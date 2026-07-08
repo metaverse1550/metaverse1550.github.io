@@ -1,0 +1,2005 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>전국시대: 바람과 강철의 노래 (무공 버전)</title>
+    <!-- Tailwind CSS 및 동양풍 폰트 로드 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=East+Sea+Dokdo&family=Noto+Serif+KR:wght@300;700;900&display=swap');
+        
+        body {
+            background-color: #0c0a0a;
+            font-family: 'Noto Serif KR', serif;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .brush-title {
+            font-family: 'East Sea Dokdo', sans-serif;
+            text-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
+        }
+
+        /* 수묵화 잉크 느낌의 텍스처 배경 */
+        .sumi-overlay {
+            background-image: radial-gradient(circle, rgba(0,0,0,0) 60%, rgba(12,10,10,0.95) 100%),
+                              url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.08 0'/%3E%3C/filter%3E%3Crect width='100' height='100' filter='url(%23noise)' fill='none'/%3E%3C/svg%3E");
+        }
+
+        /* 체력, 체간, 기 게이지 애니메이션 */
+        .bar-transition {
+            transition: width 0.15s cubic-bezier(0.1, 0.8, 0.3, 1);
+        }
+
+        /* 스킬 버튼 쿨다운/사용가능 펄스 효과 */
+        .skill-ready {
+            box-shadow: 0 0 8px rgba(147, 51, 234, 0.6);
+            animation: pulse-border 1.5s infinite;
+        }
+
+        @keyframes pulse-border {
+            0%, 100% { border-color: rgba(168, 85, 247, 0.5); }
+            50% { border-color: rgba(168, 85, 247, 1); }
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen text-stone-200 relative sumi-overlay select-none">
+
+    <!-- 메인 게임 보드 컨테이너 -->
+    <div class="relative flex flex-col items-center w-full max-w-[1024px] px-4">
+        
+        <!-- 게임 헤더: 대결 정보 및 국면 -->
+        <div id="game-hud" class="hidden w-full flex justify-between items-center bg-black/80 border border-stone-800 px-6 py-3 rounded-t-xl backdrop-blur-md">
+            <!-- 1P 상태 바 (파랑/은빛) -->
+            <div class="flex flex-col w-2/5">
+                <div class="flex justify-between text-xs mb-1">
+                    <span class="font-bold text-sky-400">1P (푸른 그림자)</span>
+                    <span id="p1-hp-text">HP 100/100</span>
+                </div>
+                <div class="w-full h-3 bg-stone-900 rounded-full overflow-hidden border border-stone-700">
+                    <div id="p1-hp-bar" class="h-full bg-gradient-to-r from-sky-600 to-sky-400 bar-transition" style="width: 100%;"></div>
+                </div>
+                <!-- 체간 & 기 게이지 이중 레이아웃 -->
+                <div class="grid grid-cols-2 gap-2 mt-1">
+                    <div>
+                        <div class="flex justify-between text-[9px] text-stone-400">
+                            <span>체간 (Posture)</span>
+                            <span id="p1-posture-text">0/100</span>
+                        </div>
+                        <div class="w-full h-1.5 bg-stone-900 rounded-full overflow-hidden">
+                            <div id="p1-posture-bar" class="h-full bg-amber-500 bar-transition" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-[9px] text-purple-400 font-bold">
+                            <span>오의 게이지 (氣)</span>
+                            <span id="p1-spirit-text">0%</span>
+                        </div>
+                        <div class="w-full h-1.5 bg-stone-900 rounded-full overflow-hidden">
+                            <div id="p1-spirit-bar" class="h-full bg-gradient-to-r from-purple-600 to-fuchsia-400 bar-transition" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 라운드 수 및 타이머 -->
+            <div class="flex flex-col items-center justify-center px-4">
+                <span class="text-stone-500 text-[10px] tracking-widest font-light">決鬪 (결투)</span>
+                <div class="flex items-center space-x-2 my-0.5">
+                    <span id="p1-rounds" class="text-xl font-black text-sky-400">0</span>
+                    <span class="text-stone-500">:</span>
+                    <span id="p2-rounds" class="text-xl font-black text-red-500">0</span>
+                </div>
+                <span id="round-timer" class="text-xs text-stone-400 font-mono">99</span>
+            </div>
+
+            <!-- 2P 상태 바 (빨강/붉은빛) -->
+            <div class="flex flex-col w-2/5 text-right">
+                <div class="flex justify-between text-xs mb-1 flex-row-reverse">
+                    <span id="p2-name" class="font-bold text-red-500">2P (붉은 칼날)</span>
+                    <span id="p2-hp-text">HP 100/100</span>
+                </div>
+                <div class="w-full h-3 bg-stone-900 rounded-full overflow-hidden border border-stone-700">
+                    <div id="p2-hp-bar" class="h-full bg-gradient-to-r from-red-400 to-red-600 bar-transition" style="width: 100%;"></div>
+                </div>
+                <!-- 체간 & 기 게이지 이중 레이아웃 -->
+                <div class="grid grid-cols-2 gap-2 mt-1 text-left">
+                    <div>
+                        <div class="flex justify-between text-[9px] text-stone-400 flex-row-reverse">
+                            <span>체간 (Posture)</span>
+                            <span id="p2-posture-text">0/100</span>
+                        </div>
+                        <div class="w-full h-1.5 bg-stone-900 rounded-full overflow-hidden">
+                            <div id="p2-posture-bar" class="h-full bg-amber-500 bar-transition" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-[9px] text-purple-400 font-bold flex-row-reverse">
+                            <span>오의 게이지 (氣)</span>
+                            <span id="p2-spirit-text">0%</span>
+                        </div>
+                        <div class="w-full h-1.5 bg-stone-900 rounded-full overflow-hidden">
+                            <div id="p2-spirit-bar" class="h-full bg-gradient-to-r from-purple-600 to-fuchsia-400 bar-transition" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 게임 화면 영역 -->
+        <div class="relative w-full border-4 border-stone-800 rounded-b-xl overflow-hidden bg-[#141211] aspect-[16/9] shadow-2xl">
+            <canvas id="duelCanvas" class="w-full h-full block cursor-crosshair"></canvas>
+
+            <!-- 단련 모드 전용 상태 제어 패널 -->
+            <div id="practice-panel" class="hidden absolute top-4 left-1/2 transform -translate-x-1/2 bg-black/80 border border-stone-700 px-4 py-2.5 rounded-lg flex items-center space-x-3 z-30 text-xs backdrop-blur-md">
+                <span class="text-amber-500 font-bold">🪵 허수아비 상태:</span>
+                <button id="btn-dummy-stop" class="bg-amber-600 text-black px-3 py-1 rounded font-bold transition hover:bg-amber-500">정지 상태</button>
+                <button id="btn-dummy-attack" class="bg-stone-800 text-stone-300 px-3 py-1 rounded font-bold transition hover:bg-stone-700">공격 수련 (2초 주기)</button>
+            </div>
+
+            <!-- 인게임 텍스트 안내 오버레이 -->
+            <div id="duel-announcement" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none bg-black/40 transition-opacity duration-300 opacity-0 z-20">
+                <h2 id="announcement-text" class="brush-title text-8xl md:text-9xl text-red-600 tracking-wider">尋常 (일촉즉발)</h2>
+                <p id="announcement-subtext" class="text-stone-300 text-lg md:text-xl tracking-widest mt-4">바람이 칼끝을 흔든다.</p>
+            </div>
+
+            <!-- 조작 가이드 오버레이 -->
+            <div id="p1-controls-guide" class="absolute bottom-4 left-4 bg-black/80 border border-stone-800 p-3 rounded-lg text-[10px] text-stone-400 pointer-events-none transition-opacity duration-500 space-y-1">
+                <p class="text-sky-400 font-bold text-xs mb-1">⚔️ 1P 조작법 (푸른 무사)</p>
+                <p>• 이동/점프: <span class="text-stone-100 font-bold">A / D / W</span></p>
+                <p>• 베기 / 막기: <span class="text-amber-400 font-bold">🖱️ 좌클릭</span> / <span class="text-stone-100 font-bold">E</span></p>
+                <p>• 회피(대시): <span class="text-stone-100 font-bold">Q</span></p>
+                <p class="text-fuchsia-400 font-bold">• 특수기 [뇌광찌르기]: <span class="text-stone-100 font-bold">F</span> <span class="text-stone-500">(기 35%)</span></p>
+                <p class="text-purple-400 font-bold">• 비기 [천검·무영참]: <span class="text-amber-400 font-bold">R</span> <span class="text-stone-500">(기 100%)</span></p>
+            </div>
+
+            <div id="p2-controls-guide" class="absolute bottom-4 right-4 bg-black/80 border border-stone-800 p-3 rounded-lg text-[10px] text-stone-400 text-right pointer-events-none transition-opacity duration-500 space-y-1">
+                <p class="text-red-400 font-bold text-xs mb-1">⚔️ 2P 조작법 (붉은 무사/AI)</p>
+                <p>• 이동/점프: <span class="text-stone-100 font-bold">◀ / ▶ / ▲</span></p>
+                <p>• 베기 / 막기: <span class="text-stone-100 font-bold">L</span> / <span class="text-stone-100 font-bold">▼</span></p>
+                <p>• 회피(대시): <span class="text-stone-100 font-bold">O</span></p>
+                <p class="text-fuchsia-400 font-bold">• 특수기 [사염참]: <span class="text-stone-100 font-bold">U</span> <span class="text-stone-500">(기 35%)</span></p>
+                <p class="text-purple-400 font-bold">• 비기 [신벌·무간지옥]: <span class="text-amber-400 font-bold">I</span> <span class="text-stone-500">(기 100%)</span></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 메인 대기 화면 및 설정 오버레이 -->
+    <div id="lobby-screen" class="absolute inset-0 bg-[#0c0a0a]/95 flex flex-col items-center justify-center z-50 p-6">
+        <div class="max-w-2xl text-center space-y-8">
+            <h1 class="brush-title text-8xl md:text-9xl text-stone-100 font-black tracking-widest leading-none">戰國: 劍歌</h1>
+            <p class="text-stone-400 text-sm md:text-base leading-relaxed tracking-wider">
+                붉게 저무는 황혼 아래, 단 한 번의 베기로 승부가 갈린다.<br>
+                바람을 읽고, 기(氣)를 모아 천지를 흔드는 오의와 비기를 방출하십시오.
+            </p>
+
+            <!-- 게임 모드 선택 카드 -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl mx-auto">
+                <!-- AI 대결 모드 -->
+                <button id="btn-mode-ai" class="flex flex-col items-center p-5 bg-stone-900/40 border-2 border-stone-800 hover:border-red-700 rounded-xl transition duration-300 group">
+                    <span class="text-3xl mb-2 group-hover:scale-110 transition duration-300">⚔️</span>
+                    <span class="text-lg font-bold text-stone-200">修羅 (수라 모드)</span>
+                    <span class="text-xs text-stone-500 mt-1">인공지능 검객과 목숨을 건 단독 결투</span>
+                </button>
+                <!-- 로컬 1v1 PVP 모드 -->
+                <button id="btn-mode-pvp" class="flex flex-col items-center p-5 bg-stone-900/40 border-2 border-stone-800 hover:border-sky-700 rounded-xl transition duration-300 group">
+                    <span class="text-3xl mb-2 group-hover:scale-110 transition duration-300">👥</span>
+                    <span class="text-lg font-bold text-stone-200">合和 (합화 모드)</span>
+                    <span class="text-xs text-stone-500 mt-1">한 대의 키보드로 벌이는 우정의 일기토</span>
+                </button>
+                <!-- 연습(단련) 모드 -->
+                <button id="btn-mode-practice" class="flex flex-col items-center p-5 bg-stone-900/40 border-2 border-stone-800 hover:border-amber-600 rounded-xl transition duration-300 group">
+                    <span class="text-3xl mb-2 group-hover:scale-110 transition duration-300">🪵</span>
+                    <span class="text-lg font-bold text-stone-200">鍛鍊 (단련 모드)</span>
+                    <span class="text-xs text-stone-500 mt-1">안전하게 비기와 무공 콤보를 수련하는 연습장</span>
+                </button>
+            </div>
+
+            <!-- 시스템 소개 / 가이드 수묵 느낌 정보창 -->
+            <div class="bg-stone-900/30 border border-stone-800 p-4 rounded-xl text-left text-xs text-stone-400 space-y-2 max-w-md mx-auto">
+                <p class="text-purple-400 font-bold text-center text-sm">🔮 오의(奧義) 및 비기(秘技) 비결</p>
+                <p>1. <span class="text-stone-200 font-bold">오의 게이지(氣)</span>: 공격 타격, 패링/방어 성공 시 빠르게 차오릅니다.</p>
+                <p>2. <span class="text-stone-200 font-bold">특수기 (기 35%)</span>: 1P의 전진 뇌광찌르기(F), 2P의 강한 가드붕괴 사염참(U)으로 상대의 구도를 뒤집으십시오.</p>
+                <p>3. <span class="text-stone-200 font-bold">비기 (기 100%)</span>: 천검·무영참(R)과 신벌·무간지옥(I)은 상대를 극심한 빈사 혹은 일격을 날릴 수 있는 최강의 참격입니다.</p>
+            </div>
+
+            <p class="text-stone-600 text-xs">전국시대: 바람과 강철의 노래 © 2026. HTML5 Canvas Premium Edition.</p>
+        </div>
+    </div>
+
+    <script>
+        // 오디오 제어 객체 (수묵 대결에 맞는 동양풍 효과음 합성)
+        const sfx = {
+            ctx: null,
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            },
+            playGong() {
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc1 = this.ctx.createOscillator();
+                const osc2 = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc1.type = 'triangle';
+                osc1.frequency.setValueAtTime(100, now);
+                osc1.frequency.exponentialRampToValueAtTime(60, now + 3);
+
+                osc2.type = 'sine';
+                osc2.frequency.setValueAtTime(102, now);
+                osc2.frequency.exponentialRampToValueAtTime(61, now + 3);
+
+                gain.gain.setValueAtTime(0.5, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 3);
+
+                osc1.connect(gain);
+                osc2.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc1.start(now);
+                osc2.start(now);
+                osc1.stop(now + 3);
+                osc2.stop(now + 3);
+            },
+            playClash() {
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const noise = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(1500, now);
+                osc.frequency.exponentialRampToValueAtTime(600, now + 0.15);
+
+                noise.type = 'sawtooth';
+                noise.frequency.setValueAtTime(3000, now);
+                noise.frequency.exponentialRampToValueAtTime(200, now + 0.08);
+
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+                osc.connect(gain);
+                noise.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start(now);
+                noise.start(now);
+                osc.stop(now + 0.2);
+                noise.stop(now + 0.2);
+            },
+            playParry() {
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(3200, now);
+                osc.frequency.setValueAtTime(2800, now + 0.03);
+                gain.gain.setValueAtTime(0.4, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start(now);
+                osc.stop(now + 0.5);
+            },
+            playHit() {
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const noise = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(250, now);
+                osc.frequency.linearRampToValueAtTime(30, now + 0.35);
+
+                noise.type = 'triangle';
+                noise.frequency.setValueAtTime(450, now);
+                noise.frequency.exponentialRampToValueAtTime(10, now + 0.25);
+
+                gain.gain.setValueAtTime(0.6, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+
+                osc.connect(gain);
+                noise.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start(now);
+                noise.start(now);
+                osc.stop(now + 0.35);
+                noise.stop(now + 0.35);
+            },
+            playWhoosh() {
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(60, now);
+                osc.frequency.exponentialRampToValueAtTime(250, now + 0.1);
+                osc.frequency.exponentialRampToValueAtTime(100, now + 0.2);
+
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start(now);
+                osc.stop(now + 0.2);
+            },
+            playDash() {
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.exponentialRampToValueAtTime(30, now + 0.15);
+
+                gain.gain.setValueAtTime(0.25, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start(now);
+                osc.stop(now + 0.15);
+            },
+            playUltimateCharge() {
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(100, now);
+                osc.frequency.exponentialRampToValueAtTime(800, now + 0.6);
+
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.linearRampToValueAtTime(0.5, now + 0.6);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start(now);
+                osc.stop(now + 0.8);
+            },
+            playUltimateExplode() {
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const noise = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(40, now);
+                osc.frequency.exponentialRampToValueAtTime(120, now + 0.4);
+
+                noise.type = 'sawtooth';
+                noise.frequency.setValueAtTime(2000, now);
+                noise.frequency.exponentialRampToValueAtTime(20, now + 0.6);
+
+                gain.gain.setValueAtTime(0.8, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+
+                osc.connect(gain);
+                noise.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start(now);
+                noise.start(now);
+                osc.stop(now + 0.6);
+                noise.stop(now + 0.6);
+            }
+        };
+
+        function playTone(freq, duration, type = "sine") {
+            sfx.init();
+            const now = sfx.ctx.currentTime;
+            const osc = sfx.ctx.createOscillator();
+            const gain = sfx.ctx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, now);
+            gain.gain.setValueAtTime(0.2, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            osc.connect(gain);
+            gain.connect(sfx.ctx.destination);
+            osc.start(now);
+            osc.stop(now + duration);
+        }
+
+        const canvas = document.getElementById('duelCanvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = 1024;
+        canvas.height = 576;
+
+        const GROUND_Y = 460;
+        let isPVPMode = false;
+        let isPracticeMode = false;
+        let dummyBehavior = 'stop'; 
+        let dummyAttackTimer = 0; 
+
+        let gameTime = 99;
+        let timerInterval = null;
+        let slowMoFactor = 1.0; 
+        let slowMoTimer = 0;
+        let cameraShake = 0;
+
+        // 궁극 비기 컷신 시네마틱 제어 변수
+        let ultimateCaster = null;
+        let cutsceneActive = false;
+        let cutsceneTimer = 0;
+        let cutsceneType = ''; 
+
+        const keys = {};
+        const gameState = { isRunning: false };
+
+        const leaves = [];
+        const bloodSpills = [];
+        const clashingSparks = [];
+        const fogLayers = [];
+
+        class LeafParticle {
+            constructor() {
+                this.reset();
+                this.y = Math.random() * GROUND_Y; 
+            }
+            reset() {
+                this.x = Math.random() * canvas.width + 200;
+                this.y = -20;
+                this.size = Math.random() * 4 + 4;
+                this.speedX = -(Math.random() * 1.5 + 0.8);
+                this.speedY = Math.random() * 1.0 + 0.8;
+                this.angle = Math.random() * Math.PI;
+                this.spinSpeed = Math.random() * 0.03 - 0.015;
+                const colors = [
+                    'rgba(185, 28, 28, 0.65)',  // 단풍 레드
+                    'rgba(217, 119, 6, 0.6)',   // 단풍 주황
+                    'rgba(244, 180, 215, 0.75)', // 벚꽃 라이트 핑크
+                    'rgba(244, 63, 94, 0.45)'   // 분홍 벚꽃
+                ];
+                this.color = colors[Math.floor(Math.random() * colors.length)];
+            }
+            update() {
+                this.x += this.speedX * slowMoFactor;
+                this.y += this.speedY * slowMoFactor;
+                this.angle += this.spinSpeed * slowMoFactor;
+
+                if (this.y > GROUND_Y + 10 || this.x < -10) {
+                    this.reset();
+                }
+            }
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.ellipse(0, 0, this.size, this.size / 2, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        class InkSplatter {
+            constructor(x, y, dx, dy, color) {
+                this.x = x;
+                this.y = y;
+                this.dx = dx;
+                this.dy = dy;
+                this.radius = Math.random() * 7 + 4;
+                this.alpha = 1.0;
+                this.color = color; 
+            }
+            update() {
+                this.x += this.dx * slowMoFactor;
+                this.y += this.dy * slowMoFactor;
+                this.dy += 0.25 * slowMoFactor; 
+                this.radius *= 0.97; 
+                this.alpha -= 0.015 * slowMoFactor;
+            }
+            draw() {
+                if (this.alpha <= 0) return;
+                ctx.save();
+                ctx.globalAlpha = this.alpha;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        class ParrySpark {
+            constructor(x, y, angle) {
+                this.x = x;
+                this.y = y;
+                this.length = Math.random() * 20 + 10;
+                this.angle = angle + (Math.random() * 0.6 - 0.3);
+                this.speed = Math.random() * 12 + 6;
+                this.alpha = 1.0;
+            }
+            update() {
+                this.x += Math.cos(this.angle) * this.speed * slowMoFactor;
+                this.y += Math.sin(this.angle) * this.speed * slowMoFactor;
+                this.alpha -= 0.06 * slowMoFactor;
+            }
+            draw() {
+                if (this.alpha <= 0) return;
+                ctx.save();
+                ctx.strokeStyle = `rgba(251, 191, 36, ${this.alpha})`; 
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.moveTo(this.x, this.y);
+                ctx.lineTo(this.x - Math.cos(this.angle) * this.length, this.y - Math.sin(this.angle) * this.length);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        class Samurai {
+            constructor(x, id, colorTheme, keysMap) {
+                this.id = id;
+                this.x = x;
+                this.y = GROUND_Y;
+                this.vx = 0;
+                this.vy = 0;
+                this.width = 70;
+                this.height = 120;
+                this.color = colorTheme; 
+                this.keys = keysMap;
+                
+                this.hp = 100;
+                this.maxHp = 100;
+                this.posture = 0; 
+                this.maxPosture = 100;
+                this.spirit = 0; // 기(Spirit) 게이지: 0 ~ 100
+                this.maxSpirit = 100;
+                this.roundsWon = 0;
+
+                this.dir = (id === 1) ? 1 : -1; 
+                this.isGrounded = true;
+
+                this.state = 'idle'; 
+                this.stateTimer = 0;
+                this.parryWindow = 0; 
+                
+                this.cooldowns = {
+                    slash: 0,
+                    dash: 0,
+                    special: 0,
+                    ultimate: 0,
+                    postureRecovery: 0
+                };
+
+                // 스카프/머리카락 물리 연출을 위한 트레일 노드
+                this.scarfTrail = Array.from({length: 6}, () => ({x: x, y: GROUND_Y - 90}));
+                this.hairTrail = Array.from({length: 5}, () => ({x: x, y: GROUND_Y - 95}));
+                this.swordTrail = [];
+            }
+
+            update(opponent) {
+                // 쿨다운 감쇄
+                if (this.cooldowns.slash > 0) this.cooldowns.slash--;
+                if (this.cooldowns.dash > 0) this.cooldowns.dash--;
+                if (this.cooldowns.special > 0) this.cooldowns.special--;
+                if (this.cooldowns.ultimate > 0) this.cooldowns.ultimate--;
+                
+                if (this.cooldowns.postureRecovery > 0) {
+                    this.cooldowns.postureRecovery--;
+                } else if (this.posture > 0 && this.state !== 'block') {
+                    this.posture = Math.max(0, this.posture - 0.45 * slowMoFactor);
+                }
+
+                // 비기 시네마틱 컷신 진행 중일 때 정지 상태 유지
+                if (cutsceneActive) {
+                    this.vx = 0;
+                    this.vy = 0;
+                    this.updateProceduralParts();
+                    return;
+                }
+
+                // 사망 처리
+                if (this.state === 'dead') {
+                    this.vx = 0;
+                    this.applyPhysics();
+                    this.updateProceduralParts();
+                    return;
+                }
+
+                // 경직(Stagger) 상태 처리
+                if (this.state === 'stagger') {
+                    this.stateTimer--;
+                    this.vx *= 0.85; 
+                    this.applyPhysics();
+                    this.updateProceduralParts();
+                    if (this.stateTimer <= 0) {
+                        this.state = 'idle';
+                    }
+                    return;
+                }
+
+                // 회피(대시) 상태 처리
+                if (this.state === 'dash') {
+                    this.stateTimer--;
+                    if (this.stateTimer <= 0) {
+                        this.state = 'idle';
+                        this.vx = 0;
+                    }
+                    this.applyPhysics();
+                    this.updateProceduralParts();
+                    return;
+                }
+
+                // 무공 시전 처리 (특수기 및 비기 궤적)
+                if (this.state === 'special' || this.state === 'slash') {
+                    this.stateTimer--;
+                    
+                    let hX = this.x + this.dir * 35;
+                    let hY = this.y - 75;
+                    let swordEndX = hX + Math.cos(this.dir === 1 ? -0.1 : Math.PI + 0.1) * 110;
+                    let swordEndY = hY + 10;
+
+                    if (this.state === 'special') {
+                        // 특수기 내려치기/찌르기 모션
+                        swordEndX = hX + Math.cos(this.dir === 1 ? 0.3 : Math.PI - 0.3) * 120;
+                        swordEndY = hY + 60;
+                    } else if (this.stateTimer > 12) {
+                        swordEndX = hX + Math.cos(this.dir === 1 ? -1.3 : Math.PI + 1.3) * 95;
+                        swordEndY = hY - 70;
+                    } else if (this.stateTimer <= 6) {
+                        swordEndX = hX + Math.cos(this.dir === 1 ? 0.9 : Math.PI - 0.9) * 95;
+                        swordEndY = hY + 55;
+                    }
+
+                    this.swordTrail.push({ startX: hX, startY: hY, endX: swordEndX, endY: swordEndY, alpha: 1.0 });
+
+                    // 타격 판정 프레임
+                    if (this.stateTimer === 10) {
+                        if (this.state === 'special') {
+                            this.checkSpecialHit(opponent);
+                        } else {
+                            this.checkAttackHit(opponent);
+                        }
+                    }
+
+                    if (this.stateTimer <= 0) {
+                        this.state = 'idle';
+                    }
+                    this.applyPhysics();
+                    this.updateProceduralParts();
+                    return;
+                }
+
+                // 항시 상대방 방향 직시
+                if (this.x < opponent.x) {
+                    this.dir = 1;
+                } else {
+                    this.dir = -1;
+                }
+
+                // 모드 선택별 행동 분기
+                if (isPracticeMode && this.id === 2) {
+                    this.runPracticeDummy();
+                } else if (this.id === 2 && !isPVPMode) {
+                    this.runAI(opponent);
+                } else {
+                    this.handleKeyboardInputs();
+                }
+
+                this.applyPhysics();
+                this.updateProceduralParts();
+                this.updateTrail();
+            }
+
+            updateProceduralParts() {
+                const neckX = this.x - this.dir * 12;
+                const neckY = this.y - 88;
+
+                // 머리카락 트레일 물리
+                this.hairTrail[0] = {x: neckX, y: neckY - 8};
+                for (let i = 1; i < this.hairTrail.length; i++) {
+                    const targetX = this.hairTrail[i-1].x - this.dir * 4 + Math.sin(Date.now() * 0.01 + i) * 1.5;
+                    const targetY = this.hairTrail[i-1].y + 6;
+                    this.hairTrail[i].x += (targetX - this.hairTrail[i].x) * 0.28;
+                    this.hairTrail[i].y += (targetY - this.hairTrail[i].y) * 0.28;
+                }
+
+                // 스카프 트레일 물리 (진짜 사람처럼 바람에 휘날리도록 흔들림 가미)
+                this.scarfTrail[0] = {x: neckX, y: neckY};
+                for (let i = 1; i < this.scarfTrail.length; i++) {
+                    const targetX = this.scarfTrail[i-1].x - this.dir * 8 + Math.sin(Date.now() * 0.015 + i) * 2;
+                    const targetY = this.scarfTrail[i-1].y + 3 + Math.cos(Date.now() * 0.01 + i) * 1;
+                    this.scarfTrail[i].x += (targetX - this.scarfTrail[i].x) * 0.25;
+                    this.scarfTrail[i].y += (targetY - this.scarfTrail[i].y) * 0.25;
+                }
+            }
+
+            handleKeyboardInputs() {
+                // 1. 방어/패링 (E)
+                if (keys[this.keys.block]) {
+                    if (this.state !== 'block') {
+                        this.state = 'block';
+                        this.parryWindow = 10; 
+                    } else if (this.parryWindow > 0) {
+                        this.parryWindow--;
+                    }
+                    this.vx = 0; 
+                    return;
+                } else {
+                    if (this.state === 'block') {
+                        this.state = 'idle';
+                    }
+                }
+
+                // 2. 이동 (A / D)
+                let isMoving = false;
+                if (keys[this.keys.left]) {
+                    this.vx = -4.5;
+                    isMoving = true;
+                } else if (keys[this.keys.right]) {
+                    this.vx = 4.5;
+                    isMoving = true;
+                } else {
+                    this.vx = 0;
+                }
+
+                if (isMoving && this.isGrounded) {
+                    this.state = 'walk';
+                } else if (this.isGrounded) {
+                    this.state = 'idle';
+                }
+
+                // 3. 점프 (W)
+                if (keys[this.keys.jump] && this.isGrounded) {
+                    this.vy = -12.5;
+                    this.isGrounded = false;
+                    sfx.playDash();
+                }
+
+                // 4. 일반 베기 (마우스 왼쪽 클릭)
+                if (keys[this.keys.slash] && this.cooldowns.slash === 0) {
+                    this.state = 'slash';
+                    this.stateTimer = 20; 
+                    this.cooldowns.slash = 28; 
+                    sfx.playWhoosh();
+                }
+
+                // 5. 대시/회피 (Q)
+                if (keys[this.keys.dash] && this.cooldowns.dash === 0) {
+                    this.state = 'dash';
+                    this.stateTimer = 12;
+                    this.cooldowns.dash = 50; 
+                    this.vx = this.dir * 13; 
+                    sfx.playDash();
+                    
+                    for(let i=0; i<6; i++) {
+                        bloodSpills.push(new InkSplatter(
+                            this.x + (Math.random() * 20 - 10), 
+                            this.y - 60, 
+                            -this.dir * (Math.random() * 3 + 1), 
+                            Math.random() * 2 - 1, 
+                            'rgba(30, 30, 30, 0.25)'
+                        ));
+                    }
+                }
+
+                // 6. 특수기 시전 (F) - 기 35% 소모
+                if (keys[this.keys.special] && this.cooldowns.special === 0) {
+                    if (this.spirit >= 35) {
+                        this.spirit -= 35;
+                        this.state = 'special';
+                        this.stateTimer = 22;
+                        this.cooldowns.special = 60;
+                        sfx.playWhoosh();
+                        showFloatingNotification(this.id === 1 ? "雷光 (뇌광찌르기!)" : "사염참!", this.id === 1 ? "rgba(56, 189, 248, 0.95)" : "rgba(239, 68, 68, 0.95)");
+                    } else {
+                        showFloatingNotification("기량 부족!", "rgba(120, 113, 108, 0.8)");
+                    }
+                }
+
+                // 7. 궁극비기 시전 (R) - 기 100% 소모
+                if (keys[this.keys.ultimate] && this.cooldowns.ultimate === 0) {
+                    if (this.spirit >= 100) {
+                        this.castUltimate();
+                    } else {
+                        showFloatingNotification("기력 부족 (100% 필요)", "rgba(120, 113, 108, 0.8)");
+                    }
+                }
+            }
+
+            runAI(opponent) {
+                const dist = Math.abs(this.x - opponent.x);
+
+                // 기가 100%일 때 시야에 있으면 일정 확률로 기습적 컷신 비기 연출 돌입
+                if (this.spirit >= 100 && dist < 320 && this.cooldowns.ultimate === 0 && Math.random() < 0.04) {
+                    this.castUltimate();
+                    return;
+                }
+
+                // 상대방이 경직에 빠졌을 때 사염참(특수기) 연계율 억제 조정
+                if (opponent.state === 'stagger' && dist < 180 && this.spirit >= 35 && this.cooldowns.special === 0 && Math.random() < 0.45) {
+                    this.spirit -= 35;
+                    this.state = 'special';
+                    this.stateTimer = 22;
+                    this.cooldowns.special = 75;
+                    sfx.playWhoosh();
+                    showFloatingNotification("사염참 (邪焰斬)!", "rgba(239, 68, 68, 0.95)");
+                    return;
+                }
+
+                // [밸런스 패치] AI 패링 반응 확률 완화 (0.72 -> 0.38)
+                if (opponent.state === 'slash' && opponent.stateTimer === 14 && dist < 160) {
+                    if (Math.random() < 0.38) {
+                        this.state = 'block';
+                        this.parryWindow = 10;
+                        this.vx = 0;
+                        return;
+                    }
+                }
+
+                if (this.state === 'block' && opponent.state !== 'slash') {
+                    this.state = 'idle';
+                }
+
+                if (this.state === 'block') return;
+
+                // [밸런스 패치] AI의 추격 및 접근 기동 속도 완화 (4.0 -> 3.2)
+                if (dist > 180) {
+                    this.vx = this.dir * 3.2;
+                    this.state = 'walk';
+                } else if (dist < 90) {
+                    this.vx = -this.dir * 2.8;
+                    this.state = 'walk';
+                } else {
+                    this.vx = 0;
+                    this.state = 'idle';
+
+                    // 일반 베기 빈도 조정 (0.08 -> 0.04)
+                    if (this.cooldowns.slash === 0 && Math.random() < 0.04) {
+                        this.state = 'slash';
+                        this.stateTimer = 20;
+                        this.cooldowns.slash = 45;
+                        sfx.playWhoosh();
+                    }
+                }
+            }
+
+            runPracticeDummy() {
+                this.vx = 0;
+                if (this.state === 'block') {
+                    this.state = 'idle';
+                }
+
+                if (dummyBehavior === 'attack') {
+                    dummyAttackTimer += slowMoFactor;
+                    if (dummyAttackTimer >= 110) {
+                        dummyAttackTimer = 0;
+                        this.state = 'slash';
+                        this.stateTimer = 20;
+                        this.cooldowns.slash = 35;
+                        sfx.playWhoosh();
+                    }
+                } else {
+                    dummyAttackTimer = 0;
+                }
+            }
+
+            castUltimate() {
+                this.spirit = 0;
+                ultimateCaster = this;
+                
+                // 새로운 컷신 시스템 트리거링
+                cutsceneActive = true;
+                cutsceneTimer = 60; // 1초간 컷신 진행 (60fps)
+                cutsceneType = this.id === 1 ? 'p1' : 'p2';
+
+                this.cooldowns.ultimate = 180;
+                cameraShake = 15;
+                sfx.playUltimateCharge();
+                showFloatingNotification(this.id === 1 ? "秘技 · 天劍無影斬" : "秘技 · 神罰無間地獄", "rgba(168, 85, 247, 1)");
+            }
+
+            executeUltimatePunch(opponent) {
+                this.state = 'idle';
+                sfx.playUltimateExplode();
+                cameraShake = 35;
+                triggerFlash();
+
+                const dist = Math.abs(this.x - opponent.x);
+                if (dist < 420) {
+                    // 화면 절반을 커버하는 치명적 난무 참격
+                    opponent.hp = Math.max(0, opponent.hp - 40);
+                    opponent.state = 'stagger';
+                    opponent.stateTimer = 70;
+                    opponent.posture = Math.min(opponent.maxPosture, opponent.posture + 60);
+
+                    // 화면 전체를 뒤덮는 참격 이펙트 파티클 분사
+                    const hitX = opponent.x;
+                    const hitY = opponent.y - 75;
+                    for (let j = 0; j < 50; j++) {
+                        bloodSpills.push(new InkSplatter(
+                            hitX + (Math.random() * 200 - 100), 
+                            hitY + (Math.random() * 200 - 100),
+                            (Math.random() * 20 - 10),
+                            (Math.random() * -12 - 4),
+                            this.id === 1 ? '#090d16' : '#1d0909'
+                        ));
+                    }
+                    triggerSlowMotion(0.04, 1800);
+
+                    if (opponent.hp <= 0) {
+                        if (isPracticeMode) {
+                            setTimeout(() => {
+                                opponent.hp = 100;
+                                opponent.posture = 0;
+                                opponent.state = 'idle';
+                            }, 600);
+                        } else {
+                            opponent.state = 'dead';
+                            handleRoundEnding(this);
+                        }
+                    }
+                } else {
+                    showFloatingNotification("허공을 베었다!", "rgba(156, 163, 175, 0.8)");
+                }
+            }
+
+            applyPhysics() {
+                if (!this.isGrounded) {
+                    this.vy += 0.6; 
+                    this.y += this.vy * slowMoFactor;
+
+                    if (this.y >= GROUND_Y) {
+                        this.y = GROUND_Y;
+                        this.vy = 0;
+                        this.isGrounded = true;
+                    }
+                }
+
+                this.x += this.vx * slowMoFactor;
+
+                if (this.x < 60) this.x = 60;
+                if (this.x > canvas.width - 60) this.x = canvas.width - 60;
+            }
+
+            updateTrail() {
+                this.swordTrail.forEach(t => t.alpha -= 0.08 * slowMoFactor);
+                this.swordTrail = this.swordTrail.filter(t => t.alpha > 0);
+            }
+
+            checkAttackHit(opponent) {
+                const range = 160; 
+                const dist = Math.abs(this.x - opponent.x);
+                const isFacing = (this.dir === 1 && opponent.x > this.x) || (this.dir === -1 && opponent.x < this.x);
+
+                if (dist < range && isFacing) {
+                    if (opponent.state === 'block') {
+                        if (opponent.parryWindow > 0) {
+                            // 완벽한 흘리기 (Parry)
+                            sfx.playParry();
+                            cameraShake = 16;
+                            triggerFlash();
+                            opponent.parryWindow = 0; 
+
+                            this.state = 'stagger';
+                            // [밸런스 패치] 적이 플레이어를 패링할 때보다 플레이어가 적을 패링했을 때의 후딜레이 메리트 상향 (45 -> 55)
+                            this.stateTimer = this.id === 1 ? 55 : 35; 
+                            this.vx = -this.dir * 4.5; 
+
+                            // 가해자 기 충전
+                            this.spirit = Math.min(this.maxSpirit, this.spirit + 15);
+                            opponent.spirit = Math.min(opponent.maxSpirit, opponent.spirit + 25); // 패링 성공자 더 높은 기 보상
+
+                            const sparksX = (this.x + opponent.x) / 2;
+                            const sparksY = (this.y + opponent.y) / 2 - 70;
+                            for (let i = 0; i < 18; i++) {
+                                clashingSparks.push(new ParrySpark(sparksX, sparksY, (this.dir === 1) ? Math.PI : 0));
+                            }
+                            
+                            showFloatingNotification("彈 (흘려내기!)", "rgba(245, 158, 11, 0.95)");
+                        } else {
+                            // 일반 방어
+                            sfx.playClash();
+                            cameraShake = 6;
+
+                            opponent.posture = Math.min(opponent.maxPosture, opponent.posture + 22);
+                            opponent.cooldowns.postureRecovery = 90; 
+
+                            opponent.x += this.dir * 18;
+                            this.x -= this.dir * 10;
+
+                            this.spirit = Math.min(this.maxSpirit, this.spirit + 8);
+                            opponent.spirit = Math.min(opponent.maxSpirit, opponent.spirit + 10);
+
+                            const sparksX = (this.x + opponent.x) / 2;
+                            const sparksY = (this.y + opponent.y) / 2 - 70;
+                            for (let i = 0; i < 6; i++) {
+                                clashingSparks.push(new ParrySpark(sparksX, sparksY, (this.dir === 1) ? Math.PI : 0));
+                            }
+
+                            if (opponent.posture >= opponent.maxPosture) {
+                                opponent.state = 'stagger';
+                                opponent.stateTimer = 80; 
+                                opponent.posture = 0; 
+                                showFloatingNotification("崩 (체간 붕괴!)", "rgba(239, 68, 68, 0.95)");
+                            }
+                        }
+                    } else if (opponent.state === 'dash') {
+                        showFloatingNotification("避 (유엽회피!)", "rgba(120, 113, 108, 0.95)");
+                    } else {
+                        // 완전 피격
+                        sfx.playHit();
+                        cameraShake = 24;
+                        
+                        opponent.hp = Math.max(0, opponent.hp - 25);
+                        opponent.state = 'stagger';
+                        opponent.stateTimer = 25; 
+                        opponent.x += this.dir * 25; 
+
+                        this.spirit = Math.min(this.maxSpirit, this.spirit + 20);
+
+                        opponent.posture = Math.min(opponent.maxPosture, opponent.posture + 12);
+
+                        const hitX = opponent.x;
+                        const hitY = opponent.y - 75;
+                        for (let j = 0; j < 30; j++) {
+                            const color = Math.random() > 0.4 ? '#140c0c' : '#991b1b';
+                            bloodSpills.push(new InkSplatter(
+                                hitX, hitY,
+                                (this.dir * (Math.random() * 9 + 4)) + (Math.random() * 4 - 2),
+                                (Math.random() * -10 - 2),
+                                color
+                            ));
+                        }
+
+                        triggerSlowMotion(0.12, 280);
+
+                        if (opponent.hp <= 0) {
+                            if (isPracticeMode) {
+                                setTimeout(() => {
+                                    opponent.hp = 100;
+                                    opponent.posture = 0;
+                                    opponent.state = 'idle';
+                                    showFloatingNotification("氣 (자세 극복)", "rgba(56, 189, 248, 0.95)");
+                                    playTone(440, 0.3, "sine");
+                                }, 600);
+                            } else {
+                                opponent.state = 'dead';
+                                handleRoundEnding(this);
+                            }
+                        }
+                    }
+                }
+            }
+
+            checkSpecialHit(opponent) {
+                const range = 175; 
+                const dist = Math.abs(this.x - opponent.x);
+                const isFacing = (this.dir === 1 && opponent.x > this.x) || (this.dir === -1 && opponent.x < this.x);
+
+                if (dist < range && isFacing) {
+                    if (opponent.state === 'block') {
+                        if (opponent.parryWindow > 0) {
+                            // 특수기도 가드 타이밍 흘리기는 가능
+                            sfx.playParry();
+                            cameraShake = 14;
+                            opponent.parryWindow = 0;
+                            
+                            this.state = 'stagger';
+                            this.stateTimer = 50;
+                            this.vx = -this.dir * 5.5;
+
+                            showFloatingNotification("특수기 패링!", "rgba(168, 85, 247, 1)");
+                        } else {
+                            // 일반 가드 관통 및 붕괴 대미지 부여
+                            sfx.playHit();
+                            cameraShake = 20;
+                            opponent.hp = Math.max(0, opponent.hp - 12); // 관통 가드 피해
+                            opponent.posture = Math.min(opponent.maxPosture, opponent.posture + 45); // 무거운 체간 타격
+                            opponent.x += this.dir * 30;
+
+                            showFloatingNotification("방어 관통!", "rgba(239, 68, 68, 1)");
+
+                            if (opponent.posture >= opponent.maxPosture) {
+                                opponent.state = 'stagger';
+                                opponent.stateTimer = 85;
+                                opponent.posture = 0;
+                            }
+                        }
+                    } else if (opponent.state === 'dash') {
+                        showFloatingNotification("避 (유엽회피!)", "rgba(120, 113, 108, 0.95)");
+                    } else {
+                        // 방어 없이 특수기 정통 피격
+                        sfx.playHit();
+                        cameraShake = 28;
+                        opponent.hp = Math.max(0, opponent.hp - 35);
+                        opponent.state = 'stagger';
+                        opponent.stateTimer = 40;
+                        opponent.x += this.dir * 40;
+
+                        const hitX = opponent.x;
+                        const hitY = opponent.y - 75;
+                        for (let j = 0; j < 35; j++) {
+                            bloodSpills.push(new InkSplatter(
+                                hitX, hitY,
+                                (this.dir * (Math.random() * 11 + 5)) + (Math.random() * 4 - 2),
+                                (Math.random() * -12 - 3),
+                                '#991b1b'
+                            ));
+                        }
+                        triggerSlowMotion(0.08, 400);
+
+                        if (opponent.hp <= 0) {
+                            if (isPracticeMode) {
+                                setTimeout(() => {
+                                    opponent.hp = 100;
+                                    opponent.posture = 0;
+                                    opponent.state = 'idle';
+                                }, 600);
+                            } else {
+                                opponent.state = 'dead';
+                                handleRoundEnding(this);
+                            }
+                        }
+                    }
+                }
+            }
+
+            draw(ctx) {
+                ctx.save();
+
+                // 발밑 수묵 그림자 연출
+                ctx.fillStyle = 'rgba(0,0,0,0.45)';
+                ctx.beginPath();
+                ctx.ellipse(this.x, GROUND_Y + 4, 45, 9, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                let shakeX = 0;
+                let shakeY = 0;
+                if (this.state === 'stagger') {
+                    shakeX = Math.random() * 6 - 3;
+                }
+
+                ctx.translate(this.x + shakeX, this.y + shakeY);
+                ctx.scale(this.dir, 1); 
+
+                if (this.state === 'dead') {
+                    ctx.rotate(-Math.PI / 2.1);
+                    ctx.translate(-55, 35);
+                }
+
+                // 기 충전 아우라 연출
+                if (this.spirit >= 100 && this.state !== 'dead') {
+                    ctx.strokeStyle = this.color === 'sky' ? 'rgba(56, 189, 248, 0.4)' : 'rgba(239, 68, 68, 0.4)';
+                    ctx.lineWidth = 10 + Math.sin(Date.now() * 0.01) * 4;
+                    ctx.beginPath();
+                    ctx.ellipse(0, -55, 30, 55, 0, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+
+                const paintFill = (color) => {
+                    ctx.fillStyle = color;
+                    ctx.strokeStyle = color;
+                    ctx.lineJoin = 'round';
+                    ctx.lineCap = 'round';
+                };
+
+                const bodyColor = (this.color === 'sky') ? '#1e293b' : '#141414';
+                const accentColor = (this.color === 'sky') ? '#38bdf8' : '#e11d48';
+
+                // 1. 머리카락 그리기 (Procedural Hair)
+                ctx.strokeStyle = '#020202';
+                ctx.lineWidth = 4;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                this.hairTrail.forEach((node, idx) => {
+                    const lx = (node.x - this.x) * this.dir;
+                    const ly = node.y - this.y;
+                    if (idx === 0) ctx.moveTo(lx, ly);
+                    else ctx.lineTo(lx, ly);
+                });
+                ctx.stroke();
+
+                // 2. 도포 자락 및 하카마 (Kimono Pants)
+                paintFill(bodyColor);
+                ctx.beginPath();
+                ctx.moveTo(-12, -22);
+                ctx.quadraticCurveTo(-32, -45, -22, -82); 
+                ctx.lineTo(16, -82); 
+                ctx.quadraticCurveTo(24, -45, 16, -22); 
+                ctx.lineTo(26, 0); 
+                ctx.lineTo(5, -4);
+                ctx.lineTo(-5, -4);
+                ctx.lineTo(-24, 0); 
+                ctx.closePath();
+                ctx.fill();
+
+                // 3. 복대/가죽 벨트
+                paintFill('#0f172a');
+                ctx.fillRect(-18, -54, 34, 6);
+
+                // 4. 의복 동정 깃 라인
+                ctx.strokeStyle = accentColor;
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.moveTo(-8, -80);
+                ctx.lineTo(4, -62);
+                ctx.moveTo(8, -80);
+                ctx.lineTo(-4, -62);
+                ctx.stroke();
+
+                // 5. 로닌 대나무 삿갓 (Ronin Hat)
+                paintFill('#1f1914'); 
+                ctx.beginPath();
+                ctx.moveTo(-35, -94);
+                ctx.lineTo(0, -112);
+                ctx.lineTo(35, -94);
+                ctx.quadraticCurveTo(0, -98, -35, -94);
+                ctx.closePath();
+                ctx.fill();
+                
+                ctx.strokeStyle = '#2d241e';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(-12, -92);
+                ctx.quadraticCurveTo(0, -78, 12, -92);
+                ctx.stroke();
+
+                // 삿갓 뒤 묶음끈끈이 디테일
+                ctx.strokeStyle = '#0c0a0a';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(-4, -84);
+                ctx.quadraticCurveTo(-10, -50, -15, -35);
+                ctx.stroke();
+
+                // 6. 얼굴 안광 및 스킨톤 드로잉
+                paintFill('#ebd3bc'); 
+                ctx.beginPath();
+                ctx.arc(0, -84, 12, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 안광 효과
+                paintFill(accentColor);
+                ctx.shadowColor = accentColor;
+                ctx.shadowBlur = 10;
+                ctx.beginPath();
+                ctx.arc(6, -86, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0; 
+
+                // 7. 실시간 바람에 휘날리는 머플러/스카프
+                ctx.strokeStyle = accentColor;
+                ctx.lineWidth = 6;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                this.scarfTrail.forEach((node, idx) => {
+                    const lx = (node.x - this.x) * this.dir;
+                    const ly = node.y - this.y;
+                    if (idx === 0) ctx.moveTo(lx, ly);
+                    else ctx.lineTo(lx, ly);
+                });
+                ctx.stroke();
+
+                // 8. 무기(카타나) 및 팔 동작 자세별 렌더링
+                ctx.strokeStyle = bodyColor;
+                ctx.lineWidth = 14;
+                ctx.beginPath();
+                
+                let swordAngle = 0.8; 
+                let hiltX = 22, hiltY = -64; 
+
+                if (this.state === 'idle') {
+                    ctx.moveTo(-10, -72);
+                    ctx.quadraticCurveTo(12, -70, hiltX, hiltY);
+                    ctx.stroke();
+                    swordAngle = 1.15; 
+                } else if (this.state === 'walk') {
+                    ctx.moveTo(-10, -72);
+                    ctx.quadraticCurveTo(10, -62, hiltX, hiltY);
+                    ctx.stroke();
+                    swordAngle = 1.25 + Math.sin(Date.now() * 0.016) * 0.15;
+                } else if (this.state === 'block') {
+                    hiltX = 18; hiltY = -83;
+                    ctx.moveTo(-10, -72);
+                    ctx.lineTo(hiltX, hiltY);
+                    ctx.stroke();
+                    swordAngle = -1.3; 
+                } else if (this.state === 'slash' || this.state === 'special') {
+                    hiltX = 36; hiltY = -56;
+                    ctx.moveTo(-10, -72);
+                    ctx.quadraticCurveTo(16, -98, hiltX, hiltY);
+                    ctx.stroke();
+                    swordAngle = this.state === 'special' ? 0.1 : 0.3 + (this.stateTimer / 20) * 1.6; 
+                } else if (this.state === 'stagger') {
+                    hiltX = 10; hiltY = -50;
+                    ctx.moveTo(-10, -72);
+                    ctx.lineTo(hiltX, hiltY);
+                    ctx.stroke();
+                    swordAngle = 2.45; 
+                }
+
+                // 카타나 메탈 광택 드로잉
+                ctx.save();
+                ctx.translate(hiltX, hiltY);
+                ctx.rotate(swordAngle);
+
+                ctx.fillStyle = '#a16207';
+                ctx.fillRect(-2, -5, 4, 16);
+                ctx.fillStyle = '#1c1917';
+                ctx.beginPath();
+                ctx.arc(0, 0, 8, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.strokeStyle = '#e2e8f0';
+                ctx.lineWidth = 3.2;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.quadraticCurveTo(3, -50, 4.5, -86);
+                ctx.stroke();
+
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1.2;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.quadraticCurveTo(2, -50, 3.2, -84);
+                ctx.stroke();
+
+                ctx.restore();
+                ctx.restore();
+            }
+        }
+
+        function drawSwordTrails() {
+            [p1, p2].forEach(p => {
+                p.swordTrail.forEach(trail => {
+                    ctx.save();
+                    ctx.globalAlpha = trail.alpha;
+                    
+                    const grad = ctx.createLinearGradient(trail.startX, trail.startY, trail.endX, trail.endY);
+                    if (p.color === 'sky') {
+                        grad.addColorStop(0, 'rgba(56, 189, 248, 0.8)');
+                        grad.addColorStop(1, 'rgba(255, 255, 255, 0.05)');
+                    } else {
+                        grad.addColorStop(0, 'rgba(225, 29, 72, 0.8)');
+                        grad.addColorStop(1, 'rgba(255, 255, 255, 0.05)');
+                    }
+
+                    ctx.strokeStyle = grad;
+                    ctx.lineWidth = 16; 
+                    ctx.lineCap = 'round';
+                    ctx.beginPath();
+                    ctx.moveTo(trail.startX, trail.startY);
+                    ctx.lineTo(trail.endX, trail.endY);
+                    ctx.stroke();
+                    ctx.restore();
+                });
+            });
+        }
+
+        function drawCutscene() {
+            ctx.save();
+            
+            // 1. 반투명 먹물빛 시네마틱 한풍 가리개
+            ctx.fillStyle = 'rgba(12, 10, 10, 0.9)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 2. 가로지르는 사선의 먹물 획 애니메이션
+            let progress = (60 - cutsceneTimer) / 60; // 0 to 1
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+            ctx.lineWidth = 80;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(-100, -100);
+            ctx.lineTo(-100 + (canvas.width + 200) * progress, -100 + (canvas.height + 200) * progress);
+            ctx.stroke();
+
+            // 날카로운 내면 기공선
+            ctx.strokeStyle = cutsceneType === 'p1' ? 'rgba(56, 189, 248, 0.6)' : 'rgba(239, 68, 68, 0.6)';
+            ctx.lineWidth = 15;
+            ctx.beginPath();
+            ctx.moveTo(-100, -100);
+            ctx.lineTo(-100 + (canvas.width + 200) * progress, -100 + (canvas.height + 200) * progress);
+            ctx.stroke();
+
+            // 3. 근접 고해상도 인물 무사 실루엣 연출
+            if (cutsceneType === 'p1') {
+                // P1 푸른 무사 수묵 실루엣
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+                ctx.beginPath();
+                ctx.moveTo(0, canvas.height);
+                ctx.lineTo(350, canvas.height);
+                ctx.quadraticCurveTo(280, 200, 150, 150);
+                ctx.quadraticCurveTo(120, 80, 240, 50); // 삿갓 부분
+                ctx.lineTo(0, 50);
+                ctx.closePath();
+                ctx.fill();
+
+                // 매서운 안광
+                ctx.fillStyle = '#38bdf8';
+                ctx.shadowColor = '#38bdf8';
+                ctx.shadowBlur = 25 + Math.sin(Date.now() * 0.05) * 10;
+                ctx.beginPath();
+                ctx.arc(160, 155, 7, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+
+                // 웅장한 서예 가로수 글꼴
+                ctx.fillStyle = 'rgba(254, 243, 199, 0.95)';
+                ctx.font = '900 110px East Sea Dokdo';
+                ctx.textAlign = 'right';
+                ctx.fillText("天劍無影", canvas.width - 150, canvas.height / 2 - 20);
+                ctx.font = '700 28px Noto Serif KR';
+                ctx.fillText("오의 · 천검무영참 (天劍無影斬)", canvas.width - 150, canvas.height / 2 + 55);
+            } else {
+                // P2 붉은 무사 수묵 실루엣
+                ctx.fillStyle = 'rgba(28, 10, 10, 0.9)';
+                ctx.beginPath();
+                ctx.moveTo(canvas.width, canvas.height);
+                ctx.lineTo(canvas.width - 350, canvas.height);
+                ctx.quadraticCurveTo(canvas.width - 280, 200, canvas.width - 150, 150);
+                ctx.quadraticCurveTo(canvas.width - 120, 80, canvas.width - 240, 50);
+                ctx.lineTo(canvas.width, 50);
+                ctx.closePath();
+                ctx.fill();
+
+                // 핏빛 안광
+                ctx.fillStyle = '#ef4444';
+                ctx.shadowColor = '#ef4444';
+                ctx.shadowBlur = 25 + Math.sin(Date.now() * 0.05) * 10;
+                ctx.beginPath();
+                ctx.arc(canvas.width - 160, 155, 7, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+
+                ctx.fillStyle = 'rgba(254, 243, 199, 0.95)';
+                ctx.font = '900 110px East Sea Dokdo';
+                ctx.textAlign = 'left';
+                ctx.fillText("神罰無間", 150, canvas.height / 2 - 20);
+                ctx.font = '700 28px Noto Serif KR';
+                ctx.fillText("오의 · 신벌무간지옥 (神罰無間地獄)", 150, canvas.height / 2 + 55);
+            }
+
+            // 시네마틱 컷신용 비산하는 검은 잉크 파티클 수동 주입
+            if (cutsceneTimer % 4 === 0) {
+                let splatterX = Math.random() * canvas.width;
+                let splatterY = Math.random() * canvas.height;
+                for (let k = 0; k < 2; k++) {
+                    bloodSpills.push(new InkSplatter(
+                        splatterX, splatterY,
+                        Math.random() * 8 - 4,
+                        Math.random() * 8 - 4,
+                        cutsceneType === 'p1' ? 'rgba(56, 189, 248, 0.2)' : 'rgba(239, 68, 68, 0.2)'
+                    ));
+                }
+            }
+
+            ctx.restore();
+        }
+
+        let flashOpacity = 0;
+        function triggerFlash() {
+            flashOpacity = 0.6; 
+        }
+
+        let floatTexts = [];
+        function showFloatingNotification(text, color) {
+            floatTexts.push({
+                x: (p1.x + p2.x) / 2 + (Math.random() * 50 - 25),
+                y: Math.min(p1.y, p2.y) - 130 + (Math.random() * 30 - 15),
+                text: text,
+                color: color,
+                alpha: 1.0,
+                scale: 1.3
+            });
+        }
+
+        function triggerSlowMotion(factor, durationMs) {
+            slowMoFactor = factor;
+            slowMoTimer = durationMs;
+        }
+
+        function drawBackground() {
+            const isUltActive = cutsceneActive;
+            const skyGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            
+            if (isUltActive) {
+                skyGrad.addColorStop(0, '#020202');
+                skyGrad.addColorStop(0.5, '#222222');
+                skyGrad.addColorStop(1, '#0c0c0c');
+            } else {
+                skyGrad.addColorStop(0, '#080606');
+                skyGrad.addColorStop(0.45, '#2c0d0d'); 
+                skyGrad.addColorStop(1, '#151111');
+            }
+            ctx.fillStyle = skyGrad;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 1. 거대한 동양의 보름달
+            ctx.save();
+            ctx.shadowColor = isUltActive ? '#ffffff' : '#e11d48';
+            ctx.shadowBlur = 60;
+            ctx.fillStyle = isUltActive ? 'rgba(255, 255, 255, 0.75)' : 'rgba(225, 29, 72, 0.5)'; 
+            ctx.beginPath();
+            ctx.arc(canvas.width / 2, GROUND_Y - 90, 180, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+
+            // 2. 수묵화 풍의 산수화 실루엣
+            ctx.fillStyle = isUltActive ? '#111111' : '#1c0f0f';
+            ctx.beginPath();
+            ctx.moveTo(-50, GROUND_Y);
+            ctx.quadraticCurveTo(250, 310, 500, GROUND_Y);
+            ctx.quadraticCurveTo(750, 260, 1000, GROUND_Y);
+            ctx.quadraticCurveTo(1120, 330, 1150, GROUND_Y);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = isUltActive ? '#090909' : '#120a0a';
+            ctx.beginPath();
+            ctx.moveTo(-50, GROUND_Y);
+            ctx.quadraticCurveTo(150, 380, 420, GROUND_Y);
+            ctx.quadraticCurveTo(680, 340, 950, GROUND_Y);
+            ctx.quadraticCurveTo(1100, 390, 1150, GROUND_Y);
+            ctx.closePath();
+            ctx.fill();
+
+            // 3. 탑과 도리이 문
+            ctx.fillStyle = '#050404';
+            
+            // 좌측 기와 지붕 탑 실루엣
+            ctx.save();
+            ctx.translate(100, GROUND_Y);
+            ctx.fillRect(-20, -180, 40, 180); 
+            for(let level=0; level<5; level++) {
+                const y = -35 * (level + 1);
+                const w = 65 - level * 7;
+                ctx.beginPath();
+                ctx.moveTo(-w/2 - 6, y + 8);
+                ctx.lineTo(-w/2, y);
+                ctx.lineTo(w/2, y);
+                ctx.lineTo(w/2 + 6, y + 8);
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.fillRect(-2, -210, 4, 30);
+            ctx.restore();
+
+            // 우측 전통 도리이 실루엣
+            ctx.save();
+            ctx.translate(900, GROUND_Y);
+            ctx.fillRect(-45, -90, 10, 90); 
+            ctx.fillRect(35, -90, 10, 90);  
+            ctx.fillRect(-55, -80, 110, 8);
+            ctx.beginPath();
+            ctx.moveTo(-65, -95);
+            ctx.quadraticCurveTo(0, -92, 65, -95);
+            ctx.lineTo(60, -87);
+            ctx.quadraticCurveTo(0, -85, -60, -87);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+
+            // 바닥재 마감
+            ctx.fillStyle = '#050404';
+            ctx.fillRect(0, GROUND_Y, canvas.width, canvas.height - GROUND_Y);
+
+            ctx.strokeStyle = '#020202';
+            ctx.lineWidth = 6;
+            ctx.beginPath();
+            ctx.moveTo(0, GROUND_Y + 3);
+            ctx.lineTo(canvas.width, GROUND_Y + 3);
+            ctx.stroke();
+
+            drawFog();
+        }
+
+        function drawFog() {
+            if (fogLayers.length === 0) {
+                for (let i = 0; i < 4; i++) {
+                    fogLayers.push({
+                        x: Math.random() * canvas.width,
+                        y: GROUND_Y - 20 + Math.random() * 25,
+                        speed: Math.random() * 0.4 + 0.1,
+                        width: Math.random() * 300 + 200,
+                        height: 12,
+                        alpha: Math.random() * 0.15 + 0.05
+                    });
+                }
+            }
+
+            fogLayers.forEach(fog => {
+                fog.x -= fog.speed * slowMoFactor;
+                if (fog.x + fog.width < 0) {
+                    fog.x = canvas.width;
+                }
+                ctx.save();
+                ctx.fillStyle = '#fff';
+                ctx.globalAlpha = fog.alpha;
+                ctx.beginPath();
+                ctx.ellipse(fog.x, fog.y, fog.width, fog.height, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            });
+        }
+
+        function drawFloatingTexts() {
+            floatTexts.forEach(ft => {
+                ctx.save();
+                ctx.globalAlpha = ft.alpha;
+                ctx.fillStyle = ft.color;
+                ctx.font = `900 ${Math.round(30 * ft.scale)}px East Sea Dokdo`;
+                ctx.textAlign = 'center';
+                ctx.fillText(ft.text, ft.x, ft.y);
+                ctx.restore();
+
+                ft.y -= 1.8 * slowMoFactor;
+                ft.alpha -= 0.022 * slowMoFactor;
+                ft.scale *= 0.99;
+            });
+            floatTexts = floatTexts.filter(ft => ft.alpha > 0);
+        }
+
+        let isRoundOver = false;
+
+        function handleRoundEnding(winner) {
+            if (isRoundOver) return;
+            isRoundOver = true;
+
+            if (winner && winner.id !== 0) {
+                winner.roundsWon++;
+            }
+            document.getElementById('p1-rounds').innerText = p1.roundsWon;
+            document.getElementById('p2-rounds').innerText = p2.roundsWon;
+
+            triggerSlowMotion(0.06, 2200);
+
+            const announcer = document.getElementById('duel-announcement');
+            const text = document.getElementById('announcement-text');
+            const subtext = document.getElementById('announcement-subtext');
+
+            announcer.classList.remove('opacity-0');
+            announcer.classList.add('opacity-100');
+
+            if (p1.roundsWon >= 3 || p2.roundsWon >= 3) {
+                text.innerText = "決着 (결착)";
+                text.className = "brush-title text-8xl md:text-9xl text-amber-500 font-bold";
+                const champion = p1.roundsWon >= 3 ? "1P (푸른 그림자)" : "2P (붉은 칼날)";
+                subtext.innerHTML = `<span class='font-bold text-stone-100'>${champion}</span> 의 완승으로 영광스런 가극이 끝났소.<br><br><button onclick="resetWholeMatch()" class="bg-stone-100 hover:bg-stone-300 text-black px-6 py-2.5 rounded-lg text-sm transition font-bold pointer-events-auto">다시 대결하기</button>`;
+                
+                clearInterval(timerInterval);
+            } else {
+                text.innerText = "一本 (한판)";
+                text.className = "brush-title text-8xl md:text-9xl text-red-600 font-bold";
+                const winnerName = winner.id === 1 ? "1P 푸른 그림자" : "2P 붉은 칼날";
+                subtext.innerText = `${winnerName}의 정밀한 오의 발도. 다음 대결 준비 중...`;
+
+                setTimeout(() => {
+                    resetRound();
+                }, 3500);
+            }
+        }
+
+        function resetRound() {
+            p1.x = 250;
+            p1.y = GROUND_Y;
+            p1.hp = 100;
+            p1.posture = 0;
+            // p1.spirit = 0; // 한 판이 끝나도 오의 게이지가 유지되도록 초기화 항목에서 제거했습니다.
+            p1.state = 'idle';
+
+            p2.x = 770;
+            p2.y = GROUND_Y;
+            p2.hp = 100;
+            p2.posture = 0;
+            // p2.spirit = 0; // 한 판이 끝나도 오의 게이지가 유지되도록 초기화 항목에서 제거했습니다.
+            p2.state = 'idle';
+
+            if (isPracticeMode) {
+                gameTime = Infinity;
+                document.getElementById('round-timer').innerText = "∞";
+            } else {
+                gameTime = 99;
+                document.getElementById('round-timer').innerText = gameTime;
+            }
+
+            const announcer = document.getElementById('duel-announcement');
+            announcer.classList.remove('opacity-100');
+            announcer.classList.add('opacity-0');
+
+            isRoundOver = false;
+            slowMoFactor = 1.0;
+            cutsceneActive = false;
+            cutsceneTimer = 0;
+
+            sfx.playGong();
+            updateHUD();
+        }
+
+        function resetWholeMatch() {
+            p1.roundsWon = 0;
+            p2.roundsWon = 0;
+            document.getElementById('p1-rounds').innerText = '0';
+            document.getElementById('p2-rounds').innerText = '0';
+            
+            // 새로운 전체 매치를 시작할 때만 오의 게이지를 0으로 완벽히 리셋합니다.
+            p1.spirit = 0;
+            p2.spirit = 0;
+            
+            if (!isPracticeMode) {
+                startTimer();
+            } else {
+                if (timerInterval) clearInterval(timerInterval);
+            }
+            resetRound();
+        }
+
+        function updateHUD() {
+            document.getElementById('p1-hp-bar').style.width = `${p1.hp}%`;
+            document.getElementById('p1-hp-text').innerText = `HP ${Math.round(p1.hp)}/100`;
+            document.getElementById('p1-posture-bar').style.width = `${p1.posture}%`;
+            document.getElementById('p1-posture-text').innerText = `${Math.round(p1.posture)}/100`;
+            document.getElementById('p1-spirit-bar').style.width = `${p1.spirit}%`;
+            document.getElementById('p1-spirit-text').innerText = `${Math.round(p1.spirit)}%`;
+
+            document.getElementById('p2-hp-bar').style.width = `${p2.hp}%`;
+            document.getElementById('p2-hp-text').innerText = `HP ${Math.round(p2.hp)}/100`;
+            document.getElementById('p2-posture-bar').style.width = `${p2.posture}%`;
+            document.getElementById('p2-posture-text').innerText = `${Math.round(p2.posture)}/100`;
+            document.getElementById('p2-spirit-bar').style.width = `${p2.spirit}%`;
+            document.getElementById('p2-spirit-text').innerText = `${Math.round(p2.spirit)}%`;
+        }
+
+        function startTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                if (gameState.isRunning && !isRoundOver && !isPracticeMode) {
+                    gameTime--;
+                    document.getElementById('round-timer').innerText = gameTime;
+
+                    if (gameTime <= 0) {
+                        if (p1.hp === p2.hp) {
+                            handleRoundEnding({ id: 0, roundsWon: 0 }); 
+                        } else if (p1.hp > p2.hp) {
+                            handleRoundEnding(p1);
+                        } else {
+                            handleRoundEnding(p2);
+                        }
+                    }
+                }
+            }, 1000);
+        }
+
+        function gameLoop(timestamp) {
+            let shakeX = 0;
+            let shakeY = 0;
+            if (cameraShake > 0.1) {
+                shakeX = (Math.random() * 2 - 1) * cameraShake;
+                shakeY = (Math.random() * 2 - 1) * cameraShake;
+                cameraShake *= 0.88; 
+            }
+
+            if (slowMoTimer > 0) {
+                slowMoTimer -= 16.67; 
+                if (slowMoTimer <= 0) {
+                    slowMoFactor = 1.0; 
+                }
+            }
+
+            // 비기 시네마틱 컷신 구동 시, 캐릭터 물리 이동 정지
+            if (!cutsceneActive) {
+                p1.update(p2);
+                p2.update(p1);
+            } else {
+                p1.updateProceduralParts();
+                p2.updateProceduralParts();
+                p1.updateTrail();
+                p2.updateTrail();
+            }
+
+            ctx.save();
+            ctx.translate(shakeX, shakeY); 
+            drawBackground();
+
+            leaves.forEach(leaf => leaf.update());
+            leaves.forEach(leaf => leaf.draw());
+
+            drawSwordTrails();
+
+            p1.draw(ctx);
+            p2.draw(ctx);
+
+            bloodSpills.forEach(b => { b.update(); b.draw(); });
+            clashingSparks.forEach(s => { s.update(); s.draw(); });
+
+            for (let i = bloodSpills.length - 1; i >= 0; i--) {
+                if (bloodSpills[i].alpha <= 0) bloodSpills.splice(i, 1);
+            }
+            for (let i = clashingSparks.length - 1; i >= 0; i--) {
+                if (clashingSparks[i].alpha <= 0) clashingSparks.splice(i, 1);
+            }
+
+            drawFloatingTexts();
+
+            // 컷신 드로잉 기동
+            if (cutsceneActive) {
+                drawCutscene();
+                cutsceneTimer--;
+                if (cutsceneTimer <= 0) {
+                    cutsceneActive = false;
+                    ultimateCaster.executeUltimatePunch(ultimateCaster.id === 1 ? p2 : p1);
+                }
+            }
+
+            ctx.restore();
+
+            if (flashOpacity > 0.01) {
+                ctx.save();
+                ctx.globalAlpha = flashOpacity;
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.restore();
+                flashOpacity *= 0.72; 
+            }
+
+            updateHUD();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        const p1Keys = { left: 'a', right: 'd', jump: 'w', block: 'e', slash: 'left_click', dash: 'q', special: 'f', ultimate: 'r' };
+        const p2Keys = { left: 'ArrowLeft', right: 'ArrowRight', jump: 'ArrowUp', block: 'ArrowDown', slash: 'l', dash: 'o', special: 'u', ultimate: 'i' };
+
+        const p1 = new Samurai(250, 1, 'sky', p1Keys);
+        const p2 = new Samurai(770, 2, 'red', p2Keys);
+
+        function setupControls() {
+            // 키보드 입력 매핑
+            window.addEventListener('keydown', (e) => {
+                const key = e.key.toLowerCase();
+                keys[key] = true;
+                
+                // 한국어 키 대응
+                if (key === 'a' || key === 'ㅁ') keys['a'] = true;
+                if (key === 'd' || key === 'ㅇ') keys['d'] = true;
+                if (key === 'w' || key === 'ㅈ') keys['w'] = true;
+                if (key === 'e' || key === 'ㄷ') keys['e'] = true;
+                if (key === 'q' || key === 'ㅂ') keys['q'] = true;
+                if (key === 'f' || key === 'ㄹ') keys['f'] = true;
+                if (key === 'r' || key === 'ㄱ') keys['r'] = true;
+                if (key === 'l' || key === 'ㅣ') keys['l'] = true;
+                if (key === 'o' || key === 'ㅐ') keys['o'] = true;
+                if (key === 'u' || key === 'ㅕ') keys['u'] = true;
+                if (key === 'i' || key === 'ㅑ') keys['i'] = true;
+                
+                keys[e.key] = true;
+            });
+
+            window.addEventListener('keyup', (e) => {
+                const key = e.key.toLowerCase();
+                keys[key] = false;
+                
+                if (key === 'a' || key === 'ㅁ') keys['a'] = false;
+                if (key === 'd' || key === 'ㅇ') keys['d'] = false;
+                if (key === 'w' || key === 'ㅈ') keys['w'] = false;
+                if (key === 'e' || key === 'ㄷ') keys['e'] = false;
+                if (key === 'q' || key === 'ㅂ') keys['q'] = false;
+                if (key === 'f' || key === 'ㄹ') keys['f'] = false;
+                if (key === 'r' || key === 'ㄱ') keys['r'] = false;
+                if (key === 'l' || key === 'ㅣ') keys['l'] = false;
+                if (key === 'o' || key === 'ㅐ') keys['o'] = false;
+                if (key === 'u' || key === 'ㅕ') keys['u'] = false;
+                if (key === 'i' || key === 'ㅑ') keys['i'] = false;
+                
+                keys[e.key] = false;
+            });
+
+            // 1P 마우스 좌클릭 시 베기 공격 작동 지원
+            canvas.addEventListener('mousedown', (e) => {
+                if (e.button === 0 && gameState.isRunning) {
+                    keys['left_click'] = true;
+                }
+            });
+
+            canvas.addEventListener('mouseup', (e) => {
+                if (e.button === 0 && gameState.isRunning) {
+                    keys['left_click'] = false;
+                }
+            });
+
+            // 마우스 이탈 시 공격 키 해제 예외 안전장치
+            canvas.addEventListener('mouseleave', () => {
+                keys['left_click'] = false;
+            });
+
+            // 수라 AI 모드 가동
+            document.getElementById('btn-mode-ai').addEventListener('click', () => {
+                isPVPMode = false;
+                isPracticeMode = false;
+                document.getElementById('p2-name').innerText = "修羅 (수라 AI)";
+                document.getElementById('practice-panel').classList.add('hidden');
+                startGame();
+            });
+
+            // 1v1 PVP 모드 가동
+            document.getElementById('btn-mode-pvp').addEventListener('click', () => {
+                isPVPMode = true;
+                isPracticeMode = false;
+                document.getElementById('p2-name').innerText = "2P (붉은 칼날)";
+                document.getElementById('practice-panel').classList.add('hidden');
+                startGame();
+            });
+
+            // 연습(단련) 모드 가동
+            document.getElementById('btn-mode-practice').addEventListener('click', () => {
+                isPVPMode = false;
+                isPracticeMode = true;
+                document.getElementById('p2-name').innerText = "🪵 훈련용 인형";
+                document.getElementById('practice-panel').classList.remove('hidden');
+                setDummyBehavior('stop'); 
+                startGame();
+            });
+
+            // 단련장 컨트롤러 바인딩
+            document.getElementById('btn-dummy-stop').addEventListener('click', () => {
+                setDummyBehavior('stop');
+            });
+            document.getElementById('btn-dummy-attack').addEventListener('click', () => {
+                setDummyBehavior('attack');
+            });
+        }
+
+        function setDummyBehavior(behavior) {
+            dummyBehavior = behavior;
+            const btnStop = document.getElementById('btn-dummy-stop');
+            const btnAttack = document.getElementById('btn-dummy-attack');
+
+            if (behavior === 'stop') {
+                btnStop.className = "bg-amber-600 text-black px-3 py-1 rounded font-bold transition hover:bg-amber-500";
+                btnAttack.className = "bg-stone-800 text-stone-300 px-3 py-1 rounded font-bold transition hover:bg-stone-700";
+            } else {
+                btnStop.className = "bg-stone-800 text-stone-300 px-3 py-1 rounded font-bold transition hover:bg-stone-700";
+                btnAttack.className = "bg-amber-600 text-black px-3 py-1 rounded font-bold transition hover:bg-amber-500";
+            }
+        }
+
+        for (let i = 0; i < 45; i++) {
+            leaves.push(new LeafParticle());
+        }
+
+        function startGame() {
+            sfx.init();
+
+            document.getElementById('lobby-screen').classList.add('hidden');
+            document.getElementById('game-hud').classList.remove('hidden');
+
+            gameState.isRunning = true;
+            resetWholeMatch();
+            
+            // 조작 가이드 자동 페이드 아웃
+            setTimeout(() => {
+                document.getElementById('p1-controls-guide').style.opacity = '0';
+                document.getElementById('p2-controls-guide').style.opacity = '0';
+            }, 8000);
+        }
+
+        window.onload = function() {
+            setupControls();
+            requestAnimationFrame(gameLoop);
+        };
+    </script>
+</body>
+</html>
