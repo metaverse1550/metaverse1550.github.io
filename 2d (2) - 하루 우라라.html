@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Shadow 2D: Abandoned School</title>
+    <style>
+        body { margin: 0; background: #111; color: white; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
+        #gameCanvas { border: 2px solid #555; background: #000; cursor: pointer; }
+        #ui { position: absolute; top: 50px; left: 10px; font-family: sans-serif; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
+        .stat { font-size: 14px; background: rgba(0,0,0,0.5); padding: 5px; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat" id="stage">스테이지: 1</div>
+        <div class="stat" id="hp">HP: 100</div>
+        <div class="stat" id="items">아이템: 0/3</div>
+    </div>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let gameState = 'start'; 
+        let stage = 1;
+        let map = [];
+        const cols = 20, rows = 15, tileSize = 40;
+
+        let player = { x: 60, y: 60, hp: 100, items: 0, hitCooldown: 0 };
+        let items = [];
+        // 괴물 기본 속도 대폭 하향 조정
+        let enemy = { x: 0, y: 0, baseSpeed: 0.05 }; 
+        let exit = {x: 0, y: 0, active: false}; 
+        const keys = {};
+
+        function generateObstacles() {
+            map = Array.from({length: rows}, () => Array(cols).fill(0));
+            for(let y=0; y<rows; y++) {
+                for(let x=0; x<cols; x++) {
+                    if (y === 0 || y === rows-1 || x === 0 || x === cols-1) {
+                        map[y][x] = 1;
+                    } else if (Math.random() < 0.2) {
+                        const isStart = (x < 3 && y < 3);
+                        const isExit = (x > cols-4 && y > rows-4);
+                        if (!isStart && !isExit) map[y][x] = 1;
+                    }
+                }
+            }
+            
+            items = [{x: 200, y: 200}, {x: 600, y: 200}, {x: 600, y: 400}].map(i => ({...i, taken: false}));
+            exit = {x: (cols-2)*tileSize + 20, y: (rows-2)*tileSize + 20, active: false};
+            
+            enemy.x = (cols-2) * tileSize;
+            enemy.y = (rows-2) * tileSize;
+        }
+
+        function findPath(start, goal) {
+            let queue = [[start]];
+            let visited = new Set([`${start.x},${start.y}`]);
+            while (queue.length > 0) {
+                let path = queue.shift();
+                let node = path[path.length - 1];
+                if (node.x === goal.x && node.y === goal.y) return path;
+                for (let [dx, dy] of [[0,1],[0,-1],[1,0],[-1,0]]) {
+                    let nx = node.x + dx, ny = node.y + dy;
+                    if (map[ny] && map[ny][nx] === 0 && !visited.has(`${nx},${ny}`)) {
+                        visited.add(`${nx},${ny}`);
+                        queue.push([...path, {x: nx, y: ny}]);
+                    }
+                }
+            }
+            return [];
+        }
+
+        function resetGame(fullReset = false) {
+            player = { x: 60, y: 60, hp: 100, items: 0, hitCooldown: 0 };
+            if(fullReset) { 
+                stage = 1; 
+                gameState = 'start'; 
+            } else { 
+                stage++; 
+                gameState = 'playing'; 
+            }
+            generateObstacles();
+        }
+
+        window.addEventListener('keydown', e => {
+            keys[e.key.toLowerCase()] = true;
+            if (gameState === 'start' && e.code === 'Space') { generateObstacles(); gameState = 'playing'; }
+        });
+        window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+        canvas.addEventListener('mousedown', (e) => { 
+            if(gameState === 'start') { 
+                generateObstacles(); 
+                gameState = 'playing'; 
+            } else if(gameState === 'gameover') { 
+                resetGame(true); 
+            }
+        });
+
+        function update() {
+            if (gameState !== 'playing') return;
+            let speed = 4;
+            if (keys['w'] && !map[Math.floor((player.y-speed)/tileSize)][Math.floor(player.x/tileSize)]) player.y -= speed;
+            if (keys['s'] && !map[Math.floor((player.y+speed)/tileSize)][Math.floor(player.x/tileSize)]) player.y += speed;
+            if (keys['a'] && !map[Math.floor(player.y/tileSize)][Math.floor((player.x-speed)/tileSize)]) player.x -= speed;
+            if (keys['d'] && !map[Math.floor(player.y/tileSize)][Math.floor((player.x+speed)/tileSize)]) player.x += speed;
+
+            items.forEach(item => {
+                if (!item.taken && Math.hypot(player.x - item.x, player.y - item.y) < 25) {
+                    item.taken = true; player.items++;
+                    if (player.items === 3) exit.active = true;
+                }
+            });
+
+            if (exit.active && Math.hypot(player.x - exit.x, player.y - exit.y) < 30) resetGame();
+
+            let path = findPath({x: Math.floor(enemy.x/tileSize), y: Math.floor(enemy.y/tileSize)}, {x: Math.floor(player.x/tileSize), y: Math.floor(player.y/tileSize)});
+            if (path.length > 1) {
+                let next = path[1];
+                let tx = next.x * tileSize + tileSize/2;
+                let ty = next.y * tileSize + tileSize/2;
+                // 스테이지 상승에 따른 속도 증가폭도 완만하게 변경
+                let currentEnemySpeed = enemy.baseSpeed + (stage * 0.01);
+                enemy.x += (tx - enemy.x) * currentEnemySpeed;
+                enemy.y += (ty - enemy.y) * currentEnemySpeed;
+            }
+
+            if (player.hitCooldown > 0) player.hitCooldown--;
+            if (player.hitCooldown === 0 && Math.hypot(player.x - enemy.x, player.y - enemy.y) < 30) {
+                player.hp -= 25; player.hitCooldown = 60;
+                if (player.hp <= 0) gameState = 'gameover';
+            }
+            document.getElementById('stage').innerText = `스테이지: ${stage}`;
+            document.getElementById('hp').innerText = `HP: ${player.hp}`;
+            document.getElementById('items').innerText = `아이템: ${player.items}/3`;
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, 800, 600);
+            if (gameState === 'start') {
+                ctx.fillStyle = "white"; ctx.font = "40px Arial";
+                ctx.fillText("클릭 또는 스페이스바를 눌러 시작", 100, 300);
+            } else if (gameState === 'gameover') {
+                ctx.fillStyle = "red"; ctx.font = "80px Arial";
+                ctx.fillText("GAME OVER", 180, 300);
+                ctx.fillStyle = "white"; ctx.font = "30px Arial";
+                ctx.fillText("클릭하여 다시 시작", 270, 360);
+            } else {
+                for (let y = 0; y < rows; y++) {
+                    for (let x = 0; x < cols; x++) {
+                        ctx.fillStyle = map[y][x] === 1 ? "#333" : "#000";
+                        ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
+                    }
+                }
+                if(exit.active) { ctx.fillStyle = "lime"; ctx.fillRect(exit.x-15, exit.y-15, 30, 30); }
+                ctx.fillStyle = "blue"; ctx.fillRect(player.x-10, player.y-10, 20, 20);
+                ctx.fillStyle = "yellow"; items.forEach(i => { if(!i.taken) ctx.fillRect(i.x-10, i.y-10, 20, 20); });
+                ctx.fillStyle = "red"; ctx.fillRect(enemy.x-10, enemy.y-10, 20, 20);
+            }
+        }
+        function loop() { update(); draw(); requestAnimationFrame(loop); }
+        loop();
+    </script>
+</body>
+</html>
