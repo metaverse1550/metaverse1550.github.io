@@ -1,0 +1,1139 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>사이버 스페이스 파이터 3D</title>
+    <!-- Tailwind CSS (현대적인 반투명 UI 스타일링용) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #030712;
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+            user-select: none;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        /* Neon Glassmorphism 스타일 */
+        .neon-panel {
+            background: rgba(10, 15, 30, 0.65);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(59, 130, 246, 0.25);
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.15);
+        }
+        /* 충돌 플래시 */
+        .hit-flash {
+            animation: red-flash 0.2s ease-out;
+        }
+        @keyframes red-flash {
+            0% { background: rgba(239, 68, 68, 0.45); }
+            100% { background: rgba(0, 0, 0, 0); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 게임 전체 화면 컨테이너 -->
+    <div id="game-container" class="relative w-full h-full">
+        <!-- 충돌 시 플래시 오버레이 -->
+        <div id="damage-overlay" class="absolute inset-0 pointer-events-none z-10 transition-colors duration-100"></div>
+
+        <!-- 1. 메인 메뉴 오버레이 -->
+        <div id="menu-overlay" class="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/85 text-white p-4">
+            <div class="neon-panel max-w-md w-full rounded-2xl p-8 text-center border-cyan-500/30">
+                <h1 class="text-4xl font-black tracking-wider mb-2 bg-gradient-to-r from-cyan-400 via-blue-500 to-indigo-400 bg-clip-text text-transparent drop-shadow-[0_0_15px_rgba(34,211,238,0.3)]">
+                    CYBER FIGHTER 3D
+                </h1>
+                <p class="text-xs text-cyan-400 font-bold tracking-widest uppercase mb-6">Deep Space Canyon Avoidance</p>
+                
+                <div class="space-y-3 mb-8 text-left text-xs text-slate-300">
+                    <div class="flex items-center space-x-3 bg-slate-900/60 p-3 rounded-xl border border-white/5">
+                        <span class="bg-cyan-500 text-xs font-bold px-2 py-0.5 rounded text-slate-950">Mouse / WASD</span>
+                        <span>전투기 이동 (상, 하, 좌, 우 조향)</span>
+                    </div>
+                    <div class="flex items-center space-x-3 bg-slate-900/60 p-3 rounded-xl border border-white/5">
+                        <span class="bg-blue-500 text-xs font-bold px-2 py-0.5 rounded text-white">Left Click / Space</span>
+                        <span>네온 플라즈마 캐논 발사 (장애물 파괴)</span>
+                    </div>
+                    <div class="flex items-center space-x-3 bg-slate-900/60 p-3 rounded-xl border border-white/5">
+                        <span class="bg-emerald-500 text-xs font-bold px-2 py-0.5 rounded text-slate-950">Glow Items</span>
+                        <span>보호막 충전(녹색), 더블캐논(황색), 보너스 에너지 코어(청색)</span>
+                    </div>
+                </div>
+
+                <button id="btn-start" class="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-cyan-500/20 transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98]">
+                    레이스 및 출격 개시
+                </button>
+            </div>
+        </div>
+
+        <!-- 2. 카운트다운 화면 -->
+        <div id="countdown-overlay" class="hidden absolute inset-0 z-20 flex items-center justify-center text-white pointer-events-none">
+            <span id="countdown-text" class="text-9xl font-black italic scale-50 opacity-0 transition-all duration-300 drop-shadow-[0_0_20px_rgba(34,211,238,0.5)]">3</span>
+        </div>
+
+        <!-- 3. 인게임 실시간 HUD -->
+        <div id="hud-overlay" class="hidden absolute inset-0 pointer-events-none z-15 flex flex-col justify-between p-6 text-white">
+            <!-- 상단 정보 바 -->
+            <div class="flex justify-between items-start w-full">
+                <!-- 생명력 & 스피드 -->
+                <div class="neon-panel px-5 py-3 rounded-2xl flex items-center space-x-6 border-cyan-500/20">
+                    <div>
+                        <div class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">SHIELD</div>
+                        <div class="w-32 h-3 bg-slate-800 rounded-full mt-1 overflow-hidden border border-white/5">
+                            <div id="shield-bar" class="w-full h-full bg-gradient-to-r from-cyan-400 to-blue-500 transition-all duration-100"></div>
+                        </div>
+                    </div>
+                    <div class="h-8 w-[1px] bg-white/10"></div>
+                    <div>
+                        <div class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">LASER POWER</div>
+                        <div id="hud-weapon" class="text-sm font-black text-cyan-300 mt-1">STANDARD x1</div>
+                    </div>
+                </div>
+
+                <!-- 점수 및 거리 -->
+                <div class="neon-panel px-5 py-3 rounded-2xl text-right border-cyan-500/20">
+                    <div class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">SCORE</div>
+                    <div class="text-2xl font-black italic text-cyan-300" id="hud-score">00000</div>
+                </div>
+            </div>
+
+            <!-- 하단 정보 바 -->
+            <div class="flex justify-between items-end w-full">
+                <div class="neon-panel px-4 py-2 rounded-xl text-xs text-slate-400 border-cyan-500/10">
+                    <kbd class="bg-slate-800 px-1.5 py-0.5 rounded text-white mr-1">P</kbd> Pause
+                </div>
+                <div class="neon-panel px-5 py-3 rounded-xl text-right border-cyan-500/10">
+                    <span class="text-xs text-slate-400">WARP VELOCITY:</span>
+                    <span id="hud-speed" class="text-xl font-bold text-yellow-300 ml-2">120 km/h</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. 일시정지 화면 -->
+        <div id="pause-overlay" class="hidden absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/70 text-white pointer-events-auto">
+            <div class="neon-panel max-w-xs w-full rounded-2xl p-6 text-center shadow-2xl border-cyan-500/30">
+                <h2 class="text-2xl font-black mb-4 text-cyan-400">WARP INTERRUPTED</h2>
+                <p class="text-xs text-slate-400 mb-6">시뮬레이션이 일시 정지되었습니다.</p>
+                <button id="btn-resume" class="w-full bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold py-3 rounded-xl mb-3 transition-colors">
+                    계속하기 (P)
+                </button>
+                <button id="btn-restart-pause" class="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl transition-colors">
+                    처음부터 재출격
+                </button>
+            </div>
+        </div>
+
+        <!-- 5. 결과 오버레이 -->
+        <div id="result-overlay" class="hidden absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/95 text-white p-4">
+            <div class="neon-panel max-w-md w-full rounded-3xl p-8 text-center border-red-500/30">
+                <div id="result-badge" class="w-20 h-20 mx-auto mb-6 flex items-center justify-center rounded-full text-4xl neon-panel border-red-500/30 bg-red-950/20">💥</div>
+                <h2 class="text-4xl font-black italic tracking-wide mb-2 text-red-500 drop-shadow-[0_0_10px_rgba(239,68,68,0.3)]">MISSION FAILED</h2>
+                <p class="text-xs text-slate-400 mb-6">에너지 실드가 완전히 방전되어 기체가 대기권에서 침묵했습니다.</p>
+                
+                <div class="bg-slate-900/60 rounded-2xl p-5 mb-8 text-left space-y-2 text-sm border border-white/5">
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">최종 스코어</span>
+                        <span id="res-score" class="font-bold text-cyan-300 text-lg">0</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">도달 워프 스피드</span>
+                        <span id="res-max-speed" class="font-bold text-yellow-300 text-lg">0 km/h</span>
+                    </div>
+                </div>
+
+                <button id="btn-restart" class="w-full bg-gradient-to-r from-red-500 to-amber-600 hover:from-red-600 hover:to-amber-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-red-500/20 transition-all transform hover:scale-[1.02] active:scale-[0.98]">
+                    다시 우주로 출격하기
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 오디오 동의 바 -->
+    <div id="audio-consent" class="fixed bottom-4 right-4 z-50 neon-panel max-w-xs p-4 rounded-xl text-xs text-white flex items-center justify-between border-cyan-500/20 shadow-lg">
+        <span>더 다이내믹한 빔 발사 효과음과 충돌음을 경험해 보세요.</span>
+        <button id="btn-audio-enable" class="bg-cyan-500 hover:bg-cyan-600 px-3 py-1.5 rounded font-bold ml-2 text-slate-950 transition-colors">허용</button>
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. 네이티브 오디오 헵틱/합성 엔진 (Web Audio API)
+        // ==========================================
+        class SoundEngine {
+            constructor() {
+                this.ctx = null;
+                this.initialized = false;
+                this.engineGain = null;
+                this.engineOsc = null;
+            }
+
+            init() {
+                if (this.initialized) return;
+                try {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContext();
+                    
+                    // 우주선 엔진 배후 저음 노이즈 세팅
+                    this.engineOsc = this.ctx.createOscillator();
+                    this.engineGain = this.ctx.createGain();
+                    
+                    this.engineOsc.type = 'triangle';
+                    this.engineOsc.frequency.setValueAtTime(55, this.ctx.currentTime); // 55Hz 베이스 우웅음
+                    this.engineGain.gain.setValueAtTime(0.0, this.ctx.currentTime);
+
+                    const filter = this.ctx.createBiquadFilter();
+                    filter.type = 'lowpass';
+                    filter.frequency.setValueAtTime(120, this.ctx.currentTime);
+
+                    this.engineOsc.connect(filter);
+                    filter.connect(this.engineGain);
+                    this.engineGain.connect(this.ctx.destination);
+                    this.engineOsc.start();
+
+                    this.initialized = true;
+                    document.getElementById('audio-consent').classList.add('hidden');
+                } catch (e) {
+                    console.warn("오디오 지원 불가 기기:", e);
+                }
+            }
+
+            setEngineFrequency(speedRatio) {
+                if (!this.initialized) return;
+                // 우주선 속도에 맞춰 엔진 주파수 피치 변경
+                const targetFreq = 45 + (speedRatio * 80);
+                this.engineOsc.frequency.setTargetAtTime(targetFreq, this.ctx.currentTime, 0.1);
+                
+                const targetVolume = 0.05 + (speedRatio * 0.08);
+                this.engineGain.gain.setTargetAtTime(targetVolume, this.ctx.currentTime, 0.1);
+            }
+
+            playLaser() {
+                if (!this.initialized) return;
+                const ctx = this.ctx;
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(800, ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(150, ctx.currentTime + 0.15);
+
+                gain.gain.setValueAtTime(0.12, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.16);
+            }
+
+            playExplosion() {
+                if (!this.initialized) return;
+                const ctx = this.ctx;
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                const filter = ctx.createBiquadFilter();
+
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(180, ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(30, ctx.currentTime + 0.35);
+
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(250, ctx.currentTime);
+
+                gain.gain.setValueAtTime(0.35, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+
+                osc.connect(filter);
+                filter.connect(gain);
+                gain.connect(ctx.destination);
+
+                osc.start();
+                osc.stop(ctx.currentTime + 0.4);
+            }
+
+            playPowerUp() {
+                if (!this.initialized) return;
+                const ctx = this.ctx;
+                const notes = [440, 554.37, 659.25, 880]; // 아르페지오 업그레이드 음
+                notes.forEach((freq, idx) => {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.08);
+                    
+                    gain.gain.setValueAtTime(0.1, ctx.currentTime + idx * 0.08);
+                    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + idx * 0.08 + 0.15);
+                    
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(ctx.currentTime + idx * 0.08);
+                    osc.stop(ctx.currentTime + idx * 0.08 + 0.2);
+                });
+            }
+
+            playCountdown() {
+                if (!this.initialized) return;
+                const ctx = this.ctx;
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+                
+                gain.gain.setValueAtTime(0.2, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+
+                osc.start();
+                osc.stop(ctx.currentTime + 0.3);
+            }
+
+            stopAll() {
+                if (!this.initialized) return;
+                this.engineGain.gain.setTargetAtTime(0.0, this.ctx.currentTime, 0.1);
+            }
+        }
+
+        const sfx = new SoundEngine();
+        document.getElementById('btn-audio-enable').addEventListener('click', () => sfx.init());
+
+        // ==========================================
+        // 2. 입력 장치 핸들러 (마우스, 키보드, 터치 인터페이스)
+        // ==========================================
+        class Input {
+            constructor() {
+                this.keys = { w: false, a: false, s: false, d: false, space: false, p: false };
+                this.mouse = { x: 0, y: 0 }; // 비율 좌표 -1 ~ +1
+                this.mouseClicked = false;
+
+                // 마우스 움직임 감지
+                window.addEventListener('mousemove', (e) => this.onMouseMove(e));
+                window.addEventListener('mousedown', () => { this.mouseClicked = true; });
+                window.addEventListener('mouseup', () => { this.mouseClicked = false; });
+                
+                // 모바일 터치 대응
+                window.addEventListener('touchmove', (e) => this.onTouchMove(e));
+                window.addEventListener('touchstart', () => { this.mouseClicked = true; });
+                window.addEventListener('touchend', () => { this.mouseClicked = false; });
+
+                // 키보드 대응
+                window.addEventListener('keydown', (e) => this.setKey(e, true));
+                window.addEventListener('keyup', (e) => this.setKey(e, false));
+            }
+
+            onMouseMove(e) {
+                this.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+                this.mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            }
+
+            onTouchMove(e) {
+                if (e.touches.length > 0) {
+                    const t = e.touches[0];
+                    this.mouse.x = (t.clientX / window.innerWidth) * 2 - 1;
+                    this.mouse.y = -(t.clientY / window.innerHeight) * 2 + 1;
+                }
+            }
+
+            setKey(e, state) {
+                const k = e.key.toLowerCase();
+                if (k === 'w' || e.key === 'ArrowUp') this.keys.w = state;
+                if (k === 's' || e.key === 'ArrowDown') this.keys.s = state;
+                if (k === 'a' || e.key === 'ArrowLeft') this.keys.a = state;
+                if (k === 'd' || e.key === 'ArrowRight') this.keys.d = state;
+                if (e.key === ' ' || e.key === 'Spacebar') this.keys.space = state;
+                if (k === 'p' && state === true) this.keys.p = true; // 단발 작동
+            }
+
+            reset() {
+                for (let k in this.keys) {
+                    if (k !== 'p') this.keys[k] = false;
+                }
+                this.mouseClicked = false;
+            }
+        }
+
+        // ==========================================
+        // 3. 인게임 배경 및 캐니언(터널) 모듈 빌더
+        // ==========================================
+        class InfiniteTunnel {
+            constructor(scene) {
+                this.scene = scene;
+                this.tunnelSegments = [];
+                this.segmentLength = 60;
+                this.totalSegments = 5;
+
+                this.buildTunnel();
+            }
+
+            buildTunnel() {
+                // 터널 세그먼트 생성 (네온 캐니언 스타일의 벽과 격자 배치)
+                for (let i = 0; i < this.totalSegments; i++) {
+                    const segment = this.createSegment(i * -this.segmentLength);
+                    this.scene.add(segment);
+                    this.tunnelSegments.push(segment);
+                }
+            }
+
+            createSegment(zOffset) {
+                const group = new THREE.Group();
+
+                // 1. 벽면 격자 그물망 (상하좌우 장벽)
+                const thickness = 0.5;
+                const size = 35;
+                
+                const gridGeo = new THREE.BoxGeometry(size, thickness, this.segmentLength);
+                const gridMat = new THREE.MeshStandardMaterial({
+                    color: 0x1d4ed8,
+                    roughness: 0.8,
+                    metalness: 0.2,
+                    wireframe: true // 사이버 망 느낌
+                });
+
+                // 바닥 벽
+                const floor = new THREE.Mesh(gridGeo, gridMat);
+                floor.position.set(0, -size / 2, zOffset - this.segmentLength / 2);
+                group.add(floor);
+
+                // 천장 벽
+                const ceiling = new THREE.Mesh(gridGeo, gridMat);
+                ceiling.position.set(0, size / 2, zOffset - this.segmentLength / 2);
+                group.add(ceiling);
+
+                // 좌측 벽
+                const sideGeo = new THREE.BoxGeometry(thickness, size, this.segmentLength);
+                const leftWall = new THREE.Mesh(sideGeo, gridMat);
+                leftWall.position.set(-size / 2, 0, zOffset - this.segmentLength / 2);
+                group.add(leftWall);
+
+                // 우측 벽
+                const rightWall = new THREE.Mesh(sideGeo, gridMat);
+                rightWall.position.set(size / 2, 0, zOffset - this.segmentLength / 2);
+                group.add(rightWall);
+
+                // 2. 주기적으로 빛나는 유도 네온 링
+                const ringGeo = new THREE.TorusGeometry(size / 2.1, 0.2, 8, 24);
+                const ringMat = new THREE.MeshBasicMaterial({ color: 0x06b6d4 });
+                const neonRing = new THREE.Mesh(ringGeo, ringMat);
+                neonRing.position.set(0, 0, zOffset - this.segmentLength);
+                group.add(neonRing);
+
+                return group;
+            }
+
+            // 전방 스피드에 맞춰 터널을 뒤로 밀고 루프 처리 (메모리 재활용 최적화)
+            update(speed, dt) {
+                this.tunnelSegments.forEach(seg => {
+                    seg.position.z += speed * dt;
+
+                    // 플레이어 뒤편(-Z) 멀리 가버린 세그먼트를 저 멀리 전방(+Z)으로 재스폰
+                    if (seg.position.z > this.segmentLength) {
+                        seg.position.z -= this.segmentLength * this.totalSegments;
+                    }
+                });
+            }
+        }
+
+        // ==========================================
+        // 4. 우주선 플레이어 클래스
+        // ==========================================
+        class Spaceship {
+            constructor(scene) {
+                this.scene = scene;
+                this.mesh = new THREE.Group();
+
+                // 물리 속성
+                this.position = new THREE.Vector3(0, 0, 0);
+                this.targetPos = new THREE.Vector3(0, 0, 0);
+                this.speed = 10;
+                
+                // 가속/조향 한계
+                this.boundary = 14; 
+                this.shield = 100;
+                this.weaponPower = 1; // 1: 싱글, 2: 더블, 3: 트리플
+
+                this.buildShipMesh();
+                this.scene.add(this.mesh);
+            }
+
+            buildShipMesh() {
+                // 멋진 공상과학 전투기 프레임 조립 (로폴 스타일 캐논 탑재)
+                const bodyGeo = new THREE.ConeGeometry(0.8, 3.2, 4);
+                bodyGeo.rotateX(Math.PI / 2); // 정면 바라보도록
+                const bodyMat = new THREE.MeshStandardMaterial({
+                    color: 0x3b82f6,
+                    roughness: 0.2,
+                    metalness: 0.8
+                });
+                const body = new THREE.Mesh(bodyGeo, bodyMat);
+                body.castShadow = true;
+                this.mesh.add(body);
+
+                // 날개 (좌)
+                const wingGeo = new THREE.BoxGeometry(2.4, 0.15, 1.2);
+                const leftWing = new THREE.Mesh(wingGeo, bodyMat);
+                leftWing.position.set(-1.2, -0.1, -0.4);
+                leftWing.rotation.z = -0.15;
+                leftWing.castShadow = true;
+                this.mesh.add(leftWing);
+
+                // 날개 (우)
+                const rightWing = leftWing.clone();
+                rightWing.position.x = 1.2;
+                rightWing.rotation.z = 0.15;
+                this.mesh.add(rightWing);
+
+                // 조종석 네온 캐노피
+                const glassGeo = new THREE.SphereGeometry(0.4, 8, 8);
+                glassGeo.scale(1, 0.6, 2.0);
+                const glassMat = new THREE.MeshBasicMaterial({ color: 0x22d3ee });
+                const glass = new THREE.Mesh(glassGeo, glassMat);
+                glass.position.set(0, 0.35, 0.2);
+                this.mesh.add(glass);
+
+                // 날개 끝 플라즈마 레이저 포대 (좌우)
+                const cannonGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.8, 4);
+                cannonGeo.rotateX(Math.PI / 2);
+                const cannonMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.9 });
+                
+                const leftCannon = new THREE.Mesh(cannonGeo, cannonMat);
+                leftCannon.position.set(-2.2, -0.1, 0);
+                this.mesh.add(leftCannon);
+
+                const rightCannon = leftCannon.clone();
+                rightCannon.position.x = 2.2;
+                this.mesh.add(rightCannon);
+            }
+
+            update(dt, input) {
+                // 키보드 조작 가속 유도
+                let dx = 0;
+                let dy = 0;
+                const keyPower = 18;
+
+                if (input.keys.a) dx = -keyPower * dt;
+                if (input.keys.d) dx = keyPower * dt;
+                if (input.keys.w) dy = keyPower * dt;
+                if (input.keys.s) dy = -keyPower * dt;
+
+                if (dx !== 0 || dy !== 0) {
+                    this.targetPos.x += dx;
+                    this.targetPos.y += dy;
+                } else {
+                    // 키보드 가속이 없다면 마우스/터치 위치로 정밀 추적
+                    this.targetPos.x = THREE.MathUtils.lerp(this.targetPos.x, input.mouse.x * this.boundary, dt * 10);
+                    this.targetPos.y = THREE.MathUtils.lerp(this.targetPos.y, input.mouse.y * this.boundary, dt * 10);
+                }
+
+                // 이동 한계 제한 (가드레일 역할)
+                this.targetPos.x = THREE.MathUtils.clamp(this.targetPos.x, -this.boundary, this.boundary);
+                this.targetPos.y = THREE.MathUtils.clamp(this.targetPos.y, -this.boundary + 1, this.boundary - 1);
+
+                // 비행기에 보간(Lerp) 물리 추적 적용
+                this.position.lerp(this.targetPos, dt * 8);
+                this.mesh.position.copy(this.position);
+
+                // 회전 비주얼 (날개 기울이기 연출)
+                const roll = (this.position.x - this.targetPos.x) * 0.18;
+                const pitch = (this.position.y - this.targetPos.y) * 0.12;
+                this.mesh.rotation.set(pitch, 0, roll);
+            }
+
+            getCollisionSphere() {
+                return { center: this.position.clone(), radius: 1.5 };
+            }
+        }
+
+        // ==========================================
+        // 5. 장애물 (소행성) & 유도 아이템 풀 클래스
+        // ==========================================
+        class EntitySystem {
+            constructor(scene) {
+                this.scene = scene;
+                this.asteroids = [];
+                this.powerups = [];
+                this.maxSpawnDist = -120; // 스폰 한계 거리
+
+                // 재활용 기하학 생성
+                this.asteroidGeo = new THREE.DodecahedronGeometry(1.5, 1);
+                this.asteroidMat = new THREE.MeshStandardMaterial({
+                    color: 0x4b5563,
+                    roughness: 0.9,
+                    metalness: 0.05,
+                    flatShading: true
+                });
+            }
+
+            spawnAsteroid(speed) {
+                // 화면 저 멀리 +Z(즉 멀어져 보이지만 다가오는 방향)에 스폰
+                const m = new THREE.Mesh(this.asteroidGeo, this.asteroidMat);
+                m.position.set(
+                    (Math.random() - 0.5) * 26,
+                    (Math.random() - 0.5) * 24,
+                    this.maxSpawnDist
+                );
+                
+                // 크기 무작위 분화
+                const s = 0.8 + Math.random() * 1.8;
+                m.scale.set(s, s, s);
+
+                // 자체 자전 속력 할당
+                const rotationSpeed = new THREE.Vector3(
+                    Math.random() * 2,
+                    Math.random() * 2,
+                    Math.random() * 2
+                );
+
+                this.scene.add(m);
+                this.asteroids.push({
+                    mesh: m,
+                    rotV: rotationSpeed,
+                    radius: 1.5 * s,
+                    health: Math.floor(s * 2) // 크기에 비례한 체력화
+                });
+            }
+
+            spawnPowerup() {
+                // 파워업 아이템 구체 소환
+                const types = ['shield', 'weapon', 'core'];
+                const type = types[Math.floor(Math.random() * types.length)];
+                
+                const geo = new THREE.OctahedronGeometry(1.0, 0);
+                let color = 0x10b981; // shield: 녹색
+                if (type === 'weapon') color = 0xfacc15; // weapon: 황색
+                if (type === 'core') color = 0x3b82f6; // core: 블루
+
+                const mat = new THREE.MeshBasicMaterial({ color: color, wireframe: true });
+                const m = new THREE.Mesh(geo, mat);
+                m.position.set(
+                    (Math.random() - 0.5) * 22,
+                    (Math.random() - 0.5) * 20,
+                    this.maxSpawnDist
+                );
+
+                this.scene.add(m);
+                this.powerups.push({ mesh: m, type: type, radius: 1.2 });
+            }
+
+            update(speed, dt) {
+                // 1. 소행성 돌격 업데이트
+                for (let i = this.asteroids.length - 1; i >= 0; i--) {
+                    const ast = this.asteroids[i];
+                    ast.mesh.position.z += speed * dt;
+
+                    // 회전 자전 연산
+                    ast.mesh.rotation.x += ast.rotV.x * dt;
+                    ast.mesh.rotation.y += ast.rotV.y * dt;
+
+                    // 플레이어 후방으로 지나간 소행성 자동 소멸
+                    if (ast.mesh.position.z > 15) {
+                        this.scene.remove(ast.mesh);
+                        this.asteroids.splice(i, 1);
+                    }
+                }
+
+                // 2. 파워업 아이템 접근 업데이트
+                for (let i = this.powerups.length - 1; i >= 0; i--) {
+                    const p = this.powerups[i];
+                    p.mesh.position.z += speed * dt;
+                    p.mesh.rotation.y += dt * 3;
+
+                    if (p.mesh.position.z > 15) {
+                        this.scene.remove(p.mesh);
+                        this.powerups.splice(i, 1);
+                    }
+                }
+            }
+
+            clearAll() {
+                this.asteroids.forEach(a => this.scene.remove(a.mesh));
+                this.powerups.forEach(p => this.scene.remove(p.mesh));
+                this.asteroids = [];
+                this.powerups = [];
+            }
+        }
+
+        // ==========================================
+        // 6. 플레이어 레이저 플라즈마 캐논 제어계
+        // ==========================================
+        class LaserSystem {
+            constructor(scene) {
+                this.scene = scene;
+                this.lasers = [];
+                this.laserGeo = new THREE.CylinderGeometry(0.1, 0.1, 2.0, 4);
+                this.laserGeo.rotateX(Math.PI / 2);
+                this.laserMat = new THREE.MeshBasicMaterial({ color: 0x06b6d4 });
+            }
+
+            fire(pos, weaponPower) {
+                sfx.playLaser();
+                
+                // 캐논 레벨별 다중 포탄 투하식 레이저 전개
+                if (weaponPower === 1) {
+                    // 단발 중앙 레이저
+                    const l = new THREE.Mesh(this.laserGeo, this.laserMat);
+                    l.position.copy(pos).add(new THREE.Vector3(0, 0, -1));
+                    this.scene.add(l);
+                    this.lasers.push(l);
+                } else if (weaponPower === 2) {
+                    // 좌우 더블 캐논 레이저
+                    [-1.5, 1.5].forEach(offsetX => {
+                        const l = new THREE.Mesh(this.laserGeo, this.laserMat);
+                        l.position.copy(pos).add(new THREE.Vector3(offsetX, -0.1, -1));
+                        this.scene.add(l);
+                        this.lasers.push(l);
+                    });
+                } else {
+                    // 중앙 + 좌우 트리플 레이저
+                    [-2.2, 0, 2.2].forEach(offsetX => {
+                        const l = new THREE.Mesh(this.laserGeo, this.laserMat);
+                        l.position.copy(pos).add(new THREE.Vector3(offsetX, 0, -1));
+                        this.scene.add(l);
+                        this.lasers.push(l);
+                    });
+                }
+            }
+
+            update(dt) {
+                const laserSpeed = -200; // 전방을 향해 초고속 질주
+                for (let i = this.lasers.length - 1; i >= 0; i--) {
+                    const l = this.lasers[i];
+                    l.position.z += laserSpeed * dt;
+
+                    // 사정거리 이탈 시 자동 소거
+                    if (l.position.z < -140) {
+                        this.scene.remove(l);
+                        this.lasers.splice(i, 1);
+                    }
+                }
+            }
+
+            clearAll() {
+                this.lasers.forEach(l => this.scene.remove(l));
+                this.lasers = [];
+            }
+        }
+
+        // ==========================================
+        // 7. 폭발 파티클 풀 매니저
+        // ==========================================
+        class ParticleManager {
+            constructor(scene) {
+                this.scene = scene;
+                this.pool = [];
+                this.geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+            }
+
+            spawnExplosion(pos, colorHex = 0xfacc15) {
+                const count = 15;
+                const mat = new THREE.MeshBasicMaterial({ color: colorHex });
+
+                for (let i = 0; i < count; i++) {
+                    const m = new THREE.Mesh(this.geo, mat);
+                    m.position.copy(pos);
+                    this.scene.add(m);
+
+                    const velocity = new THREE.Vector3(
+                        (Math.random() - 0.5) * 20,
+                        (Math.random() - 0.5) * 20,
+                        (Math.random() - 0.5) * 20
+                    );
+
+                    this.pool.push({
+                        mesh: m,
+                        vel: velocity,
+                        life: 0,
+                        maxLife: 30 + Math.random() * 20
+                    });
+                }
+            }
+
+            update(dt) {
+                for (let i = this.pool.length - 1; i >= 0; i--) {
+                    const p = this.pool[i];
+                    p.mesh.position.addScaledVector(p.vel, dt);
+                    p.life += dt * 60;
+                    p.mesh.scale.multiplyScalar(0.96); // 서서히 기화
+
+                    if (p.life >= p.maxLife) {
+                        this.scene.remove(p.mesh);
+                        this.pool.splice(i, 1);
+                    }
+                }
+            }
+
+            clearAll() {
+                this.pool.forEach(p => this.scene.remove(p.mesh));
+                this.pool = [];
+            }
+        }
+
+        // ==========================================
+        // 8. 메인 게임 중추 조율 시스템
+        // ==========================================
+        class Game {
+            constructor() {
+                this.container = document.getElementById('game-container');
+                this.scene = null;
+                this.camera = null;
+                this.renderer = null;
+                this.clock = new THREE.Clock();
+
+                // 모듈 엔진 바인딩
+                this.input = new Input();
+                this.tunnel = null;
+                this.player = null;
+                this.entities = null;
+                this.lasers = null;
+                this.particles = null;
+
+                // 게임 런타임 속성
+                this.state = 'MENU'; // MENU, COUNTDOWN, PLAY, PAUSE, END
+                this.speed = 45; // 현재 비행 스피드
+                this.maxSpeed = 160;
+                this.score = 0;
+                this.countdownVal = 3;
+
+                // 레이저 무기 속도 제한 타이머
+                this.fireTimer = 0;
+                this.fireRate = 0.2; // 0.2초마다 1회 연사 가능
+
+                // 엔티티 스폰 타이머
+                this.spawnTimer = 0;
+                this.itemSpawnTimer = 0;
+
+                this.initEngine();
+                this.initScene();
+                this.bindUI();
+                this.animate();
+            }
+
+            initEngine() {
+                const width = window.innerWidth;
+                const height = window.innerHeight;
+
+                this.scene = new THREE.Scene();
+                // 먼지와 사이버 느낌을 줄 안개 적용
+                this.scene.background = new THREE.Color(0x020617);
+                this.scene.fog = new THREE.FogExp2(0x020617, 0.009);
+
+                this.camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
+                
+                // 카메라를 비행기 살짝 뒤편 고도에 기본 배치
+                this.camera.position.set(0, 2.5, 8.5);
+
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.renderer.setSize(width, height);
+                this.renderer.shadowMap.enabled = true;
+                this.container.prepend(this.renderer.domElement);
+
+                // 리사이즈
+                window.addEventListener('resize', () => {
+                    const w = window.innerWidth;
+                    const h = window.innerHeight;
+                    this.camera.aspect = w / h;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(w, h);
+                });
+            }
+
+            initScene() {
+                // 입체 조명 설치
+                const ambient = new THREE.AmbientLight(0x0ea5e9, 0.35);
+                this.scene.add(ambient);
+
+                const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+                dirLight.position.set(0, 25, 25);
+                this.scene.add(dirLight);
+
+                const pointLight = new THREE.PointLight(0x06b6d4, 1.2, 50);
+                pointLight.position.set(0, 0, -10);
+                this.scene.add(pointLight);
+
+                // 핵심 모듈 초기화
+                this.tunnel = new InfiniteTunnel(this.scene);
+                this.player = new Spaceship(this.scene);
+                this.entities = new EntitySystem(this.scene);
+                this.lasers = new LaserSystem(this.scene);
+                this.particles = new ParticleManager(this.scene);
+            }
+
+            bindUI() {
+                document.getElementById('btn-start').addEventListener('click', () => {
+                    sfx.init();
+                    this.startCountdown();
+                });
+                document.getElementById('btn-resume').addEventListener('click', () => {
+                    this.togglePause();
+                });
+                document.getElementById('btn-restart-pause').addEventListener('click', () => {
+                    this.togglePause();
+                    this.restartGame();
+                });
+                document.getElementById('btn-restart').addEventListener('click', () => {
+                    this.restartGame();
+                });
+            }
+
+            startCountdown() {
+                document.getElementById('menu-overlay').classList.add('hidden');
+                document.getElementById('result-overlay').classList.add('hidden');
+                document.getElementById('countdown-overlay').classList.remove('hidden');
+                document.getElementById('hud-overlay').classList.remove('hidden');
+
+                this.state = 'COUNTDOWN';
+                this.countdownVal = 3;
+                this.updateCountdownUI();
+            }
+
+            updateCountdownUI() {
+                const el = document.getElementById('countdown-text');
+                if (this.countdownVal > 0) {
+                    el.textContent = this.countdownVal;
+                    sfx.playCountdown();
+                    
+                    // 스케일 역동성 보정
+                    el.style.transform = 'scale(1.5)';
+                    el.style.opacity = '1';
+                    setTimeout(() => {
+                        el.style.transform = 'scale(0.5)';
+                        el.style.opacity = '0';
+                    }, 650);
+
+                    this.countdownVal--;
+                    setTimeout(() => this.updateCountdownUI(), 1000);
+                } else if (this.countdownVal === 0) {
+                    el.textContent = "WARP ACTIVE!";
+                    sfx.playCountdown();
+                    el.style.transform = 'scale(1.8)';
+                    el.style.opacity = '1';
+                    
+                    setTimeout(() => {
+                        el.style.transform = 'scale(0.5)';
+                        el.style.opacity = '0';
+                        document.getElementById('countdown-overlay').classList.add('hidden');
+                    }, 800);
+
+                    this.state = 'PLAY';
+                    this.clock.getDelta(); // 인게임 구동을 위해 타이머 리셋
+                }
+            }
+
+            togglePause() {
+                if (this.state === 'PLAY') {
+                    this.state = 'PAUSE';
+                    sfx.stopAll();
+                    document.getElementById('pause-overlay').classList.remove('hidden');
+                } else if (this.state === 'PAUSE') {
+                    this.state = 'PLAY';
+                    document.getElementById('pause-overlay').classList.add('hidden');
+                    this.clock.getDelta();
+                }
+            }
+
+            handleCollisions() {
+                const shipSphere = this.player.getCollisionSphere();
+
+                // 1. 소행성 충돌 및 탄막 격파 판정
+                const asteroids = this.entities.asteroids;
+                const lasers = this.lasers.lasers;
+
+                for (let aIdx = asteroids.length - 1; aIdx >= 0; aIdx--) {
+                    const ast = asteroids[aIdx];
+                    const astPos = ast.mesh.position;
+
+                    // (A) 플레이어 전투기와의 직접 충돌 판정
+                    const distToShip = astPos.distanceTo(shipSphere.center);
+                    if (distToShip < shipSphere.radius + ast.radius) {
+                        // 실드 차감 및 햅틱 효과
+                        this.player.shield -= 25;
+                        this.particles.spawnExplosion(astPos, 0xef4444);
+                        sfx.playExplosion();
+                        
+                        // 충돌 화면 붉은 흔들림 효과
+                        const df = document.getElementById('damage-overlay');
+                        df.classList.add('hit-flash');
+                        setTimeout(() => df.classList.remove('hit-flash'), 200);
+
+                        // 소행성 강제 파괴
+                        this.scene.remove(ast.mesh);
+                        asteroids.splice(aIdx, 1);
+
+                        if (this.player.shield <= 0) {
+                            this.endGame();
+                        }
+                        continue;
+                    }
+
+                    // (B) 캐논 빔 레이저 소행성 충돌 격파 연산
+                    for (let lIdx = lasers.length - 1; lIdx >= 0; lIdx--) {
+                        const l = lasers[lIdx];
+                        const distToLaser = astPos.distanceTo(l.position);
+
+                        if (distToLaser < ast.radius + 0.5) {
+                            // 소행성 체력 디그레이드
+                            ast.health--;
+                            
+                            // 빔 탄환 제거
+                            this.scene.remove(l);
+                            lasers.splice(lIdx, 1);
+
+                            if (ast.health <= 0) {
+                                // 소행성 완전 격파 스코어 업
+                                this.score += Math.floor(ast.radius * 150);
+                                this.particles.spawnExplosion(astPos, 0xfacc15);
+                                sfx.playExplosion();
+
+                                this.scene.remove(ast.mesh);
+                                asteroids.splice(aIdx, 1);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // 2. 파워업 아이템 획득 판정
+                const powerups = this.entities.powerups;
+                for (let pIdx = powerups.length - 1; pIdx >= 0; pIdx--) {
+                    const pup = powerups[pIdx];
+                    const distToShip = pup.mesh.position.distanceTo(shipSphere.center);
+
+                    if (distToShip < shipSphere.radius + pup.radius) {
+                        sfx.playPowerUp();
+                        this.particles.spawnExplosion(pup.mesh.position, 0x10b981);
+
+                        // 아이템 기능 투하
+                        if (pup.type === 'shield') {
+                            this.player.shield = Math.min(100, this.player.shield + 30);
+                        } else if (pup.type === 'weapon') {
+                            this.player.weaponPower = Math.min(3, this.player.weaponPower + 1);
+                        } else if (pup.type === 'core') {
+                            this.score += 2000;
+                        }
+
+                        // 아이템 제거
+                        this.scene.remove(pup.mesh);
+                        powerups.splice(pIdx, 1);
+                    }
+                }
+            }
+
+            endGame() {
+                this.state = 'END';
+                sfx.stopAll();
+
+                document.getElementById('res-score').textContent = this.score;
+                document.getElementById('res-max-speed').textContent = `${Math.round(this.speed * 4)} km/h`;
+
+                document.getElementById('result-overlay').classList.remove('hidden');
+                document.getElementById('hud-overlay').classList.add('hidden');
+            }
+
+            restartGame() {
+                this.entities.clearAll();
+                this.lasers.clearAll();
+                this.particles.clearAll();
+
+                this.player.position.set(0, 0, 0);
+                this.player.targetPos.set(0, 0, 0);
+                this.player.shield = 100;
+                this.player.weaponPower = 1;
+                
+                this.score = 0;
+                this.speed = 45;
+                this.input.reset();
+
+                this.startCountdown();
+            }
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+
+                let dt = this.clock.getDelta();
+                if (dt > 0.1) dt = 0.1; // 브라우저 백그라운드 전환 가드
+
+                // 단발성 P키 일시정지 트랙
+                if (this.input.keys.p) {
+                    this.input.keys.p = false;
+                    this.togglePause();
+                }
+
+                if (this.state === 'PLAY') {
+                    // 점수 및 비행 최고 속도 지속 보정
+                    this.score += Math.floor(this.speed * dt);
+                    this.speed = THREE.MathUtils.lerp(this.speed, this.maxSpeed, dt * 0.04);
+                    sfx.setEngineFrequency(this.speed / this.maxSpeed);
+
+                    // 1. 플레이어 전투기 이동 연산
+                    this.player.update(dt, this.input);
+
+                    // 2. 무한 스페이스 캐니언 뒤로 스크롤
+                    this.tunnel.update(this.speed, dt);
+
+                    // 3. 엔티티 소환 루프 조율
+                    this.spawnTimer += dt;
+                    // 속도가 빨라질수록 장애물 생성 속도 점진 단축
+                    const spawnInterval = Math.max(0.2, 0.7 - (this.speed / this.maxSpeed) * 0.45);
+                    if (this.spawnTimer >= spawnInterval) {
+                        this.entities.spawnAsteroid(this.speed);
+                        this.spawnTimer = 0;
+                    }
+
+                    this.itemSpawnTimer += dt;
+                    if (this.itemSpawnTimer >= 5.0) { // 5초마다 실드/화력 무작위 소환
+                        this.entities.spawnPowerup();
+                        this.itemSpawnTimer = 0;
+                    }
+
+                    this.entities.update(this.speed, dt);
+
+                    // 4. 무기 연사 제어
+                    this.fireTimer += dt;
+                    if ((this.input.keys.space || this.input.mouseClicked) && this.fireTimer >= this.fireRate) {
+                        this.lasers.fire(this.player.position, this.player.weaponPower);
+                        this.fireTimer = 0;
+                    }
+                    this.lasers.update(dt);
+
+                    // 5. 파티클 및 충돌 제어
+                    this.handleCollisions();
+                    this.particles.update(dt);
+
+                    // 6. 실시간 HUD 데이터 갱신
+                    document.getElementById('shield-bar').style.width = `${this.player.shield}%`;
+                    document.getElementById('hud-weapon').textContent = `LEVEL x${this.player.weaponPower}`;
+                    document.getElementById('hud-score').textContent = String(this.score).padStart(5, '0');
+                    document.getElementById('hud-speed').textContent = `${Math.round(this.speed * 4)} km/h`;
+
+                    // 부드러운 흔들림 카메라 뷰
+                    this.camera.position.x = THREE.MathUtils.lerp(this.camera.position.x, this.player.position.x * 0.45, dt * 6);
+                    this.camera.position.y = THREE.MathUtils.lerp(this.camera.position.y, this.player.position.y * 0.45 + 2.5, dt * 6);
+                    this.camera.lookAt(new THREE.Vector3(this.player.position.x * 0.7, this.player.position.y * 0.7, -15));
+                }
+
+                // 카운트다운이나 대기 중에도 잔잔히 흩날리는 파티클 효과 렌더링 유지
+                if (this.state !== 'PAUSE') {
+                    this.particles.update(dt);
+                }
+
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+
+        window.onload = () => {
+            new Game();
+        };
+    </script>
+</body>
+</html>
