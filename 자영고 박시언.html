@@ -1,0 +1,1511 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>그녀들을 유혹하라! - 판타지 러브 비트</title>
+    <style>
+        /* 네오 픽셀풍 폰트 및 스타일링 적용 */
+        @import url('https://fonts.googleapis.com/css2?family=DungGeunMo&display=swap');
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0c0813;
+            color: #ffffff;
+            font-family: 'DungGeunMo', 'Courier New', Courier, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        #game-container {
+            position: relative;
+            width: 1024px;
+            height: 768px;
+            background-color: #07040a;
+            border: 4px solid #201335;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.9), 0 0 0 4px #3b205e;
+            outline: none;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            image-rendering: pixelated;
+            width: 1024px;
+            height: 768px;
+        }
+
+        #key-guide {
+            position: absolute;
+            bottom: -35px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            font-size: 14px;
+            color: #8b8b9c;
+            text-shadow: 1px 1px 0px #000;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container" tabindex="0">
+    <canvas id="gameCanvas" width="1024" height="768"></canvas>
+</div>
+<div id="key-guide">상단 카드를 마우스로 클릭하여 공략할 히로인을 선택하세요! [조작: 방향키 ← ↓ ↑ →] [P: 일시정지]</div>
+
+<script>
+/**
+ * FANTASY RHYTHM ROMANCE - 스크린샷 UI 완벽 이식판
+ * - 싱글 파일 HTML5 Canvas 완전 구현
+ * - 6명의 히로인 선택 기능, 스크린샷과 1:1 대응하는 정밀하고 세련된 레이아웃 구성
+ */
+
+const GAME_WIDTH = 1024;
+const GAME_HEIGHT = 768;
+
+// 게임 설정 상수
+const CONSTANTS = {
+    MAX_HP: 5, // 이미지 기준 하트 5개
+    NOTE_SPEED: 5,
+    LANE_X_START: 250,
+    LANE_WIDTH: 320,
+    判定_Y: 630, // 하단 판정선 위치
+    NOTE_SPAWN_INTERVAL: 45, // 노트 낙하 주기 프레임수
+    HIT_PERFECT_LOVE: 150,
+    HIT_GREAT_LOVE: 80,
+    HIT_GOOD_LOVE: 30,
+    PENALTY_LOVE: 500, // 미스 시 감소 포인트
+    PENALTY_HP: 1
+};
+
+// 키보드 키 코드 매핑
+const KEYS = {
+    ARROW_LEFT: 'ArrowLeft',
+    ARROW_DOWN: 'ArrowDown',
+    ARROW_UP: 'ArrowUp',
+    ARROW_RIGHT: 'ArrowRight',
+    KEY_P: 'KeyP',
+    KEY_R: 'KeyR'
+};
+
+// 판정 데이터 정의
+const JUDGEMENTS = {
+    PERFECT: { range: 18, score: 300, love: 150, text: 'PERFECT!', color: '#ff00ff' },
+    GREAT:   { range: 35, score: 150, love: 80,  text: 'GREAT',    color: '#00ffff' },
+    GOOD:    { range: 50, score: 50,  love: 30,  text: 'GOOD',     color: '#00ff66' },
+    MISS:    { range: 80, score: 0,   love: -500, text: 'MISS...',  color: '#ff0055' }
+};
+
+// --- Web Audio API 효과음 엔진 ---
+class SoundManager {
+    constructor() {
+        this.ctx = null;
+    }
+    init() {
+        if (!this.ctx) {
+            this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+    }
+    playTone(freq, type = 'sine', duration = 0.1, volume = 0.1) {
+        this.init();
+        if (!this.ctx) return;
+        try {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+            gain.gain.setValueAtTime(volume, this.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start();
+            osc.stop(this.ctx.currentTime + duration);
+        } catch (e) {}
+    }
+    playPerfect() {
+        this.playTone(523.25, 'sine', 0.1, 0.15); // C5
+        setTimeout(() => this.playTone(783.99, 'sine', 0.2, 0.15), 60); // G5
+    }
+    playSuccess() {
+        this.playTone(587.33, 'triangle', 0.15, 0.12); // D5
+    }
+    playMiss() {
+        this.playTone(130, 'sawtooth', 0.25, 0.2); // Low frequency buzz
+    }
+    playWin() {
+        const arpeggio = [523.25, 659.25, 783.99, 1046.50];
+        arpeggio.forEach((f, i) => {
+            setTimeout(() => this.playTone(f, 'sine', 0.3, 0.15), i * 120);
+        });
+    }
+    playLose() {
+        const arpeggio = [392.00, 311.13, 261.63];
+        arpeggio.forEach((f, i) => {
+            setTimeout(() => this.playTone(f, 'triangle', 0.4, 0.15), i * 180);
+        });
+    }
+}
+const sounds = new SoundManager();
+
+// --- 파티클 이펙트 ---
+class Particle {
+    constructor(x, y, color) {
+        this.x = x;
+        this.y = y;
+        this.vx = (Math.random() - 0.5) * 10;
+        this.vy = (Math.random() - 0.5) * 10 - 4;
+        this.color = color;
+        this.alpha = 1.0;
+        this.decay = 0.02 + Math.random() * 0.02;
+        this.size = 2 + Math.random() * 4;
+    }
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vy += 0.15; // 중력
+        this.alpha -= this.decay;
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, this.alpha);
+        ctx.fillStyle = this.color;
+        ctx.fillRect(this.x - this.size/2, this.y - this.size/2, this.size, this.size);
+        ctx.restore();
+    }
+}
+
+// --- 히로인 정보 및 데이터 리스트 ---
+const HEROINES_DATA = [
+    {
+        id: 1,
+        name: "하나",
+        sub: "소박한 선배",
+        tags: ["순수", "상냥", "배려심"],
+        desc: "언제나 당신을 도와주는 다정한 선배. 당신을 믿고 의지하고 있다.",
+        targetLove: 5000,
+        hairColor: "#fce4a6",
+        eyeColor: "#5fa3bf",
+        themeColor: "#00aaff",
+        dialogues: {
+            start: "오늘도 연습 열심히하네...\n역시, 네가 있으면 왠지 마음이 놓여.",
+            miss: "앗, 미안해! 내가 타이밍을 방해했나..?",
+            perfect: "굉장해..! 역시 너는 특별한 재능이 있는 것 같아.",
+            win: "너와 함께 보낸 시간들... 앞으로도 쭉 기억할래.",
+            lose: "속상해하지 마. 내가 항상 옆에서 응원하고 있으니까."
+        }
+    },
+    {
+        id: 2,
+        name: "유리",
+        sub: "츤데레 동급생",
+        tags: ["츤데레", "자존심", "속마음"],
+        desc: "겉으로는 차갑지만 사심은 당신을 신경쓰고 있다. 용기를 내어 다가가자.",
+        targetLove: 8000,
+        hairColor: "#ff3e3e",
+        eyeColor: "#ff5e00",
+        themeColor: "#ff3333",
+        dialogues: {
+            start: "딱, 딱히 널 기다린 건 아니거든?! \n뭐야, 그 멍청한 표정은? 준비나 해!",
+            miss: "야! 똑바로 못 해?! 집중 안 할래?!",
+            perfect: "헤에, 제법이잖아? 아, 아주 쬐끔은 인정해 줄게.",
+            win: "흥... 이렇게까지 다정하게 굴면 어쩌자는 거야, 바보.",
+            lose: "하아... 한심하긴. 다음번엔 내 마법 속도에 맞춰봐!"
+        }
+    },
+    {
+        id: 3,
+        name: "레이나",
+        sub: "쿨한 전학생",
+        tags: ["쿨", "무관심", "시크"],
+        desc: "감정을 잘 드러내지 않는 미스터리한 전학생. 당신의 리듬을 시험한다.",
+        targetLove: 12000,
+        hairColor: "#d2d2f8",
+        eyeColor: "#9b78ff",
+        themeColor: "#ab8fff",
+        dialogues: {
+            start: "리듬은 마음의 투영... \n너의 연주로 내 굳어버린 심장을 흔들어볼래?",
+            miss: "흐트러졌어. 네 연주, 조금 실망일지도.",
+            perfect: "아름다운 박자... 기분 좋은 파동이 흐르고 있어.",
+            win: "처음이야, 내 감정을 이렇게 격렬하게 흔들어 놓은 사람은.",
+            lose: "고요하게 침묵하는 편이 나았을지도 모르겠네."
+        }
+    },
+    {
+        id: 4,
+        name: "미유",
+        sub: "아이돌 지망생",
+        tags: ["명랑", "긍정", "꿈많음"],
+        desc: "무대 위에 서는 것이 꿈인 소녀. 당신의 응원이 가장 큰 힘이 된다!",
+        targetLove: 16000,
+        hairColor: "#ff9ebe",
+        eyeColor: "#ff3ebc",
+        themeColor: "#ff5ebc",
+        dialogues: {
+            start: "해피니스 에너지를 가득 담아서~\n미유링의 특별한 비트와 싱크로해봐, 스타트!⭐",
+            miss: "아우우~ 박자가 꼬였잖아! 뺨 뿅 망치 발동이닷!",
+            perfect: "와아! 완전 퍼펙트 싱크로! 관객들의 호응이 들려!",
+            win: "너는 이제 미유 전속의 넘버원 프로듀서이자 내 영웅이야!💘",
+            lose: "음이 뚝 끊겨버렸어... 하지만 기죽지 말고 스마일~ 아자!"
+        }
+    },
+    {
+        id: 5,
+        name: "미코",
+        sub: "장난기 많은 후배",
+        tags: ["장난꾸러기", "능글맞음", "요망"],
+        desc: "온갖 장난으로 당신을 가지고 노는 후배. 하지만 진심은...?",
+        targetLove: 20000,
+        hairColor: "#ffd1b3",
+        eyeColor: "#ff5a78",
+        themeColor: "#e67300",
+        dialogues: {
+            start: "아하핫~ 선배 오늘도 또 딴청 피우고 있었죠?\n저랑 리듬으로 승부해서 이기면 소원 하나 들어드릴게요~",
+            miss: "선배 뺨이 엄청 보드랍네요~ 아야했죠? 바보 메롱~🤪",
+            perfect: "에엣? 선배답지 않게 왜 이렇게 멋있게 잘 맞추는 건데요?",
+            win: "장난꾸러기인 제가 진짜로 사랑에 빠져버리면... 어떻게 책임지실래요?",
+            lose: "푸훕, 선배 역시 실력은 허당이네요~ 장난은 여기까진가?"
+        }
+    },
+    {
+        id: 6,
+        name: "아야",
+        sub: "도도한 반장",
+        tags: ["도도함", "책임감", "완벽주의"],
+        desc: "모두를 통솔하는 완벽한 반장. 당신의 실력을 인정할 수 있을까?",
+        targetLove: 24000,
+        hairColor: "#333344",
+        eyeColor: "#cc1a1a",
+        themeColor: "#990000",
+        dialogues: {
+            start: "부활동 시간에 한눈을 파는 학생이 있군요.\n규율을 어긴 대가로 저와 진지한 음악 대결을 처벌로 내리겠어요.",
+            miss: "집중력이 형편없군요! 기합을 다시 넣어야겠어요.",
+            perfect: "완벽해요... 이 정도 실력이라면 부장 자리를 맡겨도 될 정도입니다.",
+            win: "규칙을 제일 소중히 여기던 제가, 당신이라는 변수 때문에 고장을 일으켰나 봐요.",
+            lose: "시간 낭비였군요. 다음번엔 좀 더 착실하게 연습해서 오도록 해요."
+        }
+    }
+];
+
+// --- Player 클래스 ---
+class Player {
+    constructor() {
+        this.score = 0;
+        this.highScore = parseInt(localStorage.getItem('FRR_IMG_HIGHSCORE')) || 0;
+        this.combo = 0;
+        this.maxCombo = 0;
+        this.hp = CONSTANTS.MAX_HP;
+        this.lovePoint = 0;
+    }
+    reset() {
+        this.score = 0;
+        this.combo = 0;
+        this.maxCombo = 0;
+        this.hp = CONSTANTS.MAX_HP;
+        this.lovePoint = 0;
+        this.highScore = parseInt(localStorage.getItem('FRR_IMG_HIGHSCORE')) || 0;
+    }
+    addScore(points, love, targetMax) {
+        this.score += points;
+        this.lovePoint = Math.max(0, Math.min(targetMax, this.lovePoint + love));
+        this.combo++;
+        if (this.combo > this.maxCombo) {
+            this.maxCombo = this.combo;
+        }
+        if (this.score > this.highScore) {
+            this.highScore = this.score;
+            localStorage.setItem('FRR_IMG_HIGHSCORE', this.highScore);
+        }
+    }
+    applyMiss() {
+        this.combo = 0;
+        this.hp = Math.max(0, this.hp - CONSTANTS.PENALTY_HP);
+        this.lovePoint = Math.max(0, this.lovePoint - CONSTANTS.PENALTY_LOVE);
+    }
+}
+
+// --- Heroine 렌더러 및 상태 클래스 ---
+class Heroine {
+    constructor(data) {
+        this.setData(data);
+        this.state = "idle"; // "idle", "slap", "happy", "shy"
+        this.stateTimer = 0;
+        this.blinkTimer = 0;
+        this.eyeBlink = false;
+        this.blush = 0;
+    }
+
+    setData(data) {
+        this.data = data;
+        this.name = data.name;
+        this.hairColor = data.hairColor;
+        this.eyeColor = data.eyeColor;
+        this.themeColor = data.themeColor;
+    }
+
+    update() {
+        if (this.stateTimer > 0) {
+            this.stateTimer--;
+            if (this.stateTimer === 0) {
+                this.state = "idle";
+            }
+        }
+
+        this.blinkTimer++;
+        if (this.blinkTimer > 150) {
+            this.eyeBlink = true;
+            if (this.blinkTimer > 162) {
+                this.eyeBlink = false;
+                this.blinkTimer = 0;
+            }
+        }
+
+        if (this.state === "shy") {
+            this.blush = Math.min(1.0, this.blush + 0.08);
+        } else if (this.state === "slap") {
+            this.blush = Math.min(0.8, this.blush + 0.12);
+        } else {
+            this.blush = Math.max(0.1, this.blush - 0.03);
+        }
+    }
+
+    triggerSlap() {
+        this.state = "slap";
+        this.stateTimer = 35;
+    }
+    triggerHappy() {
+        this.state = "happy";
+        this.stateTimer = 45;
+    }
+    triggerShy() {
+        this.state = "shy";
+        this.stateTimer = 45;
+    }
+
+    // Canvas로 개성 넘치는 히로인 도트화 그리기
+    draw(ctx, x, y, width = 160, height = 180) {
+        ctx.save();
+        ctx.translate(x, y);
+
+        // 뒷머리 그리기
+        ctx.fillStyle = this.hairColor;
+        ctx.fillRect(-65, -100, 130, 95);
+
+        // 여우귀 장식 (미코 전용 부가 드로잉)
+        if (this.data.id === 5) {
+            ctx.fillStyle = this.hairColor;
+            // 왼쪽 귀
+            ctx.beginPath();
+            ctx.moveTo(-50, -100); ctx.lineTo(-75, -135); ctx.lineTo(-30, -100); ctx.fill();
+            // 오른쪽 귀
+            ctx.beginPath();
+            ctx.moveTo(30, -100); ctx.lineTo(75, -135); ctx.lineTo(50, -100); ctx.fill();
+            // 귀 내부 분홍 귀털
+            ctx.fillStyle = '#ff9ebe';
+            ctx.beginPath();
+            ctx.moveTo(-45, -100); ctx.lineTo(-62, -123); ctx.lineTo(-35, -100); ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(35, -100); ctx.lineTo(62, -123); ctx.lineTo(45, -100); ctx.fill();
+        }
+
+        // 트윈테일 (미유 전용 리본 및 포니테일)
+        if (this.data.id === 4) {
+            ctx.fillStyle = this.hairColor;
+            ctx.fillRect(-85, -85, 25, 60);
+            ctx.fillRect(60, -85, 25, 60);
+            // 리본
+            ctx.fillStyle = '#ff0055';
+            ctx.fillRect(-70, -88, 10, 10);
+            ctx.fillRect(60, -88, 10, 10);
+        }
+
+        // 얼굴 베이스
+        ctx.fillStyle = '#ffe0cc';
+        ctx.fillRect(-45, -90, 90, 75);
+        ctx.fillRect(-35, -15, 70, 15); // 턱턱
+
+        // 앞머리 덮개
+        ctx.fillStyle = this.hairColor;
+        ctx.fillRect(-48, -95, 96, 20);
+        ctx.fillRect(-48, -75, 18, 30); // 옆머리 왼쪽
+        ctx.fillRect(30, -75, 18, 30); // 옆머리 오른쪽
+        
+        // 안경 드로잉 (아야 반장 안경)
+        if (this.data.id === 6) {
+            ctx.strokeStyle = '#ff003c';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(-30, -58, 22, 14);
+            ctx.strokeRect(8, -58, 22, 14);
+            ctx.beginPath();
+            ctx.moveTo(-8, -51); ctx.lineTo(8, -51);
+            ctx.stroke();
+        }
+
+        // 눈 그리기
+        if (this.eyeBlink && this.state !== "slap" && this.state !== "happy") {
+            ctx.fillStyle = '#bf9b81';
+            ctx.fillRect(-28, -52, 15, 4);
+            ctx.fillRect(13, -52, 15, 4);
+        } else if (this.state === "slap") {
+            // 화난 눈
+            ctx.fillStyle = '#ff1100';
+            ctx.fillRect(-28, -55, 15, 5);
+            ctx.fillRect(13, -55, 15, 5);
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(-30, -57); ctx.lineTo(-12, -49);
+            ctx.moveTo(30, -57); ctx.lineTo(12, -49);
+            ctx.stroke();
+        } else if (this.state === "happy" || this.state === "shy") {
+            // 미소 눈 (^^)
+            ctx.strokeStyle = this.eyeColor;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(-20, -48, 7, Math.PI, 0, false);
+            ctx.arc(20, -48, 7, Math.PI, 0, false);
+            ctx.stroke();
+        } else {
+            // 기본 눈
+            ctx.fillStyle = this.eyeColor;
+            ctx.fillRect(-28, -56, 14, 12);
+            ctx.fillRect(14, -56, 14, 12);
+            // 흰 하이라이트 광원
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(-28, -56, 5, 5);
+            ctx.fillRect(14, -56, 5, 5);
+        }
+
+        // 볼 발그레 blush 효과
+        if (this.blush > 0.01) {
+            ctx.fillStyle = `rgba(255, 80, 120, ${this.blush})`;
+            ctx.fillRect(-35, -40, 16, 8);
+            ctx.fillRect(19, -40, 16, 8);
+        }
+
+        // 입
+        ctx.fillStyle = '#f06292';
+        if (this.state === "slap") {
+            ctx.fillRect(-6, -34, 12, 4); // 화남 입
+        } else if (this.state === "happy") {
+            ctx.beginPath();
+            ctx.arc(0, -32, 8, 0, Math.PI, false);
+            ctx.fill();
+        } else if (this.state === "shy") {
+            ctx.fillRect(-3, -32, 6, 6); // 작아짐 o
+        } else {
+            ctx.fillRect(-8, -30, 16, 3); // 은은한 미소
+        }
+
+        // 목 & 옷 (교복 스타일)
+        ctx.fillStyle = '#ffe0cc';
+        ctx.fillRect(-10, 0, 20, 10);
+
+        // 재킷/상의 칼라
+        ctx.fillStyle = '#222233'; // 기본 어두운 네이비 재킷
+        ctx.fillRect(-40, 8, 80, 50);
+
+        // 셔츠 칼라 & 빨간 넥타이
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.moveTo(-15, 8); ctx.lineTo(0, 24); ctx.lineTo(-30, 8); ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(15, 8); ctx.lineTo(0, 24); ctx.lineTo(30, 8); ctx.fill();
+
+        ctx.fillStyle = '#ff1744'; // 빨간 타이
+        ctx.fillRect(-3, 14, 6, 22);
+        ctx.beginPath();
+        ctx.moveTo(-5, 36); ctx.lineTo(0, 44); ctx.lineTo(5, 36); ctx.fill();
+
+        ctx.restore();
+    }
+}
+
+// --- RhythmSystem (리듬게임 중앙 엔진) ---
+class RhythmSystem {
+    constructor() {
+        this.lanes = [
+            { key: KEYS.ARROW_LEFT,  color: '#c25eff', label: '←', x: 352 + 0   * 80, angle: Math.PI },
+            { key: KEYS.ARROW_DOWN,  color: '#3ec5ff', label: '↓', x: 352 + 1   * 80, angle: Math.PI / 2 },
+            { key: KEYS.ARROW_UP,    color: '#3eff9d', label: '↑', x: 352 + 2   * 80, angle: -Math.PI / 2 },
+            { key: KEYS.ARROW_RIGHT, color: '#ffa33e', label: '→', x: 352 + 3   * 80, angle: 0 }
+        ];
+        this.notes = [];
+        this.spawnTimer = 0;
+        this.particles = [];
+        this.hitEffects = [];
+        this.currentJudgementText = "";
+        this.currentJudgementColor = "#ffffff";
+        this.judgementTimer = 0;
+        this.totalComboCount = 0;
+    }
+
+    reset() {
+        this.notes = [];
+        this.spawnTimer = 0;
+        this.particles = [];
+        this.hitEffects = [];
+        this.currentJudgementText = "";
+        this.judgementTimer = 0;
+        this.totalComboCount = 0;
+    }
+
+    update(player, heroine, addShake, activeDialogue) {
+        this.spawnTimer++;
+        if (this.spawnTimer >= CONSTANTS.NOTE_SPAWN_INTERVAL) {
+            this.spawnTimer = 0;
+            const randLane = Math.floor(Math.random() * 4);
+            this.notes.push({
+                lane: randLane,
+                y: 360, // 리듬 레인 영역 상단에서 스폰 (Y: 360 ~ 630 낙하)
+                active: true
+            });
+        }
+
+        for (let i = this.notes.length - 1; i >= 0; i--) {
+            const note = this.notes[i];
+            note.y += CONSTANTS.NOTE_SPEED;
+
+            // 판정 이탈 시 MISS 처리
+            if (note.y > CONSTANTS.判定_Y + JUDGEMENTS.MISS.range && note.active) {
+                note.active = false;
+                this.triggerJudgement(JUDGEMENTS.MISS);
+                player.applyMiss();
+                heroine.triggerSlap();
+                sounds.playMiss();
+                addShake(12);
+
+                // 대사 Miss 업데이트
+                activeDialogue(heroine.data.dialogues.miss, "miss");
+
+                this.hitEffects.push({
+                    x: this.lanes[note.lane].x + 40,
+                    y: CONSTANTS.判定_Y,
+                    radius: 15,
+                    maxRadius: 35,
+                    alpha: 1.0,
+                    color: '#ff003c'
+                });
+            }
+        }
+
+        this.notes = this.notes.filter(note => note.y < 700 && note.active);
+        this.particles.forEach(p => p.update());
+        this.particles = this.particles.filter(p => p.alpha > 0);
+
+        this.hitEffects.forEach(e => {
+            e.radius += (e.maxRadius - e.radius) * 0.15;
+            e.alpha -= 0.05;
+        });
+        this.hitEffects = this.hitEffects.filter(e => e.alpha > 0);
+
+        if (this.judgementTimer > 0) {
+            this.judgementTimer--;
+        }
+    }
+
+    triggerJudgement(judg) {
+        this.currentJudgementText = judg.text;
+        this.currentJudgementColor = judg.color;
+        this.judgementTimer = 40;
+    }
+
+    handleInput(key, player, heroine, addShake, activeDialogue) {
+        const laneIdx = this.lanes.findIndex(l => l.key === key);
+        if (laneIdx === -1) return null;
+
+        let targetNote = null;
+        let minDiff = Infinity;
+
+        for (let i = 0; i < this.notes.length; i++) {
+            const note = this.notes[i];
+            if (note.lane === laneIdx && note.active) {
+                const diff = Math.abs(note.y - CONSTANTS.判定_Y);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    targetNote = note;
+                }
+            }
+        }
+
+        if (targetNote && minDiff <= JUDGEMENTS.MISS.range) {
+            let selected = null;
+            if (minDiff <= JUDGEMENTS.PERFECT.range) {
+                selected = JUDGEMENTS.PERFECT;
+                player.addScore(selected.score, selected.love, heroine.data.targetLove);
+                heroine.triggerShy();
+                sounds.playPerfect();
+                this.spawnParticles(this.lanes[laneIdx].x + 40, CONSTANTS.判定_Y, selected.color);
+                
+                // 가끔 Perfect 대사 연출
+                if (Math.random() < 0.35) {
+                    activeDialogue(heroine.data.dialogues.perfect, "perfect");
+                }
+            } else if (minDiff <= JUDGEMENTS.GREAT.range) {
+                selected = JUDGEMENTS.GREAT;
+                player.addScore(selected.score, selected.love, heroine.data.targetLove);
+                heroine.triggerHappy();
+                sounds.playSuccess();
+                this.spawnParticles(this.lanes[laneIdx].x + 40, CONSTANTS.判定_Y, selected.color);
+            } else if (minDiff <= JUDGEMENTS.GOOD.range) {
+                selected = JUDGEMENTS.GOOD;
+                player.addScore(selected.score, selected.love, heroine.data.targetLove);
+                sounds.playTone(392, 'sine', 0.08, 0.1);
+            } else {
+                selected = JUDGEMENTS.MISS;
+                player.applyMiss();
+                heroine.triggerSlap();
+                sounds.playMiss();
+                addShake(12);
+                activeDialogue(heroine.data.dialogues.miss, "miss");
+            }
+
+            targetNote.active = false;
+            this.triggerJudgement(selected);
+
+            this.hitEffects.push({
+                x: this.lanes[laneIdx].x + 40,
+                y: CONSTANTS.判定_Y,
+                radius: 12,
+                maxRadius: 50,
+                alpha: 1.0,
+                color: selected.color
+            });
+
+            return selected;
+        }
+        return null;
+    }
+
+    spawnParticles(x, y, color) {
+        for (let i = 0; i < 15; i++) {
+            this.particles.push(new Particle(x, y, color));
+        }
+    }
+
+    // 네온 스타일의 둥근 입체 방향키 그리기
+    drawArrow(ctx, x, y, size, angle, color, filled = false) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 4;
+        ctx.fillStyle = filled ? color : 'rgba(0, 0, 0, 0.5)';
+
+        ctx.beginPath();
+        // 정방향 화살표 그리기 (오른쪽 기준)
+        ctx.moveTo(size * 0.4, 0);
+        ctx.lineTo(-size * 0.2, -size * 0.4);
+        ctx.lineTo(-size * 0.2, -size * 0.18);
+        ctx.lineTo(-size * 0.5, -size * 0.18);
+        ctx.lineTo(-size * 0.5, size * 0.18);
+        ctx.lineTo(-size * 0.2, size * 0.18);
+        ctx.lineTo(-size * 0.2, size * 0.4);
+        ctx.closePath();
+
+        ctx.fill();
+        ctx.stroke();
+
+        // 내부 네온 하이라이트 선 추가
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(size * 0.25, 0);
+        ctx.lineTo(-size * 0.15, -size * 0.25);
+        ctx.stroke();
+
+        ctx.restore();
+    }
+
+    draw(ctx) {
+        // 리듬 레인 검정 네온 쉴드 배경
+        ctx.fillStyle = 'rgba(7, 5, 12, 0.9)';
+        ctx.fillRect(330, 360, 360, 320);
+        
+        ctx.strokeStyle = '#2d2047';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(330, 360, 360, 320);
+
+        // 4개의 궤적 가로 분할선 그리기
+        this.lanes.forEach((lane, idx) => {
+            ctx.strokeStyle = '#1d1530';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(lane.x, 360);
+            ctx.lineTo(lane.x, 680);
+            if (idx === 3) {
+                ctx.moveTo(lane.x + 80, 360);
+                ctx.lineTo(lane.x + 80, 680);
+            }
+            ctx.stroke();
+
+            // 판정 대상 하이라이트 존 (스크린샷 보라색 네온선)
+            this.drawArrow(ctx, lane.x + 40, CONSTANTS.判定_Y, 44, lane.angle, lane.color, false);
+        });
+
+        // 핑크 네온 횡단 판정선
+        ctx.strokeStyle = '#ff00aa';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(330, CONSTANTS.判定_Y);
+        ctx.lineTo(690, CONSTANTS.判定_Y);
+        ctx.stroke();
+
+        // 떨어지는 노트 그리기
+        this.notes.forEach(note => {
+            if (!note.active) return;
+            const lane = this.lanes[note.lane];
+            this.drawArrow(ctx, lane.x + 40, note.y, 44, lane.angle, lane.color, true);
+        });
+
+        // 타격 리플 링 그리기
+        this.hitEffects.forEach(e => {
+            ctx.save();
+            ctx.globalAlpha = Math.max(0, e.alpha);
+            ctx.strokeStyle = e.color;
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        });
+
+        // 파티클들 그리기
+        ctx.save();
+        this.particles.forEach(p => p.draw(ctx));
+        ctx.restore();
+    }
+}
+
+// --- DialogueSystem (대화 출력 컨트롤러) ---
+class DialogueSystem {
+    constructor() {
+        this.currentText = "";
+        this.targetText = "";
+        this.typingIndex = 0;
+        this.typingTimer = 0;
+    }
+
+    setDialogue(text) {
+        this.targetText = text;
+        this.currentText = "";
+        this.typingIndex = 0;
+        this.typingTimer = 0;
+    }
+
+    update() {
+        if (this.currentText.length < this.targetText.length) {
+            this.typingTimer++;
+            if (this.typingTimer >= 3) {
+                this.typingTimer = 0;
+                this.typingIndex++;
+                this.currentText = this.targetText.substring(0, this.typingIndex);
+            }
+        }
+    }
+
+    draw(ctx, x, y, width, height, currentHeroine) {
+        ctx.save();
+        ctx.translate(x, y);
+
+        // 프레임 테두리 그리기
+        ctx.fillStyle = '#0f0c18';
+        ctx.fillRect(0, 0, width, height);
+        ctx.strokeStyle = '#22193a';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(0, 0, width, height);
+
+        // 히로인 도트 초상화 프레임
+        ctx.fillStyle = '#1b142c';
+        ctx.fillRect(15, 15, 95, 95);
+        ctx.strokeStyle = '#432f6a';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(15, 15, 95, 95);
+
+        // 초상화 프레임 내에 작게 그리기
+        currentHeroine.draw(ctx, 62, 85, 80, 80);
+
+        // 대사 텍스트 본문
+        ctx.fillStyle = '#4cc0ff';
+        ctx.font = 'bold 16px DungGeunMo';
+        ctx.fillText(currentHeroine.data.name, 128, 32);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '14px DungGeunMo';
+        const lines = this.currentText.split('\n');
+        lines.forEach((line, idx) => {
+            ctx.fillText(line, 128, 60 + idx * 22);
+        });
+
+        // 우측 하단 핑크색 미니 하트 데코레이션
+        ctx.fillStyle = '#ff3e7b';
+        ctx.font = '15px DungGeunMo';
+        ctx.fillText('❤', width - 25, height - 15);
+
+        ctx.restore();
+    }
+}
+
+// --- Game 클래스 (매니저 및 씬 라우터) ---
+class Game {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+
+        // 세부 모듈 등록
+        this.player = new Player();
+        this.heroines = HEROINES_DATA.map(data => new Heroine(data));
+        
+        // 디폴트로 첫 번째 히로인 '하나' 선택 상태 시작
+        this.selectedHeroineIdx = 0;
+        
+        this.rhythmSystem = new RhythmSystem();
+        this.dialogueSystem = new DialogueSystem();
+
+        // 게임 상태: "TITLE", "PLAYING", "PAUSED", "GAME_OVER", "VICTORY"
+        this.state = "TITLE";
+        this.shakeAmount = 0;
+
+        // 페널티 시각 정보 오버레이 알림용 상태 변수
+        this.penaltyDisplayTimer = 0;
+        this.penaltyMsg = "";
+        this.penaltySubMsg = "";
+        this.lastActionType = "none"; // "miss", "perfect", "great"
+
+        this.init();
+    }
+
+    init() {
+        const container = document.getElementById('game-container');
+        container.addEventListener('keydown', (e) => this.handleKeyDown(e));
+        
+        // 히로인 카드 클릭 선택 감지를 위한 마우스 이벤트 리스너 추가
+        this.canvas.addEventListener('mousedown', (e) => this.handleMouseClick(e));
+
+        container.focus();
+        this.setHeroine(0);
+    }
+
+    setHeroine(idx) {
+        this.selectedHeroineIdx = idx;
+        const currentHeroine = this.heroines[idx];
+        this.dialogueSystem.setDialogue(currentHeroine.data.dialogues.start);
+    }
+
+    addShake(val) {
+        this.shakeAmount = val;
+    }
+
+    // 마우스 카드를 통한 히로인 선택 처리
+    handleMouseClick(e) {
+        // 오프셋 좌표 획득
+        const rect = this.canvas.getBoundingClientRect();
+        const mouseX = (e.clientX - rect.left) * (GAME_WIDTH / rect.width);
+        const mouseY = (e.clientY - rect.top) * (GAME_HEIGHT / rect.height);
+
+        // 메인 스테이지 대기/타이틀 상태일 때 카드 클릭 판정 수행
+        if (this.state === "TITLE") {
+            const cardY = 85;
+            const cardH = 265;
+            const cardW = 144;
+            const startX = 20;
+            const spacing = 164;
+
+            for (let i = 0; i < 6; i++) {
+                const cx = startX + i * spacing;
+                if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cardY && mouseY <= cardY + cardH) {
+                    sounds.playTone(440, 'triangle', 0.1, 0.1);
+                    this.setHeroine(i);
+                    break;
+                }
+            }
+
+            // 하단 대결 시작 버튼 판정
+            if (mouseX >= 380 && mouseX <= 644 && mouseY >= 690 && mouseY <= 745) {
+                sounds.init();
+                this.startGame();
+            }
+        }
+    }
+
+    handleKeyDown(e) {
+        const key = e.code;
+
+        if (key === KEYS.KEY_R) {
+            this.restartGame();
+            return;
+        }
+
+        if (key === KEYS.KEY_P) {
+            if (this.state === "PLAYING") {
+                this.state = "PAUSED";
+                sounds.playTone(220, 'square', 0.15, 0.1);
+            } else if (this.state === "PAUSED") {
+                this.state = "PLAYING";
+                sounds.playTone(330, 'square', 0.15, 0.1);
+            }
+            return;
+        }
+
+        if (this.state === "TITLE") {
+            if (key === 'Space' || key === 'Enter') {
+                sounds.init();
+                this.startGame();
+            }
+        } else if (this.state === "PLAYING") {
+            const activeH = this.heroines[this.selectedHeroineIdx];
+            const activeDialogue = (msg, type) => {
+                this.dialogueSystem.setDialogue(msg);
+                this.lastActionType = type;
+                this.penaltyDisplayTimer = 50; // 페널티 오버레이 박스 표시 시간
+
+                if (type === "miss") {
+                    this.penaltyMsg = "MISS...";
+                    this.penaltySubMsg = "뺨을 맞았다! HP -1, 유혹 포인트 -500";
+                } else if (type === "perfect") {
+                    this.penaltyMsg = "PERFECT!!";
+                    this.penaltySubMsg = "사랑이 깊어집니다! 유혹 포인트 대량 증가";
+                }
+            };
+
+            this.rhythmSystem.handleInput(key, this.player, activeH, (v) => this.addShake(v), activeDialogue);
+        } else if (this.state === "GAME_OVER" || this.state === "VICTORY") {
+            if (key === 'Space' || key === 'Enter') {
+                this.state = "TITLE";
+                this.player.reset();
+                this.rhythmSystem.reset();
+                this.setHeroine(this.selectedHeroineIdx);
+            }
+        }
+    }
+
+    startGame() {
+        this.state = "PLAYING";
+        this.player.reset();
+        this.rhythmSystem.reset();
+        const activeH = this.heroines[this.selectedHeroineIdx];
+        this.dialogueSystem.setDialogue(activeH.data.dialogues.start);
+        this.penaltyDisplayTimer = 0;
+        sounds.playTone(523, 'sine', 0.25, 0.15);
+    }
+
+    restartGame() {
+        this.player.reset();
+        this.rhythmSystem.reset();
+        const activeH = this.heroines[this.selectedHeroineIdx];
+        this.dialogueSystem.setDialogue(activeH.data.dialogues.start);
+        this.state = "PLAYING";
+        this.penaltyDisplayTimer = 0;
+        this.addShake(5);
+    }
+
+    update() {
+        if (this.shakeAmount > 0) {
+            this.shakeAmount *= 0.9;
+            if (this.shakeAmount < 0.5) this.shakeAmount = 0;
+        }
+
+        const activeH = this.heroines[this.selectedHeroineIdx];
+
+        if (this.state === "PLAYING") {
+            activeH.update();
+            
+            const activeDialogue = (msg, type) => {
+                this.dialogueSystem.setDialogue(msg);
+                this.lastActionType = type;
+                this.penaltyDisplayTimer = 55;
+                this.penaltyMsg = "MISS...";
+                this.penaltySubMsg = "뺨을 맞았다! HP -1, 유혹 포인트 -500";
+            };
+
+            this.rhythmSystem.update(this.player, activeH, (v) => this.addShake(v), activeDialogue);
+            this.dialogueSystem.update();
+
+            if (this.penaltyDisplayTimer > 0) {
+                this.penaltyDisplayTimer--;
+            }
+
+            // 승리/패배 상태 체크
+            if (this.player.hp <= 0) {
+                this.state = "GAME_OVER";
+                this.dialogueSystem.setDialogue(activeH.data.dialogues.lose);
+                sounds.playLose();
+            } else if (this.player.lovePoint >= activeH.data.targetLove) {
+                this.state = "VICTORY";
+                this.dialogueSystem.setDialogue(activeH.data.dialogues.win);
+                sounds.playWin();
+            }
+        } else {
+            // 메인 대기실에서도 히로인 대사 및 애니메이션 갱신 처리
+            activeH.update();
+            this.dialogueSystem.update();
+        }
+    }
+
+    draw() {
+        this.ctx.save();
+
+        if (this.shakeAmount > 0) {
+            const dx = (Math.random() - 0.5) * this.shakeAmount;
+            const dy = (Math.random() - 0.5) * this.shakeAmount;
+            this.ctx.translate(dx, dy);
+        }
+
+        // 1. 전체 백그라운드 칠하기
+        this.ctx.fillStyle = '#0a0812';
+        this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+        // 2. 상단 6인 히로인 카드 목록 그리기
+        this.drawHeroineSelectionCards();
+
+        // 3. 하단 레이아웃 구획 나누기 (이미지 UI 기반 완벽 이식)
+        // 좌측 STATUS 구역
+        this.drawStatusPanel(20, 360, 290, 230);
+
+        // 중앙 리듬게임 레인 드로잉
+        this.rhythmSystem.draw(this.ctx);
+
+        // 우측 대사 DIALOGUE 구역
+        this.dialogueSystem.draw(this.ctx, 710, 360, 290, 150, this.heroines[this.selectedHeroineIdx]);
+
+        // 우측 최하단 페널티/성공 보상 알림 구역 (PENALTY)
+        this.drawPenaltyPanel(710, 525, 290, 155);
+
+        // 4. 음악 재생 하이라이트바 장식 데코레이션 (중앙)
+        this.drawMusicProgress(330, 690, 360, 60);
+
+        // 5. 각 씬 상태별 연출 화면 그리기
+        this.drawSceneOverlays();
+
+        this.ctx.restore();
+    }
+
+    // 상단 6명의 히로인 선택 리스트 렌더링
+    drawHeroineSelectionCards() {
+        const startX = 20;
+        const cardY = 85;
+        const cardW = 144;
+        const cardH = 265;
+        const spacing = 164;
+
+        // "그녀들을 유혹하라!" 타이틀 텍스트
+        this.ctx.textAlign = 'center';
+        this.ctx.fillStyle = '#ff3e7b';
+        this.ctx.font = 'bold 24px DungGeunMo';
+        this.ctx.fillText("그녀들을 유혹하라! ❤", GAME_WIDTH / 2, 38);
+        this.ctx.fillStyle = '#8e8b9f';
+        this.ctx.font = '14px DungGeunMo';
+        this.ctx.fillText("리듬을 맞춰 마음을 사로잡으세요!", GAME_WIDTH / 2, 60);
+
+        for (let i = 0; i < 6; i++) {
+            const h = this.heroines[i];
+            const cx = startX + i * spacing;
+            const isSelected = (this.selectedHeroineIdx === i);
+
+            // 네온 하이라이트 테두리
+            this.ctx.fillStyle = isSelected ? '#151126' : '#0a0712';
+            this.ctx.fillRect(cx, cardY, cardW, cardH);
+            this.ctx.strokeStyle = isSelected ? h.themeColor : '#221935';
+            this.ctx.lineWidth = isSelected ? 4 : 2;
+            this.ctx.strokeRect(cx, cardY, cardW, cardH);
+
+            // 번호 장식 배지
+            this.ctx.fillStyle = isSelected ? h.themeColor : '#32254e';
+            ctx_drawCircle(this.ctx, cx + 22, cardY + 22, 14, true);
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.font = '12px DungGeunMo';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText((i + 1).toString(), cx + 22, cardY + 26);
+
+            // 히로인 이름 및 서브 타이틀
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.font = 'bold 16px DungGeunMo';
+            this.ctx.fillText(h.name, cx + 72, cardY + 28);
+            this.ctx.fillStyle = '#ff7bbd';
+            this.ctx.font = '11px DungGeunMo';
+            this.ctx.fillText(h.data.sub, cx + 72, cardY + 46);
+
+            // 도트 얼굴 드로잉 영역 분할 (중간 박스)
+            this.ctx.fillStyle = '#110d1f';
+            this.ctx.fillRect(cx + 12, cardY + 55, cardW - 24, 110);
+            this.ctx.strokeRect(cx + 12, cardY + 55, cardW - 24, 110);
+            
+            // 전용 도트 드로잉
+            h.draw(this.ctx, cx + 72, cardY + 140, 80, 80);
+
+            // 특징 태그 배치
+            let tagX = cx + 15;
+            h.data.tags.forEach(tag => {
+                const tagW = 34;
+                this.ctx.fillStyle = '#22193e';
+                this.ctx.fillRect(tagX, cardY + 172, tagW, 16);
+                this.ctx.strokeStyle = '#432a6e';
+                this.ctx.lineWidth = 1;
+                this.ctx.strokeRect(tagX, cardY + 172, tagW, 16);
+
+                this.ctx.fillStyle = '#bfaee3';
+                this.ctx.font = '9px DungGeunMo';
+                this.ctx.fillText(tag, tagX + tagW/2, cardY + 184);
+                tagX += tagW + 4;
+            });
+
+            // 간단 설명 요약
+            this.ctx.fillStyle = '#8e8b9f';
+            this.ctx.font = '9px DungGeunMo';
+            this.ctx.textAlign = 'left';
+            const textLines = h.data.desc.split('. ');
+            ctx_wrapText(this.ctx, h.data.desc, cx + 12, cardY + 203, cardW - 24, 11);
+
+            // 목표 유혹 포인트 정보
+            this.ctx.fillStyle = h.themeColor;
+            this.ctx.font = 'bold 11px DungGeunMo';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText(`목표 유혹 포인트`, cx + 72, cardY + 242);
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.font = 'bold 13px DungGeunMo';
+            this.ctx.fillText(h.data.targetLove.toLocaleString(), cx + 72, cardY + 258);
+        }
+    }
+
+    // 좌측 STATUS 구획 그리기
+    drawStatusPanel(x, y, width, height) {
+        this.ctx.save();
+        this.ctx.translate(x, y);
+
+        // 프레임 배경
+        this.ctx.fillStyle = '#0f0c18';
+        this.ctx.fillRect(0, 0, width, height);
+        this.ctx.strokeStyle = '#22193a';
+        this.ctx.lineWidth = 3;
+        this.ctx.strokeRect(0, 0, width, height);
+
+        // 상단 소제목 헤더
+        this.ctx.fillStyle = '#4c3a6e';
+        this.ctx.font = 'bold 12px DungGeunMo';
+        this.ctx.fillText("STATUS", 20, 22);
+
+        // --- 1. HP 하트바 그리기 (하트 아이콘 5칸 채우기 형태) ---
+        this.ctx.fillStyle = '#8e8b9f';
+        this.ctx.font = '12px DungGeunMo';
+        this.ctx.fillText("HP", 20, 48);
+
+        const heartX = 20;
+        const heartY = 56;
+        for (let i = 0; i < CONSTANTS.MAX_HP; i++) {
+            if (i < this.player.hp) {
+                this.ctx.fillStyle = '#ff1155'; // 채워진 핑크 하트
+                this.ctx.font = '18px DungGeunMo';
+                this.ctx.fillText("♥", heartX + i * 22, heartY + 12);
+            } else {
+                this.ctx.fillStyle = '#32254e'; // 깨진 빈 하트
+                this.ctx.font = '18px DungGeunMo';
+                this.ctx.fillText("♡", heartX + i * 22, heartY + 12);
+            }
+        }
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = '11px DungGeunMo';
+        this.ctx.fillText(`${this.player.hp}/5`, 140, 68);
+
+        // --- 2. 유혹 포인트 전용 프로그레스 바 ---
+        this.ctx.fillStyle = '#8e8b9f';
+        this.ctx.font = '12px DungGeunMo';
+        this.ctx.fillText("유혹 포인트", 20, 102);
+
+        const barW = width - 40;
+        this.ctx.fillStyle = '#110d1c';
+        this.ctx.fillRect(20, 114, barW, 24);
+        this.ctx.strokeStyle = '#2a1a4a';
+        this.ctx.strokeRect(20, 114, barW, 24);
+
+        const currentTarget = this.heroines[this.selectedHeroineIdx].data.targetLove;
+        const lovePct = Math.min(1.0, this.player.lovePoint / currentTarget);
+        this.ctx.fillStyle = '#c25eff'; // 매력적인 보라빛 네온 바
+        this.ctx.fillRect(21, 115, (barW - 2) * lovePct, 22);
+
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = '12px DungGeunMo';
+        this.ctx.textAlign = 'right';
+        this.ctx.fillText(`${this.player.lovePoint.toLocaleString()} / ${currentTarget.toLocaleString()}`, width - 25, 131);
+
+        // --- 3. 큰 황금빛 숫자 콤보 데코 ---
+        this.ctx.textAlign = 'left';
+        this.ctx.fillStyle = '#8e8b9f';
+        this.ctx.font = '12px DungGeunMo';
+        this.ctx.fillText("콤보", 20, 168);
+
+        const bounce = this.player.combo > 0 ? Math.sin(Date.now() * 0.05) * 3 : 0;
+        this.ctx.fillStyle = '#ffc107';
+        this.ctx.font = `bold ${32 + bounce}px DungGeunMo`;
+        this.ctx.fillText(this.player.combo.toString(), 20, 210);
+
+        // 최고 기록 정보
+        this.ctx.fillStyle = '#a692c2';
+        this.ctx.font = '11px DungGeunMo';
+        this.ctx.fillText(`최고기록: ${this.player.highScore}`, 120, 192);
+        this.ctx.fillText(`맥스콤보: ${this.player.maxCombo}`, 120, 210);
+
+        this.ctx.restore();
+    }
+
+    // 우측 최하단 페널티 연출 창 그리기 (뺨을 맞았다! 페널티)
+    drawPenaltyPanel(x, y, width, height) {
+        this.ctx.save();
+        this.ctx.translate(x, y);
+
+        this.ctx.fillStyle = '#0f0c18';
+        this.ctx.fillRect(0, 0, width, height);
+        this.ctx.strokeStyle = '#22193a';
+        this.ctx.lineWidth = 3;
+        this.ctx.strokeRect(0, 0, width, height);
+
+        this.ctx.fillStyle = '#4c3a6e';
+        this.ctx.font = 'bold 12px DungGeunMo';
+        this.ctx.fillText("PENALTY / ALERTER", 20, 22);
+
+        if (this.penaltyDisplayTimer > 0) {
+            // 미스 일 때와 성공 일 때 장식 분기
+            if (this.lastActionType === "miss") {
+                // 빨간 경고창 플래시 피격감 연출
+                this.ctx.fillStyle = 'rgba(255, 17, 85, 0.08)';
+                this.ctx.fillRect(5, 30, width - 10, height - 35);
+
+                this.ctx.fillStyle = '#ff1155';
+                this.ctx.font = 'bold 22px DungGeunMo';
+                this.ctx.fillText(this.penaltyMsg, 20, 56);
+
+                // 스크린샷 묘사 뺨 애니메이션 알림글
+                this.ctx.fillStyle = '#ffffff';
+                this.ctx.font = '14px DungGeunMo';
+                this.ctx.fillText("뺨을 맞았다! (아야!)", 20, 85);
+
+                this.ctx.fillStyle = '#ff5a5a';
+                this.ctx.font = '12px DungGeunMo';
+                this.ctx.fillText("HP -1  /  유혹 포인트 -500", 20, 114);
+
+                // 오른쪽 편에 뺨 때리기 픽셀 손가락 타격선 효과 장식
+                this.ctx.strokeStyle = '#ff1155';
+                this.ctx.lineWidth = 2;
+                ctx_pixelLine(this.ctx, width - 80, 50, width - 40, 100, '#ff1155', 3);
+                ctx_pixelLine(this.ctx, width - 70, 40, width - 30, 90, '#ff1155', 1);
+            } else {
+                // 성공적인 터치 피드백
+                this.ctx.fillStyle = '#00ffff';
+                this.ctx.font = 'bold 22px DungGeunMo';
+                this.ctx.fillText(this.penaltyMsg, 20, 56);
+
+                this.ctx.fillStyle = '#ffffff';
+                this.ctx.font = '14px DungGeunMo';
+                this.ctx.fillText(this.penaltySubMsg, 20, 85);
+            }
+        } else {
+            // 대기 시 조언 출력
+            this.ctx.fillStyle = '#8e8b9f';
+            this.ctx.font = '12px DungGeunMo';
+            this.ctx.fillText("리듬 조작 가이드", 20, 56);
+            ctx_wrapText(this.ctx, "박자에 맞추어 떨어지는 노트를 정확히 맞춰 판정 구역을 자극하세요! 완벽한 조화를 유도해야 그녀들의 마음의 문을 열 수 있습니다.", 20, 78, width - 40, 18);
+        }
+
+        this.ctx.restore();
+    }
+
+    // 이미지 중앙에 묘사된 Now Playing 음악바 묘사
+    drawMusicProgress(x, y, width, height) {
+        this.ctx.save();
+        this.ctx.translate(x, y);
+
+        // 백그라운드 레일
+        this.ctx.fillStyle = '#0a0712';
+        this.ctx.fillRect(0, 0, width, height);
+        this.ctx.strokeStyle = '#221935';
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeRect(0, 0, width, height);
+
+        // 🎵 아이콘과 텍스트
+        this.ctx.fillStyle = '#a692c2';
+        this.ctx.font = '11px DungGeunMo';
+        this.ctx.fillText("🎵 Now Playing : Daydream", 15, 24);
+
+        // 시간 표시
+        this.ctx.textAlign = 'right';
+        this.ctx.fillText("01:28 / 02:45", width - 15, 24);
+
+        // 프로그레스 트랙 바
+        const progressW = width - 30;
+        this.ctx.fillStyle = '#1c152c';
+        this.ctx.fillRect(15, 34, progressW, 8);
+
+        // 채워지는 비율 (타이머를 이용한 장식적 바 움직임)
+        const barPct = 0.53 + Math.sin(Date.now() * 0.0002) * 0.05;
+        this.ctx.fillStyle = '#ff5ebc';
+        this.ctx.fillRect(15, 34, progressW * barPct, 8);
+
+        // 미니 네온 도트 핸들러
+        this.ctx.fillStyle = '#ffffff';
+        ctx_drawCircle(this.ctx, 15 + progressW * barPct, 38, 5, true);
+
+        this.ctx.restore();
+    }
+
+    // 씬 마스크 및 종료/시작 상태창 그리기
+    drawSceneOverlays() {
+        if (this.state === "TITLE") {
+            // 반투명 어둠 장막 (선택 중에는 희미하게 뒷배경이 보임)
+            this.ctx.fillStyle = 'rgba(7, 5, 12, 0.6)';
+            this.ctx.fillRect(0, 340, GAME_WIDTH, GAME_HEIGHT - 340);
+
+            // 대결 시작 실행 버튼 오버레이 (리듬판 중앙 위)
+            const btnX = 380;
+            const btnY = 690;
+            const btnW = 264;
+            const btnH = 55;
+
+            this.ctx.fillStyle = '#ff1155';
+            this.ctx.fillRect(btnX, btnY, btnW, btnH);
+            this.ctx.strokeStyle = '#ffffff';
+            this.ctx.lineWidth = 2;
+            this.ctx.strokeRect(btnX, btnY, btnW, btnH);
+
+            const isHoverBlink = Math.floor(Date.now() / 300) % 2 === 0;
+            this.ctx.fillStyle = isHoverBlink ? '#ffffff' : '#ffe0f0';
+            this.ctx.font = 'bold 20px DungGeunMo';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText("대결 시작 (ENTER)", GAME_WIDTH/2, btnY + 34);
+
+            // 사용 가이드 배너 추가
+            this.ctx.fillStyle = '#ffd700';
+            this.ctx.font = '14px DungGeunMo';
+            this.ctx.fillText("◀  상단 히로인 카드를 마우스로 클릭하여 대상을 골라보세요  ▶", GAME_WIDTH/2, 350);
+        }
+
+        else if (this.state === "PAUSED") {
+            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.82)';
+            this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+            this.ctx.textAlign = 'center';
+            this.ctx.fillStyle = '#ffc107';
+            this.ctx.font = 'bold 36px DungGeunMo';
+            this.ctx.fillText("일시 정지 (PAUSED)", GAME_WIDTH/2, 340);
+
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.font = '18px DungGeunMo';
+            this.ctx.fillText("진행을 계속하려면 [P] 키를 누르세요.", GAME_WIDTH/2, 390);
+            this.ctx.fillText("초기 상태로 완전히 복귀하려면 [R] 키를 누르세요.", GAME_WIDTH/2, 425);
+        }
+
+        else if (this.state === "GAME_OVER") {
+            this.ctx.fillStyle = 'rgba(10, 5, 15, 0.95)';
+            this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+            this.ctx.textAlign = 'center';
+            this.ctx.fillStyle = '#ff1155';
+            this.ctx.font = 'bold 48px DungGeunMo';
+            this.ctx.fillText("연주 실패 (GAME OVER)", GAME_WIDTH/2, 280);
+
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.font = '18px DungGeunMo';
+            this.ctx.fillText("그녀를 당황하게 하여 퇴장당했습니다...", GAME_WIDTH/2, 340);
+            this.ctx.fillStyle = '#ffd700';
+            this.ctx.fillText(`획득한 하이스코어: ${this.player.score.toLocaleString()} 점`, GAME_WIDTH/2, 380);
+
+            const blink = Math.floor(Date.now() / 400) % 2 === 0;
+            this.ctx.fillStyle = blink ? '#00ffff' : '#ffffff';
+            this.ctx.font = 'bold 20px DungGeunMo';
+            this.ctx.fillText("엔터를 눌러 로비로 귀환하기", GAME_WIDTH/2, 450);
+        }
+
+        else if (this.state === "VICTORY") {
+            this.ctx.fillStyle = 'rgba(10, 5, 20, 0.95)';
+            this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+            this.ctx.textAlign = 'center';
+            this.ctx.fillStyle = '#00ffff';
+            this.ctx.font = 'bold 48px DungGeunMo';
+            this.ctx.fillText("✨ STAGE COMPLETE! ✨", GAME_WIDTH/2, 260);
+
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.font = '18px DungGeunMo';
+            this.ctx.fillText(`${this.heroines[this.selectedHeroineIdx].name}의 마음이 열렸습니다! 공략 대성공!`, GAME_WIDTH/2, 320);
+
+            this.ctx.fillStyle = '#ffc107';
+            this.ctx.font = 'bold 22px DungGeunMo';
+            this.ctx.fillText(`최종 스코어: ${this.player.score.toLocaleString()}`, GAME_WIDTH/2, 365);
+            this.ctx.fillText(`최대 콤보: ${this.player.maxCombo} Combo`, GAME_WIDTH/2, 400);
+
+            const blink = Math.floor(Date.now() / 400) % 2 === 0;
+            this.ctx.fillStyle = blink ? '#ff5ebc' : '#ffffff';
+            this.ctx.font = 'bold 18px DungGeunMo';
+            this.ctx.fillText("엔터를 누르면 메인 화면으로 돌아갑니다.", GAME_WIDTH/2, 470);
+        }
+    }
+
+    run() {
+        const loop = () => {
+            this.update();
+            this.draw();
+            requestAnimationFrame(loop);
+        };
+        requestAnimationFrame(loop);
+    }
+}
+
+// --- 보조 유틸리티 드로잉 함수 ---
+function ctx_pixelLine(ctx, x1, y1, x2, y2, color, width) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    ctx.restore();
+}
+
+function ctx_drawCircle(ctx, x, y, r, fill = true) {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    if (fill) {
+        ctx.fill();
+    } else {
+        ctx.stroke();
+    }
+}
+
+// 정해진 가로 폭에 맞춰 픽셀 텍스트 자동 줄바꿈 헬퍼
+function ctx_wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+    const words = text.split('');
+    let line = '';
+
+    for (let n = 0; n < words.length; n++) {
+        let testLine = line + words[n];
+        let metrics = ctx.measureText(testLine);
+        let testWidth = metrics.width;
+        if (testWidth > maxWidth && n > 0) {
+            ctx.fillText(line, x, y);
+            line = words[n];
+            y += lineHeight;
+        } else {
+            line = testLine;
+        }
+    }
+    ctx.fillText(line, x, y);
+}
+
+// 브라우저 로딩 완료 후 실행
+window.onload = function() {
+    const game = new Game();
+    game.run();
+};
+</script>
+</body>
+</html>
