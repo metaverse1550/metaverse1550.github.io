@@ -1,0 +1,1500 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Dream Architect - 프리미엄 인테리어 시뮬레이터</title>
+    <!-- Tailwind CSS (UI 스타일링용) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome (아이콘용) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Three.js 라이브러리 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            user-select: none;
+            font-family: 'Inter', 'Segoe UI', 'Arial', sans-serif;
+            background-color: #1a1a1c;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        /* 고급스러운 미니멀 크로스헤어 */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 10px;
+            height: 10px;
+            pointer-events: none;
+            z-index: 10;
+        }
+        #crosshair::before, #crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(255, 255, 255, 0.6);
+            border-radius: 1px;
+        }
+        #crosshair::before {
+            top: 4px;
+            left: 0;
+            width: 10px;
+            height: 2px;
+        }
+        #crosshair::after {
+            top: 0;
+            left: 4px;
+            width: 2px;
+            height: 10px;
+        }
+        /* 핫바 선택 테두리 */
+        .hotbar-selected {
+            border: 3px solid #dfb76c !important;
+            box-shadow: 0 0 15px rgba(223, 183, 108, 0.8);
+            transform: scale(1.1);
+            z-index: 20;
+        }
+        /* 스크롤바 커스텀 */
+        .custom-scrollbar::-webkit-scrollbar {
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.25);
+            border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.4);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+
+    <!-- Crosshair -->
+    <div id="crosshair"></div>
+
+    <!-- UI Overlay -->
+    <div id="ui-overlay" class="absolute inset-0 pointer-events-none flex flex-col justify-between p-6 z-20">
+        <!-- 상단 바 -->
+        <div class="flex justify-between items-start w-full">
+            <!-- 시뮬레이터 가이드 정보 -->
+            <div class="bg-stone-900/90 backdrop-blur-lg rounded-2xl p-5 flex flex-col gap-1 pointer-events-auto border border-stone-800 w-64 shadow-2xl">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span class="text-stone-100 text-xs font-bold uppercase tracking-wider">아키텍트 크리에이티브 모드</span>
+                </div>
+                <div class="text-[11px] text-stone-400 leading-relaxed">
+                    체력과 허기 제한이 해제되었습니다. 상시 제공되는 따스한 아침 조명 아래에서 정밀하게 집을 디자인하세요.
+                </div>
+            </div>
+
+            <!-- 미션 정보 & 조도 제어 -->
+            <div class="flex flex-col items-end gap-2">
+                <div class="bg-stone-900/90 backdrop-blur-lg rounded-2xl p-5 text-right pointer-events-auto border border-stone-800 w-72 shadow-2xl">
+                    <div class="text-[10px] text-stone-500 font-bold uppercase tracking-widest mb-1"><i class="fa-solid fa-sun text-amber-500 mr-1"></i> 현재 조명 환경</div>
+                    <div id="time-text" class="text-amber-400 font-bold text-sm">맑고 눈부신 아침 (Sunny Morning)</div>
+                    <div class="text-[10px] text-stone-500 font-bold uppercase tracking-widest mt-4 mb-1"><i class="fa-solid fa-couch text-amber-600 mr-1"></i> 가구 배치 계수</div>
+                    <div id="mission-progress" class="text-stone-300 font-bold text-xs">고급 가구 배치: 0/30 완성</div>
+                </div>
+                <!-- 퀵 저장/불러오기 -->
+                <div class="flex gap-2 pointer-events-auto">
+                    <button id="btn-save" class="bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg border border-stone-700 transition-all flex items-center gap-1.5">
+                        <i class="fa-solid fa-floppy-disk text-stone-400"></i> 아파트 저장
+                    </button>
+                    <button id="btn-load" class="bg-amber-800/90 hover:bg-amber-700 text-amber-100 text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg border border-amber-800/50 transition-all flex items-center gap-1.5">
+                        <i class="fa-solid fa-folder-open text-amber-300"></i> 아파트 복원
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 하단 가구 단축바 (15개 슬롯, 가로 스크롤 가능하며 컴팩트하게 구성) -->
+        <div class="w-full flex justify-center mb-1">
+            <div class="bg-stone-950/95 backdrop-blur-xl rounded-2xl p-3 border border-stone-800/80 flex flex-col gap-1.5 pointer-events-auto shadow-2xl max-w-full lg:max-w-4xl">
+                <div class="text-[10px] text-stone-400 text-center font-bold tracking-wide"><i class="fa-solid fa-arrows-left-right text-[8px] mr-1"></i> 마우스 휠이나 클릭으로 15가지 프리미엄 가구 전환 가능</div>
+                <div class="flex gap-2 overflow-x-auto custom-scrollbar pb-1 px-1" id="hotbar-container">
+                    <!-- Dynamic Generation (15 Items) -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 대기실 및 일시정지 오버레이 -->
+    <div id="menu-overlay" class="absolute inset-0 bg-stone-950/95 backdrop-blur-lg flex flex-col justify-center items-center z-50 transition-opacity duration-300">
+        <div class="max-w-md w-full bg-stone-900 border border-stone-800/60 rounded-3xl p-8 text-center shadow-2xl mx-4">
+            <h1 class="text-3xl font-black text-stone-100 tracking-tight mb-1">DREAM ARCHITECT 3D</h1>
+            <p class="text-[10px] text-amber-500 uppercase tracking-widest mb-6">Premium Linking Furniture Edition</p>
+            
+            <!-- 조작 가이드 -->
+            <div class="bg-stone-950 border border-stone-800 rounded-2xl p-5 text-left mb-6 text-xs text-stone-400 space-y-2.5 leading-relaxed">
+                <div class="font-bold text-stone-300 border-b border-stone-800 pb-1.5 mb-2.5 flex items-center justify-between">
+                    <span>🏠 스마트 모듈러 가구 가이드</span>
+                    <span class="text-[9px] text-yellow-400 bg-yellow-400/10 px-2 py-0.5 rounded-full border border-yellow-400/20">Studio Pro Mode</span>
+                </div>
+                <p><kbd class="bg-stone-800 text-stone-200 px-1.5 py-0.5 rounded text-[10px] border border-stone-700">W</kbd> <kbd class="bg-stone-800 text-stone-200 px-1.5 py-0.5 rounded text-[10px] border border-stone-700">A</kbd> <kbd class="bg-stone-800 text-stone-200 px-1.5 py-0.5 rounded text-[10px] border border-stone-700">S</kbd> <kbd class="bg-stone-800 text-stone-200 px-1.5 py-0.5 rounded text-[10px] border border-stone-700">D</kbd> : 공간 자유 산책</p>
+                <p><kbd class="bg-stone-800 text-stone-200 px-4 py-0.5 rounded text-[10px] border border-stone-700">Space</kbd> : 도약 및 위층 빌드</p>
+                <p><kbd class="bg-stone-800 text-stone-200 px-1.5 py-0.5 rounded text-[10px] border border-stone-700">좌클릭</kbd> : 가구 철거 및 인벤토리 회수</p>
+                <p><kbd class="bg-stone-800 text-stone-200 px-1.5 py-0.5 rounded text-[10px] border border-stone-700">우클릭</kbd> : 정면에 바라보며 가구 설계 및 가설</p>
+                <p><kbd class="bg-stone-800 text-stone-200 px-1.5 py-0.5 rounded text-[10px] border border-stone-700">휠 / 숫자 1~9</kbd> : 15종 프리미엄 가구 퀵 체인지</p>
+                <div class="text-[11px] text-stone-400 pt-2 border-t border-stone-800/80 mt-2">
+                    💡 <span class="text-amber-400 font-semibold">스마트 가구 자동 이어붙임:</span> 책상 뿐만 아니라 <span class="text-amber-300 font-semibold">쇼파도 가로로 나란히 이어 붙이면</span> 중간의 팔걸이가 자동으로 스킵되어 웅장하고 예쁜 일체형 소파 베드가 조립됩니다!
+                </div>
+            </div>
+
+            <button id="btn-play" class="w-full bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-stone-950 font-extrabold py-3.5 px-6 rounded-2xl shadow-xl transition-all transform hover:scale-[1.01] active:scale-[0.99] mb-3 flex items-center justify-center gap-2 text-sm">
+                <i class="fa-solid fa-palette text-sm"></i> <span id="btn-play-text" class="text-sm">인테리어 설계 개시</span>
+            </button>
+            <p class="text-[11px] text-stone-500">화면 중앙을 클릭하면 카메라 시점이 활성화됩니다.</p>
+        </div>
+    </div>
+
+    <!-- 게임 엔딩 모달 -->
+    <div id="game-end-overlay" class="absolute inset-0 bg-stone-950/95 backdrop-blur-xl flex flex-col justify-center items-center z-50 hidden">
+        <div class="max-w-md w-full bg-stone-900 border border-stone-800 rounded-3xl p-8 text-center shadow-2xl mx-4">
+            <div id="game-end-icon" class="text-5xl mb-4">🏠</div>
+            <h2 id="game-end-title" class="text-2xl font-black text-stone-200 mb-2">드림 하우스 완공</h2>
+            <p id="game-end-desc" class="text-stone-400 text-xs mb-6">안락하고 예쁜 아침 햇살을 품은 명품 하우스가 완성되었습니다.</p>
+
+            <button id="btn-restart" class="w-full bg-gradient-to-r from-stone-800 to-stone-750 hover:from-stone-700 hover:to-stone-650 text-white font-bold py-3 px-6 rounded-2xl shadow-lg transition-all mb-3 flex items-center justify-center gap-2 text-sm">
+                <i class="fa-solid fa-rotate-left"></i> 공간 밀어내고 새로 설계하기
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 글로벌 가구 사양 설정 및 모형 정의
+        // ==========================================
+        const BLOCK_SIZE = 1;
+        const WORLD_SIZE = 32; 
+        const WORLD_HEIGHT = 4;
+
+        // 15종 명품 가구 및 자재 블록 규격 정의
+        const BLOCK_TYPES = {
+            AIR: 0,
+            WALL_CREAM: 1,  // 01 크림톤 스무스 콘크리트 내벽
+            FLOOR_HERRING: 2, // 02 헤링본 오크 원목 바닥
+            DESK: 3,        // 03 [연결형] 모듈 월넛 서재 데스크
+            SOFA: 4,        // 04 [연결형] 모던 프리미엄 패브릭 쇼파
+            BED: 5,         // 05 헤드보드 및 듀얼 필로우 가죽 프레임 침대
+            LAMP: 6,        // 06 무광 황동 머리맡 밀크 스탠드 조명
+            CHAIR: 7,       // 07 유선형 등받이 스칸디나비안 디자이너 체어
+            TABLE: 8,       // 08 천연 대리석 골드 프레임 원형 탁자
+            PLANT: 9,       // 09 토분 속 풍성한 실내식물 몬스테라
+            SHELF: 10,      // 10 개방형 비대칭 슬림 우드 책장 콘솔
+            TELEVISION: 11, // 11 OLED 슬림 TV 및 사운드바 하부 수납장
+            BATHTUB: 12,    // 12 크롬 수전 포함 세라믹 욕조
+            KITCHEN: 13,    // 13 비앙코 대리석 싱크 가구 아일랜드
+            DOOR: 14,       // 14 아치형 가죽 패널 디자인 도어 프레임
+            RUG: 15         // 15 북유럽 보송보송 프린지 러그
+        };
+
+        // 파스텔 솜사탕 감성을 실물 가구 텍스처와 배합한 고급 조색 세트 (밀크티, 크림, 올리브그린, 섀비블루 무드)
+        const BLOCK_DATA = {
+            [BLOCK_TYPES.WALL_CREAM]: { name: "크림 화이트 내벽", color: 0xeae6df, isFurniture: false },
+            [BLOCK_TYPES.FLOOR_HERRING]: { name: "헤링본 오크 바닥", color: 0x9e8876, isFurniture: false },
+            [BLOCK_TYPES.DESK]: { name: "모듈 데스크 (자동연결)", color: 0x6e5a4f, isFurniture: true, icon: "🖥️" },
+            [BLOCK_TYPES.SOFA]: { name: "패브릭 소파 (자동연결)", color: 0x93a29b, isFurniture: true, icon: "🛋️" },
+            [BLOCK_TYPES.BED]: { name: "클래식 가죽 더블 침대", color: 0xdfd8cf, isFurniture: true, icon: "🛏️" },
+            [BLOCK_TYPES.LAMP]: { name: "스탠딩 무드등", color: 0xfbf2e3, isFurniture: true, icon: "💡" },
+            [BLOCK_TYPES.CHAIR]: { name: "인체공학 디자이너 체어", color: 0xbfa899, isFurniture: true, icon: "🪑" },
+            [BLOCK_TYPES.TABLE]: { name: "대리석 원형 티테이블", color: 0xe0dacf, isFurniture: true, icon: "🍽️" },
+            [BLOCK_TYPES.PLANT]: { name: "식물 몬스테라 화분", color: 0x6b7b66, isFurniture: true, icon: "🌿" },
+            [BLOCK_TYPES.SHELF]: { name: "비대칭 인테리어 책장", color: 0xa89382, isFurniture: true, icon: "📚" },
+            [BLOCK_TYPES.TELEVISION]: { name: "OLED TV & 사운드바 콘솔", color: 0x3d4047, isFurniture: true, icon: "📺" },
+            [BLOCK_TYPES.BATHTUB]: { name: "세라믹 프리 스탠딩 욕조", color: 0xf5f3ee, isFurniture: true, icon: "🛁" },
+            [BLOCK_TYPES.KITCHEN]: { name: "아일랜드 대리석 주방", color: 0xabc1b7, isFurniture: true, icon: "🍳" },
+            [BLOCK_TYPES.DOOR]: { name: "클래식 프렌치 원목문", color: 0xc4b2a5, isFurniture: true, icon: "🚪" },
+            [BLOCK_TYPES.RUG]: { name: "포근한 북유럽 원형 러그", color: 0xededeb, isFurniture: true, icon: "🧶" }
+        };
+
+        // ==========================================
+        // SMART FURNITURE GENERATOR (지능형 가구 조립 및 병합)
+        // ==========================================
+        function generateFurnitureGroup(type, x, y, z, world) {
+            const group = new THREE.Group();
+
+            // 가구 베이스 투명 축 경계 상자
+            const baseGeo = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+            const baseMat = new THREE.MeshBasicMaterial({ visible: false });
+            const boundingMesh = new THREE.Mesh(baseGeo, baseMat);
+            group.add(boundingMesh);
+
+            // 매트하고 실제 가구 소재 같은 질감을 주기 위한 표준 공용 머티리얼 믹서
+            const createMat = (color, rough = 0.85, metal = 0.05, emissiveColor = 0x000000) => {
+                return new THREE.MeshStandardMaterial({
+                    color: color,
+                    roughness: rough,
+                    metalness: metal,
+                    emissive: new THREE.Color(emissiveColor),
+                    flatShading: true
+                });
+            };
+
+            switch (type) {
+                case BLOCK_TYPES.WALL_CREAM: {
+                    const wall = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), createMat(0xeae6df, 0.9));
+                    wall.castShadow = true;
+                    wall.receiveShadow = true;
+                    group.add(wall);
+
+                    // 하단 걸레받이(트림) 디테일 추가
+                    const trim = new THREE.Mesh(new THREE.BoxGeometry(1.02, 0.1, 1.02), createMat(0x6e5a4f, 0.7));
+                    trim.position.y = -0.45;
+                    group.add(trim);
+                    break;
+                }
+                case BLOCK_TYPES.FLOOR_HERRING: {
+                    const floor = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), createMat(0x9e8876, 0.65));
+                    floor.castShadow = true;
+                    floor.receiveShadow = true;
+                    group.add(floor);
+                    break;
+                }
+                case BLOCK_TYPES.DESK: {
+                    // [책상 연결 지능형 다리 생략 알고리즘]
+                    let hasLeft = false, hasRight = false, hasBack = false, hasFront = false;
+
+                    if (world) {
+                        hasLeft = (world.getBlockType(x - 1, y, z) === BLOCK_TYPES.DESK);
+                        hasRight = (world.getBlockType(x + 1, y, z) === BLOCK_TYPES.DESK);
+                        hasBack = (world.getBlockType(x, y, z - 1) === BLOCK_TYPES.DESK);
+                        hasFront = (world.getBlockType(x, y, z + 1) === BLOCK_TYPES.DESK);
+                    }
+
+                    const deskWood = createMat(0x6e5a4f, 0.55, 0.1);
+                    const topScaleX = (hasLeft && hasRight) ? 1.0 : 0.98;
+                    const topScaleZ = (hasBack && hasFront) ? 1.0 : 0.98;
+                    
+                    const topMesh = new THREE.Mesh(new THREE.BoxGeometry(topScaleX, 0.08, topScaleZ), deskWood);
+                    topMesh.position.y = 0.35;
+                    topMesh.castShadow = true;
+                    group.add(topMesh);
+
+                    const legMat = createMat(0x18181a, 0.8, 0.5); 
+                    const legGeo = new THREE.BoxGeometry(0.06, 0.75, 0.06);
+
+                    if (!hasLeft && !hasBack) {
+                        const leg = new THREE.Mesh(legGeo, legMat);
+                        leg.position.set(-0.41, 0, -0.41);
+                        leg.castShadow = true;
+                        group.add(leg);
+                    }
+                    if (!hasRight && !hasBack) {
+                        const leg = new THREE.Mesh(legGeo, legMat);
+                        leg.position.set(0.41, 0, -0.41);
+                        leg.castShadow = true;
+                        group.add(leg);
+                    }
+                    if (!hasLeft && !hasFront) {
+                        const leg = new THREE.Mesh(legGeo, legMat);
+                        leg.position.set(-0.41, 0, 0.41);
+                        leg.castShadow = true;
+                        group.add(leg);
+                    }
+                    if (!hasRight && !hasFront) {
+                        const leg = new THREE.Mesh(legGeo, legMat);
+                        leg.position.set(0.41, 0, 0.41);
+                        leg.castShadow = true;
+                        group.add(leg);
+                    }
+                    break;
+                }
+                case BLOCK_TYPES.SOFA: {
+                    // [쇼파 지능형 연결 알고리즘]
+                    let hasLeft = false, hasRight = false;
+
+                    if (world) {
+                        hasLeft = (world.getBlockType(x - 1, y, z) === BLOCK_TYPES.SOFA);
+                        hasRight = (world.getBlockType(x + 1, y, z) === BLOCK_TYPES.SOFA);
+                    }
+
+                    const fabric = createMat(0x93a29b, 0.9);
+                    const woodLegMat = createMat(0x5c4f46, 0.7);
+
+                    // 소파 메인 좌판 (병합을 위해 가로폭 보정)
+                    const baseWidth = (hasLeft && hasRight) ? 1.0 : (hasLeft || hasRight) ? 0.95 : 0.88;
+                    const base = new THREE.Mesh(new THREE.BoxGeometry(baseWidth, 0.35, 0.88), fabric);
+                    base.position.set(0, -0.2, 0.05);
+                    base.castShadow = true;
+                    group.add(base);
+
+                    // 분할 쿠션 절개선 디테일 구현
+                    const cushionWidth = baseWidth / 2;
+                    const cushion = new THREE.Mesh(new THREE.BoxGeometry(cushionWidth - 0.02, 0.08, 0.82), fabric);
+                    cushion.position.set(-cushionWidth/2, 0.02, 0.05);
+                    cushion.castShadow = true;
+                    const cushion2 = cushion.clone();
+                    cushion2.position.x = cushionWidth/2;
+                    group.add(cushion, cushion2);
+
+                    // 소파 등받이
+                    const backWidth = (hasLeft && hasRight) ? 1.0 : 0.88;
+                    const back = new THREE.Mesh(new THREE.BoxGeometry(backWidth, 0.58, 0.22), fabric);
+                    back.position.set(0, 0.08, -0.3);
+                    back.castShadow = true;
+                    group.add(back);
+
+                    // 쇼파 좌측 팔걸이: 좌측에 쇼파가 없을 때만 배치
+                    if (!hasLeft) {
+                        const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.44, 0.88), fabric);
+                        leftArm.position.set(-0.41, -0.05, 0.05);
+                        leftArm.castShadow = true;
+                        group.add(leftArm);
+                    }
+
+                    // 쇼파 우측 팔걸이: 우측에 쇼파가 없을 때만 배치
+                    if (!hasRight) {
+                        const rightArm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.44, 0.88), fabric);
+                    rightArm.position.set(0.41, -0.05, 0.05);
+                    rightArm.castShadow = true;
+                    group.add(rightArm);
+                }
+
+                // 하부 목재 원목 다리
+                const legGeo = new THREE.CylinderGeometry(0.04, 0.025, 0.15, 8);
+                const dl = [[-0.38, -0.38], [0.38, -0.38], [-0.38, 0.42], [0.38, 0.42]];
+                dl.forEach(offset => {
+                    const leg = new THREE.Mesh(legGeo, woodLegMat);
+                    leg.position.set(offset[0], -0.42, offset[1]);
+                    leg.castShadow = true;
+                    group.add(leg);
+                });
+                break;
+            }
+            case BLOCK_TYPES.BED: {
+                // 2칸(더블 사이즈) 규격의 고품격 원목 침대 헤드보드 프레임
+                const bedFrame = new THREE.Mesh(new THREE.BoxGeometry(0.96, 0.22, 1.94), createMat(0x6e5a4f, 0.7));
+                bedFrame.position.set(0, -0.38, -0.48);
+                bedFrame.castShadow = true;
+                group.add(bedFrame);
+
+                // 높은 헤드보드 등받이 뒷판 (2칸 안쪽 끝단에 배치)
+                const headBoard = new THREE.Mesh(new THREE.BoxGeometry(0.96, 0.75, 0.12), createMat(0xdfd8cf, 0.85));
+                headBoard.position.set(0, 0.1, -1.39);
+                headBoard.castShadow = true;
+                group.add(headBoard);
+
+                // 푹신한 구스 패딩 더블 매트리스
+                const mattress = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.32, 1.82), createMat(0xffffff, 0.95));
+                mattress.position.set(0, -0.12, -0.45);
+                mattress.castShadow = true;
+                group.add(mattress);
+
+                // 헤드보드 앞에 가지런히 놓인 2조의 대형 베개
+                const pillowMat = createMat(0xeae6df, 0.9);
+                const pillowGeo = new THREE.BoxGeometry(0.38, 0.1, 0.25);
+                
+                const leftPillow = new THREE.Mesh(pillowGeo, pillowMat);
+                leftPillow.position.set(-0.21, 0.1, -1.15);
+                leftPillow.rotation.x = -0.12;
+                leftPillow.castShadow = true;
+
+                const rightPillow = leftPillow.clone();
+                rightPillow.position.x = 0.21;
+                group.add(leftPillow, rightPillow);
+
+                // 침대 끝자락에 덧댄 데코레이션 감성 러너 담요
+                const runner = new THREE.Mesh(new THREE.BoxGeometry(0.91, 0.33, 0.7), createMat(0x9e8876, 0.9));
+                runner.position.set(0, -0.11, 0.1);
+                runner.castShadow = true;
+                group.add(runner);
+                break;
+            }
+            case BLOCK_TYPES.LAMP: {
+                // 감성 밀크 스탠드 황동 머티리얼 적용
+                    const brassMat = createMat(0xcca43b, 0.25, 0.95);
+                    
+                    // 디스크 바닥 베이스
+                    const baseDisc = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.03, 16), brassMat);
+                    baseDisc.position.y = -0.45;
+                    group.add(baseDisc);
+
+                    // 슬림 지지대 파이프
+                    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.68, 8), brassMat);
+                    pole.position.y = -0.1;
+                    group.add(pole);
+
+                    // 불이 들어오는 유백색 갓
+                    const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.22, 0.3, 16), createMat(0xffffff, 0.9, 0, 0xfbf2e3));
+                    shade.position.y = 0.28;
+                    shade.castShadow = true;
+                    group.add(shade);
+                    break;
+                }
+                case BLOCK_TYPES.CHAIR: {
+                    const frameMat = createMat(0x3d3028, 0.6);
+                    const cushionMat = createMat(0xabc1b7, 0.9); // 파스텔 민트 천
+
+                    // 유선형 라운딩 방석시트
+                    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.05, 0.48), cushionMat);
+                    seat.position.y = -0.1;
+                    seat.castShadow = true;
+                    group.add(seat);
+
+                    // 살대가 들어간 아름다운 의자 등받이
+                    const backrest = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.38, 0.05), cushionMat);
+                    backrest.position.set(0, 0.12, -0.22);
+                    backrest.castShadow = true;
+                    group.add(backrest);
+
+                    // 빗각으로 세련되게 뻗은 다리 4개
+                    const legMat = createMat(0x18181a, 0.8, 0.5);
+                    const legGeo = new THREE.CylinderGeometry(0.02, 0.015, 0.4, 8);
+                    const coords = [[-0.18, -0.18], [0.18, -0.18], [-0.18, 0.18], [0.18, 0.18]];
+                    coords.forEach(c => {
+                        const leg = new THREE.Mesh(legGeo, legMat);
+                        leg.position.set(c[0], -0.3, c[1]);
+                        leg.rotation.z = c[0] * -0.4;
+                        leg.castShadow = true;
+                        group.add(leg);
+                    });
+                    break;
+                }
+                case BLOCK_TYPES.TABLE: {
+                    const goldMat = createMat(0xdfb76c, 0.2, 0.95);
+                    const marbleMat = createMat(0xeae6df, 0.3, 0.4); // 비앙코 대리석 상판
+
+                    // 우아한 가두리 음각 대리석 원형 판넬
+                    const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.46, 0.05, 24), marbleMat);
+                    tableTop.position.y = 0.15;
+                    tableTop.castShadow = true;
+                    group.add(tableTop);
+
+                    // 하단 골드 테두리 프레임
+                    const goldRing = new THREE.Mesh(new THREE.CylinderGeometry(0.47, 0.47, 0.02, 24), goldMat);
+                    goldRing.position.y = 0.12;
+                    group.add(goldRing);
+
+                    // 크로스오버 지지대 다리
+                    const legGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.62, 8);
+                    const leg1 = new THREE.Mesh(legGeo, goldMat);
+                    leg1.position.y = -0.18;
+                    leg1.rotation.z = 0.22;
+                    
+                    const leg2 = leg1.clone();
+                    leg2.rotation.z = -0.22;
+                    group.add(leg1, leg2);
+
+                    const basePlat = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.02, 16), goldMat);
+                    basePlat.position.y = -0.48;
+                    group.add(basePlat);
+                    break;
+                }
+                case BLOCK_TYPES.PLANT: {
+                    // 미니멀 시멘트 세라믹 화분
+                    const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.16, 0.42, 12), createMat(0xbbaba0, 0.92));
+                    pot.position.y = -0.28;
+                    pot.castShadow = true;
+                    group.add(pot);
+
+                    const dirt = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.02, 12), createMat(0x4a3c31, 0.95));
+                    dirt.position.y = -0.08;
+                    group.add(dirt);
+
+                    // 몬스테라 줄기 및 갈라진 나뭇잎 타일 다발
+                    const stemMat = createMat(0x52634d, 0.88);
+                    const leafMat = createMat(0x6b7b66, 0.94); // 유칼립투스 카키 올리브
+
+                    for (let i = 0; i < 4; i++) {
+                        const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.5, 8), stemMat);
+                        stem.position.set((Math.random() - 0.5) * 0.1, 0.12, (Math.random() - 0.5) * 0.1);
+                        stem.rotation.z = (Math.random() - 0.5) * 0.5;
+                        stem.rotation.x = (Math.random() - 0.5) * 0.5;
+                        group.add(stem);
+
+                        // 넓적한 하트형 갈라진 잎사귀 디테일
+                        const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 6), leafMat);
+                        leaf.scale.set(1.0, 0.1, 1.4);
+                        leaf.position.copy(stem.position);
+                        leaf.position.y += 0.25;
+                        leaf.rotation.x = Math.random() * 0.8;
+                        leaf.rotation.y = Math.random() * 1.5;
+                        leaf.castShadow = true;
+                        group.add(leaf);
+                    }
+                    break;
+                }
+                case BLOCK_TYPES.SHELF: {
+                    const wood = createMat(0xa89382, 0.8);
+                    
+                    // 수납장 기둥 구조틀
+                    const backWall = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.88, 0.38), wood);
+                    backWall.position.y = -0.05;
+                    backWall.castShadow = true;
+                    group.add(backWall);
+
+                    // 책 선반 구획 분할용 슬롯
+                    const insideGeo = new THREE.BoxGeometry(0.82, 0.82, 0.38);
+                    const insideMat = createMat(0x1a1a1c, 0.95);
+                    const hole = new THREE.Mesh(insideGeo, insideMat);
+                    hole.position.y = -0.05;
+                    group.add(hole);
+
+                    // 미니 파스텔 수납 상자들
+                    const box1 = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, 0.34), createMat(0xabc1b7, 0.9));
+                    box1.position.set(-0.2, -0.22, 0.02);
+                    box1.castShadow = true;
+
+                    const box2 = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.32, 0.34), createMat(0xdfd8cf, 0.9));
+                    box2.position.set(0.2, 0.12, 0.02);
+                    box2.castShadow = true;
+                    group.add(box1, box2);
+                    break;
+                }
+                case BLOCK_TYPES.TELEVISION: {
+                    // 프리미엄 스마트 무광 TV 데크 콘솔
+                    const consoleTable = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.25, 0.52), createMat(0x31343a, 0.75));
+                    consoleTable.position.y = -0.38;
+                    consoleTable.castShadow = true;
+                    group.add(consoleTable);
+
+                    // 아주 얇은 무광 OLED 패널 구조
+                    const panelFrame = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.52, 0.04), createMat(0x111215, 0.9, 0.6));
+                    panelFrame.position.set(0, 0.18, 0);
+                    panelFrame.castShadow = true;
+                    group.add(panelFrame);
+
+                    // 화면 전면 반사 셰이더 느낌의 저반사 유리 패널
+                    const screen = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.48, 0.01), createMat(0x050608, 0.3, 0.9));
+                    screen.position.set(0, 0.18, 0.022);
+                    group.add(screen);
+
+                    // 콘솔 상의 초슬림 스피커 사운드 바
+                    const soundbar = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.04, 0.08), createMat(0x18181a, 0.95));
+                    soundbar.position.set(0, -0.23, 0.18);
+                    group.add(soundbar);
+                    break;
+                }
+                case BLOCK_TYPES.BATHTUB: {
+                    // 아크릴 미니멀 자유 곡선 욕조 외관 구조
+                    const tubMat = createMat(0xf5f3ee, 0.25, 0.3);
+                    const outerBody = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.55, 0.92), tubMat);
+                    outerBody.position.y = -0.22;
+                    outerBody.castShadow = true;
+                    group.add(outerBody);
+
+                    // 에메랄드 은은한 수조 욕조수
+                    const water = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.02, 0.82), createMat(0xa5c9d6, 0.4, 0.8));
+                    water.position.y = -0.02;
+                    group.add(water);
+
+                    // 고급 벽걸이 수도꼭지 디테일 (수전 수구)
+                    const faucetMat = createMat(0xeae6df, 0.15, 0.95);
+                    const faucet = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.18, 8), faucetMat);
+                    faucet.position.set(0.38, 0.15, 0.38);
+                    faucet.rotation.z = 0.5;
+                    group.add(faucet);
+                    break;
+                }
+                case BLOCK_TYPES.KITCHEN: {
+                    // 고급 무광 파스텔 올리브그린 수납 하부 데스크
+                    const deskMat = createMat(0xabc1b7, 0.88);
+                    const cabinet = new THREE.Mesh(new THREE.BoxGeometry(0.96, 0.72, 0.96), deskMat);
+                    cabinet.position.y = -0.14;
+                    cabinet.castShadow = true;
+                    group.add(cabinet);
+
+                    // 비앙코 화이트 대리석 조리 가두리 상판
+                    const marbleTop = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.06, 0.98), createMat(0xffffff, 0.35, 0.3));
+                    marbleTop.position.y = 0.25;
+                    marbleTop.castShadow = true;
+                    group.add(marbleTop);
+
+                    // 황동 소재의 싱크볼 세부 구조 수전
+                    const tap = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.22, 8), createMat(0xdfb76c, 0.15, 0.95));
+                    tap.position.set(-0.25, 0.36, -0.25);
+                    group.add(tap);
+
+                    const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.1, 8), createMat(0xdfb76c, 0.15, 0.95));
+                    spout.position.set(-0.2, 0.46, -0.25);
+                    spout.rotation.z = Math.PI / 2;
+                    group.add(spout);
+                    break;
+                }
+                case BLOCK_TYPES.DOOR: {
+                    const woodFrame = createMat(0xc4b2a5, 0.8);
+                    
+                    // 정교한 도어 기둥 프레임 몰딩 라인
+                    const leftStrut = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.0, 0.16), woodFrame);
+                    leftStrut.position.set(-0.44, 0, 0);
+                    const rightStrut = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.0, 0.16), woodFrame);
+                    rightStrut.position.set(0.44, 0, 0);
+                    const header = new THREE.Mesh(new THREE.BoxGeometry(0.96, 0.08, 0.16), woodFrame);
+                    header.position.y = 0.46;
+
+                    group.add(leftStrut, rightStrut, header);
+
+                    // 도어 프레임 안쪽 우드 도어 패널 본체
+                    const doorPanel = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.92, 0.05), createMat(0x8e7868, 0.75));
+                    doorPanel.position.set(0, -0.01, 0);
+                    doorPanel.castShadow = true;
+                    group.add(doorPanel);
+
+                    // 황동 레트로 고급 회전 손잡이 핸들바 디테일
+                    const handle = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), createMat(0xdfb76c, 0.2, 0.9));
+                    handle.position.set(0.28, -0.05, 0.04);
+                    group.add(handle);
+                    break;
+                }
+                case BLOCK_TYPES.RUG: {
+                    // 포근하고 보송보송한 오프화이트 원형 짜임 러그 단면
+                    const silkRug = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.48, 0.015, 24), createMat(0xededeb, 0.98));
+                    silkRug.position.y = -0.49;
+                    silkRug.receiveShadow = true;
+                    group.add(silkRug);
+                    break;
+                }
+            }
+
+            return group;
+        }
+
+        // ==========================================
+        // 1. WORLD CLASS (차분한 인테리어 전경 로딩)
+        // ==========================================
+        class World {
+            constructor(scene) {
+                this.scene = scene;
+                this.blocks = new Map(); // key: "x,y,z", value: { type, meshGroup }
+
+                // 가상 프레임 하이라이트 박스 (가구 배치선)
+                const hlGeo = new THREE.BoxGeometry(BLOCK_SIZE * 1.01, BLOCK_SIZE * 1.01, BLOCK_SIZE * 1.01);
+                const hlMat = new THREE.MeshBasicMaterial({
+                    color: 0xdfb76c,
+                    wireframe: true,
+                    transparent: true,
+                    opacity: 0.6
+                });
+                this.highlightBox = new THREE.Mesh(hlGeo, hlMat);
+                this.highlightBox.visible = false;
+                this.scene.add(this.highlightBox);
+            }
+
+            getKey(x, y, z) {
+                return `${Math.floor(x)},${Math.floor(y)},${Math.floor(z)}`;
+            }
+
+            // 아파트 초기 지형 구성
+            generate() {
+                this.clear();
+
+                for (let x = -WORLD_SIZE/2; x < WORLD_SIZE/2; x++) {
+                    for (let z = -WORLD_SIZE/2; z < WORLD_SIZE/2; z++) {
+                        // 바닥 설치
+                        this.setBlock(x, 0, z, BLOCK_TYPES.FLOOR_HERRING, 0, false);
+
+                        // 사방에 경계 내벽 가설
+                        const isBorder = (x === -WORLD_SIZE/2 || x === WORLD_SIZE/2 - 1 || z === -WORLD_SIZE/2 || z === WORLD_SIZE/2 - 1);
+                        if (isBorder) {
+                            for (let y = 1; y < WORLD_HEIGHT; y++) {
+                                this.setBlock(x, y, z, BLOCK_TYPES.WALL_CREAM, 0, false);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 가구 설치 (주변 책상/소파 결합 형태 갱신을 위해 리모델링 트리거 탑재)
+            setBlock(x, y, z, type, rotationY = 0, refreshNeighbors = true) {
+                const key = this.getKey(x, y, z);
+                
+                // 기존 가구 철거
+                this.removeBlock(x, y, z, false);
+
+                if (type === BLOCK_TYPES.AIR) return;
+
+                // 지능형 결합 모듈 기반 가구 그룹 생성
+                const group = generateFurnitureGroup(type, x, y, z, this);
+                group.position.set(x + 0.5, y + 0.5, z + 0.5);
+                group.rotation.y = rotationY;
+                group.userData = { x, y, z, type, rotationY };
+
+                group.traverse(child => {
+                    if (child.isMesh) {
+                        child.userData = { parentGroup: group };
+                    }
+                });
+
+                this.scene.add(group);
+                this.blocks.set(key, { type, meshGroup: group });
+
+                // 주변 인근 모듈러 가구 형태 실시간 갱신
+                if (refreshNeighbors) {
+                    this.updateAdjacentModulars(x, y, z);
+                }
+            }
+
+            // 가구 철거
+            removeBlock(x, y, z, refreshNeighbors = true) {
+                const key = this.getKey(x, y, z);
+                const block = this.blocks.get(key);
+                if (block) {
+                    this.scene.remove(block.meshGroup);
+                    
+                    block.meshGroup.traverse(child => {
+                        if (child.isMesh) {
+                            child.geometry.dispose();
+                            if (Array.isArray(child.material)) {
+                                child.material.forEach(m => m.dispose());
+                            } else {
+                                child.material.dispose();
+                            }
+                        }
+                    });
+
+                    this.blocks.delete(key);
+
+                    // 주변 인근 모듈러 가구 실시간 리빌딩 트리거
+                    if (refreshNeighbors) {
+                        this.updateAdjacentModulars(x, y, z);
+                    }
+                    return block.type;
+                }
+                return null;
+            }
+
+            // 인접한 사방 책상 및 소파 모듈 형태 자동 병합 연산 로직
+            updateAdjacentModulars(x, y, z) {
+                const neighbors = [
+                    { nx: x - 1, ny: y, nz: z },
+                    { nx: x + 1, ny: y, nz: z },
+                    { nx: x, ny: y, nz: z - 1 },
+                    { nx: x, ny: y, nz: z + 1 }
+                ];
+
+                neighbors.forEach(n => {
+                    const key = this.getKey(n.nx, n.ny, n.nz);
+                    const b = this.blocks.get(key);
+                    if (b) {
+                        if (b.type === BLOCK_TYPES.DESK || b.type === BLOCK_TYPES.SOFA) {
+                            const rotY = b.meshGroup.userData.rotationY || 0;
+                            this.setBlock(n.nx, n.ny, n.nz, b.type, rotY, false);
+                        }
+                    }
+                });
+            }
+
+            getBlockType(x, y, z) {
+                const key = this.getKey(x, y, z);
+                const block = this.blocks.get(key);
+                return block ? block.type : BLOCK_TYPES.AIR;
+            }
+
+            clear() {
+                this.blocks.forEach(block => {
+                    this.scene.remove(block.meshGroup);
+                    block.meshGroup.traverse(child => {
+                        if (child.isMesh) {
+                            child.geometry.dispose();
+                            child.material.dispose();
+                        }
+                    });
+                });
+                this.blocks.clear();
+            }
+
+            checkCollision(box) {
+                const minX = Math.floor(box.min.x);
+                const maxX = Math.ceil(box.max.x);
+                const minY = Math.floor(box.min.y);
+                const maxY = Math.ceil(box.max.y);
+                const minZ = Math.floor(box.min.z);
+                const maxZ = Math.ceil(box.max.z);
+
+                for (let x = minX; x < maxX; x++) {
+                    for (let y = minY; y < maxY; y++) {
+                        for (let z = minZ; z < maxZ; z++) {
+                            const type = this.getBlockType(x, y, z);
+                            // 러그는 충돌 판정을 제외하여 가구가 위에 놓여도 자연스럽게 이동할 수 있도록 설계
+                            if (type !== BLOCK_TYPES.AIR && type !== BLOCK_TYPES.RUG) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                return false;
+            }
+
+            serialize() {
+                const data = [];
+                this.blocks.forEach((block, key) => {
+                    const [x, y, z] = key.split(',').map(Number);
+                    data.push({ x, y, z, type: block.type, rotationY: block.meshGroup.userData.rotationY || 0 });
+                });
+                return data;
+            }
+
+            deserialize(data) {
+                this.clear();
+                data.forEach(item => {
+                    this.setBlock(item.x, item.y, item.z, item.type, item.rotationY || 0, false);
+                });
+                // 배치 완료 후 이웃 모듈러 가구 정렬 재평가
+                this.blocks.forEach((block, key) => {
+                    const [x, y, z] = key.split(',').map(Number);
+                    if (block.type === BLOCK_TYPES.DESK || block.type === BLOCK_TYPES.SOFA) {
+                        const rotY = block.meshGroup.userData.rotationY || 0;
+                        this.setBlock(x, y, z, block.type, rotY, false);
+                    }
+                });
+            }
+        }
+
+        // ==========================================
+        // 2. PLAYER CLASS (조작 및 쾌적 충돌)
+        // ==========================================
+        class Player {
+            constructor(camera, world, scene) {
+                this.camera = camera;
+                this.world = world;
+                this.scene = scene;
+
+                this.position = new THREE.Vector3(0, 1.2, 0); 
+                this.velocity = new THREE.Vector3(0, 0, 0);
+                this.height = 1.6;
+                this.width = 0.5;
+                this.speed = 4.5; 
+                this.jumpStrength = 5.8; 
+                this.gravity = 16.5; 
+                this.isGrounded = false;
+
+                this.pitch = 0;
+                this.yaw = 0;
+                this.sensitivity = 0.0018;
+
+                this.keys = { w: false, a: false, s: false, d: false, space: false };
+                this.isLocked = false;
+
+                this.initControls();
+            }
+
+            initControls() {
+                window.addEventListener('keydown', (e) => {
+                    if (!this.isLocked) return;
+                    switch (e.code) {
+                        case 'KeyW': this.keys.w = true; break;
+                        case 'KeyA': this.keys.a = true; break;
+                        case 'KeyS': this.keys.s = true; break;
+                        case 'KeyD': this.keys.d = true; break;
+                        case 'Space': this.keys.space = true; break;
+                    }
+                });
+
+                window.addEventListener('keyup', (e) => {
+                    switch (e.code) {
+                        case 'KeyW': this.keys.w = false; break;
+                        case 'KeyA': this.keys.a = false; break;
+                        case 'KeyS': this.keys.s = false; break;
+                        case 'KeyD': this.keys.d = false; break;
+                        case 'Space': this.keys.space = false; break;
+                    }
+                });
+
+                window.addEventListener('mousemove', (e) => {
+                    if (!this.isLocked) return;
+                    this.yaw -= e.movementX * this.sensitivity;
+                    this.pitch -= e.movementY * this.sensitivity;
+                    this.pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, this.pitch));
+
+                    this.camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
+                });
+            }
+
+            getBoundingBox(pos) {
+                return new THREE.Box3(
+                    new THREE.Vector3(pos.x - this.width/2, pos.y, pos.z - this.width/2),
+                    new THREE.Vector3(pos.x + this.width/2, pos.y + this.height, pos.z + this.width/2)
+                );
+            }
+
+            update(dt) {
+                // 생존 제한 요소가 제거되었습니다. 자유 이동 물리만 수행합니다.
+                const moveVector = new THREE.Vector3();
+                if (this.keys.w) moveVector.z -= 1;
+                if (this.keys.s) moveVector.z += 1;
+                if (this.keys.a) moveVector.x -= 1;
+                if (this.keys.d) moveVector.x += 1;
+                moveVector.normalize();
+
+                const direction = new THREE.Vector3(moveVector.x, 0, moveVector.z);
+                direction.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+
+                this.velocity.x = direction.x * this.speed;
+                this.velocity.z = direction.z * this.speed;
+                this.velocity.y -= this.gravity * dt;
+
+                if (this.keys.space && this.isGrounded) {
+                    this.velocity.y = this.jumpStrength;
+                    this.isGrounded = false;
+                }
+
+                const nextPos = this.position.clone();
+
+                // Y축 충돌 검사
+                nextPos.y += this.velocity.y * dt;
+                let box = this.getBoundingBox(nextPos);
+                if (this.world.checkCollision(box)) {
+                    if (this.velocity.y < 0) {
+                        this.isGrounded = true;
+                    }
+                    this.velocity.y = 0;
+                    nextPos.y = this.position.y;
+                } else {
+                    this.isGrounded = false;
+                }
+
+                // X축 충돌 검사
+                nextPos.x += this.velocity.x * dt;
+                box = this.getBoundingBox(nextPos);
+                if (this.world.checkCollision(box)) {
+                    this.velocity.x = 0;
+                    nextPos.x = this.position.x;
+                }
+
+                // Z축 충돌 검사
+                nextPos.z += this.velocity.z * dt;
+                box = this.getBoundingBox(nextPos);
+                if (this.world.checkCollision(box)) {
+                    this.velocity.z = 0;
+                    nextPos.z = this.position.z;
+                }
+
+                this.position.copy(nextPos);
+
+                if (this.position.y < -10) {
+                    this.position.set(0, 3, 0);
+                    this.velocity.set(0, 0, 0);
+                }
+
+                this.camera.position.copy(this.position);
+                this.camera.position.y += 1.4; 
+            }
+        }
+
+        // ==========================================
+        // 3. INVENTORY & HOTBAR (15개 슬롯 완벽 지원)
+        // ==========================================
+        class Inventory {
+            constructor() {
+                // 15가지 소품 및 건축 자재 무제한 지원
+                this.slots = [
+                    { type: BLOCK_TYPES.WALL_CREAM, count: 99 },
+                    { type: BLOCK_TYPES.FLOOR_HERRING, count: 99 },
+                    { type: BLOCK_TYPES.DESK, count: 99 },
+                    { type: BLOCK_TYPES.SOFA, count: 99 },
+                    { type: BLOCK_TYPES.BED, count: 99 },
+                    { type: BLOCK_TYPES.LAMP, count: 99 },
+                    { type: BLOCK_TYPES.CHAIR, count: 99 },
+                    { type: BLOCK_TYPES.TABLE, count: 99 },
+                    { type: BLOCK_TYPES.PLANT, count: 99 },
+                    { type: BLOCK_TYPES.SHELF, count: 99 },
+                    { type: BLOCK_TYPES.TELEVISION, count: 99 },
+                    { type: BLOCK_TYPES.BATHTUB, count: 99 },
+                    { type: BLOCK_TYPES.KITCHEN, count: 99 },
+                    { type: BLOCK_TYPES.DOOR, count: 99 },
+                    { type: BLOCK_TYPES.RUG, count: 99 }
+                ];
+                this.selectedIndex = 0;
+            }
+
+            getSelectedItem() {
+                return this.slots[this.selectedIndex];
+            }
+
+            useItem() {
+                // 크리에이티브 모드이므로 자재 갯수를 소모시키지 않고 계속 설치 가능합니다.
+                return true;
+            }
+
+            addItem(type, count = 1) {
+                // 수량 유지
+            }
+
+            changeSelection(dir) {
+                this.selectedIndex = (this.selectedIndex + dir + this.slots.length) % this.slots.length;
+            }
+        }
+
+        // ==========================================
+        // 4. UI MANAGER (고급 모던 테마 바인딩)
+        // ==========================================
+        class UIManager {
+            constructor(game) {
+                this.game = game;
+
+                this.timeText = document.getElementById('time-text');
+                this.missionProgress = document.getElementById('mission-progress');
+                this.hotbarContainer = document.getElementById('hotbar-container');
+                this.menuOverlay = document.getElementById('menu-overlay');
+                this.btnPlay = document.getElementById('btn-play');
+                this.btnPlayText = document.getElementById('btn-play-text');
+                this.gameEndOverlay = document.getElementById('game-end-overlay');
+                this.btnRestart = document.getElementById('btn-restart');
+
+                this.btnPlay.addEventListener('click', () => this.game.requestLock());
+                this.btnRestart.addEventListener('click', () => this.game.restart());
+
+                window.addEventListener('wheel', (e) => {
+                    if (!this.game.player.isLocked) return;
+                    const dir = e.deltaY > 0 ? 1 : -1;
+                    this.game.inventory.changeSelection(dir);
+                    this.renderHotbar();
+                    this.scrollToSelectedHotbar();
+                });
+
+                window.addEventListener('keydown', (e) => {
+                    if (!this.game.player.isLocked) return;
+                    const keyNum = parseInt(e.key);
+                    // 1~9 단축 키 선택 기능 연동
+                    if (keyNum >= 1 && keyNum <= 9) {
+                        this.game.inventory.selectedIndex = keyNum - 1;
+                        this.renderHotbar();
+                        this.scrollToSelectedHotbar();
+                    }
+                });
+
+                this.renderHotbar();
+            }
+
+            renderHotbar() {
+                this.hotbarContainer.innerHTML = '';
+                this.game.inventory.slots.forEach((slot, index) => {
+                    const blockInfo = BLOCK_DATA[slot.type];
+                    const isSelected = index === this.game.inventory.selectedIndex;
+                    const colorHex = '#' + blockInfo.color.toString(16).padStart(6, '0');
+
+                    const slotDiv = document.createElement('div');
+                    slotDiv.id = `hotbar-slot-${index}`;
+                    slotDiv.className = `w-12 h-12 flex-shrink-0 bg-stone-900 border border-stone-800 rounded-xl flex flex-col justify-between items-center p-1.5 relative select-none cursor-pointer transition-all hover:bg-stone-800 ${isSelected ? 'hotbar-selected bg-stone-800' : ''}`;
+                    
+                    slotDiv.addEventListener('mousedown', (e) => {
+                        e.stopPropagation();
+                        this.game.inventory.selectedIndex = index;
+                        this.renderHotbar();
+                    });
+
+                    const itemBox = document.createElement('div');
+                    itemBox.className = 'w-6 h-6 rounded-lg flex items-center justify-center text-md mt-0.5';
+                    
+                    if (blockInfo.isFurniture) {
+                        itemBox.textContent = blockInfo.icon;
+                    } else {
+                        itemBox.style.backgroundColor = colorHex;
+                        itemBox.className += ' border border-stone-950 shadow-inner';
+                    }
+
+                    const countSpan = document.createElement('span');
+                    countSpan.className = 'absolute bottom-0.5 right-1.5 text-[8px] font-black text-stone-500';
+                    countSpan.textContent = "∞";
+
+                    if (index < 9) {
+                        const keySpan = document.createElement('span');
+                        keySpan.className = 'absolute top-0.5 left-1 text-[7px] font-bold text-stone-600';
+                        keySpan.textContent = index + 1;
+                        slotDiv.appendChild(keySpan);
+                    }
+
+                    slotDiv.appendChild(itemBox);
+                    slotDiv.appendChild(countSpan);
+                    slotDiv.title = blockInfo.name;
+                    this.hotbarContainer.appendChild(slotDiv);
+                });
+            }
+
+            scrollToSelectedHotbar() {
+                const activeId = `hotbar-slot-${this.game.inventory.selectedIndex}`;
+                const activeEl = document.getElementById(activeId);
+                if (activeEl) {
+                    activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                }
+            }
+
+            update() {
+                const placed = this.game.blocksPlaced;
+                const target = this.game.winTarget;
+                this.missionProgress.textContent = `고급 가구 배치: ${placed}/${target} 완성`;
+            }
+
+            showMenu(status, isPause = false) {
+                if (status) {
+                    this.menuOverlay.style.opacity = '1';
+                    this.menuOverlay.style.pointerEvents = 'auto';
+                    this.btnPlayText.textContent = isPause ? "설계 계속하기" : "인테리어 설계 시작하기";
+                } else {
+                    this.menuOverlay.style.opacity = '0';
+                    this.menuOverlay.style.pointerEvents = 'none';
+                }
+            }
+
+            showEndScreen(win = false) {
+                this.gameEndOverlay.classList.remove('hidden');
+            }
+
+            hideEndScreen() {
+                this.gameEndOverlay.classList.add('hidden');
+            }
+        }
+
+        // ==========================================
+        // 5. MAIN GAME CLASS (맑은 아침 조명 전용 설계)
+        // ==========================================
+        class Game {
+            constructor() {
+                this.container = document.getElementById('canvas-container');
+                this.clock = new THREE.Clock();
+
+                this.blocksPlaced = 0;
+                this.winTarget = 30; 
+                this.hasEnded = false;
+
+                this.initThree();
+                this.initWorld();
+                this.initPlayer();
+                this.initInteractions();
+                this.initUI();
+
+                document.addEventListener('pointerlockchange', () => this.onPointerLockChange(), false);
+                window.addEventListener('resize', () => this.onWindowResize(), false);
+
+                this.animate();
+            }
+
+            initThree() {
+                // 은은하고 아늑한 대리석/화강암 샌드 하우스 아침 조명 연출
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0xf6f0e5); // 상스런 크림 베이지 아침 하늘
+                this.scene.fog = new THREE.FogExp2(0xf6f0e5, 0.025);
+
+                this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
+
+                this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                this.container.appendChild(this.renderer.domElement);
+
+                // 어둡던 내부를 밝고 뽀샤시하게 채워줄 간접광 세기 상향 (0.38 -> 0.65)
+                this.ambientLight = new THREE.AmbientLight(0xfffdfa, 0.65); 
+                this.scene.add(this.ambientLight);
+
+                // 화사하게 비추는 따뜻한 아침 9시 햇살 세기 상향 (0.45 -> 0.95) 및 그림자 맵 디테일 최적화
+                this.sunLight = new THREE.DirectionalLight(0xfff6ea, 0.95);
+                this.sunLight.castShadow = true;
+                this.sunLight.shadow.mapSize.width = 1024;
+                this.sunLight.shadow.mapSize.height = 1024;
+                this.sunLight.shadow.camera.near = 0.5;
+                this.sunLight.shadow.camera.far = 50;
+                
+                // 햇살이 가구 틈새에 예쁘게 안착될 수 있도록 사선 각도 지정
+                this.sunLight.position.set(12, 22, 16);
+                
+                const d = 20;
+                this.sunLight.shadow.camera.left = -d;
+                this.sunLight.shadow.camera.right = d;
+                this.sunLight.shadow.camera.top = d;
+                this.sunLight.shadow.camera.bottom = -d;
+                this.scene.add(this.sunLight);
+            }
+
+            initWorld() {
+                this.world = new World(this.scene);
+                this.world.generate();
+            }
+
+            initPlayer() {
+                this.player = new Player(this.camera, this.world, this.scene);
+                this.player.position.set(0, 1.2, 0); 
+            }
+
+            initUI() {
+                this.ui = new UIManager(this);
+            }
+
+            initInteractions() {
+                this.raycaster = new THREE.Raycaster();
+                this.mouse = new THREE.Vector2(0, 0);
+
+                window.addEventListener('mousedown', (e) => {
+                    if (!this.player.isLocked || this.hasEnded) return;
+
+                    this.raycaster.setFromCamera(this.mouse, this.camera);
+                    
+                    const targets = [];
+                    this.world.blocks.forEach(b => {
+                        b.meshGroup.traverse(child => {
+                            if (child.isMesh) {
+                                targets.push(child);
+                            }
+                        });
+                    });
+
+                    const intersects = this.raycaster.intersectObjects(targets);
+
+                    if (intersects.length > 0) {
+                        const intersect = intersects[0];
+                        if (intersect.distance > 5.5) return; 
+
+                        const targetMesh = intersect.object;
+                        const parentGroup = targetMesh.userData.parentGroup;
+                        if (!parentGroup) return;
+
+                        const { x, y, z, type } = parentGroup.userData;
+
+                        if (e.button === 0) {
+                            // [좌클릭] 가구 철거 및 회수
+                            const removedType = this.world.removeBlock(x, y, z, true);
+                            if (removedType !== null) {
+                                this.ui.renderHotbar();
+                                this.playBlockImpactEffect(intersect.point, BLOCK_DATA[removedType].color);
+                            }
+                        } 
+                        else if (e.button === 2) {
+                            // [우클릭] 가구 설치
+                            const selected = this.inventory.getSelectedItem();
+                            if (!selected) return;
+
+                            const normal = intersect.face.normal;
+                            const newX = x + normal.x;
+                            const newY = y + normal.y;
+                            const newZ = z + normal.z;
+
+                            const installBox = new THREE.Box3(
+                                new THREE.Vector3(newX, newY, newZ),
+                                new THREE.Vector3(newX + 1, newY + 1, newZ + 1)
+                            );
+                            const pBox = this.player.getBoundingBox(this.player.position);
+                            
+                            if (!installBox.intersectsBox(pBox)) {
+                                if (this.inventory.useItem()) {
+                                    // 1인칭 정면을 바라보며 회전각 스냅 빌드 연산
+                                    const dir = new THREE.Vector3();
+                                    this.camera.getWorldDirection(dir);
+                                    
+                                    const angle = Math.atan2(dir.x, dir.z);
+                                    const snappedAngle = Math.round(angle / (Math.PI / 2)) * (Math.PI / 2);
+                                    const rotationY = snappedAngle + Math.PI;
+
+                                    this.world.setBlock(newX, newY, newZ, selected.type, rotationY, true);
+                                    
+                                    if (BLOCK_DATA[selected.type].isFurniture) {
+                                        this.blocksPlaced++;
+                                    }
+
+                                    this.ui.renderHotbar();
+                                    this.playBlockImpactEffect(new THREE.Vector3(newX+0.5, newY+0.5, newZ+0.5), BLOCK_DATA[selected.type].color);
+
+                                    if (this.blocksPlaced >= this.winTarget) {
+                                        this.gameWin();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }, false);
+
+                window.addEventListener('contextmenu', e => e.preventDefault());
+                this.inventory = new Inventory();
+            }
+
+            onPointerLockChange() {
+                if (document.pointerLockElement === this.container) {
+                    this.player.isLocked = true;
+                    this.ui.showMenu(false);
+                } else {
+                    this.player.isLocked = false;
+                    if (!this.hasEnded) {
+                        this.ui.showMenu(true, true);
+                    }
+                }
+            }
+
+            requestLock() {
+                if (this.hasEnded) return;
+                this.container.requestPointerLock();
+            }
+
+            onWindowResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+
+            playBlockImpactEffect(pos, color) {
+                const particleCount = 6;
+                const geometry = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+                const material = new THREE.MeshBasicMaterial({ color: color });
+                const particles = [];
+
+                for (let i = 0; i < particleCount; i++) {
+                    const mesh = new THREE.Mesh(geometry, material);
+                    mesh.position.copy(pos);
+                    mesh.userData = {
+                        vel: new THREE.Vector3(
+                            (Math.random() - 0.5) * 1.5,
+                            (Math.random() * 1.5) + 0.8,
+                            (Math.random() - 0.5) * 1.5
+                        )
+                    };
+                    this.scene.add(mesh);
+                    particles.push(mesh);
+                }
+
+                const startTime = performance.now();
+                const particleLoop = () => {
+                    const elapsed = (performance.now() - startTime) / 1000;
+                    if (elapsed < 0.4) {
+                        particles.forEach(p => {
+                            p.position.x += p.userData.vel.x * 0.016;
+                            p.position.y += p.userData.vel.y * 0.016;
+                            p.position.z += p.userData.vel.z * 0.016;
+                            p.userData.vel.y -= 5.0 * 0.016;
+                        });
+                        requestAnimationFrame(particleLoop);
+                    } else {
+                        particles.forEach(p => {
+                            this.scene.remove(p);
+                            p.geometry.dispose();
+                            p.material.dispose();
+                        });
+                    }
+                };
+                particleLoop();
+            }
+
+            updateHighlight() {
+                if (!this.player.isLocked) {
+                    this.world.highlightBox.visible = false;
+                    return;
+                }
+
+                this.raycaster.setFromCamera(this.mouse, this.camera);
+                
+                const targets = [];
+                this.world.blocks.forEach(b => {
+                    b.meshGroup.traverse(child => {
+                        if (child.isMesh) {
+                            targets.push(child);
+                        }
+                    });
+                });
+
+                const intersects = this.raycaster.intersectObjects(targets);
+
+                if (intersects.length > 0 && intersects[0].distance <= 5.5) {
+                    const intersectObj = intersects[0].object;
+                    const parentGroup = intersectObj.userData.parentGroup;
+                    if (parentGroup) {
+                        const { x, y, z } = parentGroup.userData;
+                        this.world.highlightBox.position.set(x + 0.5, y + 0.5, z + 0.5);
+                        this.world.highlightBox.visible = true;
+                        return;
+                    }
+                }
+                this.world.highlightBox.visible = false;
+            }
+
+            saveGame() {
+                const worldData = this.world.serialize();
+                const playerData = {
+                    pos: { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z },
+                    blocksPlaced: this.blocksPlaced
+                };
+                const inventoryData = this.inventory.slots;
+
+                localStorage.setItem('da_world_v2', JSON.stringify(worldData));
+                localStorage.setItem('da_player_v2', JSON.stringify(playerData));
+                localStorage.setItem('da_inventory_v2', JSON.stringify(inventoryData));
+
+                this.showFloatingMessage("💾 드림 하우스 인테리어 설계 도면이 저장되었습니다!");
+            }
+
+            loadGame() {
+                const worldData = localStorage.getItem('da_world_v2');
+                const playerData = localStorage.getItem('da_player_v2');
+                const inventoryData = localStorage.getItem('da_inventory_v2');
+
+                if (worldData && playerData && inventoryData) {
+                    this.world.deserialize(JSON.parse(worldData));
+                    
+                    const p = JSON.parse(playerData);
+                    this.player.position.set(p.pos.x, p.pos.y, p.pos.z);
+                    this.blocksPlaced = p.blocksPlaced || 0;
+
+                    this.inventory.slots = JSON.parse(inventoryData);
+
+                    this.ui.renderHotbar();
+                    this.showFloatingMessage("📂 드림 하우스 인테리어 설계 도면이 복원되었습니다!");
+                } else {
+                    this.showFloatingMessage("⚠️ 복원할 설계도 파일이 존재하지 않습니다!");
+                }
+            }
+
+            showFloatingMessage(text) {
+                const msg = document.createElement('div');
+                msg.className = "fixed bottom-24 left-1/2 -translate-x-1/2 bg-stone-900/95 border border-stone-800 px-6 py-2.5 rounded-full text-stone-300 text-[11px] font-bold shadow-2xl tracking-wide z-50 pointer-events-none transition-all duration-300 opacity-0 transform translate-y-2";
+                msg.textContent = text;
+                document.body.appendChild(msg);
+
+                setTimeout(() => {
+                    msg.classList.remove('opacity-0', 'translate-y-2');
+                }, 50);
+
+                setTimeout(() => {
+                    msg.classList.add('opacity-0', '-translate-y-2');
+                    setTimeout(() => msg.remove(), 300);
+                }, 2200);
+            }
+
+            gameWin() {
+                this.hasEnded = true;
+                document.exitPointerLock();
+                this.ui.showEndScreen(true);
+            }
+
+            restart() {
+                this.hasEnded = false;
+                this.blocksPlaced = 0;
+                this.player.position.set(0, 1.2, 0);
+                this.player.velocity.set(0, 0, 0);
+                this.inventory = new Inventory();
+                this.world.generate();
+                this.ui.renderHotbar();
+                this.ui.hideEndScreen();
+                this.clock.getDelta();
+                this.requestLock();
+            }
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+
+                const dt = Math.min(this.clock.getDelta(), 0.1);
+
+                if (this.player.isLocked && !this.hasEnded) {
+                    this.player.update(dt);
+                    this.updateHighlight();
+                }
+
+                this.ui.update();
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+
+        window.onload = () => {
+            const game = new Game();
+        };
+    </script>
+</body>
+</html>
