@@ -1,0 +1,2527 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>사일런트 클리닉: 화력 폭발 (Silent Clinic: Car Smash & Boss 200%)</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Fonts and Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Creepster&family=Nanum+Gothic:wght@400;700;800&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body {
+            font-family: 'Nanum Gothic', sans-serif;
+            background-color: #020204;
+            color: #f1f5f9;
+            user-select: none;
+            overflow: hidden;
+        }
+        .horror-title {
+            font-family: 'Creepster', cursive;
+            text-shadow: 0 0 10px rgba(239, 68, 68, 0.9), 0 0 25px rgba(220, 38, 38, 0.5);
+        }
+        .retro-mono {
+            font-family: 'Share Tech Mono', monospace;
+        }
+        #canvas-container {
+            position: relative;
+            box-shadow: 0 0 35px rgba(0, 0, 0, 0.95), 0 0 20px rgba(239, 68, 68, 0.15);
+        }
+        .scanlines {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.25) 50%
+            );
+            background-size: 100% 4px;
+            pointer-events: none;
+            z-index: 10;
+            opacity: 0.45;
+        }
+        @keyframes horrorFlicker {
+            0%, 100% { opacity: 1; }
+            45% { opacity: 1; }
+            46% { opacity: 0.35; }
+            47% { opacity: 0.85; }
+            48% { opacity: 0.2; }
+            53% { opacity: 0.95; }
+            55% { opacity: 0.4; }
+            56% { opacity: 0.95; }
+        }
+        .flicker-ambient {
+            animation: horrorFlicker 7s infinite;
+        }
+        .v-button {
+            touch-action: none;
+            user-select: none;
+        }
+        .skill-node {
+            background: rgba(15, 23, 42, 0.85);
+            border: 2px solid #334155;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+        }
+        .skill-ready {
+            border-color: #f59e0b;
+            box-shadow: 0 0 15px rgba(245, 158, 11, 0.4);
+        }
+        .skill-car-ready {
+            border-color: #3b82f6;
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.4);
+        }
+    </style>
+</head>
+<body class="w-screen h-screen flex flex-col items-center justify-center p-2">
+
+    <div id="game-wrapper" class="relative w-full max-w-[1024px] h-[760px] bg-slate-950 border-4 border-slate-900 rounded-xl overflow-hidden shadow-2xl flex flex-col">
+        
+        <!-- HEADER HUD -->
+        <header class="h-16 border-b border-slate-900 bg-black px-4 flex items-center justify-between text-xs z-20">
+            <div class="flex items-center gap-4">
+                <span class="text-red-600 font-bold uppercase tracking-widest text-2xl horror-title font-sans">Silent Clinic</span>
+                <span class="px-2 py-0.5 bg-red-950/80 border border-red-800 text-red-400 rounded font-bold text-[11px]" id="hud-floor">1층 - 긴 대피 복도</span>
+            </div>
+            
+            <div class="flex items-center gap-6 text-slate-300">
+                <div class="flex items-center gap-1.5">
+                    <i class="fa-solid fa-clock text-red-500"></i>
+                    <span id="hud-time" class="retro-mono font-bold text-slate-200 text-sm">00:00</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <i class="fa-solid fa-gun text-amber-500 animate-pulse" id="weapon-icon"></i>
+                    <span id="hud-ammo" class="font-bold text-amber-400 text-sm">경찰용 전술 단검</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="font-bold text-slate-400">체력:</span>
+                    <div class="flex gap-0.5 bg-slate-950 p-1 border border-slate-800 rounded-md" id="health-bar-segments"></div>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <button id="btn-pause" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md transition text-xs font-semibold"><i class="fa-solid fa-pause mr-1"></i>일시정지</button>
+            </div>
+        </header>
+
+        <!-- CANVAS AND GAME MODAL WRAPPER -->
+        <div class="flex-1 relative bg-black flex items-center justify-center">
+            
+            <!-- GAME CANVAS CONTAINER -->
+            <div id="canvas-container" class="hidden w-[960px] h-[520px] relative">
+                <canvas id="gameCanvas" width="960" height="520" class="block bg-neutral-950 cursor-crosshair"></canvas>
+                <div class="scanlines"></div>
+                
+                <!-- Floor goal indicator HUD -->
+                <div class="absolute top-4 left-4 bg-black/85 border border-slate-800 rounded px-3 py-2 max-w-[360px] text-xs pointer-events-none transition-all" id="objective-box">
+                    <div class="text-red-500 font-bold uppercase tracking-wide mb-1 flex items-center gap-1">
+                        <i class="fa-solid fa-crosshairs"></i> 작전 지침
+                    </div>
+                    <p id="objective-text" class="text-slate-300 leading-relaxed font-semibold">장애물을 회피하여 우측 끝 계단실 입구까지 도달하십시오.</p>
+                </div>
+
+                <!-- Boss HP Bar Panel -->
+                <div id="boss-hud-panel" class="absolute top-4 right-4 bg-red-950/95 border-2 border-red-700 rounded-md p-2.5 w-[320px] pointer-events-none transition-opacity duration-300 opacity-0 z-30">
+                    <div class="flex justify-between items-center text-xs font-bold text-red-400 mb-1">
+                        <span class="uppercase tracking-widest"><i class="fa-solid fa-skull-crossbones mr-1.5 animate-bounce"></i>변이주: 아바도네스</span>
+                        <span id="boss-hp-percentage" class="retro-mono text-amber-400 font-extrabold">200%</span>
+                    </div>
+                    <div class="w-full bg-slate-900 h-3 rounded border border-red-900 overflow-hidden">
+                        <div id="boss-hp-bar-fill" class="bg-gradient-to-r from-red-600 via-amber-500 to-red-600 h-full w-full transition-all duration-75"></div>
+                    </div>
+                </div>
+
+                <!-- Interaction Prompt HUD -->
+                <div id="interaction-prompt" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-slate-950/95 border-2 border-amber-500 text-amber-400 rounded-lg px-6 py-4 text-center font-bold text-sm shadow-2xl transition-all duration-150 opacity-0 pointer-events-none z-30">
+                    <i class="fa-solid fa-stairs text-2xl mb-1.5 block animate-bounce"></i>
+                    <span id="prompt-main-text">비상 계단문에 도착했습니다.</span>
+                    <p class="text-white text-xs mt-1.5 font-normal">키보드 <kbd class="px-1.5 py-0.5 bg-slate-800 border border-slate-600 rounded text-amber-400 font-bold">F</kbd> 키를 눌러 상호작용 하십시오.</p>
+                </div>
+
+                <div id="horror-overlay" class="absolute inset-0 bg-red-950/45 pointer-events-none opacity-0 transition-opacity duration-150"></div>
+                
+                <div id="toast-message" class="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-slate-900/95 border border-slate-700 text-slate-100 rounded-full px-5 py-2 text-xs font-bold shadow-lg transition-all duration-300 opacity-0 pointer-events-none z-30">
+                    수신 전송 데이터 성공
+                </div>
+            </div>
+
+            <!-- MAIN MENU SCREEN -->
+            <div id="screen-main-menu" class="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-slate-950 to-black z-30 px-6">
+                <div class="text-center mb-8 flicker-ambient">
+                    <h1 class="text-6xl md:text-7xl font-extrabold text-red-600 tracking-wider horror-title mb-1 font-sans">SILENT CLINIC</h1>
+                    <p class="text-slate-400 text-xs tracking-widest uppercase font-mono">가로형 확장 개방 구역 대탈출 • 완벽한 충돌 물리 탑재</p>
+                </div>
+
+                <div class="flex flex-col gap-4 w-72">
+                    <button id="btn-new-game" class="w-full py-3 bg-red-700 hover:bg-red-600 text-white font-bold rounded-lg border-b-4 border-red-900 shadow-lg hover:scale-[1.01] active:scale-[0.99] transition-all text-xs tracking-wider">
+                        탈출 작전 개시 (1층부터 시작)
+                    </button>
+                    <button id="btn-continue" class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-lg border-b-4 border-slate-900 shadow-lg disabled:opacity-40 disabled:cursor-not-allowed hover:scale-[1.01] active:scale-[0.99] transition-all text-xs tracking-wider" disabled>
+                        체크포인트 이어서 가기
+                    </button>
+                    <button id="btn-settings-open" class="w-full py-2 bg-slate-900 hover:bg-slate-800 text-slate-400 text-xs rounded-lg border border-slate-800 transition-all font-semibold">
+                        조작 가이드 및 생존 교범
+                    </button>
+                </div>
+
+                <div class="mt-8 max-w-lg bg-slate-950/80 border border-slate-800 p-3 rounded text-[11px] text-slate-400 leading-relaxed font-mono">
+                    <span class="text-blue-400 font-bold block mb-1">📢 경찰차 폭발 던지기 긴급 업데이트 패치</span>
+                    • <strong>좀비 체력 조정</strong>: 이제 권총으로 정확히 <strong>5번 사격</strong>해야 쓰러집니다!<br>
+                    • <strong>좀비 물량 증가</strong>: 층마다 기어 나오는 감염체의 숫자가 대폭 늘어났습니다.<br>
+                    • <strong>궁극 스킬 [E]: 경찰차 투척</strong>: 엄청난 크기의 순찰차를 소환 투척해 경로 상의 좀비를 일격사시킵니다 (15초 쿨타임).<br>
+                    • <strong>최종 아바도네스 보스전</strong>: 체력 게이지 <strong>200% 증가</strong> 및 바닥 산성 장판 소환 등 다채로운 5중 패턴 구사!
+                </div>
+            </div>
+
+            <!-- GAME OVER SCREEN -->
+            <div id="screen-game-over" class="absolute inset-0 bg-black/95 z-30 flex-col items-center justify-center hidden px-6">
+                <h2 class="text-5xl font-bold text-red-600 horror-title mb-4 tracking-widest animate-pulse font-sans">수사관 순직</h2>
+                <p class="text-slate-400 text-sm max-w-md text-center mb-8 leading-relaxed font-sans">
+                    감염 세포 침투에 의해 생체 신호가 완전히 영으로 수렴되었습니다.
+                </p>
+                <div class="flex gap-4 w-72">
+                    <button id="btn-retry" class="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded shadow-lg transition-all text-xs">
+                        해당 층수 재시작
+                    </button>
+                    <button id="btn-gameover-menu" class="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded transition-all text-xs">
+                        메인 메뉴로
+                    </button>
+                </div>
+            </div>
+
+            <!-- GAME CLEAR SCREEN -->
+            <div id="screen-clear" class="absolute inset-0 bg-slate-950/95 z-30 flex flex-col items-center justify-center hidden px-6">
+                <div class="text-center mb-8">
+                    <i class="fa-solid fa-circle-check text-emerald-500 text-5xl animate-bounce mb-4"></i>
+                    <h2 class="text-5xl font-bold text-emerald-500 font-sans tracking-wide mb-2">옥상 탈출 작전 대성공!</h2>
+                    <p class="text-slate-400 text-sm font-sans">최종 마기 보스 아바도네스(200% HP)를 격멸하고 헬기 탑승에 성공하여 탈출했습니다!</p>
+                </div>
+
+                <div class="bg-black/90 border border-slate-800 rounded-lg p-6 w-96 mb-8 text-center shadow-2xl font-mono">
+                    <h3 class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-4 border-b border-slate-800 pb-2">최종 작전 보고서</h3>
+                    <div class="flex justify-between text-sm py-1.5">
+                        <span class="text-slate-400">총 돌파 소요 시간:</span>
+                        <span id="clear-time" class="font-bold text-slate-200 text-base">00:00</span>
+                    </div>
+                    <div class="flex justify-between text-sm py-1.5">
+                        <span class="text-slate-400">최종 수사관 생존 여부:</span>
+                        <span class="font-bold text-emerald-400 text-base">생존 대원 복귀</span>
+                    </div>
+                </div>
+
+                <button id="btn-clear-menu" class="w-64 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow-lg transition-all">
+                    사령부 복귀
+                </button>
+            </div>
+
+            <!-- PAUSE SCREEN -->
+            <div id="screen-pause" class="absolute inset-0 bg-black/90 z-30 flex flex-col items-center justify-center hidden px-6">
+                <h3 class="text-3xl font-bold text-slate-200 mb-6 uppercase tracking-widest retro-mono">작전 일시 중지</h3>
+                <div class="flex flex-col gap-4 w-64">
+                    <button id="btn-resume" class="w-full py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg transition-all text-xs">
+                        작전 이어서 재개
+                    </button>
+                    <button id="btn-save" class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-lg transition-all text-xs">
+                        현재 데이터 임시저장
+                    </button>
+                    <button id="btn-menu-exit" class="w-full py-3 bg-slate-900 hover:bg-slate-800 text-slate-400 rounded-lg border border-slate-800 transition-all text-xs">
+                        탈출 포기 (메인메뉴)
+                    </button>
+                </div>
+            </div>
+
+            <!-- SETTINGS SCREEN -->
+            <div id="screen-settings" class="absolute inset-0 bg-slate-950 z-30 flex flex-col items-center justify-center hidden px-6 py-4">
+                <div class="max-w-xl w-full bg-black/90 border border-slate-800 rounded-lg p-6 text-xs text-slate-300 overflow-y-auto max-h-full">
+                    <h3 class="text-lg font-bold text-red-500 mb-4 border-b border-slate-800 pb-2"><i class="fa-solid fa-circle-info mr-2"></i>생존 전술 교범</h3>
+                    
+                    <div class="space-y-3 mb-6 leading-relaxed">
+                        <p><strong class="text-white text-sm">1. WASD 무빙 & 충돌:</strong> 키보드 <kbd class="px-1.5 py-0.5 bg-slate-800 rounded text-amber-400">W</kbd> <kbd class="px-1.5 py-0.5 bg-slate-800 rounded text-amber-400">A</kbd> <kbd class="px-1.5 py-0.5 bg-slate-800 rounded text-amber-400">S</kbd> <kbd class="px-1.5 py-0.5 bg-slate-800 rounded text-amber-400">D</kbd> 또는 <kbd class="px-1.5 py-0.5 bg-slate-800 rounded text-amber-400">방향키</kbd>를 사용하여 이동합니다.</p>
+                        <p><strong class="text-blue-400 text-sm">2. [E] 경찰차 초강력 투척 (신규!):</strong> 위협 상황에서 단숨에 좀비 무리를 정리합니다. 15초 쿨타임을 가지며 마우스 에임 방향으로 무시무시한 순찰차를 던집니다. 일반 좀비는 <strong>한 방에 즉사</strong>합니다!</p>
+                        <p><strong class="text-white text-sm">3. 10초 쿨타임 전술 질주:</strong> <kbd class="px-1.5 py-0.5 bg-slate-800 rounded text-amber-400">Shift</kbd> 키를 눌러 짧은 시간 무적 질주하여 포위를 풀고 탈출할 수 있습니다.</p>
+                        <p><strong class="text-white text-sm">4. 20초 쿨타임 특수 병기 로켓포:</strong> <kbd class="px-1.5 py-0.5 bg-slate-800 rounded text-amber-400">R</kbd> 키를 눌러 광역 기절/폭발 피해를 발휘하는 고속 로켓을 발사합니다.</p>
+                    </div>
+
+                    <button id="btn-settings-close" class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-md transition-all text-xs">
+                        전술 숙지 완료 (메인으로)
+                    </button>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- FOOTER BAR WITH SKILLS HUD -->
+        <footer class="h-16 border-t border-slate-900 bg-black/95 px-4 flex items-center justify-between gap-4 text-xs z-20">
+            <div class="flex items-center gap-4">
+                <div id="skill-dash" class="skill-node flex items-center gap-2 px-3 py-1.5 rounded-lg text-slate-400 text-[11px] font-bold">
+                    <i class="fa-solid fa-gauge-high text-amber-500 text-sm"></i>
+                    <span>대시 [Shift]</span>
+                    <span id="dash-cd-timer" class="retro-mono text-amber-400">READY</span>
+                </div>
+                <div id="skill-car" class="skill-node flex items-center gap-2 px-3 py-1.5 rounded-lg text-slate-400 text-[11px] font-bold">
+                    <i class="fa-solid fa-car-burst text-blue-400 text-sm"></i>
+                    <span>경찰차 투척 [E]</span>
+                    <span id="car-cd-timer" class="retro-mono text-blue-400">READY</span>
+                </div>
+                <div id="skill-rocket" class="skill-node flex items-center gap-2 px-3 py-1.5 rounded-lg text-slate-400 text-[11px] font-bold">
+                    <i class="fa-solid fa-burst text-cyan-500 text-sm animate-pulse"></i>
+                    <span>로켓포 [R]</span>
+                    <span id="rocket-cd-timer" class="retro-mono text-cyan-400">READY</span>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-2 overflow-hidden whitespace-nowrap text-ellipsis flex-1 max-w-[300px]">
+                <span class="text-red-500 font-bold tracking-wider shrink-0 uppercase"><i class="fa-solid fa-terminal mr-1"></i>무전 수신:</span>
+                <div id="hud-log" class="text-slate-400 font-medium italic overflow-hidden whitespace-nowrap text-ellipsis">
+                    통신 연결 성공... 무기를 장착하고 다음 층 계단으로 질주하십시오.
+                </div>
+            </div>
+
+            <div class="text-slate-500 hidden sm:block shrink-0 italic text-[11px]">
+                WASD 이동 | Shift 대시 | E 경찰차 | R 로켓포 | L-Click 사격
+            </div>
+        </footer>
+
+        <!-- MOBILE TOUCH PAD -->
+        <div id="mobile-controls" class="absolute bottom-18 right-4 flex gap-4 md:hidden z-20 pointer-events-none w-full justify-between px-6">
+            <div class="flex flex-col gap-1.5 pointer-events-auto">
+                <div class="flex justify-center">
+                    <button class="v-button w-11 h-11 bg-slate-900/80 border border-slate-700 rounded-full text-slate-300 font-bold flex items-center justify-center active:bg-red-700 text-sm" id="v-up">W</button>
+                </div>
+                <div class="flex gap-4">
+                    <button class="v-button w-11 h-11 bg-slate-900/80 border border-slate-700 rounded-full text-slate-300 font-bold flex items-center justify-center active:bg-red-700 text-sm" id="v-left">A</button>
+                    <button class="v-button w-11 h-11 bg-slate-900/80 border border-slate-700 rounded-full text-slate-300 font-bold flex items-center justify-center active:bg-red-700 text-sm" id="v-down">S</button>
+                    <button class="v-button w-11 h-11 bg-slate-900/80 border border-slate-700 rounded-full text-slate-300 font-bold flex items-center justify-center active:bg-red-700 text-sm" id="v-right">D</button>
+                </div>
+            </div>
+            
+            <div class="flex gap-2 items-center pointer-events-auto">
+                <button class="v-button w-11 h-11 bg-slate-900/90 border border-amber-500 text-amber-400 rounded-full font-bold text-xs flex flex-col items-center justify-center" id="v-dash"><i class="fa-solid fa-gauge-high"></i>DASH</button>
+                <button class="v-button w-11 h-11 bg-slate-900/90 border border-blue-500 text-blue-400 rounded-full font-bold text-xs flex flex-col items-center justify-center" id="v-car"><i class="fa-solid fa-car-burst"></i>CAR</button>
+                <button class="v-button w-11 h-11 bg-slate-900/90 border border-cyan-500 text-cyan-400 rounded-full font-bold text-xs flex flex-col items-center justify-center" id="v-rocket"><i class="fa-solid fa-burst"></i>RK</button>
+                <button class="v-button w-12 h-12 bg-emerald-700/85 border border-emerald-400 text-white rounded-full font-extrabold shadow-lg flex items-center justify-center active:bg-emerald-500" id="v-interact">F</button>
+                <button class="v-button w-14 h-14 bg-red-700/80 border-2 border-red-500 text-white rounded-full font-bold shadow-lg flex items-center justify-center active:bg-red-500 mr-2" id="v-attack">공격</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    class AudioEngine {
+        constructor() {
+            this.ctx = null;
+            this.ambientOsc = null;
+            this.ambientGain = null;
+            this.heartbeatInterval = null;
+            this.init();
+        }
+
+        init() {
+            try {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (AudioCtx) this.ctx = new AudioCtx();
+            } catch(e) {
+                console.warn("Audio Context init blocked or skipped.", e);
+            }
+        }
+
+        resume() {
+            if (this.ctx && this.ctx.state === 'suspended') {
+                this.ctx.resume();
+            }
+        }
+
+        startAmbient() {
+            this.resume();
+            if (!this.ctx) return;
+            try {
+                this.stopAmbient();
+                this.ambientOsc = this.ctx.createOscillator();
+                this.ambientOsc.type = 'sawtooth';
+                this.ambientOsc.frequency.setValueAtTime(32, this.ctx.currentTime); 
+
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(70, this.ctx.currentTime);
+
+                this.ambientGain = this.ctx.createGain();
+                this.ambientGain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+
+                const lfo = this.ctx.createOscillator();
+                lfo.frequency.setValueAtTime(0.12, this.ctx.currentTime); 
+                const lfoGain = this.ctx.createGain();
+                lfoGain.gain.setValueAtTime(0.03, this.ctx.currentTime);
+                
+                lfo.connect(lfoGain);
+                lfoGain.connect(this.ambientGain.gain);
+                
+                this.ambientOsc.connect(filter);
+                filter.connect(this.ambientGain);
+                this.ambientGain.connect(this.ctx.destination);
+
+                this.ambientOsc.start();
+                lfo.start();
+            } catch(e){}
+        }
+
+        stopAmbient() {
+            if (this.ambientOsc) {
+                try { this.ambientOsc.stop(); } catch(e){}
+                this.ambientOsc = null;
+            }
+        }
+
+        playHeartbeat() {
+            if (!this.ctx) return;
+            this.resume();
+            try {
+                const playBeep = (freq, duration, vol) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(50, this.ctx.currentTime);
+                    
+                    gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+                    
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + duration);
+                };
+                playBeep(50, 0.25, 0.18);
+                setTimeout(() => { playBeep(45, 0.35, 0.14); }, 180);
+            } catch(e){}
+        }
+
+        startHeartbeats() {
+            if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = setInterval(() => { this.playHeartbeat(); }, 1200);
+        }
+
+        stopHeartbeats() {
+            if (this.heartbeatInterval) {
+                clearInterval(this.heartbeatInterval);
+                this.heartbeatInterval = null;
+            }
+        }
+
+        playStep() {
+            if (!this.ctx) return;
+            try {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(65, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(12, this.ctx.currentTime + 0.1);
+                
+                gain.gain.setValueAtTime(0.04, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.1);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.12);
+            } catch(e){}
+        }
+
+        playZombieMoan() {
+            if (!this.ctx) return;
+            try {
+                const osc = this.ctx.createOscillator();
+                const filter = this.ctx.createBiquadFilter();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(65, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(35, this.ctx.currentTime + 0.95);
+                
+                filter.type = 'peaking';
+                filter.frequency.setValueAtTime(200, this.ctx.currentTime);
+                filter.Q.setValueAtTime(10, this.ctx.currentTime);
+                
+                gain.gain.setValueAtTime(0.14, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.95);
+                
+                osc.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 1.0);
+            } catch(e){}
+        }
+
+        playGunfire() {
+            if (!this.ctx) return;
+            try {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(280, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.12);
+                
+                gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.15);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.16);
+            } catch(e){}
+        }
+
+        playQuantumFire() {
+            if (!this.ctx) return;
+            try {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(120, this.ctx.currentTime + 0.08);
+                
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.1);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.1);
+            } catch(e){}
+        }
+
+        playRocketFire() {
+            if (!this.ctx) return;
+            try {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(15, this.ctx.currentTime + 0.45);
+                
+                gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.5);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.5);
+            } catch(e){}
+        }
+
+        playCarEngine() {
+            if (!this.ctx) return;
+            try {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(95, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(260, this.ctx.currentTime + 0.8);
+                
+                gain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 1.2);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 1.2);
+            } catch(e){}
+        }
+
+        playSlash() {
+            if (!this.ctx) return;
+            try {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(550, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(90, this.ctx.currentTime + 0.08);
+                
+                gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.09);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.1);
+            } catch(e){}
+        }
+
+        playSolve() {
+            if (!this.ctx) return;
+            try {
+                const now = this.ctx.currentTime;
+                const notes = [261.63, 329.63, 392.00, 523.25];
+                notes.forEach((freq, idx) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+                    gain.gain.setValueAtTime(0.1, now + idx * 0.08);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.2);
+                    
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(now + idx * 0.08);
+                    osc.stop(now + idx * 0.08 + 0.25);
+                });
+            } catch(e){}
+        }
+
+        playDamage() {
+            if (!this.ctx) return;
+            try {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(15, this.ctx.currentTime + 0.2);
+                
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.25);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.27);
+            } catch(e){}
+        }
+    }
+
+    const audio = new AudioEngine();
+    </script>
+
+    <script>
+    class SaveManager {
+        static SAVE_KEY = "SILENT_CLINIC_QUANTUM_SAVE_2026";
+
+        static save(gameData) {
+            try {
+                localStorage.setItem(this.SAVE_KEY, JSON.stringify(gameData));
+                return true;
+            } catch(e) {
+                console.error("Autosave Target Failed:", e);
+                return false;
+            }
+        }
+
+        static load() {
+            try {
+                const raw = localStorage.getItem(this.SAVE_KEY);
+                if (raw) return JSON.parse(raw);
+            } catch(e) {}
+            return null;
+        }
+
+        static clear() {
+            try {
+                localStorage.removeItem(this.SAVE_KEY);
+            } catch(e) {}
+        }
+    }
+    </script>
+
+    <script>
+    const TILE_SIZE = 40;
+    const GRID_COLS = 62; // 62 * 40 = 2480px 초장거리 가로 병동 복도형 맵!
+    const GRID_ROWS = 13; // 13 * 40 = 520px 높이
+
+    function generateOpenFloorGrid(floorIndex) {
+        const grid = [];
+        for (let r = 0; r < GRID_ROWS; r++) {
+            grid[r] = [];
+            for (let c = 0; c < GRID_COLS; c++) {
+                if (r === 0 || r === GRID_ROWS - 1 || c === 0 || c === GRID_COLS - 1) {
+                    grid[r][c] = 1;
+                } else {
+                    grid[r][c] = 0; 
+                }
+            }
+        }
+
+        grid[Math.floor(GRID_ROWS / 2)][GRID_COLS - 2] = 4;
+
+        const layouts = [
+            // Floor 1 Layout obstacles
+            [
+                {c: 10, r: 3, w: 2, h: 2}, {c: 10, r: 8, w: 2, h: 2},
+                {c: 20, r: 2, w: 1, h: 4}, {c: 20, r: 7, w: 1, h: 4},
+                {c: 30, r: 4, w: 2, h: 5},
+                {c: 40, r: 2, w: 1, h: 4}, {c: 40, r: 7, w: 1, h: 4},
+                {c: 50, r: 3, w: 2, h: 2}, {c: 50, r: 8, w: 2, h: 2}
+            ],
+            // Floor 2 Layout obstacles
+            [
+                {c: 8, r: 2, w: 2, h: 3}, {c: 8, r: 8, w: 2, h: 3},
+                {c: 18, r: 4, w: 3, h: 2}, {c: 18, r: 7, w: 3, h: 2},
+                {c: 28, r: 2, w: 2, h: 4}, {c: 28, r: 8, w: 2, h: 3},
+                {c: 38, r: 5, w: 4, h: 3},
+                {c: 48, r: 3, w: 2, h: 3}, {c: 48, r: 7, w: 2, h: 3}
+            ],
+            // Floor 3 Layout obstacles
+            [
+                {c: 9, r: 2, w: 1, h: 5}, {c: 9, r: 8, w: 1, h: 3},
+                {c: 19, r: 1, w: 2, h: 4}, {c: 19, r: 7, w: 2, h: 5},
+                {c: 29, r: 4, w: 3, h: 4},
+                {c: 39, r: 1, w: 2, h: 5}, {c: 39, r: 8, w: 2, h: 4},
+                {c: 49, r: 3, w: 1, h: 6}
+            ],
+            // Floor 4 Layout obstacles
+            [
+                {c: 7, r: 3, w: 2, h: 2}, {c: 14, r: 7, w: 2, h: 3},
+                {c: 21, r: 2, w: 2, h: 4}, {c: 28, r: 6, w: 2, h: 5},
+                {c: 35, r: 2, w: 3, h: 3}, {c: 42, r: 8, w: 2, h: 3},
+                {c: 49, r: 3, w: 2, h: 4}
+            ],
+            // Floor 5 Layout obstacles (Main Arena for Final Boss) - 장애물 완전 제거!
+            []
+        ];
+
+        const activeLayout = layouts[floorIndex] || layouts[0];
+        activeLayout.forEach(obj => {
+            for (let rOffset = 0; rOffset < obj.h; rOffset++) {
+                for (let cOffset = 0; cOffset < obj.w; cOffset++) {
+                    const finalR = obj.r + rOffset;
+                    const finalC = obj.c + cOffset;
+                    if (finalR < GRID_ROWS && finalC < GRID_COLS) {
+                        if (!(finalC <= 5 && finalR >= 3 && finalR <= 9) && !(finalC >= GRID_COLS - 6)) {
+                            grid[finalR][finalC] = 1;
+                        }
+                    }
+                }
+            }
+        });
+
+        return grid;
+    }
+
+    const CLINIC_FLOORS = [
+        {
+            index: 0,
+            name: "1층 - 중앙 비상 격리 통로",
+            goal: "엄폐물을 활용해 좀비 시야를 우회하고, 우측 끝 비상문 앞으로 가서 [F] 키를 누르십시오.",
+            playerStart: { x: 2, y: 6 },
+            weaponDrops: [
+                { x: 10, y: 2, type: "pistol" },
+                { x: 22, y: 10, type: "ammo" },
+                { x: 38, y: 2, type: "ammo" }
+            ],
+            zombies: [
+                { x: 14, y: 4 }, { x: 20, y: 9 }, { x: 25, y: 2 }, { x: 28, y: 10 }, { x: 34, y: 3 }, 
+                { x: 39, y: 8 }, { x: 44, y: 9 }, { x: 48, y: 2 }, { x: 52, y: 5 }, { x: 55, y: 10 }
+            ]
+        },
+        {
+            index: 1,
+            name: "2층 - 응급 외래 처치 전람실",
+            goal: "체력 관리에 항상 주의하십시오. 무기 및 탄약 상자를 수색하고 우측 비상문으로 이동하십시오.",
+            playerStart: { x: 2, y: 6 },
+            weaponDrops: [
+                { x: 8, y: 6, type: "pistol" },
+                { x: 25, y: 3, type: "ammo" },
+                { x: 42, y: 9, type: "ammo" }
+            ],
+            zombies: [
+                { x: 12, y: 3 }, { x: 16, y: 8 }, { x: 21, y: 10 }, { x: 26, y: 2 }, { x: 31, y: 3 }, 
+                { x: 36, y: 9 }, { x: 40, y: 10 }, { x: 44, y: 2 }, { x: 48, y: 5 }, { x: 53, y: 9 }, { x: 56, y: 4 }
+            ]
+        },
+        {
+            index: 2,
+            name: "3층 - 수술용 산소 공급 회廊",
+            goal: "경찰차 투척[E] 스킬과 로켓포[R]를 효율적으로 배합해 활로를 열고 전진하십시오.",
+            playerStart: { x: 2, y: 6 },
+            weaponDrops: [
+                { x: 11, y: 10, type: "pistol" },
+                { x: 28, y: 2, type: "ammo" },
+                { x: 45, y: 10, type: "ammo" }
+            ],
+            zombies: [
+                { x: 11, y: 3 }, { x: 15, y: 9 }, { x: 20, y: 9 }, { x: 24, y: 2 }, { x: 29, y: 4 }, 
+                { x: 33, y: 10 }, { x: 38, y: 8 }, { x: 42, y: 3 }, { x: 47, y: 3 }, { x: 52, y: 10 }, { x: 55, y: 5 }
+            ]
+        },
+        {
+            index: 3,
+            name: "4층 - 비상용 산성 정류소",
+            goal: "마지막 대피 헬기 층으로 가기 직전입니다. 극단적인 돌림 감염체 밀도를 경계하십시오.",
+            playerStart: { x: 2, y: 6 },
+            weaponDrops: [
+                { x: 7, y: 2, type: "pistol" },
+                { x: 24, y: 10, type: "ammo" },
+                { x: 40, y: 2, type: "ammo" }
+            ],
+            zombies: [
+                { x: 10, y: 4 }, { x: 14, y: 9 }, { x: 18, y: 8 }, { x: 22, y: 2 }, { x: 28, y: 3 }, 
+                { x: 32, y: 10 }, { x: 37, y: 9 }, { x: 41, y: 2 }, { x: 46, y: 4 }, { x: 50, y: 8 }, { x: 54, y: 10 }
+            ]
+        },
+        {
+            index: 4,
+            name: "5층 - 옥상 메인 헬기 계단 광장 (결전)",
+            goal: "입구에서 양자포를 습득하고, 200% 생체 장벽을 보유한 최종 보스 아바도네스를 격파하십시오!",
+            playerStart: { x: 2, y: 6 },
+            weaponDrops: [
+                { x: 6, y: 6, type: "quantum" }
+            ],
+            zombies: [
+                { x: 12, y: 4 }, { x: 15, y: 9 }, { x: 19, y: 2 }, { x: 22, y: 9 }, { x: 26, y: 4 }, 
+                { x: 30, y: 3 }, { x: 35, y: 10 }, { x: 42, y: 9 }, { x: 46, y: 3 }
+            ]
+        }
+    ];
+
+    function checkLineOfSight(grid, x0, y0, x1, y1) {
+        let dx = Math.abs(x1 - x0);
+        let dy = Math.abs(y1 - y0);
+        let sx = (x0 < x1) ? 1 : -1;
+        let sy = (y0 < y1) ? 1 : -1;
+        let err = dx - dy;
+
+        let cx = x0;
+        let cy = y0;
+
+        while (true) {
+            if (cx < 0 || cx >= GRID_COLS || cy < 0 || cy >= GRID_ROWS) return false;
+            if (grid[cy][cx] === 1) {
+                if (cx !== x0 || cy !== y0) {
+                    return false; 
+                }
+            }
+            if (cx === x1 && cy === y1) break;
+            let e2 = 2 * err;
+            if (e2 > -dy) {
+                err -= dy;
+                cx += sx;
+            }
+            if (e2 < dx) {
+                err += dx;
+                cy += sy;
+            }
+        }
+        return true;
+    }
+    </script>
+
+    <script>
+    class DynamicZombie {
+        constructor(gridX, gridY) {
+            this.gridX = gridX;
+            this.gridY = gridY;
+            this.pixelX = gridX * TILE_SIZE + TILE_SIZE / 2;
+            this.pixelY = gridY * TILE_SIZE + TILE_SIZE / 2;
+            
+            this.spawnX = gridX;
+            this.spawnY = gridY;
+            
+            this.speed = 1.45; 
+            this.angle = Math.random() * Math.PI * 2;
+            this.state = 'patrol'; 
+            this.stateTimer = 0;
+            this.shiverOffset = 0;
+            this.hp = 125; 
+            this.aggroCooldown = 0; 
+        }
+
+        update(dt, player, grid, otherZombies) {
+            this.shiverOffset = Math.sin(Date.now() / 45) * 2.0;
+
+            const dx = player.pixelX - this.pixelX;
+            const dy = player.pixelY - this.pixelY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            const zGridX = Math.floor(this.pixelX / TILE_SIZE);
+            const zGridY = Math.floor(this.pixelY / TILE_SIZE);
+
+            const hasSight = checkLineOfSight(grid, zGridX, zGridY, player.gridX, player.gridY);
+
+            if (dist < 260 && hasSight) {
+                if (this.state !== 'chase') {
+                    this.state = 'chase';
+                    audio.playZombieMoan();
+                }
+                this.aggroCooldown = 2.5; 
+            } else {
+                if (this.state === 'chase') {
+                    this.aggroCooldown -= dt;
+                    if (this.aggroCooldown <= 0 || dist > 380) {
+                        this.state = 'patrol';
+                    }
+                }
+            }
+
+            let moveVecX = 0;
+            let moveVecY = 0;
+
+            if (this.state === 'chase') {
+                this.angle = Math.atan2(dy, dx);
+                moveVecX = Math.cos(this.angle) * this.speed;
+                moveVecY = Math.sin(this.angle) * this.speed;
+            } else {
+                const targetPixelX = this.spawnX * TILE_SIZE + TILE_SIZE / 2;
+                const targetPixelY = this.spawnY * TILE_SIZE + TILE_SIZE / 2;
+                const distToSpawn = Math.hypot(targetPixelX - this.pixelX, targetPixelY - this.pixelY);
+
+                if (distToSpawn > 15) {
+                    this.angle = Math.atan2(targetPixelY - this.pixelY, targetPixelX - this.pixelX);
+                    moveVecX = Math.cos(this.angle) * (this.speed * 0.8);
+                    moveVecY = Math.sin(this.angle) * (this.speed * 0.8);
+                } else {
+                    this.stateTimer += dt;
+                    if (this.stateTimer > 4.5) {
+                        this.stateTimer = 0;
+                        this.angle = Math.random() * Math.PI * 2;
+                    }
+                    moveVecX = Math.cos(this.angle) * 0.35;
+                    moveVecY = Math.sin(this.angle) * 0.35;
+                }
+            }
+
+            otherZombies.forEach(other => {
+                if (other === this) return;
+                const distBetween = Math.hypot(other.pixelX - this.pixelX, other.pixelY - this.pixelY);
+                if (distBetween < 22) { 
+                    const pushAngle = Math.atan2(this.pixelY - other.pixelY, this.pixelX - other.pixelX);
+                    moveVecX += Math.cos(pushAngle) * 0.6;
+                    moveVecY += Math.sin(pushAngle) * 0.6;
+                }
+            });
+
+            const targetX = this.pixelX + moveVecX;
+            const targetY = this.pixelY + moveVecY;
+
+            if (this.canWalkAt(targetX, this.pixelY, grid)) {
+                this.pixelX = targetX;
+            } else {
+                this.pixelY += Math.sign(moveVecY) * 0.5;
+            }
+
+            if (this.canWalkAt(this.pixelX, targetY, grid)) {
+                this.pixelY = targetY;
+            } else {
+                this.pixelX += Math.sign(moveVecX) * 0.5;
+            }
+
+            this.gridX = Math.floor(this.pixelX / TILE_SIZE);
+            this.gridY = Math.floor(this.pixelY / TILE_SIZE);
+        }
+
+        canWalkAt(px, py, grid) {
+            const radius = 10;
+            const checkPoints = [
+                { x: px - radius, y: py - radius },
+                { x: px + radius, y: py - radius },
+                { x: px - radius, y: py + radius },
+                { x: px + radius, y: py + radius }
+            ];
+            for (let pt of checkPoints) {
+                const gx = Math.floor(pt.x / TILE_SIZE);
+                const gy = Math.floor(pt.y / TILE_SIZE);
+                if (gx < 0 || gx >= GRID_COLS || gy < 0 || gy >= GRID_ROWS) return false;
+                if (grid[gy][gx] === 1) return false;
+            }
+            return true;
+        }
+
+        draw(ctx) {
+            ctx.save();
+            ctx.translate(this.pixelX + this.shiverOffset, this.pixelY);
+            ctx.rotate(this.angle);
+
+            ctx.fillStyle = "#1b381e"; 
+            ctx.beginPath();
+            ctx.arc(0, 0, 11, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = "#7a1d2e";
+            ctx.beginPath();
+            ctx.arc(-2, -2, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = "#ff003c";
+            ctx.beginPath();
+            ctx.arc(5, -3, 2.5, 0, Math.PI * 2);
+            ctx.arc(5, 3, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = "#14532d";
+            ctx.lineWidth = 3;
+            const armTwitch = Math.sin(Date.now() / 60) * 3;
+            
+            ctx.beginPath();
+            ctx.moveTo(0, -7);
+            ctx.lineTo(13 + armTwitch, -5);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(0, 7);
+            ctx.lineTo(12 - armTwitch, 5);
+            ctx.stroke();
+
+            ctx.fillStyle = "#450a0a";
+            ctx.fillRect(-5, -4, 4, 8);
+
+            if (this.state === 'chase') {
+                ctx.restore();
+                ctx.save();
+                ctx.fillStyle = "#ef4444";
+                ctx.font = "bold 13px sans-serif";
+                ctx.fillText("⚠️", this.pixelX - 6, this.pixelY - 18);
+                ctx.restore();
+                return;
+            }
+
+            ctx.restore();
+        }
+    }
+    </script>
+
+    <script>
+    class AbaddonesBoss {
+        constructor(gridX, gridY) {
+            this.gridX = gridX;
+            this.gridY = gridY;
+            this.pixelX = gridX * TILE_SIZE + TILE_SIZE / 2;
+            this.pixelY = gridY * TILE_SIZE + TILE_SIZE / 2;
+
+            this.speed = 1.9; // 대폭 상향된 기동력
+            this.hp = 2400; 
+            this.maxHp = 2400;
+            this.angle = Math.PI;
+
+            this.attackTimer = 0;
+            this.pulseAnim = 0;
+            this.chargeMode = false;
+            this.chargeDirX = 0;
+            this.chargeTimer = 0;
+            this.angerAnim = 0;
+
+            this.patternCycle = 0; 
+        }
+
+        update(dt, player, grid) {
+            this.pulseAnim = Math.sin(Date.now() / 120) * 4;
+            this.angerAnim = Math.sin(Date.now() / 40) * 1.5;
+
+            if (this.hp < this.maxHp * 0.5) {
+                this.speed = 2.8; // 분노 광폭화 돌파 속도
+            }
+
+            const dx = player.pixelX - this.pixelX;
+            const dy = player.pixelY - this.pixelY;
+            const dist = Math.hypot(dx, dy);
+
+            this.angle = Math.atan2(dy, dx);
+
+            if (this.chargeMode) {
+                this.chargeTimer -= dt;
+                const chargeSpeed = 7.5;
+                const targetX = this.pixelX + this.chargeDirX * chargeSpeed;
+
+                if (this.canWalkAt(targetX, this.pixelY, grid)) {
+                    this.pixelX = targetX;
+                } else {
+                    this.chargeMode = false; 
+                    audio.playDamage();
+                    game.logMessage("보스가 벽에 뇌격을 부딪치며 돌진을 중지했습니다.");
+                }
+
+                if (this.chargeTimer <= 0) {
+                    this.chargeMode = false;
+                }
+
+                if (dist < 45) {
+                    game.damagePlayer(20, "⚠️ 보스 아바도네스의 전력 차지 돌진공격에 직격당했습니다!");
+                    this.chargeMode = false;
+                }
+                return;
+            }
+
+            if (dist > 30) {
+                const moveVecX = Math.cos(this.angle) * this.speed;
+                const moveVecY = Math.sin(this.angle) * this.speed;
+
+                const targetX = this.pixelX + moveVecX;
+                const targetY = this.pixelY + moveVecY;
+
+                if (this.canWalkAt(targetX, this.pixelY, grid)) this.pixelX = targetX;
+                if (this.canWalkAt(this.pixelX, targetY, grid)) this.pixelY = targetY;
+            }
+
+            this.attackTimer += dt;
+            const attackCooldown = this.hp < this.maxHp * 0.5 ? 1.0 : 1.8;
+
+            if (this.attackTimer > attackCooldown) {
+                this.attackTimer = 0;
+                this.executeDiverseSkill(player, dist);
+            }
+        }
+
+        executeDiverseSkill(player, dist) {
+            this.patternCycle = (this.patternCycle + 1) % 5;
+
+            switch(this.patternCycle) {
+                case 0:
+                    game.spawnBossProjectile(this.pixelX, this.pixelY, this.angle - 0.35);
+                    game.spawnBossProjectile(this.pixelX, this.pixelY, this.angle - 0.15);
+                    game.spawnBossProjectile(this.pixelX, this.pixelY, this.angle);
+                    game.spawnBossProjectile(this.pixelX, this.pixelY, this.angle + 0.15);
+                    game.spawnBossProjectile(this.pixelX, this.pixelY, this.angle + 0.35);
+                    audio.playZombieMoan();
+                    game.logMessage("보스 스킬 [블러드 스페어]: 오염된 탄알이 5갈래로 퍼집니다.");
+                    break;
+
+                case 1:
+                    if (dist < 320) {
+                        const pullAngle = Math.atan2(this.pixelY - player.pixelY, this.pixelX - player.pixelX);
+                        player.pixelX += Math.cos(pullAngle) * 95;
+                        player.pixelY += Math.sin(pullAngle) * 95;
+                        audio.playDamage();
+                        game.createSparks(player.pixelX, player.pixelY, "#a855f7", 10);
+                        game.logMessage("보스 스킬 [공간 흡수]: 강한 인력으로 수사관을 자기 앞으로 끌어당겼습니다!");
+                    }
+                    break;
+
+                case 2:
+                    game.spawnAcidSpit(player.pixelX, player.pixelY);
+                    audio.playStep();
+                    game.logMessage("보스 스킬 [용성 점막]: 플레이어의 위치에 즉시 지속 피해 산성 장판을 남겼습니다.");
+                    break;
+
+                case 3:
+                    this.chargeMode = true;
+                    this.chargeDirX = Math.sign(player.pixelX - this.pixelX);
+                    this.chargeTimer = 1.6;
+                    audio.playRocketFire();
+                    game.logMessage("보스 스킬 [파괴 전차]: 일직선 방향으로 급속 충돌 돌진 상태가 되었습니다!");
+                    break;
+
+                case 4:
+                    if (game.zombiesList.length < 15) {
+                        game.zombiesList.push(new DynamicZombie(Math.floor(this.pixelX / TILE_SIZE) - 3, Math.floor(this.pixelY / TILE_SIZE)));
+                        game.zombiesList.push(new DynamicZombie(Math.floor(this.pixelX / TILE_SIZE) + 3, Math.floor(this.pixelY / TILE_SIZE)));
+                        audio.playZombieMoan();
+                        game.logMessage("보스 스킬 [세포 군사]: 수하 감염체 2기를 전방에 급속 복제 소환했습니다.");
+                    }
+                    break;
+            }
+        }
+
+        canWalkAt(px, py, grid) {
+            const radius = 24;
+            const checkPoints = [
+                { x: px - radius, y: py - radius },
+                { x: px + radius, y: py - radius },
+                { x: px - radius, y: py + radius },
+                { x: px + radius, y: py + radius }
+            ];
+            for (let pt of checkPoints) {
+                const gx = Math.floor(pt.x / TILE_SIZE);
+                const gy = Math.floor(pt.y / TILE_SIZE);
+                if (gx < 0 || gx >= GRID_COLS || gy < 0 || gy >= GRID_ROWS) return false;
+                if (grid[gy][gx] === 1) return false;
+            }
+            return true;
+        }
+
+        draw(ctx) {
+            ctx.save();
+            ctx.translate(this.pixelX + this.angerAnim, this.pixelY);
+            ctx.rotate(this.angle);
+
+            const sizeMultiplier = this.hp < this.maxHp * 0.5 ? 1.25 : 1.0;
+            const coreRadius = (26 + this.pulseAnim) * sizeMultiplier;
+
+            ctx.fillStyle = this.chargeMode ? "#dc2626" : "#7f1d1d";
+            ctx.beginPath();
+            ctx.arc(0, 0, coreRadius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "#450a0a";
+            ctx.lineWidth = 4;
+            ctx.stroke();
+
+            ctx.fillStyle = this.hp < this.maxHp * 0.5 ? "#f43f5e" : "#ea580c";
+            ctx.beginPath();
+            ctx.arc(4, 0, coreRadius * 0.65, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = "#fff";
+            const eyeOffsets = [
+                {x: 14, y: -10}, {x: 18, y: -4}, {x: 18, y: 4}, {x: 14, y: 10},
+                {x: 8, y: -14}, {x: 8, y: 14}
+            ];
+            eyeOffsets.forEach(pos => {
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            ctx.fillStyle = "#f8fafc";
+            ctx.beginPath();
+            ctx.moveTo(15, -8);
+            ctx.lineTo(24, -4);
+            ctx.lineTo(18, 0);
+            ctx.lineTo(24, 4);
+            ctx.lineTo(15, 8);
+            ctx.fill();
+
+            ctx.strokeStyle = "#ef4444";
+            ctx.lineWidth = 5;
+            const wiggle = Math.sin(Date.now() / 80) * 12;
+
+            ctx.beginPath();
+            ctx.moveTo(-15, -15);
+            ctx.bezierCurveTo(-35, -30 + wiggle, -45, -10 - wiggle, -55, -20);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(-15, 15);
+            ctx.bezierCurveTo(-35, 30 - wiggle, -45, 10 + wiggle, -55, 20);
+            ctx.stroke();
+
+            ctx.restore();
+        }
+    }
+    </script>
+
+    <script>
+    class Particle {
+        constructor(x, y, color, speed = 4) {
+            this.x = x;
+            this.y = y;
+            this.color = color;
+            this.vx = (Math.random() - 0.5) * speed;
+            this.vy = (Math.random() - 0.5) * speed;
+            this.alpha = 1;
+            this.decay = Math.random() * 0.05 + 0.02;
+            this.size = Math.random() * 3.5 + 1.5;
+        }
+
+        update() {
+            this.x += this.vx;
+            this.y += this.vy;
+            this.alpha -= this.decay;
+        }
+
+        draw(ctx) {
+            ctx.save();
+            ctx.globalAlpha = this.alpha;
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    class Bullet {
+        constructor(x, y, targetX, targetY, isQuantum = false) {
+            this.x = x;
+            this.y = y;
+            const dx = targetX - x;
+            const dy = targetY - y;
+            const dist = Math.hypot(dx, dy);
+            
+            this.speed = isQuantum ? 15 : 12;
+            this.vx = (dx / dist) * this.speed;
+            this.vy = (dy / dist) * this.speed;
+            this.active = true;
+            this.isQuantum = isQuantum;
+        }
+
+        update(grid) {
+            this.x += this.vx;
+            this.y += this.vy;
+
+            const gx = Math.floor(this.x / TILE_SIZE);
+            const gy = Math.floor(this.y / TILE_SIZE);
+            if (gx < 0 || gx >= GRID_COLS || gy < 0 || gy >= GRID_ROWS) {
+                this.active = false;
+                return;
+            }
+            if (grid[gy][gx] === 1) {
+                this.active = false; 
+            }
+        }
+
+        draw(ctx) {
+            ctx.save();
+            if (this.isQuantum) {
+                ctx.fillStyle = "#38bdf8";
+                ctx.shadowColor = "#0ea5e9";
+                ctx.shadowBlur = 8;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 5, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                ctx.fillStyle = "#fbbf24";
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.restore();
+        }
+    }
+
+    class BossProjectile {
+        constructor(x, y, angle) {
+            this.x = x;
+            this.y = y;
+            this.speed = 4.2;
+            this.vx = Math.cos(angle) * this.speed;
+            this.vy = Math.sin(angle) * this.speed;
+            this.active = true;
+        }
+
+        update(grid) {
+            this.x += this.vx;
+            this.y += this.vy;
+
+            const gx = Math.floor(this.x / TILE_SIZE);
+            const gy = Math.floor(this.y / TILE_SIZE);
+            if (gx < 0 || gx >= GRID_COLS || gy < 0 || gy >= GRID_ROWS || grid[gy][gx] === 1) {
+                this.active = false;
+            }
+        }
+
+        draw(ctx) {
+            ctx.save();
+            ctx.fillStyle = "#f43f5e";
+            ctx.shadowColor = "#e11d48";
+            ctx.shadowBlur = 6;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, 6.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    class AcidPool {
+        constructor(x, y) {
+            this.x = x;
+            this.y = y;
+            this.radius = 48;
+            this.duration = 4.5; 
+        }
+
+        update(dt, player) {
+            this.duration -= dt;
+            
+            const dist = Math.hypot(player.pixelX - this.x, player.pixelY - this.y);
+            if (dist < this.radius && player.damageCooldown <= 0 && game.dashActiveTimer <= 0) {
+                game.damagePlayer(10, "⚠️ 산성 융해 웅덩이에 접촉해 1칸 피해를 지속적으로 유실했습니다!");
+            }
+        }
+
+        draw(ctx) {
+            ctx.save();
+            ctx.fillStyle = "rgba(132, 204, 22, 0.28)";
+            ctx.strokeStyle = "rgba(101, 163, 13, 0.75)";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = "rgba(163, 230, 53, 0.6)";
+            for (let i = 0; i < 5; i++) {
+                const bubbleX = this.x + Math.sin(Date.now() / 200 + i) * (this.radius * 0.6);
+                const bubbleY = this.y + Math.cos(Date.now() / 200 + i * 2) * (this.radius * 0.6);
+                ctx.beginPath();
+                ctx.arc(bubbleX, bubbleY, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.restore();
+        }
+    }
+
+    class SpecialRocket {
+        constructor(x, y, targetX, targetY) {
+            this.x = x;
+            this.y = y;
+            const dx = targetX - x;
+            const dy = targetY - y;
+            const dist = Math.hypot(dx, dy);
+            this.vx = (dx / dist) * 12.5; 
+            this.vy = (dy / dist) * 12.5;
+            this.active = true;
+        }
+
+        update(grid) {
+            this.x += this.vx;
+            this.y += this.vy;
+
+            const gx = Math.floor(this.x / TILE_SIZE);
+            const gy = Math.floor(this.y / TILE_SIZE);
+            if (gx < 0 || gx >= GRID_COLS || gy < 0 || gy >= GRID_ROWS || grid[gy][gx] === 1) {
+                this.explode();
+                this.active = false;
+            }
+        }
+
+        explode() {
+            audio.playRocketFire();
+            game.createSparks(this.x, this.y, "#f97316", 65); 
+            game.createSparks(this.x, this.y, "#facc15", 45);
+            game.createSparks(this.x, this.y, "#ef4444", 30);
+
+            const explosionRadius = 180; 
+            
+            for (let i = game.zombiesList.length - 1; i >= 0; i--) {
+                const z = game.zombiesList[i];
+                const d = Math.hypot(z.pixelX - this.x, z.pixelY - this.y);
+                if (d < explosionRadius) {
+                    z.hp -= 999; 
+                    if (z.hp <= 0) {
+                        game.zombiesList.splice(i, 1);
+                        game.logMessage("초대형 전술 로켓포 폭발로 감염체 무리를 일사 소탕했습니다!");
+                    }
+                }
+            }
+
+            if (game.bossInstance) {
+                const d = Math.hypot(game.bossInstance.pixelX - this.x, game.bossInstance.pixelY - this.y);
+                if (d < explosionRadius) {
+                    game.bossInstance.hp -= 450; 
+                    game.logMessage("보스 아바도네스에게 초대형 로켓포 치명타 세열피해를 입혔습니다.");
+                }
+            }
+        }
+
+        draw(ctx) {
+            ctx.save();
+            ctx.fillStyle = "#ea580c";
+            ctx.strokeStyle = "#facc15";
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, 22, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = "#ef4444";
+            ctx.beginPath();
+            ctx.arc(this.x - this.vx * 1.5, this.y - this.vy * 1.5, 14, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    class ThrownCar {
+        constructor(x, y, targetX, targetY) {
+            this.x = x;
+            this.y = y;
+            const dx = targetX - x;
+            const dy = targetY - y;
+            const dist = Math.hypot(dx, dy);
+            
+            this.vx = (dx / dist) * 11.0;
+            this.vy = (dy / dist) * 11.0;
+            this.angle = Math.atan2(dy, dx);
+            this.active = true;
+            this.sizeW = 85;
+            this.sizeH = 45;
+            this.life = 2.5; 
+        }
+
+        update(dt, grid) {
+            this.x += this.vx;
+            this.y += this.vy;
+            this.life -= dt;
+
+            const gx = Math.floor(this.x / TILE_SIZE);
+            const gy = Math.floor(this.y / TILE_SIZE);
+            
+            if (gx < 0 || gx >= GRID_COLS || gy < 0 || gy >= GRID_ROWS || grid[gy][gx] === 1 || this.life <= 0) {
+                this.explode();
+                this.active = false;
+                return;
+            }
+
+            for (let i = game.zombiesList.length - 1; i >= 0; i--) {
+                const z = game.zombiesList[i];
+                const collisionDist = Math.hypot(z.pixelX - this.x, z.pixelY - this.y);
+                if (collisionDist < 50) {
+                    z.hp -= 999; 
+                    game.createSparks(z.pixelX, z.pixelY, "#dc2626", 25);
+                    if (z.hp <= 0) {
+                        game.zombiesList.splice(i, 1);
+                        game.logMessage("경찰차 돌진으로 경로상의 변이체를 완전 분쇄했습니다!");
+                    }
+                }
+            }
+
+            if (game.bossInstance) {
+                const collisionDist = Math.hypot(game.bossInstance.pixelX - this.x, game.bossInstance.pixelY - this.y);
+                if (collisionDist < 60) {
+                    game.bossInstance.hp -= 300; 
+                    game.createSparks(game.bossInstance.pixelX, game.bossInstance.pixelY, "#f59e0b", 35);
+                    game.logMessage("순찰차 충돌로 보스에게 300의 치명타 둔탁한 무기피해를 입혔습니다!");
+                    this.explode();
+                    this.active = false;
+                }
+            }
+        }
+
+        explode() {
+            audio.playRocketFire();
+            game.createSparks(this.x, this.y, "#ef4444", 45);
+            game.createSparks(this.x, this.y, "#f59e0b", 35);
+            game.createSparks(this.x, this.y, "#3b82f6", 30);
+            game.logMessage("투척된 경찰차가 최종 폭발하며 산화하였습니다!");
+        }
+
+        draw(ctx) {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.rotate(this.angle);
+
+            ctx.fillStyle = "#1e293b"; 
+            ctx.fillRect(-this.sizeW/2, -this.sizeH/2, this.sizeW, this.sizeH);
+            ctx.strokeStyle = "#94a3b8";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(-this.sizeW/2, -this.sizeH/2, this.sizeW, this.sizeH);
+
+            ctx.fillStyle = "#f8fafc";
+            ctx.fillRect(-15, -this.sizeH/2 + 2, 30, this.sizeH - 4);
+
+            ctx.fillStyle = "#38bdf8";
+            ctx.fillRect(10, -this.sizeH/2 + 5, 12, this.sizeH - 10);
+            ctx.fillRect(-28, -this.sizeH/2 + 5, 8, this.sizeH - 10);
+
+            const sirenBlink = Math.floor(Date.now() / 100) % 2 === 0;
+            ctx.fillStyle = sirenBlink ? "#ef4444" : "#3b82f6";
+            ctx.beginPath();
+            ctx.arc(-4, 0, 8, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = "rgba(254, 240, 138, 0.2)";
+            ctx.beginPath();
+            ctx.moveTo(this.sizeW/2, -15);
+            ctx.lineTo(this.sizeW/2 + 100, -45);
+            ctx.lineTo(this.sizeW/2 + 100, 45);
+            ctx.lineTo(this.sizeW/2, 15);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = "#020617";
+            ctx.fillRect(-this.sizeW/4 - 6, -this.sizeH/2 - 4, 12, 5);
+            ctx.fillRect(this.sizeW/4 - 6, -this.sizeH/2 - 4, 12, 5);
+            ctx.fillRect(-this.sizeW/4 - 6, this.sizeH/2 - 1, 12, 5);
+            ctx.fillRect(this.sizeW/4 - 6, this.sizeH/2 - 1, 12, 5);
+
+            ctx.restore();
+        }
+    }
+    </script>
+
+    <script>
+    class GameEngine {
+        constructor() {
+            this.canvas = document.getElementById("gameCanvas");
+            this.ctx = this.canvas.getContext("2d");
+
+            this.currentFloor = 0;
+            this.floors = JSON.parse(JSON.stringify(CLINIC_FLOORS));
+            
+            for (let i = 0; i < this.floors.length; i++) {
+                this.floors[i].grid = generateOpenFloorGrid(i);
+            }
+
+            this.keys = {};
+            this.player = {
+                pixelX: 100,
+                pixelY: 100,
+                gridX: 2,
+                gridY: 6,
+                speed: 3.1,
+                angle: 0,
+                hp: 100, 
+                bullets: 150, 
+                hasPistol: false,
+                hasQuantum: false, 
+                damageCooldown: 0,
+                stepSoundCounter: 0
+            };
+
+            this.dashCooldownMax = 10.0;
+            this.dashCooldownTimer = 0;
+            this.dashActiveTimer = 0;
+
+            this.rocketCooldownMax = 20.0;
+            this.rocketCooldownTimer = 0;
+
+            this.carCooldownMax = 15.0;
+            this.carCooldownTimer = 0;
+
+            this.bulletsList = [];
+            this.bossProjectilesList = [];
+            this.rocketsList = [];
+            this.thrownCarsList = []; 
+            this.acidPoolsList = []; 
+            this.zombiesList = [];
+            this.weaponDropsList = [];
+            this.particlesList = [];
+
+            this.camera = {
+                x: 0, y: 0, width: 960, height: 520
+            };
+
+            this.isGaming = false;
+            this.isPaused = false;
+            this.playTime = 0;
+            this.timerInterval = null;
+            this.flashIntensity = 0;
+            this.aimPos = { x: 0, y: 0 };
+            this.nearExitGate = false;
+
+            this.bossInstance = null; 
+
+            this.bindInputEvents();
+        }
+
+        showToast(message) {
+            const toast = document.getElementById("toast-message");
+            toast.textContent = message;
+            toast.style.opacity = "1";
+            setTimeout(() => { toast.style.opacity = "0"; }, 2800);
+        }
+
+        init(loadSaved = false) {
+            this.isPaused = false;
+            this.isGaming = true;
+            this.bulletsList = [];
+            this.bossProjectilesList = [];
+            this.rocketsList = [];
+            this.thrownCarsList = [];
+            this.acidPoolsList = [];
+            this.particlesList = [];
+            this.nearExitGate = false;
+            this.bossInstance = null;
+
+            document.getElementById("interaction-prompt").style.opacity = "0";
+            document.getElementById("boss-hud-panel").style.opacity = "0";
+            this.playTime = loadSaved ? this.playTime : 0;
+
+            const floorData = this.floors[this.currentFloor];
+            
+            this.player.gridX = floorData.playerStart.x;
+            this.player.gridY = floorData.playerStart.y;
+            this.player.pixelX = this.player.gridX * TILE_SIZE + TILE_SIZE / 2;
+            this.player.pixelY = this.player.gridY * TILE_SIZE + TILE_SIZE / 2;
+            this.player.hp = loadSaved ? this.player.hp : 100;
+            this.player.damageCooldown = 0;
+
+            this.dashCooldownTimer = 0;
+            this.dashActiveTimer = 0;
+            this.rocketCooldownTimer = 0;
+            this.carCooldownTimer = 0;
+
+            this.weaponDropsList = JSON.parse(JSON.stringify(floorData.weaponDrops || []));
+
+            this.zombiesList = [];
+            floorData.zombies.forEach(z => {
+                this.zombiesList.push(new DynamicZombie(z.x, z.y));
+            });
+
+            if (this.currentFloor === 4) {
+                this.bossInstance = new AbaddonesBoss(GRID_COLS - 6, Math.floor(GRID_ROWS / 2));
+                
+                document.getElementById("boss-hud-panel").style.opacity = "1";
+                document.getElementById("boss-hp-percentage").textContent = "200%";
+                document.getElementById("boss-hp-bar-fill").style.width = "100%";
+            }
+
+            audio.startAmbient();
+            audio.startHeartbeats();
+
+            if (this.timerInterval) clearInterval(this.timerInterval);
+            this.timerInterval = setInterval(() => {
+                if (this.isGaming && !this.isPaused) {
+                    this.playTime++;
+                    this.updateTimeHUD();
+                }
+            }, 1000);
+
+            this.updateHealthBarUI();
+            this.updateInventoryHUD();
+            this.logMessage(`${this.currentFloor + 1}층 수색 구역 진입 완료. ${floorData.goal}`);
+            document.getElementById("hud-floor").textContent = `${this.currentFloor + 1}층 - 비상 탈출 통로`;
+            document.getElementById("objective-text").textContent = floorData.goal;
+
+            document.getElementById("canvas-container").classList.remove("hidden");
+            document.getElementById("screen-main-menu").classList.add("hidden");
+            document.getElementById("screen-game-over").classList.add("hidden");
+            document.getElementById("screen-clear").classList.add("hidden");
+            document.getElementById("screen-pause").classList.add("hidden");
+        }
+
+        logMessage(msg) {
+            document.getElementById("hud-log").innerHTML = `<span class="text-red-500 font-bold">[통신]</span> ${msg}`;
+        }
+
+        updateTimeHUD() {
+            const min = Math.floor(this.playTime / 60).toString().padStart(2, '0');
+            const sec = (this.playTime % 60).toString().padStart(2, '0');
+            document.getElementById("hud-time").textContent = `${min}:${sec}`;
+        }
+
+        updateInventoryHUD() {
+            const ammoHUD = document.getElementById("hud-ammo");
+            const icon = document.getElementById("weapon-icon");
+
+            if (this.player.hasQuantum) {
+                icon.className = "fa-solid fa-wand-magic-sparkles text-cyan-400 animate-bounce";
+                ammoHUD.innerHTML = `<span class="text-cyan-400 font-extrabold">양자 중력 포 [탄환: 무제한 (∞)]</span>`;
+            } else if (this.player.hasPistol) {
+                icon.className = "fa-solid fa-gun text-amber-500 animate-pulse";
+                ammoHUD.innerHTML = `<span class="text-amber-400">9mm 전술 권총 [탄환: ${this.player.bullets} / 150발]</span>`;
+            } else {
+                icon.className = "fa-solid fa-skull text-slate-500";
+                ammoHUD.innerHTML = `<span class="text-slate-400">경찰용 전술 단검 [무제한]</span>`;
+            }
+        }
+
+        updateHealthBarUI() {
+            const container = document.getElementById("health-bar-segments");
+            container.innerHTML = "";
+            const activeSegments = Math.ceil(this.player.hp / 10);
+            for (let i = 0; i < 10; i++) {
+                const seg = document.createElement("div");
+                seg.className = `w-4 h-6 rounded-sm ${i < activeSegments ? 'bg-red-600 border border-red-500 shadow-md shadow-red-950/80' : 'bg-slate-950 border border-slate-900'}`;
+                container.appendChild(seg);
+            }
+        }
+
+        damagePlayer(amount, reason) {
+            if (!this.isGaming) return;
+            this.player.hp -= amount;
+            if (this.player.hp < 0) this.player.hp = 0;
+            
+            this.player.damageCooldown = 1.0; 
+            this.flashIntensity = 0.8;
+            audio.playDamage();
+            this.createSparks(this.player.pixelX, this.player.pixelY, "#ef4444", 25);
+            this.logMessage(reason);
+            this.updateHealthBarUI();
+
+            if (this.player.hp <= 0) {
+                this.triggerGameOver();
+            }
+        }
+
+        triggerGameOver() {
+            this.isGaming = false;
+            audio.stopAmbient();
+            audio.stopHeartbeats();
+            document.getElementById("screen-game-over").classList.remove("hidden");
+            document.getElementById("screen-game-over").classList.add("flex");
+        }
+
+        triggerWin() {
+            this.isGaming = false;
+            audio.stopAmbient();
+            audio.stopHeartbeats();
+            audio.playSolve();
+
+            const min = Math.floor(this.playTime / 60).toString().padStart(2, '0');
+            const sec = (this.playTime % 60).toString().padStart(2, '0');
+            document.getElementById("clear-time").textContent = `${min}:${sec}`;
+
+            document.getElementById("screen-clear").classList.remove("hidden");
+            document.getElementById("screen-clear").classList.add("flex");
+            SaveManager.clear();
+        }
+
+        createSparks(x, y, color, count) {
+            for (let i = 0; i < count; i++) {
+                this.particlesList.push(new Particle(x, y, color));
+            }
+        }
+
+        spawnAcidSpit(x, y) {
+            this.acidPoolsList.push(new AcidPool(x, y));
+        }
+
+        executeInteraction() {
+            if (!this.isGaming || this.isPaused || !this.nearExitGate) return;
+
+            if (this.currentFloor === 4 && this.bossInstance && this.bossInstance.hp > 0) {
+                this.showToast("아바도네스를 사살하기 전에는 대피 헬기 이착륙장을 사용할 수 없습니다!");
+                return;
+            }
+
+            audio.playSolve();
+            if (this.currentFloor < this.floors.length - 1) {
+                this.currentFloor++;
+                this.init(false);
+                this.showToast(`${this.currentFloor + 1}층 비상 통로 진입 완료!`);
+            } else {
+                this.triggerWin();
+            }
+        }
+
+        executeDashSkill() {
+            if (this.dashCooldownTimer > 0) return;
+            this.dashActiveTimer = 1.2; 
+            this.dashCooldownTimer = this.dashCooldownMax;
+            audio.playSlash();
+            this.createSparks(this.player.pixelX, this.player.pixelY, "#f59e0b", 15);
+        }
+
+        executeCarSkill() {
+            if (this.carCooldownTimer > 0) return;
+            this.carCooldownTimer = this.carCooldownMax;
+            audio.playCarEngine();
+            
+            this.thrownCarsList.push(new ThrownCar(this.player.pixelX, this.player.pixelY, this.aimPos.x, this.aimPos.y));
+            game.logMessage("경찰차 궁극기 투척! 경로 상의 일반 좀비를 일격 소탕합니다!");
+        }
+
+        executeRocketSkill() {
+            if (this.rocketCooldownTimer > 0) return;
+            this.rocketCooldownTimer = this.rocketCooldownMax;
+            audio.playRocketFire();
+            this.rocketsList.push(new SpecialRocket(this.player.pixelX, this.player.pixelY, this.aimPos.x, this.aimPos.y));
+        }
+
+        bindInputEvents() {
+            window.addEventListener("keydown", (e) => {
+                const keyLower = e.key.toLowerCase();
+                this.keys[keyLower] = true;
+
+                if (keyLower === 'f') {
+                    this.executeInteraction();
+                }
+                if (e.key === 'Shift') {
+                    this.executeDashSkill();
+                }
+                if (keyLower === 'e') {
+                    this.executeCarSkill();
+                }
+                if (keyLower === 'r') {
+                    this.executeRocketSkill();
+                }
+            });
+
+            window.addEventListener("keyup", (e) => {
+                this.keys[e.key.toLowerCase()] = false;
+            });
+
+            this.canvas.addEventListener("mousemove", (e) => {
+                const rect = this.canvas.getBoundingClientRect();
+                this.aimPos.x = e.clientX - rect.left + this.camera.x;
+                this.aimPos.y = e.clientY - rect.top + this.camera.y;
+            });
+
+            this.canvas.addEventListener("mousedown", (e) => {
+                if (e.button === 0) { 
+                    this.executePlayerAttack();
+                }
+            });
+
+            const addMobileEvent = (id, key) => {
+                const btn = document.getElementById(id);
+                if (btn) {
+                    btn.addEventListener("touchstart", (e) => { e.preventDefault(); this.keys[key] = true; });
+                    btn.addEventListener("touchend", (e) => { e.preventDefault(); this.keys[key] = false; });
+                }
+            };
+            addMobileEvent("v-up", "w");
+            addMobileEvent("v-left", "a");
+            addMobileEvent("v-down", "s");
+            addMobileEvent("v-right", "d");
+
+            document.getElementById("v-dash").addEventListener("touchstart", (e) => {
+                e.preventDefault();
+                this.executeDashSkill();
+            });
+            document.getElementById("v-car").addEventListener("touchstart", (e) => {
+                e.preventDefault();
+                this.executeCarSkill();
+            });
+            document.getElementById("v-rocket").addEventListener("touchstart", (e) => {
+                e.preventDefault();
+                this.executeRocketSkill();
+            });
+
+            const vAttack = document.getElementById("v-attack");
+            if (vAttack) {
+                vAttack.addEventListener("touchstart", (e) => {
+                    e.preventDefault();
+                    this.executePlayerAttack();
+                });
+            }
+
+            const vInteract = document.getElementById("v-interact");
+            if (vInteract) {
+                vInteract.addEventListener("touchstart", (e) => {
+                    e.preventDefault();
+                    this.executeInteraction();
+                });
+            }
+
+            document.getElementById("btn-new-game").addEventListener("click", () => {
+                this.currentFloor = 0;
+                for (let i = 0; i < this.floors.length; i++) {
+                    this.floors[i].grid = generateOpenFloorGrid(i);
+                }
+                this.player.hasPistol = false;
+                this.player.hasQuantum = false;
+                this.player.bullets = 150; 
+                this.init(false);
+            });
+
+            document.getElementById("btn-continue").addEventListener("click", () => {
+                const save = SaveManager.load();
+                if (save) {
+                    this.currentFloor = save.currentFloor;
+                    this.floors = save.floors;
+                    this.playTime = save.playTime;
+                    this.player.hp = save.playerHp;
+                    this.player.hasPistol = save.playerHasPistol;
+                    this.player.hasQuantum = save.playerHasQuantum || false;
+                    this.player.bullets = save.playerBullets;
+                    this.init(true);
+                }
+            });
+
+            const checkSaved = SaveManager.load();
+            if (checkSaved) {
+                const btnCont = document.getElementById("btn-continue");
+                btnCont.disabled = false;
+                btnCont.textContent = `저장 위치 이어가기 (${checkSaved.currentFloor + 1}층)`;
+            }
+
+            document.getElementById("btn-pause").addEventListener("click", () => {
+                if (this.isGaming) {
+                    this.isPaused = true;
+                    document.getElementById("screen-pause").classList.remove("hidden");
+                }
+            });
+
+            document.getElementById("btn-resume").addEventListener("click", () => {
+                this.isPaused = false;
+                document.getElementById("screen-pause").classList.add("hidden");
+            });
+
+            document.getElementById("btn-save").addEventListener("click", () => {
+                const saveState = {
+                    currentFloor: this.currentFloor,
+                    floors: this.floors,
+                    playTime: this.playTime,
+                    playerHp: this.player.hp,
+                    playerHasPistol: this.player.hasPistol,
+                    playerHasQuantum: this.player.hasQuantum,
+                    playerBullets: this.player.bullets
+                };
+                if (SaveManager.save(saveState)) {
+                    this.logMessage("현재 대피 포인트 안전 데이터 백업 성공.");
+                    this.showToast("작전 데이터 백업 저장이 완료되었습니다!");
+                }
+            });
+
+            document.getElementById("btn-menu-exit").addEventListener("click", () => {
+                this.isGaming = false;
+                document.getElementById("screen-pause").classList.add("hidden");
+                document.getElementById("canvas-container").classList.add("hidden");
+                document.getElementById("screen-main-menu").classList.remove("hidden");
+            });
+
+            document.getElementById("btn-retry").addEventListener("click", () => {
+                this.init(true);
+            });
+
+            document.getElementById("btn-gameover-menu").addEventListener("click", () => {
+                document.getElementById("screen-game-over").classList.add("hidden");
+                document.getElementById("canvas-container").classList.add("hidden");
+                document.getElementById("screen-main-menu").classList.remove("hidden");
+            });
+
+            document.getElementById("btn-clear-menu").addEventListener("click", () => {
+                document.getElementById("screen-clear").classList.add("hidden");
+                document.getElementById("canvas-container").classList.add("hidden");
+                document.getElementById("screen-main-menu").classList.remove("hidden");
+            });
+
+            document.getElementById("btn-settings-open").addEventListener("click", () => {
+                document.getElementById("screen-settings").classList.remove("hidden");
+            });
+
+            document.getElementById("btn-settings-close").addEventListener("click", () => {
+                document.getElementById("screen-settings").classList.add("hidden");
+            });
+        }
+
+        executePlayerAttack() {
+            if (!this.isGaming || this.isPaused) return;
+
+            const dx = this.aimPos.x - this.player.pixelX;
+            const dy = this.aimPos.y - this.player.pixelY;
+            this.player.angle = Math.atan2(dy, dx);
+
+            if (this.player.hasQuantum) {
+                this.bulletsList.push(new Bullet(this.player.pixelX, this.player.pixelY, this.aimPos.x, this.aimPos.y, true));
+                audio.playQuantumFire();
+                this.createSparks(this.player.pixelX + Math.cos(this.player.angle)*15, this.player.pixelY + Math.sin(this.player.angle)*15, "#38bdf8", 6);
+            } else if (this.player.hasPistol && this.player.bullets > 0) {
+                this.player.bullets--;
+                this.bulletsList.push(new Bullet(this.player.pixelX, this.player.pixelY, this.aimPos.x, this.aimPos.y, false));
+                audio.playGunfire();
+                this.createSparks(this.player.pixelX + Math.cos(this.player.angle)*15, this.player.pixelY + Math.sin(this.player.angle)*15, "#fbbf24", 8);
+                this.updateInventoryHUD();
+            } else {
+                audio.playSlash();
+                this.createSparks(this.player.pixelX + Math.cos(this.player.angle)*15, this.player.pixelY + Math.sin(this.player.angle)*15, "#e2e8f0", 5);
+
+                const reachDistance = 45;
+                const hitX = this.player.pixelX + Math.cos(this.player.angle) * reachDistance;
+                const hitY = this.player.pixelY + Math.sin(this.player.angle) * reachDistance;
+
+                for (let i = this.zombiesList.length - 1; i >= 0; i--) {
+                    const z = this.zombiesList[i];
+                    const distance = Math.hypot(z.pixelX - hitX, z.pixelY - hitY);
+                    if (distance < 25) {
+                        z.hp -= 125; 
+                        this.createSparks(z.pixelX, z.pixelY, "#b91c1c", 12);
+                        z.state = 'chase'; 
+                        if (z.hp <= 0) {
+                            this.zombiesList.splice(i, 1);
+                            this.logMessage("단검 급소 관통 타격으로 적을 즉사 무력화시켰습니다.");
+                        }
+                    }
+                }
+
+                if (this.bossInstance) {
+                    const d = Math.hypot(this.bossInstance.pixelX - hitX, this.bossInstance.pixelY - hitY);
+                    if (d < 45) {
+                        this.bossInstance.hp -= 60;
+                        this.createSparks(this.bossInstance.pixelX, this.bossInstance.pixelY, "#991b1b", 15);
+                    }
+                }
+            }
+        }
+
+        update(dt) {
+            if (!this.isGaming || this.isPaused) return;
+
+            if (this.player.damageCooldown > 0) {
+                this.player.damageCooldown -= dt;
+            }
+
+            if (this.dashCooldownTimer > 0) {
+                this.dashCooldownTimer -= dt;
+                document.getElementById("dash-cd-timer").textContent = `${Math.ceil(this.dashCooldownTimer)}s`;
+                document.getElementById("skill-dash").classList.remove("skill-ready");
+            } else {
+                document.getElementById("dash-cd-timer").textContent = "READY";
+                document.getElementById("skill-dash").classList.add("skill-ready");
+            }
+
+            if (this.dashActiveTimer > 0) {
+                this.dashActiveTimer -= dt;
+            }
+
+            if (this.carCooldownTimer > 0) {
+                this.carCooldownTimer -= dt;
+                document.getElementById("car-cd-timer").textContent = `${Math.ceil(this.carCooldownTimer)}s`;
+                document.getElementById("skill-car").classList.remove("skill-car-ready");
+            } else {
+                document.getElementById("car-cd-timer").textContent = "READY";
+                document.getElementById("skill-car").classList.add("skill-car-ready");
+            }
+
+            if (this.rocketCooldownTimer > 0) {
+                this.rocketCooldownTimer -= dt;
+                document.getElementById("rocket-cd-timer").textContent = `${Math.ceil(this.rocketCooldownTimer)}s`;
+                document.getElementById("skill-rocket").classList.remove("skill-ready");
+            } else {
+                document.getElementById("rocket-cd-timer").textContent = "READY";
+                document.getElementById("skill-rocket").classList.add("skill-ready");
+            }
+
+            let vx = 0;
+            let vy = 0;
+
+            if (this.keys['w'] || this.keys['arrowup']) vy = -1;
+            if (this.keys['s'] || this.keys['arrowdown']) vy = 1;
+            if (this.keys['a'] || this.keys['arrowleft']) vx = -1;
+            if (this.keys['d'] || this.keys['arrowright']) vx = 1;
+
+            if (vx !== 0 && vy !== 0) {
+                vx *= 0.707;
+                vy *= 0.707;
+            }
+
+            if (vx !== 0 || vy !== 0) {
+                let currentSpeed = this.player.speed;
+                if (this.dashActiveTimer > 0) {
+                    currentSpeed *= 2.3; 
+                }
+
+                const moveDist = currentSpeed;
+                const nextX = this.player.pixelX + vx * moveDist;
+                const nextY = this.player.pixelY + vy * moveDist;
+
+                if (this.canWalkAt(nextX, this.player.pixelY)) {
+                    this.player.pixelX = nextX;
+                }
+                if (this.canWalkAt(this.player.pixelX, nextY)) {
+                    this.player.pixelY = nextY;
+                }
+
+                this.player.gridX = Math.floor(this.player.pixelX / TILE_SIZE);
+                this.player.gridY = Math.floor(this.player.pixelY / TILE_SIZE);
+
+                this.player.stepSoundCounter++;
+                if (this.player.stepSoundCounter % 18 === 0) {
+                    audio.playStep();
+                }
+
+                const targetAngle = Math.atan2(vy, vx);
+                this.player.angle = targetAngle;
+
+                this.checkCollisionsWithInteractiveElements();
+            }
+
+            const currentFloorData = this.floors[this.currentFloor];
+
+            for (let i = this.thrownCarsList.length - 1; i >= 0; i--) {
+                const car = this.thrownCarsList[i];
+                car.update(dt, currentFloorData.grid);
+                if (!car.active) {
+                    this.thrownCarsList.splice(i, 1);
+                }
+            }
+
+            for (let i = this.acidPoolsList.length - 1; i >= 0; i--) {
+                const pool = this.acidPoolsList[i];
+                pool.update(dt, this.player);
+                if (pool.duration <= 0) {
+                    this.acidPoolsList.splice(i, 1);
+                }
+            }
+
+            for (let i = this.bulletsList.length - 1; i >= 0; i--) {
+                const b = this.bulletsList[i];
+                b.update(currentFloorData.grid);
+
+                let collided = false;
+
+                for (let j = this.zombiesList.length - 1; j >= 0; j--) {
+                    const z = this.zombiesList[j];
+                    const hitDist = Math.hypot(z.pixelX - b.x, z.pixelY - b.y);
+                    if (hitDist < 18) {
+                        const dmg = b.isQuantum ? 125 : 25; 
+                        z.hp -= dmg; 
+                        b.active = false;
+                        collided = true;
+                        this.createSparks(z.pixelX, z.pixelY, "#991b1b", 12);
+                        z.state = 'chase'; 
+                        if (z.hp <= 0) {
+                            this.zombiesList.splice(j, 1);
+                            this.logMessage("사격 소탕으로 감염 변이체 개체를 격멸했습니다.");
+                        }
+                        break;
+                    }
+                }
+
+                if (!collided && this.bossInstance) {
+                    const hitDist = Math.hypot(this.bossInstance.pixelX - b.x, this.bossInstance.pixelY - b.y);
+                    if (hitDist < 35) {
+                        const dmg = b.isQuantum ? 32 : 12;
+                        this.bossInstance.hp -= dmg;
+                        b.active = false;
+                        this.createSparks(this.bossInstance.pixelX, this.bossInstance.pixelY, "#dc2626", 14);
+
+                        const bossHpPct = Math.max(0, Math.ceil((this.bossInstance.hp / 1200) * 100));
+                        document.getElementById("boss-hp-percentage").textContent = `${bossHpPct}%`;
+                        document.getElementById("boss-hp-bar-fill").style.width = `${Math.min(100, (this.bossInstance.hp / this.bossInstance.maxHp) * 100)}%`;
+
+                        if (this.bossInstance.hp <= 0) {
+                            this.logMessage("최종 변이보스 아바도네스를 격멸 완료했습니다! 비상 탈출구 대피 신호기 [F]를 누르십시오!");
+                            this.createSparks(this.bossInstance.pixelX, this.bossInstance.pixelY, "#ef4444", 100);
+                        }
+                    }
+                }
+
+                if (!b.active) {
+                    this.bulletsList.splice(i, 1);
+                }
+            }
+
+            for (let i = this.bossProjectilesList.length - 1; i >= 0; i--) {
+                const bp = this.bossProjectilesList[i];
+                bp.update(currentFloorData.grid);
+
+                const hitPlayerDist = Math.hypot(this.player.pixelX - bp.x, this.player.pixelY - bp.y);
+                if (hitPlayerDist < 16) {
+                    bp.active = false;
+                    if (this.dashActiveTimer <= 0) { 
+                        this.damagePlayer(10, "⚠️ 보스 유도 혈액 구체에 피격당해 1칸 피해를 유실했습니다!");
+                    }
+                }
+
+                if (!bp.active) {
+                    this.bossProjectilesList.splice(i, 1);
+                }
+            }
+
+            for (let i = this.rocketsList.length - 1; i >= 0; i--) {
+                const r = this.rocketsList[i];
+                r.update(currentFloorData.grid);
+                if (!r.active) {
+                    this.rocketsList.splice(i, 1);
+                }
+            }
+
+            this.camera.x = this.player.pixelX - this.camera.width / 2;
+            this.camera.y = this.player.pixelY - this.camera.height / 2;
+
+            const worldWidth = GRID_COLS * TILE_SIZE;
+            const worldHeight = GRID_ROWS * TILE_SIZE;
+
+            if (this.camera.x < 0) this.camera.x = 0;
+            if (this.camera.y < 0) this.camera.y = 0;
+            if (this.camera.x > worldWidth - this.camera.width) this.camera.x = worldWidth - this.camera.width;
+            if (this.camera.y > worldHeight - this.camera.height) this.camera.y = worldHeight - this.camera.height;
+
+            if (this.flashIntensity > 0) {
+                this.flashIntensity -= dt * 2.0;
+                if (this.flashIntensity < 0) this.flashIntensity = 0;
+                document.getElementById("horror-overlay").style.opacity = this.flashIntensity;
+            }
+
+            this.zombiesList.forEach(z => {
+                z.update(dt, this.player, currentFloorData.grid, this.zombiesList);
+
+                const dmgDist = Math.hypot(this.player.pixelX - z.pixelX, this.player.pixelY - z.pixelY);
+                if (dmgDist < 18) {
+                    if (this.player.damageCooldown <= 0 && this.dashActiveTimer <= 0) {
+                        this.damagePlayer(10, "⚠️ 변이체에게 피습당해 1칸의 체력을 유실했습니다!");
+                    }
+                }
+            });
+
+            if (this.bossInstance && this.bossInstance.hp > 0) {
+                this.bossInstance.update(dt, this.player, currentFloorData.grid);
+                const dmgDist = Math.hypot(this.player.pixelX - this.bossInstance.pixelX, this.player.pixelY - this.bossInstance.pixelY);
+                if (dmgDist < 35) {
+                    if (this.player.damageCooldown <= 0 && this.dashActiveTimer <= 0) {
+                        this.damagePlayer(20, "⚠️ 보스의 체내 생물 파동 영역에 노출되어 2칸 피해를 입었습니다!");
+                    }
+                }
+            }
+
+            for (let i = this.particlesList.length - 1; i >= 0; i--) {
+                const p = this.particlesList[i];
+                p.update();
+                if (p.alpha <= 0) {
+                    this.particlesList.splice(i, 1);
+                }
+            }
+
+            this.checkExitStairsProximity();
+        }
+
+        spawnBossProjectile(x, y, angle) {
+            this.bossProjectilesList.push(new BossProjectile(x, y, angle));
+        }
+
+        canWalkAt(px, py) {
+            const floorGrid = this.floors[this.currentFloor].grid;
+            const radius = 10; 
+            
+            const checkPoints = [
+                { x: px - radius, y: py - radius },
+                { x: px + radius, y: py - radius },
+                { x: px - radius, y: py + radius },
+                { x: px + radius, y: py + radius }
+            ];
+
+            for (let pt of checkPoints) {
+                const gx = Math.floor(pt.x / TILE_SIZE);
+                const gy = Math.floor(pt.y / TILE_SIZE);
+                if (gx < 0 || gx >= GRID_COLS || gy < 0 || gy >= GRID_ROWS) return false;
+                const tile = floorGrid[gy][gx];
+                if (tile === 1) {
+                    return false; 
+                }
+            }
+            return true;
+        }
+
+        checkCollisionsWithInteractiveElements() {
+            for (let i = this.weaponDropsList.length - 1; i >= 0; i--) {
+                const drop = this.weaponDropsList[i];
+                const dist = Math.hypot(this.player.pixelX - (drop.x * TILE_SIZE + TILE_SIZE/2), this.player.pixelY - (drop.y * TILE_SIZE + TILE_SIZE/2));
+                if (dist < 24) {
+                    audio.playSolve();
+                    if (drop.type === "pistol") {
+                        this.player.hasPistol = true;
+                        this.player.bullets = Math.min(150, this.player.bullets + 45); 
+                        this.logMessage("바닥에서 [9mm 경찰 전술 권총 + 대용량 탄창 보급]을 획득했습니다.");
+                    } else if (drop.type === "ammo") {
+                        this.player.bullets = Math.min(150, this.player.bullets + 35);
+                        this.logMessage("바닥에서 [탄 상자 + 추가 탄알 35발]을 보급했습니다.");
+                    } else if (drop.type === "quantum") {
+                        this.player.hasQuantum = true;
+                        this.logMessage("★ 특급 하이테크 장비 [양자 중력 포]를 습득하였습니다! 탄창 무제한(∞) 활성화!");
+                    }
+                    this.updateInventoryHUD();
+                    this.weaponDropsList.splice(i, 1);
+                }
+            }
+        }
+
+        checkExitStairsProximity() {
+            const floorGrid = this.floors[this.currentFloor].grid;
+            let stairsPixelX = 0;
+            let stairsPixelY = 0;
+            
+            for (let r = 0; r < GRID_ROWS; r++) {
+                for (let c = 0; c < GRID_COLS; c++) {
+                    if (floorGrid[r][c] === 4) {
+                        stairsPixelX = c * TILE_SIZE + TILE_SIZE / 2;
+                        stairsPixelY = r * TILE_SIZE + TILE_SIZE / 2;
+                        break;
+                    }
+                }
+            }
+
+            const distToStairs = Math.hypot(this.player.pixelX - stairsPixelX, this.player.pixelY - stairsPixelY);
+            const prompt = document.getElementById("interaction-prompt");
+
+            if (distToStairs < 75) {
+                if (!this.nearExitGate) {
+                    this.nearExitGate = true;
+                    prompt.style.opacity = "1";
+                    
+                    if (this.currentFloor === this.floors.length - 1) {
+                        document.getElementById("prompt-main-text").innerHTML = "<span class='text-emerald-400'>[최종 헬기 이착륙 대피 게이트]</span>";
+                    } else {
+                        document.getElementById("prompt-main-text").textContent = "비상 계단실 출입구에 도달했습니다.";
+                    }
+                }
+            } else {
+                if (this.nearExitGate) {
+                    this.nearExitGate = false;
+                    prompt.style.opacity = "0";
+                }
+            }
+        }
+
+        draw() {
+            this.ctx.fillStyle = "#010204";
+            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+            const activeLevel = this.floors[this.currentFloor];
+
+            this.ctx.save();
+            this.ctx.translate(-this.camera.x, -this.camera.y);
+
+            this.drawLevelTilemap(this.ctx, activeLevel);
+
+            this.drawWeaponDrops(this.ctx);
+
+            this.bulletsList.forEach(b => b.draw(this.ctx));
+            this.bossProjectilesList.forEach(bp => bp.draw(this.ctx));
+            this.rocketsList.forEach(r => r.draw(this.ctx));
+            this.thrownCarsList.forEach(car => car.draw(this.ctx));
+            
+            this.acidPoolsList.forEach(pool => pool.draw(this.ctx));
+
+            this.particlesList.forEach(p => p.draw(this.ctx));
+
+            this.zombiesList.forEach(z => z.draw(this.ctx));
+
+            if (this.bossInstance && this.bossInstance.hp > 0) {
+                this.bossInstance.draw(this.ctx);
+            }
+
+            this.drawPlayerCharacter(this.ctx);
+
+            this.ctx.restore();
+
+            this.drawHorrorAmbientVignette(this.ctx);
+        }
+
+        drawLevelTilemap(ctx, level) {
+            const startCol = Math.floor(this.camera.x / TILE_SIZE);
+            const endCol = Math.ceil((this.camera.x + this.camera.width) / TILE_SIZE);
+            const startRow = Math.floor(this.camera.y / TILE_SIZE);
+            const endRow = Math.ceil((this.camera.y + this.camera.height) / TILE_SIZE);
+
+            const sCol = Math.max(0, startCol);
+            const eCol = Math.min(GRID_COLS, endCol);
+            const sRow = Math.max(0, startRow);
+            const eRow = Math.min(GRID_ROWS, endRow);
+
+            for (let y = sRow; y < eRow; y++) {
+                for (let x = sCol; x < eCol; x++) {
+                    const tile = level.grid[y][x];
+                    const px = x * TILE_SIZE;
+                    const py = y * TILE_SIZE;
+
+                    if (tile === 1) {
+                        ctx.fillStyle = "#1e293b";
+                        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                        ctx.strokeStyle = "#334155";
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
+                        
+                        ctx.fillStyle = "#475569";
+                        ctx.fillRect(px + 4, py + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+                    } else {
+                        ctx.fillStyle = "#070c18";
+                        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                        ctx.strokeStyle = "#0f172a";
+                        ctx.lineWidth = 1;
+                        ctx.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
+
+                        if ((x * 17 + y * 9) % 37 === 0) {
+                            ctx.fillStyle = "rgba(185, 28, 28, 0.35)";
+                            ctx.beginPath();
+                            ctx.arc(px + TILE_SIZE/2, py + TILE_SIZE/2, 6, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                    }
+
+                    if (tile === 4) {
+                        ctx.fillStyle = "#059669";
+                        ctx.fillRect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+                        ctx.strokeStyle = "#34d399";
+                        ctx.lineWidth = 3;
+                        ctx.strokeRect(px + 2, py + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+                        
+                        ctx.fillStyle = "#064e3b";
+                        for (let k = 0; k < 4; k++) {
+                            ctx.fillRect(px + 6, py + 6 + (k * 8), TILE_SIZE - 12, 4);
+                        }
+                    }
+                }
+            }
+        }
+
+        drawWeaponDrops(ctx) {
+            this.weaponDropsList.forEach(drop => {
+                const px = drop.x * TILE_SIZE;
+                const py = drop.y * TILE_SIZE;
+
+                if (drop.type === "pistol") {
+                    ctx.save();
+                    ctx.fillStyle = "#fbbf24"; 
+                    ctx.fillRect(px + 12, py + 16, 18, 6);
+                    ctx.fillRect(px + 24, py + 22, 6, 8);
+                    ctx.restore();
+                } else if (drop.type === "ammo") {
+                    ctx.save();
+                    ctx.fillStyle = "#38bdf8"; 
+                    ctx.fillRect(px + 12, py + 12, 16, 16);
+                    ctx.strokeStyle = "#0284c7";
+                    ctx.strokeRect(px + 12, py + 12, 16, 16);
+                    ctx.restore();
+                } else if (drop.type === "quantum") {
+                    ctx.save();
+                    ctx.shadowColor = "#38bdf8";
+                    ctx.shadowBlur = 12;
+                    ctx.fillStyle = "#06b6d4";
+                    ctx.fillRect(px + 6, py + 14, 28, 8);
+                    ctx.fillStyle = "#a5f3fc";
+                    ctx.fillRect(px + 24, py + 11, 4, 14);
+                    ctx.restore();
+                }
+            });
+        }
+
+        drawPlayerCharacter(ctx) {
+            ctx.save();
+            ctx.translate(this.player.pixelX, this.player.pixelY);
+            ctx.rotate(this.player.angle);
+
+            if (this.dashActiveTimer > 0) {
+                ctx.fillStyle = "rgba(245, 158, 11, 0.8)";
+                ctx.beginPath();
+                ctx.arc(0, 0, 13, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            if (this.player.damageCooldown > 0 && Math.floor(Date.now() / 80) % 2 === 0) {
+                ctx.fillStyle = "rgba(239, 68, 68, 0.85)";
+            } else {
+                ctx.fillStyle = "#1d4ed8"; 
+            }
+
+            ctx.beginPath();
+            ctx.arc(0, 0, 11, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = "#0f172a";
+            ctx.fillRect(-4, -9, 8, 3);
+
+            ctx.fillStyle = "#1e1b4b";
+            ctx.fillRect(3, -5, 7, 10);
+            ctx.fillStyle = "#eab308"; 
+            ctx.fillRect(6, -1.5, 3, 3);
+
+            ctx.fillStyle = "#ffedd5";
+            ctx.beginPath();
+            ctx.arc(7, -5, 2.5, 0, Math.PI * 2);
+            ctx.arc(7, 5, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            if (this.player.hasQuantum) {
+                ctx.strokeStyle = "#06b6d4";
+                ctx.lineWidth = 3.5;
+                ctx.beginPath();
+                ctx.moveTo(6, -5);
+                ctx.lineTo(20, -5);
+                ctx.stroke();
+            } else if (this.player.hasPistol) {
+                ctx.fillStyle = "#475569";
+                ctx.fillRect(6, -7, 11, 4);
+            } else {
+                ctx.strokeStyle = "#cbd5e1";
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.moveTo(7, -5);
+                ctx.lineTo(15, -7);
+                ctx.stroke();
+            }
+
+            ctx.restore();
+        }
+
+        drawHorrorAmbientVignette(ctx) {
+            ctx.save();
+            const grad = ctx.createRadialGradient(
+                this.canvas.width / 2, this.canvas.height / 2, this.canvas.width / 2.5,
+                this.canvas.width / 2, this.canvas.height / 2, this.canvas.width / 1.05
+            );
+            grad.addColorStop(0, "rgba(2, 4, 10, 0)");
+            grad.addColorStop(1, "rgba(1, 2, 4, 0.72)"); 
+
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            ctx.restore();
+        }
+    }
+
+    window.onload = function() {
+        const game = new GameEngine();
+        window.game = game;
+
+        let lastTime = performance.now();
+        function loop(now) {
+            const dt = (now - lastTime) / 1000;
+            lastTime = now;
+
+            game.update(dt);
+            game.draw();
+
+            requestAnimationFrame(loop);
+        }
+        requestAnimationFrame(loop);
+    };
+    </script>
+</body>
+</html>
