@@ -1,0 +1,2136 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>F1 Grand Prix 3D Simulator</title>
+    <!-- 레이아웃용 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js 3D 엔진 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- 레이싱 HUD용 구글 폰트 -->
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Rajdhani', sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .font-racing {
+            font-family: 'Orbitron', sans-serif;
+        }
+        /* 로비 및 리더보드 스크롤바 커스텀 */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(0,0,0,0.3);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #ff1801;
+            border-radius: 3px;
+        }
+        /* 발광 효과 */
+        .glow-red {
+            box-shadow: 0 0 15px rgba(255, 24, 1, 0.6);
+        }
+        .glow-green {
+            box-shadow: 0 0 15px rgba(0, 255, 100, 0.6);
+        }
+        .glow-blue {
+            box-shadow: 0 0 15px rgba(0, 150, 255, 0.6);
+        }
+    </style>
+</head>
+<body class="relative w-screen h-screen">
+
+    <!-- ========================================== -->
+    <!-- 오디오 컨트롤러 (Web Audio Synthesizer) -->
+    <!-- ========================================== -->
+    <script>
+        class AudioSynth {
+            constructor() {
+                this.ctx = null;
+                this.engineOsc = null;
+                this.engineGain = null;
+                this.skidNoise = null;
+                this.skidGain = null;
+                this.radioOsc = null;
+                this.radioGain = null;
+                this.initialized = false;
+            }
+            init() {
+                if (this.initialized) return;
+                try {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContext();
+                    
+                    // 엔진 사운드 합성기 (톱니파형 + 로우패스 필터)
+                    this.engineOsc = this.ctx.createOscillator();
+                    this.engineOsc.type = 'sawtooth';
+                    this.engineFilter = this.ctx.createBiquadFilter();
+                    this.engineFilter.type = 'lowpass';
+                    this.engineFilter.frequency.value = 800;
+                    
+                    this.engineGain = this.ctx.createGain();
+                    this.engineGain.gain.value = 0.05;
+                    
+                    this.engineOsc.connect(this.engineFilter);
+                    this.engineFilter.connect(this.engineGain);
+                    this.engineGain.connect(this.ctx.destination);
+                    this.engineOsc.start();
+                    
+                    // 타이어 마찰음 합성기 (화이트 노이즈)
+                    this.skidNoise = this.createNoiseBufferNode();
+                    this.skidGain = this.ctx.createGain();
+                    this.skidGain.gain.value = 0;
+                    if (this.skidNoise) {
+                        this.skidNoise.connect(this.skidGain);
+                        this.skidGain.connect(this.ctx.destination);
+                        this.skidNoise.start();
+                    }
+
+                    this.initialized = true;
+                } catch(e) {
+                    console.warn("Web Audio API가 지원되지 않거나 브라우저에서 차단되었습니다.", e);
+                }
+            }
+            createNoiseBufferNode() {
+                if (!this.ctx) return null;
+                const bufferSize = 2 * this.ctx.sampleRate;
+                const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const output = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    output[i] = Math.random() * 2 - 1;
+                }
+                const whiteNoise = this.ctx.createBufferSource();
+                whiteNoise.buffer = noiseBuffer;
+                whiteNoise.loop = true;
+                return whiteNoise;
+            }
+            setEngineRPM(rpmPercent, speedPercent) {
+                if (!this.initialized || !this.ctx) return;
+                if (this.ctx.state === 'suspended') return;
+                
+                const baseFreq = 65 + (rpmPercent * 260) + (speedPercent * 110);
+                this.engineOsc.frequency.setTargetAtTime(baseFreq, this.ctx.currentTime, 0.1);
+                
+                this.engineFilter.frequency.setTargetAtTime(400 + (rpmPercent * 1900), this.ctx.currentTime, 0.15);
+                this.engineGain.gain.setTargetAtTime(0.02 + (rpmPercent * 0.09), this.ctx.currentTime, 0.1);
+            }
+            setSkid(intensity) {
+                if (!this.initialized || !this.ctx || !this.skidGain) return;
+                this.skidGain.gain.setTargetAtTime(intensity * 0.12, this.ctx.currentTime, 0.05);
+            }
+            playBeep(freq, duration) {
+                if (!this.initialized || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + duration);
+            }
+            playRadio() {
+                if (!this.initialized || !this.ctx) return;
+                this.playBeep(1200, 0.15);
+                setTimeout(() => this.playBeep(900, 0.1), 160);
+            }
+        }
+        const audio = new AudioSynth();
+    </script>
+
+    <!-- ========================================== -->
+    <!-- 로비 및 설정 선택 스크린 -->
+    <!-- ========================================== -->
+    <!-- -->
+    <div id="lobby" class="absolute inset-0 z-50 flex flex-col justify-between p-6 bg-gradient-to-br from-neutral-900 via-neutral-950 to-black text-white">
+        <!-- 헤더 -->
+        <div class="flex items-center justify-between border-b border-red-600/30 pb-4">
+            <div class="flex items-center space-x-3">
+                <span class="w-4 h-8 bg-red-600 skew-x-12 inline-block"></span>
+                <h1 class="text-3xl font-black tracking-wider uppercase font-racing text-red-500">F1 GP CHRONICLES</h1>
+                <span class="text-xs border border-red-500 text-red-500 px-2 py-0.5 rounded font-bold uppercase tracking-widest">3D SIMULATOR v3.5</span>
+            </div>
+            <div id="legend-badge" class="hidden bg-yellow-500 text-black font-bold px-3 py-1 rounded text-xs uppercase animate-bounce font-racing">
+                🏆 LEGEND ACTIVE
+            </div>
+            <div class="text-sm text-neutral-400">
+                HTML5 단일 파일 실감형 3D 레이싱 엔진 (서킷 락 적용)
+            </div>
+        </div>
+
+        <!-- 주 선택 영역 -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 my-auto max-h-[80vh] overflow-y-auto pr-2">
+            <!-- 1. 서킷 선택 -->
+            <div class="bg-neutral-900/60 border border-neutral-800 p-5 rounded-lg flex flex-col justify-between">
+                <div>
+                    <h2 class="text-xl font-bold mb-4 font-racing text-red-400 flex items-center">
+                        <span class="mr-2">🏁</span> 서킷 선택 (Select Track)
+                    </h2>
+                    <div id="track-list" class="space-y-3">
+                        <div onclick="selectTrack('yas')" id="track-yas" class="track-btn border-2 border-red-600 bg-red-950/20 p-3 rounded-lg cursor-pointer hover:bg-neutral-800 transition">
+                            <div class="font-bold text-lg">Yas Marina Circuit</div>
+                            <div class="text-xs text-neutral-400">아부다비 / 정교한 코너링 레이아웃 / 화려한 야간 조명 서킷</div>
+                        </div>
+                        <div onclick="selectTrack('monza')" id="track-monza" class="track-btn border border-neutral-700 bg-neutral-900 p-3 rounded-lg cursor-pointer hover:bg-neutral-800 transition">
+                            <div class="font-bold text-lg">Monza Circuit</div>
+                            <div class="text-xs text-neutral-400">이탈리아 / 초고속 템포 / 심플한 속도 중심의 스피드 레이아웃</div>
+                        </div>
+                        <div onclick="selectTrack('cota')" id="track-cota" class="track-btn border border-neutral-700 bg-neutral-900 p-3 rounded-lg cursor-pointer hover:bg-neutral-800 transition">
+                            <div class="font-bold text-lg">Circuit of the Americas</div>
+                            <div class="text-xs text-neutral-400">미국 텍사스 / 테크니컬 고저차 구현 및 다이내믹 급코너</div>
+                        </div>
+                        <div onclick="selectTrack('baku')" id="track-baku" class="track-btn border border-neutral-700 bg-neutral-900 p-3 rounded-lg cursor-pointer hover:bg-neutral-800 transition">
+                            <div class="font-bold text-lg">Baku City Circuit</div>
+                            <div class="text-xs text-neutral-400">아제르바이잔 / 극단적인 폭과 초장거리 직선의 도심형 도로 서킷</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. 팀 및 드라이버 선택 -->
+            <div class="bg-neutral-900/60 border border-neutral-800 p-5 rounded-lg flex flex-col justify-between">
+                <div>
+                    <h2 class="text-xl font-bold mb-4 font-racing text-red-400 flex items-center">
+                        <span class="mr-2">🏎️</span> 팀 선택 (Select Team)
+                    </h2>
+                    <div class="space-y-3 max-h-[350px] overflow-y-auto pr-1">
+                        <div onclick="selectTeam('mclaren')" id="team-mclaren" class="team-btn border-2 border-orange-500 bg-orange-950/10 p-3 rounded-lg cursor-pointer hover:bg-neutral-800 transition flex justify-between items-center">
+                            <div>
+                                <span class="font-bold text-orange-500">McLaren Racing</span>
+                                <div class="text-xs text-neutral-400">Lando Norris #4 | 높은 가속 세팅</div>
+                            </div>
+                            <span class="w-3 h-6 bg-orange-500 rounded-sm"></span>
+                        </div>
+                        <div onclick="selectTeam('ferrari')" id="team-ferrari" class="team-btn border border-neutral-700 bg-neutral-900 p-3 rounded-lg cursor-pointer hover:bg-neutral-800 transition flex justify-between items-center">
+                            <div>
+                                <span class="font-bold text-red-600">Scuderia Ferrari</span>
+                                <div class="text-xs text-neutral-400">Charles Leclerc #16 | 최대 다운포스 & 그립력</div>
+                            </div>
+                            <span class="w-3 h-6 bg-red-600 rounded-sm"></span>
+                        </div>
+                        <div onclick="selectTeam('redbull')" id="team-redbull" class="team-btn border border-neutral-700 bg-neutral-900 p-3 rounded-lg cursor-pointer hover:bg-neutral-800 transition flex justify-between items-center">
+                            <div>
+                                <span class="font-bold text-blue-400">Red Bull Racing</span>
+                                <div class="text-xs text-neutral-400">Max Verstappen #1 | 공격적인 오버테이크 AI</div>
+                            </div>
+                            <span class="w-3 h-6 bg-blue-800 rounded-sm"></span>
+                        </div>
+                        <div onclick="selectTeam('mercedes')" id="team-mercedes" class="team-btn border border-neutral-700 bg-neutral-900 p-3 rounded-lg cursor-pointer hover:bg-neutral-800 transition flex justify-between items-center">
+                            <div>
+                                <span class="font-bold text-emerald-400">Mercedes AMG F1</span>
+                                <div class="text-xs text-neutral-400">George Russell #63 | 베테랑 드라이빙 밸런스</div>
+                            </div>
+                            <span class="w-3 h-6 bg-emerald-400 rounded-sm"></span>
+                        </div>
+                        <div onclick="selectTeam('aston')" id="team-aston" class="team-btn border border-neutral-700 bg-neutral-900 p-3 rounded-lg cursor-pointer hover:bg-neutral-800 transition flex justify-between items-center">
+                            <div>
+                                <span class="font-bold text-green-400">Aston Martin F1</span>
+                                <div class="text-xs text-neutral-400">Fernando Alonso #14 | 탁월한 타이어 관리 능력</div>
+                            </div>
+                            <span class="w-3 h-6 bg-green-700 rounded-sm"></span>
+                        </div>
+                        <div onclick="selectTeam('alpine')" id="team-alpine" class="team-btn border border-neutral-700 bg-neutral-900 p-3 rounded-lg cursor-pointer hover:bg-neutral-800 transition flex justify-between items-center">
+                            <div>
+                                <span class="font-bold text-pink-400">Alpine F1 Team</span>
+                                <div class="text-xs text-neutral-400">Pierre Gasly #10 | 안정적인 하이브리드 세업</div>
+                            </div>
+                            <span class="w-3 h-6 bg-pink-500 rounded-sm"></span>
+                        </div>
+                        <div onclick="selectTeam('williams')" id="team-williams" class="team-btn border border-neutral-700 bg-neutral-900 p-3 rounded-lg cursor-pointer hover:bg-neutral-800 transition flex justify-between items-center">
+                            <div>
+                                <span class="font-bold text-blue-500">Williams Racing</span>
+                                <div class="text-xs text-neutral-400">Carlos Sainz #55 | 고속 스트레이트 스피드 특화</div>
+                            </div>
+                            <span class="w-3 h-6 bg-blue-600 rounded-sm"></span>
+                        </div>
+                        <div onclick="selectTeam('haas')" id="team-haas" class="team-btn border border-neutral-700 bg-neutral-900 p-3 rounded-lg cursor-pointer hover:bg-neutral-800 transition flex justify-between items-center">
+                            <div>
+                                <span class="font-bold text-neutral-200">Haas F1 Team</span>
+                                <div class="text-xs text-neutral-400">Esteban Ocon #31 | 중저속 트랙 기동력 우수</div>
+                            </div>
+                            <span class="w-3 h-6 bg-neutral-200 rounded-sm"></span>
+                        </div>
+                        <div onclick="selectTeam('vcarb')" id="team-vcarb" class="team-btn border border-neutral-700 bg-neutral-900 p-3 rounded-lg cursor-pointer hover:bg-neutral-800 transition flex justify-between items-center">
+                            <div>
+                                <span class="font-bold text-cyan-400">Visa Cash App RB</span>
+                                <div class="text-xs text-neutral-400">Yuki Tsunoda #22 | 뛰어난 슬립 코너 제어력</div>
+                            </div>
+                            <span class="w-3 h-6 bg-cyan-500 rounded-sm"></span>
+                        </div>
+                        <div onclick="selectTeam('sauber')" id="team-sauber" class="team-btn border border-neutral-700 bg-neutral-900 p-3 rounded-lg cursor-pointer hover:bg-neutral-800 transition flex justify-between items-center">
+                            <div>
+                                <span class="font-bold text-lime-400">Sauber F1 Team</span>
+                                <div class="text-xs text-neutral-400">Nico Hulkenberg #27 | 고속 회생 제동 효율 우수</div>
+                            </div>
+                            <span class="w-3 h-6 bg-lime-400 rounded-sm"></span>
+                        </div>
+                        
+                        <!-- 치트키 활성화 시 등장할 히든 플레이어 전설적 팀 및 차량 -->
+                        <div id="team-legends" class="team-btn hidden border-2 border-yellow-500 bg-yellow-950/20 p-4 rounded-lg flex flex-col space-y-3 transition">
+                            <div class="flex justify-between items-center border-b border-yellow-600/40 pb-2">
+                                <div>
+                                    <span class="font-bold text-yellow-400 text-sm">🏆 Formula Legends Class</span>
+                                    <div class="text-[10px] text-neutral-300">전설의 전용 드라이버를 기용하십시오</div>
+                                </div>
+                                <span class="w-3 h-6 bg-gradient-to-b from-yellow-400 to-yellow-600 rounded-sm"></span>
+                            </div>
+                            <!-- 90s Classic Rivalry (세나 vs 프로스트) -->
+                            <div class="space-y-1">
+                                <div class="text-[11px] text-yellow-500 uppercase tracking-widest font-bold font-racing">90s Classic Rivalry</div>
+                                <div class="grid grid-cols-2 gap-2 text-center text-xs font-bold">
+                                    <button onclick="selectLegendDriver('senna')" id="legend-btn-senna" class="bg-red-800 text-white py-1.5 rounded hover:bg-red-700 transition">A. Senna #12</button>
+                                    <button onclick="selectLegendDriver('prost')" id="legend-btn-prost" class="bg-neutral-800 text-white py-1.5 rounded border border-neutral-700 hover:bg-neutral-750 transition">A. Prost #2</button>
+                                </div>
+                            </div>
+                            <!-- 00s Modern Titans (슈마허 vs 라이코넨) -->
+                            <div class="space-y-1 pt-1">
+                                <div class="text-[11px] text-cyan-400 uppercase tracking-widest font-bold font-racing">00s Modern Titans</div>
+                                <div class="grid grid-cols-2 gap-2 text-center text-xs font-bold">
+                                    <button onclick="selectLegendDriver('schumacher')" id="legend-btn-schumacher" class="bg-neutral-800 text-white py-1.5 rounded border border-neutral-700 hover:bg-neutral-750 transition">M. Schumacher #1</button>
+                                    <button onclick="selectLegendDriver('raikkonen')" id="legend-btn-raikkonen" class="bg-neutral-800 text-white py-1.5 rounded border border-neutral-700 hover:bg-neutral-750 transition">K. Raikkonen #7</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. 날씨 및 레이스 옵션 설정 -->
+            <div class="bg-neutral-900/60 border border-neutral-800 p-5 rounded-lg flex flex-col justify-between">
+                <div>
+                    <h2 class="text-xl font-bold mb-4 font-racing text-red-400 flex items-center">
+                        <span class="mr-2">🌦️</span> 기상 & 옵션 설정 (Environment)
+                    </h2>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm text-neutral-400 mb-1">날씨 및 시간대</label>
+                            <div class="grid grid-cols-2 gap-2 text-sm text-center">
+                                <button onclick="selectWeather('day')" id="weather-day" class="weather-btn bg-red-600 font-bold py-2 rounded border border-red-500">맑은 낮 (Day)</button>
+                                <button onclick="selectWeather('night')" id="weather-night" class="weather-btn bg-neutral-800 py-2 rounded border border-neutral-700 hover:bg-neutral-700">야간 레이스</button>
+                                <button onclick="selectWeather('rain')" id="weather-rain" class="weather-btn bg-neutral-800 py-2 rounded border border-neutral-700 hover:bg-neutral-700">우천 (Wet)</button>
+                                <button onclick="selectWeather('sunset')" id="weather-sunset" class="weather-btn bg-neutral-800 py-2 rounded border border-neutral-700 hover:bg-neutral-700">일몰 (Sunset)</button>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm text-neutral-400 mb-1">장착 타이어 컴파운드</label>
+                            <div class="grid grid-cols-3 gap-1 text-xs text-center font-bold">
+                                <button onclick="selectTyre('soft')" id="tyre-soft" class="tyre-btn bg-red-800 text-white py-1.5 rounded border border-red-500">SOFT (S)</button>
+                                <button onclick="selectTyre('medium')" id="tyre-medium" class="tyre-btn bg-neutral-800 text-yellow-500 py-1.5 rounded border border-neutral-700">MEDIUM (M)</button>
+                                <button onclick="selectTyre('hard')" id="tyre-hard" class="tyre-btn bg-neutral-800 text-neutral-300 py-1.5 rounded border border-neutral-700">HARD (H)</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-6 flex flex-col space-y-2">
+                    <button onclick="toggleConsole()" class="w-full bg-neutral-800 hover:bg-neutral-700 text-neutral-400 py-2 rounded text-xs uppercase tracking-widest transition">
+                        ⌨️ 개발자 커맨드 콘솔 [~]
+                    </button>
+                    <button onclick="startGame()" class="w-full bg-red-600 hover:bg-red-700 text-white font-racing font-bold text-xl py-4 rounded-lg tracking-widest transition uppercase glow-red transform hover:scale-[1.02]">
+                        GREEN LIGHT! 레이스 시작
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 사용법 가이드 -->
+        <div class="flex flex-wrap justify-between items-center text-xs text-neutral-500 border-t border-neutral-800 pt-3">
+            <div>조작법: [W,S,A,D] 또는 [방향키] 가속/감속/스티어링 | [L-CTRL] 브레이크 | [Shift] DRS 활성화 | [G] ERS 부스트 | [C] 카메라 변경 | [~] 치트창</div>
+            <div>Three.js &middot; F1 Snap-To-Circuit Physics Core</div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- 게임 플레이 HUD 및 계기판 인터페이스 -->
+    <!-- ========================================== -->
+    <!-- -->
+    <div id="game-hud" class="absolute inset-0 z-30 pointer-events-none hidden flex flex-col justify-between p-4">
+        
+        <!-- 상단 헤더: 순위표 및 실시간 플래그 정보 -->
+        <div class="flex justify-between items-start">
+            
+            <!-- 리더보드 (20인 동적 스크롤뷰 적용 - 마우스/터치 드래그 가능) -->
+            <div class="bg-black/85 text-white border-l-4 border-red-600 p-3 rounded-r-md min-w-[320px] font-racing pointer-events-auto select-none">
+                <div class="flex justify-between items-center border-b border-neutral-800 pb-1 mb-2">
+                    <span id="hud-lap-counter-title" class="text-xs uppercase font-bold text-neutral-400">LIVE STANDINGS (LAP 1/5)</span>
+                    <span id="hud-track-name" class="text-xs font-bold text-red-500">YAS MARINA</span>
+                </div>
+                <div id="leaderboard-rows" class="space-y-1 text-sm max-h-[180px] overflow-y-auto pr-1 cursor-grab active:cursor-grabbing select-none">
+                    <!-- Dynamic Rows Rendered in updateHUDTelemetry -->
+                </div>
+            </div>
+
+            <!-- 카운트다운 스타트 라이트 -->
+            <div class="flex flex-col items-center">
+                <div id="start-lights" class="flex space-x-2 bg-neutral-900/95 p-3 rounded border border-neutral-800 mb-2">
+                    <div class="light-group flex flex-col space-y-1">
+                        <span class="w-6 h-6 rounded-full bg-neutral-800 border border-neutral-900" id="light-1"></span>
+                    </div>
+                    <div class="light-group flex flex-col space-y-1">
+                        <span class="w-6 h-6 rounded-full bg-neutral-800 border border-neutral-900" id="light-2"></span>
+                    </div>
+                    <div class="light-group flex flex-col space-y-1">
+                        <span class="w-6 h-6 rounded-full bg-neutral-800 border border-neutral-900" id="light-3"></span>
+                    </div>
+                    <div class="light-group flex flex-col space-y-1">
+                        <span class="w-6 h-6 rounded-full bg-neutral-800 border border-neutral-900" id="light-4"></span>
+                    </div>
+                    <div class="light-group flex flex-col space-y-1">
+                        <span class="w-6 h-6 rounded-full bg-neutral-800 border border-neutral-900" id="light-5"></span>
+                    </div>
+                </div>
+
+                <!-- 깃발 규정 및 DRS/ERS 표시등 -->
+                <div class="flex space-x-2">
+                    <div id="flag-box" class="bg-emerald-600 text-white font-black font-racing px-4 py-1.5 rounded shadow text-sm flex items-center space-x-2 uppercase">
+                        <span class="w-2.5 h-2.5 bg-white rounded-full animate-pulse"></span>
+                        <span id="flag-text">GREEN FLAG</span>
+                    </div>
+                    <div id="drs-indicator" class="bg-neutral-800 text-neutral-500 font-bold font-racing px-3 py-1.5 rounded text-xs uppercase border border-neutral-700">
+                        DRS [SHIFT]
+                    </div>
+                    <div id="ers-indicator" class="bg-orange-600 text-white font-bold font-racing px-3 py-1.5 rounded text-xs uppercase border border-orange-500 animate-pulse">
+                        ERS: ON
+                    </div>
+                </div>
+            </div>
+
+            <!-- 시스템 설정 정보 및 컨트롤 단축키 -->
+            <div class="flex flex-col space-y-2 pointer-events-auto">
+                <button onclick="cycleCamera()" class="bg-neutral-900/90 hover:bg-neutral-800 text-white border border-neutral-700 px-4 py-2 rounded-md font-bold text-xs font-racing flex items-center space-x-2 transition shadow-lg">
+                    <span>📹 CAMERA [C]</span>
+                </button>
+                <button onclick="requestPitstop()" class="bg-blue-900/90 hover:bg-blue-800 text-white border border-blue-700 px-4 py-2 rounded-md font-bold text-xs font-racing flex items-center space-x-2 transition shadow-lg">
+                    <span>🔧 BOX BOX (PIT)</span>
+                </button>
+                <button onclick="toggleConsole()" class="bg-neutral-900/90 hover:bg-neutral-800 text-yellow-500 border border-neutral-700 px-4 py-2 rounded-md font-bold text-xs font-racing flex items-center space-x-2 transition shadow-lg">
+                    <span>⌨️ CHEAT CONSOLE [~]</span>
+                </button>
+                <div class="bg-black/75 text-neutral-400 p-2.5 rounded border border-neutral-800 text-right text-xs">
+                    <div>WEATHER: <span id="hud-weather-text" class="text-white font-bold">SUNNY</span></div>
+                    <div>SESSION: <span id="hud-session-text" class="text-white font-bold">RACE</span></div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- 알림 영역 (섹터 클리어, 오버테이크 등) -->
+        <div class="flex justify-center my-auto">
+            <div id="race-alert" class="bg-black/90 text-white text-xl font-racing font-bold px-8 py-3 rounded-full border border-red-600 text-center uppercase tracking-widest opacity-0 transform translate-y-4 transition duration-300 pointer-events-none">
+                SECTOR 1 CLEAR
+            </div>
+        </div>
+
+        <!-- 원터치 주행 제어반 -->
+        <div class="flex justify-between items-center px-4 mb-2 pointer-events-auto">
+            <!-- 좌측: 모바일/마우스 핸들링 버튼 -->
+            <div class="flex space-x-2">
+                <button onmousedown="keys['a'] = true" onmouseup="keys['a'] = false" ontouchstart="keys['a'] = true" ontouchend="keys['a'] = false" class="w-16 h-16 bg-neutral-900/85 hover:bg-neutral-800 border-2 border-neutral-700 active:scale-95 text-2xl font-bold rounded-xl text-white flex items-center justify-center transition">◀</button>
+                <button onmousedown="keys['d'] = true" onmouseup="keys['d'] = false" ontouchstart="keys['d'] = true" ontouchend="keys['d'] = false" class="w-16 h-16 bg-neutral-900/85 hover:bg-neutral-800 border-2 border-neutral-700 active:scale-95 text-2xl font-bold rounded-xl text-white flex items-center justify-center transition">▶</button>
+            </div>
+            
+            <!-- 중앙: 인공지능 조향 정렬 어시스턴트 -->
+            <div>
+                <button onclick="toggleSteerAssist()" id="assist-btn" class="bg-emerald-600/90 hover:bg-emerald-500 border border-emerald-500 px-4 py-2.5 rounded-lg text-xs font-racing text-white font-bold transition active:scale-95 shadow-lg">
+                    🤖 STEERING ASSIST: ON
+                </button>
+            </div>
+
+            <!-- 우측: 모바일/마우스 주행 기동 버튼 -->
+            <div class="flex space-x-2">
+                <button onmousedown="keys['control'] = true" onmouseup="keys['control'] = false" ontouchstart="keys['control'] = true" ontouchend="keys['control'] = false" class="w-14 h-14 bg-red-900/85 hover:bg-red-800 border border-red-700 active:scale-95 text-xs font-bold rounded-xl text-white flex items-center justify-center transition uppercase font-racing">BRAKE</button>
+                <button onmousedown="keys['g'] = true" onmouseup="keys['g'] = false" ontouchstart="keys['g'] = true" ontouchend="keys['g'] = false" class="w-14 h-14 bg-cyan-900/85 hover:bg-cyan-800 border border-cyan-700 active:scale-95 text-xs font-bold rounded-xl text-white flex items-center justify-center transition uppercase font-racing animate-pulse">BOOST</button>
+                <button onmousedown="keys['w'] = true" onmouseup="keys['w'] = false" ontouchstart="keys['w'] = true" ontouchend="keys['w'] = false" class="w-16 h-16 bg-red-600 hover:bg-red-500 border-2 border-red-400 active:scale-95 text-lg font-bold rounded-xl text-white flex items-center justify-center transition">▲ GAS</button>
+            </div>
+        </div>
+
+        <!-- 하단 정보: 스피도미터, 기어, 타이어 마모도, ERS 배터리 게이지 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end pointer-events-auto">
+            
+            <!-- 왼쪽: 차량 내구도 및 타이어 마모상태 -->
+            <div class="bg-black/85 border border-neutral-800/80 p-3.5 rounded-lg text-white font-racing">
+                <div class="text-xs text-neutral-400 font-bold mb-2 uppercase tracking-wider">Tyres & Aerodynamics</div>
+                
+                <div class="flex justify-between items-center space-x-4">
+                    <!-- 타이어 상태 -->
+                    <div class="flex items-center space-x-2">
+                        <div class="w-12 h-12 rounded-full border-4 border-red-500 flex items-center justify-center font-black text-red-500 text-lg shadow-lg bg-black" id="tyre-badge">
+                            S
+                        </div>
+                        <div>
+                            <div class="text-xs text-neutral-400">Tyre Temp / Wear</div>
+                            <div class="text-sm font-bold text-emerald-400" id="tyre-stats">95°C / 100%</div>
+                        </div>
+                    </div>
+
+                    <!-- F1 머신 주요 모듈 손상율 -->
+                    <div class="flex-1 grid grid-cols-2 gap-1 text-center text-[10px]">
+                        <div class="bg-neutral-900 border border-neutral-800 p-1 rounded">
+                            <div class="text-neutral-500">FRONT WING</div>
+                            <div class="font-bold text-emerald-400" id="wing-damage">OK (0%)</div>
+                        </div>
+                        <div class="bg-neutral-900 border border-neutral-800 p-1 rounded">
+                            <div class="text-neutral-500">ENGINE TEMP</div>
+                            <div class="font-bold text-yellow-500" id="engine-temp">102°C</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 트랙 이탈 패널티 모니터링 -->
+                <div class="mt-2 pt-2 border-t border-neutral-800/60 flex justify-between text-xs">
+                    <span class="text-neutral-400">ROAD LIMITS STATUS:</span>
+                    <span class="text-emerald-400 font-bold" id="track-limits-status">SNAP-FIXED ON CIRCUIT</span>
+                </div>
+            </div>
+
+            <!-- 중앙: 고정밀 계기판 -->
+            <div class="bg-gradient-to-t from-neutral-950 via-black/95 to-neutral-900/90 border-2 border-neutral-700/60 p-4 rounded-xl text-white font-racing flex flex-col items-center justify-center glow-red">
+                
+                <!-- RPM LED 바 -->
+                <div class="flex space-x-1.5 mb-2.5" id="rpm-leds">
+                    <span class="w-4 h-1.5 bg-neutral-800 rounded-sm"></span>
+                    <span class="w-4 h-1.5 bg-neutral-800 rounded-sm"></span>
+                    <span class="w-4 h-1.5 bg-neutral-800 rounded-sm"></span>
+                    <span class="w-4 h-1.5 bg-neutral-800 rounded-sm"></span>
+                    <span class="w-4 h-1.5 bg-neutral-800 rounded-sm"></span>
+                    <span class="w-4 h-1.5 bg-neutral-800 rounded-sm"></span>
+                    <span class="w-4 h-1.5 bg-neutral-800 rounded-sm"></span>
+                    <span class="w-4 h-1.5 bg-neutral-800 rounded-sm"></span>
+                    <span class="w-4 h-1.5 bg-neutral-800 rounded-sm"></span>
+                    <span class="w-4 h-1.5 bg-neutral-800 rounded-sm"></span>
+                </div>
+
+                <div class="flex items-baseline space-x-4">
+                    <!-- 본인 현재 순위 -->
+                    <div class="text-center min-w-[60px] border-r border-neutral-800 pr-2">
+                        <div class="text-[9px] text-neutral-400 font-bold uppercase">POS</div>
+                        <div class="text-5xl font-black text-yellow-500 tracking-tighter" id="hud-player-pos">20</div>
+                    </div>
+                    <!-- 기어 -->
+                    <div class="text-center">
+                        <div class="text-[9px] text-neutral-400 font-bold uppercase">GEAR</div>
+                        <div class="text-5xl font-black text-red-500 tracking-tighter" id="hud-gear">1</div>
+                    </div>
+                    <!-- 속도 -->
+                    <div class="text-center min-w-[120px]">
+                        <div class="text-6xl font-black tracking-tight" id="hud-speed">000</div>
+                        <div class="text-[10px] text-neutral-400 font-bold">KM/H</div>
+                    </div>
+                    <!-- 연료량 -->
+                    <div class="text-center text-xs">
+                        <div class="text-[9px] text-neutral-400 font-bold">LAPS LEFT</div>
+                        <div class="font-bold text-yellow-500" id="hud-fuel">Laps 4.5</div>
+                    </div>
+                </div>
+
+                <!-- ERS 배터리 충전 상태 -->
+                <div class="w-full mt-3">
+                    <div class="flex justify-between text-[10px] mb-1">
+                        <span class="text-neutral-400">ERS BATTERY</span>
+                        <span class="text-cyan-400 font-bold" id="ers-percent">100%</span>
+                    </div>
+                    <div class="w-full h-2.5 bg-neutral-800 rounded-full overflow-hidden border border-neutral-700">
+                        <div class="h-full bg-gradient-to-r from-cyan-600 to-cyan-400 transition-all duration-100" id="ers-bar" style="width: 100%;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 오른쪽: 현재 랩타임 및 베스트 랩타임 기록 정보 -->
+            <div class="bg-black/85 border border-neutral-800/80 p-3.5 rounded-lg text-white font-racing">
+                <div class="text-xs text-neutral-400 font-bold mb-2 uppercase tracking-wider">TIMINGS & SECTORS</div>
+                
+                <div class="space-y-1.5 text-sm">
+                    <div class="flex justify-between">
+                        <span class="text-neutral-400">CURRENT LAP</span>
+                        <span class="font-bold text-white" id="hud-lap-time">0:00.000</span>
+                    </div>
+                    <div class="flex justify-between text-xs">
+                        <span class="text-neutral-500">BEST LAP</span>
+                        <span class="font-bold text-purple-400" id="hud-best-time">--:--.---</span>
+                    </div>
+                    <div class="flex justify-between items-center pt-2 border-t border-neutral-800/60 text-xs">
+                        <span class="text-neutral-400">SECTOR DELTA</span>
+                        <span class="px-1.5 py-0.5 rounded font-bold bg-purple-950/40 text-purple-400 border border-purple-800/40" id="sector-delta">-0.145s</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- ========================================== -->
+    <!-- 개발자 치트 커맨드 콘솔 오버레이 -->
+    <!-- ========================================== -->
+    <!-- -->
+    <div id="cheat-console" class="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm hidden flex flex-col justify-center items-center text-white p-4">
+        <div class="max-w-lg w-full bg-neutral-900 border-2 border-yellow-500 rounded-xl p-5 font-mono space-y-4 pointer-events-auto">
+            <div class="flex justify-between items-center border-b border-neutral-800 pb-2">
+                <span class="text-yellow-500 font-bold uppercase tracking-wider text-sm flex items-center">
+                    <span class="w-2.5 h-2.5 bg-yellow-500 rounded-full inline-block mr-2 animate-ping"></span>
+                    F1 DEVELOPER COMMAND CHEAT WINDOW
+                </span>
+                <button onclick="toggleConsole()" class="text-neutral-400 hover:text-white font-sans text-xl">&times;</button>
+            </div>
+            
+            <div class="h-44 bg-black/90 p-3 rounded text-xs overflow-y-auto space-y-1" id="console-output">
+                <div class="text-neutral-500">[SYSTEM] Terminal initialized. Type "F1" to unlock Formula Legends.</div>
+                <div class="text-neutral-500">[SYSTEM] Type commands inside the box below.</div>
+            </div>
+
+            <div class="flex space-x-2">
+                <input type="text" id="console-input" placeholder="Type command (e.g. F1) here..." class="flex-1 bg-black border border-neutral-800 px-3 py-2 rounded text-sm text-yellow-400 focus:outline-none focus:border-yellow-500 uppercase">
+                <button onclick="executeCommand()" class="bg-yellow-500 hover:bg-yellow-600 text-black px-4 py-2 rounded text-sm font-bold uppercase tracking-wide">
+                    EXECUTE
+                </button>
+            </div>
+            <p class="text-[10px] text-neutral-500 text-center">
+                치트코드 가이드: [F1] 레전드 클래스 드라이버(세나, 프로스트, 슈마허, 라이코넨) 선택 해금 및 AI 난이도 극대화 
+            </p>
+        </div>
+    </div>
+
+    <!-- 피트스톱 커스터마이징 오버레이 -->
+    <div id="pitstop-overlay" class="absolute inset-0 z-40 bg-black/90 backdrop-blur-sm hidden flex-col justify-center items-center text-white">
+        <div class="max-w-md w-full bg-neutral-900 border-2 border-blue-600 p-6 rounded-xl text-center font-racing space-y-6">
+            <h2 class="text-2xl font-black tracking-widest text-blue-500 uppercase flex items-center justify-center">
+                <span class="animate-ping mr-2 w-3 h-3 bg-blue-500 rounded-full inline-block"></span> PIT LANE IN PROGRESS
+            </h2>
+            <p class="text-sm text-neutral-400 font-sans">
+                피트 크루가 머신 정비를 위해 대기 중입니다. 교체할 타이어 규격을 선택하십시오.
+            </p>
+
+            <div class="grid grid-cols-3 gap-2">
+                <button onclick="performPitAction('soft')" class="bg-red-700 hover:bg-red-600 p-3 rounded font-bold border border-red-500 transition text-xs">
+                    SOFT (S)
+                </button>
+                <button onclick="performPitAction('medium')" class="bg-neutral-800 hover:bg-neutral-700 p-3 rounded font-bold border border-yellow-600 transition text-xs text-yellow-500">
+                    MEDIUM (M)
+                </button>
+                <button onclick="performPitAction('hard')" class="bg-neutral-800 hover:bg-neutral-700 p-3 rounded font-bold border border-neutral-600 transition text-xs text-neutral-300">
+                    HARD (H)
+                </button>
+            </div>
+
+            <button onclick="closePitstop()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded transition uppercase">
+                정비 완료 후 피트 아웃
+            </button>
+        </div>
+    </div>
+
+    <!-- 최종 레이스 리포트 결과 스크린 -->
+    <div id="results-screen" class="absolute inset-0 z-50 bg-black/95 flex-col justify-center items-center text-white hidden">
+        <div class="max-w-2xl w-full bg-neutral-900 border-2 border-red-600 p-8 rounded-xl font-racing space-y-6">
+            <div class="text-center">
+                <h1 class="text-4xl font-black tracking-widest text-red-500 uppercase">GRAND PRIX FINISHED</h1>
+                <p class="text-neutral-400 text-sm font-sans mt-1">공식 레이스 세션 결과 분석 리포트</p>
+            </div>
+
+            <div class="border-t border-b border-neutral-800 py-4 space-y-3">
+                <div class="flex justify-between items-center text-lg">
+                    <span class="text-neutral-400">최종 순위 (Final Position)</span>
+                    <span class="font-black text-red-500 text-2xl" id="res-pos">P 1 / 20</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-neutral-400">총 랩 수 (Completed Laps)</span>
+                    <span class="font-bold" id="res-laps">5 / 5</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-neutral-400">최고 랩타임 (Best Laptime)</span>
+                    <span class="font-bold text-purple-400" id="res-best">1:12.450</span>
+                </div>
+                <div class="flex justify-between items-center text-sm border-t border-neutral-800 pt-3">
+                    <span class="text-neutral-400">시즌 포인트 획득</span>
+                    <span class="font-bold text-yellow-500 text-lg" id="res-points">+25 PTS</span>
+                </div>
+            </div>
+
+            <div class="flex space-x-4">
+                <button onclick="restartRace()" class="flex-1 bg-red-600 hover:bg-red-700 py-3.5 rounded font-bold uppercase transition glow-red text-center">
+                    다시 하기 (Restart)
+                </button>
+                <button onclick="goToLobby()" class="flex-1 bg-neutral-800 hover:bg-neutral-700 py-3.5 rounded font-bold uppercase transition text-center">
+                    로비로 이동 (Lobby)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 일시정지 오버레이 -->
+    <div id="pause-overlay" class="absolute inset-0 z-40 bg-black/75 backdrop-blur-sm hidden flex-col justify-center items-center text-white">
+        <div class="max-w-sm w-full bg-neutral-900 border border-neutral-800 p-6 rounded-lg text-center font-racing space-y-4">
+            <h2 class="text-xl font-bold tracking-wider text-red-500">PAUSED</h2>
+            <p class="text-xs text-neutral-400 font-sans">게임이 일시정지 되었습니다.</p>
+            <button onclick="resumeGame()" class="w-full bg-red-600 hover:bg-red-700 py-2 rounded text-sm uppercase font-bold transition">계속하기 (Resume)</button>
+            <button onclick="restartRace()" class="w-full bg-neutral-800 hover:bg-neutral-700 py-2 rounded text-sm uppercase font-bold transition">재시작 (Restart)</button>
+            <button onclick="goToLobby()" class="w-full bg-neutral-800 hover:bg-neutral-700 py-2 rounded text-sm uppercase font-bold transition">로비로 (Lobby)</button>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- 게임 메인 로직 및 Three.js 3D 렌더러 -->
+    <!-- ========================================== -->
+    <script>
+        // 기본 게임 상태 구성값
+        let config = {
+            track: 'yas',
+            team: 'mclaren',
+            weather: 'day',
+            tyre: 'soft',
+            legendDriver: 'senna' // 'senna', 'prost', 'schumacher', 'raikkonen'
+        };
+
+        let gameActive = false;
+        let paused = false;
+        let raceStarted = false;
+        let countdownTime = 5;
+        let isLegendsUnlocked = false; // 레전드 드라이버 활성화 여부
+        let steerAssistActive = true;  // 자동 조향 복원 어시스턴트 활성 플래그 (기본 ON)
+
+        function initLeaderboardDragScroll() {
+            const slider = document.getElementById('leaderboard-rows');
+            if (!slider) return;
+            
+            let isDown = false;
+            let startY;
+            let scrollTop;
+
+            slider.addEventListener('mousedown', (e) => {
+                isDown = true;
+                startY = e.pageY - slider.offsetTop;
+                scrollTop = slider.scrollTop;
+            });
+
+            slider.addEventListener('mouseleave', () => {
+                isDown = false;
+            });
+
+            slider.addEventListener('mouseup', () => {
+                isDown = false;
+            });
+
+            slider.addEventListener('mousemove', (e) => {
+                if (!isDown) return;
+                e.preventDefault();
+                const y = e.pageY - slider.offsetTop;
+                const walk = (y - startY) * 1.5; // 스크롤 속도 배율
+                slider.scrollTop = scrollTop - walk;
+            });
+
+            // 모바일 및 태블릿 터치 스크롤 지원
+            slider.addEventListener('touchstart', (e) => {
+                isDown = true;
+                startY = e.touches[0].pageY - slider.offsetTop;
+                scrollTop = slider.scrollTop;
+            });
+
+            slider.addEventListener('touchend', () => {
+                isDown = false;
+            });
+
+            slider.addEventListener('touchmove', (e) => {
+                if (!isDown) return;
+                const y = e.touches[0].pageY - slider.offsetTop;
+                const walk = (y - startY) * 1.5;
+                slider.scrollTop = scrollTop - walk;
+            });
+        }
+
+        // 조향 어시스트 토글 스위치
+        function toggleSteerAssist() {
+            steerAssistActive = !steerAssistActive;
+            const btn = document.getElementById('assist-btn');
+            if (steerAssistActive) {
+                btn.innerText = "🤖 STEERING ASSIST: ON";
+                btn.className = "bg-emerald-600/90 hover:bg-emerald-500 border border-emerald-500 px-4 py-2.5 rounded-lg text-xs font-racing text-white font-bold transition active:scale-95 shadow-lg";
+                showAlert("STEERING ASSISTANCE ACTIVATED", "bg-emerald-600");
+            } else {
+                btn.innerText = "🤖 STEERING ASSIST: OFF";
+                btn.className = "bg-neutral-800 hover:bg-neutral-700 border border-neutral-600 px-4 py-2.5 rounded-lg text-xs font-racing text-neutral-400 font-bold transition active:scale-95";
+                showAlert("STEERING ASSISTANCE DEACTIVATED", "bg-neutral-750");
+            }
+            audio.playBeep(1000, 0.05);
+        }
+
+        // 치트 터미널 여닫기
+        function toggleConsole() {
+            const el = document.getElementById('cheat-console');
+            const isHidden = el.classList.contains('hidden');
+            if (isHidden) {
+                el.classList.remove('hidden');
+                document.getElementById('console-input').focus();
+            } else {
+                el.classList.add('hidden');
+            }
+        }
+
+        // 치트 명령 실행
+        function executeCommand() {
+            const inputEl = document.getElementById('console-input');
+            const cmd = inputEl.value.trim().toUpperCase();
+            const outputEl = document.getElementById('console-output');
+
+            if (cmd === "F1") {
+                isLegendsUnlocked = true;
+                outputEl.innerHTML += `<div class="text-yellow-400">[SYSTEM] CHEAT "F1" DETECTED! LEGENDS UNLOCKED!</div>`;
+                outputEl.innerHTML += `<div class="text-emerald-400">&gt; Ayrton Senna vs Alain Prost AND Michael Schumacher vs Kimi Raikkonen active!</div>`;
+                outputEl.innerHTML += `<div class="text-red-500">&gt; Grid AI Speed and Competitiveness scaled. Welcome to the historic class.</div>`;
+                
+                // 로비에 장식 배지 표시
+                document.getElementById('legend-badge').classList.remove('hidden');
+                
+                // 플레이어용 레전드 팀 선택지 활성화
+                const legendTeamCard = document.getElementById('team-legends');
+                if (legendTeamCard) {
+                    legendTeamCard.classList.remove('hidden');
+                    selectTeam('legends');
+                }
+
+                audio.playRadio();
+                showAlert("LEGEND CLASS DRIVERS UNLOCKED!", "bg-yellow-500 text-black");
+            } else {
+                outputEl.innerHTML += `<div class="text-red-400">[ERROR] Unknown command: "${cmd}". Available: F1</div>`;
+            }
+            
+            inputEl.value = "";
+            outputEl.scrollTop = outputEl.scrollHeight;
+        }
+
+        // 선택 핸들러 함수들
+        function selectTrack(id) {
+            document.querySelectorAll('.track-btn').forEach(b => b.classList.replace('border-2', 'border'));
+            document.querySelectorAll('.track-btn').forEach(b => b.classList.replace('border-red-600', 'border-neutral-700'));
+            document.querySelectorAll('.track-btn').forEach(b => b.classList.replace('bg-red-950/20', 'bg-neutral-900'));
+            const btn = document.getElementById('track-' + id);
+            btn.classList.replace('border', 'border-2');
+            btn.classList.replace('border-neutral-700', 'border-red-600');
+            btn.classList.replace('bg-neutral-900', 'bg-red-950/20');
+            config.track = id;
+            audio.playBeep(800, 0.05);
+        }
+
+        function selectTeam(id) {
+            document.querySelectorAll('.team-btn').forEach(b => {
+                b.classList.remove('border-2');
+                b.classList.add('border');
+            });
+            const btn = document.getElementById('team-' + id);
+            btn.classList.remove('border');
+            btn.classList.add('border-2');
+            config.team = id;
+            audio.playBeep(1000, 0.05);
+        }
+
+        function selectLegendDriver(driver) {
+            config.legendDriver = driver;
+            const buttons = ['senna', 'prost', 'schumacher', 'raikkonen'];
+            buttons.forEach(d => {
+                const btn = document.getElementById('legend-btn-' + d);
+                if (d === driver) {
+                    if (d === 'senna') {
+                        btn.className = "bg-yellow-500 text-black py-1.5 rounded font-bold transition";
+                    } else if (d === 'prost') {
+                        btn.className = "bg-blue-600 text-white py-1.5 rounded font-bold transition";
+                    } else if (d === 'schumacher') {
+                        btn.className = "bg-red-600 text-white py-1.5 rounded font-bold transition";
+                    } else {
+                        btn.className = "bg-sky-500 text-black py-1.5 rounded font-bold transition";
+                    }
+                } else {
+                    btn.className = "bg-neutral-800 text-white py-1.5 rounded border border-neutral-700 hover:bg-neutral-750 transition";
+                }
+            });
+            audio.playBeep(1100, 0.05);
+        }
+
+        function selectWeather(id) {
+            document.querySelectorAll('.weather-btn').forEach(b => {
+                b.classList.remove('bg-red-600', 'font-bold');
+                b.classList.add('bg-neutral-800');
+            });
+            document.getElementById('weather-' + id).classList.add('bg-red-600', 'font-bold');
+            config.weather = id;
+            audio.playBeep(900, 0.05);
+        }
+
+        function selectTyre(id) {
+            document.querySelectorAll('.tyre-btn').forEach(b => {
+                b.classList.remove('bg-red-800');
+                b.classList.add('bg-neutral-800');
+            });
+            document.getElementById('tyre-' + id).classList.add('bg-red-800');
+            config.tyre = id;
+            audio.playBeep(950, 0.05);
+        }
+
+        // 각도 선형 보간 헬퍼 함수 (조향 정렬용)
+        function lerpAngle(current, target, step) {
+            let diff = target - current;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            return current + diff * step;
+        }
+
+        function startGame() {
+            audio.init();
+            
+            document.getElementById('lobby').style.display = 'none';
+            document.getElementById('game-hud').style.display = 'flex';
+            
+            // 유저 셋업 기입
+            if (config.team === 'legends') {
+                const legendTags = { senna: 'SEN', prost: 'PRO', schumacher: 'MSC', raikkonen: 'RAI' };
+                playerStats.teamTag = legendTags[config.legendDriver] || 'SEN';
+            } else {
+                const teamTags = { 
+                    mclaren: 'MCL', 
+                    ferrari: 'FER', 
+                    redbull: 'RBR', 
+                    mercedes: 'MER', 
+                    aston: 'AST',
+                    alpine: 'ALP',
+                    williams: 'WIL',
+                    haas: 'HAA',
+                    vcarb: 'RCB',
+                    sauber: 'SAU'
+                };
+                playerStats.teamTag = teamTags[config.team] || 'MCL';
+            }
+            
+            document.getElementById('hud-weather-text').innerText = config.weather.toUpperCase();
+            document.getElementById('hud-track-name').innerText = config.track.toUpperCase() + " GP";
+            
+            const badge = document.getElementById('tyre-badge');
+            if (config.tyre === 'soft') {
+                badge.innerText = 'S';
+                badge.className = "w-12 h-12 rounded-full border-4 border-red-500 flex items-center justify-center font-black text-red-500 text-lg shadow-lg bg-black";
+            } else if (config.tyre === 'medium') {
+                badge.innerText = 'M';
+                badge.className = "w-12 h-12 rounded-full border-4 border-yellow-500 flex items-center justify-center font-black text-yellow-500 text-lg shadow-lg bg-black";
+            } else {
+                badge.innerText = 'H';
+                badge.className = "w-12 h-12 rounded-full border-4 border-white flex items-center justify-center font-black text-white text-lg shadow-lg bg-black";
+            }
+
+            // 순위표 드레그 바인딩 가동
+            initLeaderboardDragScroll();
+
+            initGameEngine();
+        }
+
+        function resumeGame() {
+            paused = false;
+            document.getElementById('pause-overlay').style.display = 'none';
+        }
+
+        function restartRace() {
+            location.reload();
+        }
+
+        function goToLobby() {
+            location.reload();
+        }
+
+        function performPitAction(tyre) {
+            config.tyre = tyre;
+            const badge = document.getElementById('tyre-badge');
+            badge.innerText = tyre[0].toUpperCase();
+            playerStats.tyreHealth = 1.0;
+            playerStats.tyreTemp = 90.0;
+            showAlert("PIT STOP COMPLETE: NEW TYRES FITTED", "bg-blue-600");
+            closePitstop();
+        }
+
+        function requestPitstop() {
+            document.getElementById('pitstop-overlay').style.display = 'flex';
+        }
+
+        function closePitstop() {
+            document.getElementById('pitstop-overlay').style.display = 'none';
+        }
+
+        function showAlert(text, bgClass = 'bg-red-600') {
+            const el = document.getElementById('race-alert');
+            el.innerText = text;
+            el.className = `text-white text-xl font-racing font-bold px-8 py-3 rounded-full border border-white text-center uppercase tracking-widest opacity-100 transform translate-y-0 transition duration-300 pointer-events-none ${bgClass}`;
+            setTimeout(() => {
+                el.style.opacity = 0;
+            }, 3000);
+        }
+
+        // ==========================================
+        // THREE.JS 씬 & 고정밀 물리 변수
+        // ==========================================
+        let scene, camera, renderer, clock;
+        let p_car, ai_cars = [];
+        let keys = {};
+        let cameraModes = ['tv', 'cockpit', 'chase', 'broadcast'];
+        let currentCamMode = 'chase';
+
+        // 60FPS 기준 물리 변수 (자유 조향 및 슬라이딩 마찰)
+        let physics = {
+            accel: 0.95,
+            decel: 0.95,
+            maxSpeed: 3.6,
+            turnSpeed: 0.035, // 360도 스티어링 회전 감도
+            drag: 0.982,
+            ersBoost: 1.40
+        };
+
+        // 드라이버 실시간 자유 주행 및 서킷 투사 상태 구조
+        let playerStats = {
+            progress: 0.0,      // 서킷 실시간 투사 진행도 (0.0 ~ 1.0)
+            closestIdx: 0,      // 현재 투사중인 가장 가까운 세그먼트 인덱스
+            lateralOffset: 0.0, // 트랙 중앙선 대비 횡방향 이격 (m 단위)
+            speed: 0,
+            angle: 0,           // 차체가 회전하고 있는 절대 3D 헤딩 앵글
+            lap: 1,
+            gear: 1,
+            rpm: 0,
+            ers: 100,
+            drs: false,
+            lapTime: 0,
+            bestLap: 0,
+            fuel: 5.5,
+            tyreHealth: 1.0,
+            tyreTemp: 85.0
+        };
+
+        // 절차적 서킷 설계를 위한 스플라인 포인트 배열
+        let trackWaypoints = [];
+        const numWaypoints = 250;
+        let trackCurve = null;      // 곡선 캐시
+        let trackPoints = [];       // 가속도 투사용 등간격 세그먼트 배열
+
+        function buildTrackSpline(trackType) {
+            trackWaypoints = [];
+            let radiusX = 180;
+            let radiusY = 120;
+            
+            if (trackType === 'monza') {
+                radiusX = 240;
+                radiusY = 80;
+            } else if (trackType === 'baku') {
+                radiusX = 150;
+                radiusY = 150;
+            }
+
+            for (let i = 0; i < numWaypoints; i++) {
+                let theta = (i / numWaypoints) * Math.PI * 2;
+                
+                let x = Math.cos(theta) * radiusX;
+                let z = Math.sin(theta) * radiusY;
+
+                // 트랙 고유 지오메트리 보간
+                if (trackType === 'yas') {
+                    x += Math.sin(theta * 5) * 25;
+                    z += Math.cos(theta * 3) * 20;
+                } else if (trackType === 'monza') {
+                    x += Math.sin(theta * 2) * 15;
+                    if (theta > Math.PI * 0.8 && theta < Math.PI * 1.2) {
+                        z += Math.cos(theta * 4) * 10;
+                    }
+                } else if (trackType === 'cota') {
+                    x += Math.sin(theta * 4) * 30;
+                    z += Math.sin(theta * 2) * 25;
+                } else if (trackType === 'baku') {
+                    x += Math.cos(theta * 6) * 18;
+                    z += Math.sin(theta * 3) * 15;
+                }
+
+                trackWaypoints.push(new THREE.Vector3(x, 0, z));
+            }
+            trackCurve = new THREE.CatmullRomCurve3(trackWaypoints, true);
+            trackPoints = trackCurve.getSpacedPoints(400); // 400 등분 고밀도 리본 인덱스 생성
+        }
+
+        function initGameEngine() {
+            clock = new THREE.Clock();
+            
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x0a0a0c, 0.0012);
+
+            // 날씨 설정별 씬 무드 연출
+            if (config.weather === 'night') {
+                scene.background = new THREE.Color(0x010103);
+                scene.fog.color = new THREE.Color(0x010103);
+            } else if (config.weather === 'rain') {
+                scene.background = new THREE.Color(0x181a20);
+                scene.fog.color = new THREE.Color(0x181a20);
+            } else if (config.weather === 'sunset') {
+                scene.background = new THREE.Color(0x301810);
+                scene.fog.color = new THREE.Color(0x301810);
+            } else {
+                scene.background = new THREE.Color(0x5080aa);
+                scene.fog.color = new THREE.Color(0x5080aa);
+            }
+
+            camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 2000);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.05;
+            
+            document.body.appendChild(renderer.domElement);
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            // 환경광 설치
+            const ambient = new THREE.AmbientLight(0xffffff, config.weather === 'night' ? 0.15 : 0.5);
+            scene.add(ambient);
+
+            // 태양광 설치
+            const sunLight = new THREE.DirectionalLight(0xfff8ea, config.weather === 'night' ? 0.2 : 1.3);
+            sunLight.position.set(150, 200, 80);
+            sunLight.castShadow = true;
+            sunLight.shadow.mapSize.width = 2048;
+            sunLight.shadow.mapSize.height = 2048;
+            sunLight.shadow.camera.near = 0.5;
+            sunLight.shadow.camera.far = 700;
+            const d = 300;
+            sunLight.shadow.camera.left = -d;
+            sunLight.shadow.camera.right = d;
+            sunLight.shadow.camera.top = d;
+            sunLight.shadow.camera.bottom = -d;
+            scene.add(sunLight);
+
+            // 야간 조명 기둥
+            if (config.weather === 'night') {
+                const colors = [0xffdcaa, 0xaad2ff, 0xffffff];
+                for (let i = 0; i < 20; i++) {
+                    const pl = new THREE.PointLight(colors[i % 3], 2.5, 60);
+                    const theta = (i / 20) * Math.PI * 2;
+                    pl.position.set(Math.cos(theta) * 180, 15, Math.sin(theta) * 130);
+                    scene.add(pl);
+                }
+            }
+
+            // 서킷 스플라인 빌드
+            buildTrackSpline(config.track);
+
+            // 렌더링용 서킷 지오메트리 덧입히기
+            createTrackGeometry();
+
+            // 유저 카 및 AI 상대 차량 생성 (AI 19대 추가되어 총 20대 구성)
+            createCars();
+
+            // 치트 키 수신기 셋업
+            setupControls();
+
+            // 신호등 스타트 카운트다운 시작
+            startGridSequence();
+
+            // 메인 무한 루프 애니메이션 구동
+            gameActive = true;
+            animateLoop();
+        }
+
+        // ==========================================
+        // 렌더링용 고해상도 리본 서킷 지오메트리 빌더
+        // ==========================================
+        function createTrackRibbonMesh(width, yOffset, isKerb = false, isLine = false) {
+            const geom = new THREE.BufferGeometry();
+            const vertices = [];
+            const uvs = [];
+            const indices = [];
+            const colors = [];
+
+            const points = trackPoints;
+
+            for (let i = 0; i <= points.length; i++) {
+                const idx = i % points.length;
+                const nextIdx = (i + 1) % points.length;
+                
+                const curr = points[idx];
+                const next = points[nextIdx];
+                
+                const dir = new THREE.Vector3().subVectors(next, curr).normalize();
+                const normal = new THREE.Vector3(-dir.z, 0, dir.x).normalize();
+                
+                const leftPt = curr.clone().addScaledVector(normal, width / 2);
+                leftPt.y = yOffset;
+                const rightPt = curr.clone().addScaledVector(normal, -width / 2);
+                rightPt.y = yOffset;
+                
+                vertices.push(leftPt.x, leftPt.y, leftPt.z);
+                vertices.push(rightPt.x, rightPt.y, rightPt.z);
+                
+                const t = i / points.length;
+                uvs.push(0, t * 150);
+                uvs.push(1, t * 150);
+
+                if (isKerb) {
+                    const isRed = Math.floor(t * 180) % 2 === 0;
+                    const r = isRed ? 1.0 : 0.95;
+                    const g = isRed ? 0.05 : 0.95;
+                    const b = isRed ? 0.05 : 0.95;
+                    colors.push(r, g, b, r, g, b);
+                }
+            }
+
+            for (let i = 0; i < points.length; i++) {
+                const v0 = i * 2;
+                const v1 = i * 2 + 1;
+                const v2 = (i + 1) * 2;
+                const v3 = (i + 1) * 2 + 1;
+                
+                indices.push(v0, v1, v2);
+                indices.push(v1, v3, v2);
+            }
+
+            geom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            geom.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+            if (isKerb) {
+                geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            }
+            geom.setIndex(indices);
+            geom.computeVertexNormals();
+
+            let material;
+            if (isKerb) {
+                material = new THREE.MeshStandardMaterial({
+                    vertexColors: true,
+                    roughness: 0.6,
+                    metalness: 0.1,
+                    side: THREE.DoubleSide
+                });
+            } else if (isLine) {
+                material = new THREE.MeshBasicMaterial({
+                    color: 0xffffff,
+                    side: THREE.DoubleSide
+                });
+            } else {
+                material = new THREE.MeshStandardMaterial({
+                    color: config.weather === 'rain' ? 0x09090c : 0x141416,
+                    roughness: config.weather === 'rain' ? 0.05 : 0.65,
+                    metalness: 0.2,
+                    side: THREE.DoubleSide
+                });
+            }
+
+            const mesh = new THREE.Mesh(geom, material);
+            mesh.receiveShadow = true;
+            mesh.castShadow = true;
+            return mesh;
+        }
+
+        function createTrackGeometry() {
+            // 1. 메인 아스팔트 서킷 도로 (폭 18)
+            const asphaltRoad = createTrackRibbonMesh(18, 0.04, false, false);
+            scene.add(asphaltRoad);
+
+            // 2. 바깥쪽 안전 백색 라인 (폭 18.2)
+            const whiteLine = createTrackRibbonMesh(18.2, 0.042, false, true);
+            scene.add(whiteLine);
+
+            // 3. F1 적색/백색 교차 연석 커브 (폭 19.8)
+            const kerbBarrier = createTrackRibbonMesh(19.8, 0.038, true, false);
+            scene.add(kerbBarrier);
+
+            // 대형 대지
+            const terrainGeo = new THREE.PlaneGeometry(3000, 3000);
+            const terrainMat = new THREE.MeshStandardMaterial({
+                color: config.weather === 'sunset' ? 0x1e1812 : 0x122410,
+                roughness: 0.95,
+                metalness: 0.0
+            });
+            const terrain = new THREE.Mesh(terrainGeo, terrainMat);
+            terrain.rotation.x = -Math.PI / 2;
+            terrain.position.y = 0.01;
+            terrain.receiveShadow = true;
+            scene.add(terrain);
+
+            // 출발 피니시 라인
+            const startLineGeo = new THREE.PlaneGeometry(18, 1);
+            const startLineMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+            const startLine = new THREE.Mesh(startLineGeo, startLineMat);
+            startLine.position.copy(trackPoints[0]);
+            startLine.position.y = 0.046;
+            startLine.rotation.x = -Math.PI / 2;
+            scene.add(startLine);
+
+            // 트랙 사이드 광고 마커 보드 조각 배치
+            for (let i = 0.05; i < 1.0; i += 0.08) {
+                const p = trackCurve.getPointAt(i);
+                const billboard = new THREE.Mesh(
+                    new THREE.BoxGeometry(7, 4.5, 0.3),
+                    new THREE.MeshStandardMaterial({ color: 0xcc0000, roughness: 0.4 })
+                );
+                billboard.position.set(p.x, 2.25, p.z + 15);
+                billboard.castShadow = true;
+                scene.add(billboard);
+            }
+        }
+
+        // ==========================================
+        // 드라이버 머신 3D 모델 및 상대방 생성
+        // ==========================================
+        function createF1Chassis(bodyColor) {
+            const carGroup = new THREE.Group();
+
+            // 메인 모노코크 카울링 바디
+            const mainBodyGeom = new THREE.BoxGeometry(1.6, 0.45, 4.5);
+            const mainBodyMat = new THREE.MeshStandardMaterial({
+                color: bodyColor,
+                roughness: 0.15,
+                metalness: 0.75
+            });
+            const mainBody = new THREE.Mesh(mainBodyGeom, mainBodyMat);
+            mainBody.castShadow = true;
+            mainBody.receiveShadow = true;
+            carGroup.add(mainBody);
+
+            // 노즈 익스텐션
+            const noseGeo = new THREE.BoxGeometry(0.8, 0.28, 2.2);
+            const nose = new THREE.Mesh(noseGeo, mainBodyMat);
+            nose.position.set(0, -0.05, -2.5);
+            nose.castShadow = true;
+            carGroup.add(nose);
+
+            // 프론트 디퓨저 윙
+            const frontWingGeo = new THREE.BoxGeometry(3.2, 0.08, 0.65);
+            const wingMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.85 });
+            const frontWing = new THREE.Mesh(frontWingGeo, wingMat);
+            frontWing.position.set(0, -0.12, -3.3);
+            frontWing.castShadow = true;
+            carGroup.add(frontWing);
+
+            // 리어 스포일러 윙
+            const rearWingGeo = new THREE.BoxGeometry(2.4, 0.65, 0.4);
+            const rearWing = new THREE.Mesh(rearWingGeo, mainBodyMat);
+            rearWing.position.set(0, 0.55, 2.2);
+            rearWing.castShadow = true;
+            carGroup.add(rearWing);
+
+            const wingEndplatesGeo = new THREE.BoxGeometry(0.1, 0.95, 0.85);
+            const endplateLeft = new THREE.Mesh(wingEndplatesGeo, wingMat);
+            endplateLeft.position.set(-1.25, 0.4, 2.2);
+            const endplateRight = endplateLeft.clone();
+            endplateRight.position.x = 1.25;
+            carGroup.add(endplateLeft);
+            carGroup.add(endplateRight);
+
+            // 리알 타이어 서스펜션 축 구성
+            const wheelGeo = new THREE.CylinderGeometry(0.58, 0.58, 0.55, 18);
+            const wheelMat = new THREE.MeshStandardMaterial({ color: 0x121212, roughness: 0.9 });
+            
+            // 전륜
+            const wheelFL = new THREE.Mesh(wheelGeo, wheelMat);
+            wheelFL.rotation.z = Math.PI / 2;
+            wheelFL.position.set(-1.05, -0.05, -1.6);
+            wheelFL.castShadow = true;
+            carGroup.add(wheelFL);
+
+            const wheelFR = wheelFL.clone();
+            wheelFR.position.x = 1.05;
+            carGroup.add(wheelFR);
+
+            // 후륜
+            const wheelRL = new THREE.Mesh(wheelGeo, wheelMat);
+            wheelRL.scale.set(1.15, 1.15, 1.15);
+            wheelRL.rotation.z = Math.PI / 2;
+            wheelRL.position.set(-1.12, 0.0, 1.55);
+            wheelRL.castShadow = true;
+            carGroup.add(wheelRL);
+
+            const wheelRR = wheelRL.clone();
+            wheelRR.position.x = 1.12;
+            carGroup.add(wheelRR);
+
+            // 헤일로 프로텍터
+            const haloGeo = new THREE.TorusGeometry(0.42, 0.052, 8, 24, Math.PI);
+            const haloMat = new THREE.MeshStandardMaterial({ color: 0x1f1f1f, roughness: 0.6 });
+            const halo = new THREE.Mesh(haloGeo, haloMat);
+            halo.position.set(0, 0.28, -0.2);
+            halo.rotation.x = Math.PI / 2;
+            carGroup.add(halo);
+
+            // 불꽃 배출 꼬리 축
+            const sparkPoint = new THREE.Object3D();
+            sparkPoint.position.set(0, -0.2, 2.1);
+            carGroup.add(sparkPoint);
+            carGroup.userData = { sparkPoint: sparkPoint };
+
+            return carGroup;
+        }
+
+        function createCars() {
+            // 전설 드라이버 색상 가중 표식
+            const colors = {
+                mclaren: 0xff6b00,
+                ferrari: 0xdc0000,
+                redbull: 0x102075,
+                mercedes: 0x00d2be,
+                aston: 0x005a30,
+                alpine: 0xff66cc,
+                williams: 0x005aff,
+                haas: 0xeeeeee,
+                vcarb: 0x2233aa,
+                sauber: 0x00ff66,
+                // 개별 레전드 리버리 튜닝
+                legends_senna: 0xffeb3b,       // 아일톤 세나 옐로우/골드
+                legends_prost: 0x0f52ba,       // 알랭 프로스트 프랑스 블루
+                legends_schumacher: 0xcc0000,  // 미하엘 슈마허 스칼렛 레드
+                legends_raikkonen: 0x3a9ad9    // 키미 라이코넨 아이스 블루
+            };
+
+            let teamColor = colors[config.team] || 0xff0000;
+            
+            // 플레이어가 레전드 팀 선택 시 개별 드라이버 색상 및 물리 매핑
+            if (config.team === 'legends') {
+                const legendMap = {
+                    'senna': { color: colors.legends_senna, accel: 1.18, maxSpeed: 3.90, turnSpeed: 0.040 },
+                    'prost': { color: colors.legends_prost, accel: 1.12, maxSpeed: 3.92, turnSpeed: 0.032 },
+                    'schumacher': { color: colors.legends_schumacher, accel: 1.16, maxSpeed: 3.95, turnSpeed: 0.036 },
+                    'raikkonen': { color: colors.legends_raikkonen, accel: 1.10, maxSpeed: 3.90, turnSpeed: 0.038 }
+                };
+                const stats = legendMap[config.legendDriver] || { color: 0xffffff, accel: 1.0, maxSpeed: 3.5, turnSpeed: 0.035 };
+                teamColor = stats.color;
+                physics.accel = stats.accel;
+                physics.maxSpeed = stats.maxSpeed;
+                physics.turnSpeed = stats.turnSpeed;
+            } else {
+                // 일반 F1 머신 고성능 성능 튜닝 세팅
+                const teamPhysics = {
+                    mclaren: { accel: 0.95, maxSpeed: 3.55, turnSpeed: 0.035 },
+                    ferrari: { accel: 0.88, maxSpeed: 3.50, turnSpeed: 0.038 },
+                    redbull: { accel: 0.92, maxSpeed: 3.60, turnSpeed: 0.036 },
+                    mercedes: { accel: 0.90, maxSpeed: 3.52, turnSpeed: 0.037 },
+                    aston: { accel: 0.86, maxSpeed: 3.48, turnSpeed: 0.035 },
+                    alpine: { accel: 0.85, maxSpeed: 3.46, turnSpeed: 0.034 },
+                    williams: { accel: 0.84, maxSpeed: 3.58, turnSpeed: 0.032 },
+                    haas: { accel: 0.87, maxSpeed: 3.45, turnSpeed: 0.035 },
+                    vcarb: { accel: 0.89, maxSpeed: 3.47, turnSpeed: 0.036 },
+                    sauber: { accel: 0.86, maxSpeed: 3.44, turnSpeed: 0.034 }
+                };
+                const spec = teamPhysics[config.team] || { accel: 0.90, maxSpeed: 3.50, turnSpeed: 0.035 };
+                physics.accel = spec.accel;
+                physics.maxSpeed = spec.maxSpeed;
+                physics.turnSpeed = spec.turnSpeed;
+            }
+
+            p_car = createF1Chassis(teamColor);
+            
+            // 초기 위치: 0번 포인트에서 가로로 2.5 오프셋에 정렬
+            const startPt = trackPoints[0];
+            const tangent = new THREE.Vector3().subVectors(trackPoints[1], startPt).normalize();
+            const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+            
+            p_car.position.copy(startPt).addScaledVector(normal, 2.5);
+            p_car.position.y = 0.25;
+            
+            playerStats.angle = Math.atan2(-tangent.x, -tangent.z);
+            p_car.rotation.y = playerStats.angle;
+
+            // 골드 휠 탑재 조건 (레전드 선택 시)
+            if (config.team === 'legends') {
+                p_car.traverse((child) => {
+                    if (child.isMesh && child.geometry && child.geometry.type === "CylinderGeometry") {
+                        child.material = new THREE.MeshStandardMaterial({
+                            color: 0xd4af37,
+                            roughness: 0.15,
+                            metalness: 0.95
+                        });
+                    }
+                });
+            }
+
+            scene.add(p_car);
+
+            // AI 상대 차량 19대 생성 (현역 16인 + 선택되지 않은 레전드 3인 자동 소집)
+            const gridRoster = [
+                { name: "M. Verstappen", team: "RBR", color: 0x102075 },
+                { name: "C. Leclerc", team: "FER", color: 0xdc0000 },
+                { name: "L. Norris", team: "MCL", color: 0xff6b00 },
+                { name: "G. Russell", team: "MER", color: 0x00d2be },
+                { name: "O. Piastri", team: "MCL", color: 0xff6b00 },
+                { name: "C. Sainz", team: "WIL", color: 0x005aff },
+                { name: "L. Hamilton", team: "FER", color: 0xdc0000 },
+                { name: "F. Alonso", team: "AST", color: 0x005a30 },
+                { name: "P. Gasly", team: "ALP", color: 0xff66cc },
+                { name: "A. Albon", team: "WIL", color: 0x005aff },
+                { name: "Y. Tsunoda", team: "RCB", color: 0x2233aa },
+                { name: "L. Stroll", team: "AST", color: 0x005a30 },
+                { name: "N. Hulkenberg", team: "SAU", color: 0x00ff66 },
+                { name: "E. Ocon", team: "HAA", color: 0xffffff },
+                { name: "K. Magnussen", team: "HAA", color: 0xffffff },
+                { name: "S. Perez", team: "RBR", color: 0x102075 }
+            ];
+
+            // 전설 드라이버가 해금된 경우, 3명의 레전드를 그리드 후반 슬롯에 자동 대체 추가
+            if (isLegendsUnlocked) {
+                const legendsPool = [
+                    { driverId: 'senna', name: "Ayrton Senna", team: "SEN", color: colors.legends_senna },
+                    { driverId: 'prost', name: "Alain Prost", team: "PRO", color: colors.legends_prost },
+                    { driverId: 'schumacher', name: "M. Schumacher", team: "MSC", color: colors.legends_schumacher },
+                    { driverId: 'raikkonen', name: "K. Raikkonen", team: "RAI", color: colors.legends_raikkonen }
+                ];
+                
+                // 플레이어가 타고 있는 1명을 제외한 나머지 3명을 리스트업
+                const filteredLegends = legendsPool.filter(l => l.driverId !== config.legendDriver || config.team !== 'legends');
+                
+                // 그리드에 전설적 AI 주자 투입
+                filteredLegends.forEach((leg, index) => {
+                    gridRoster.push({
+                        name: leg.name,
+                        team: leg.team,
+                        color: leg.color,
+                        isLegendAI: true
+                    });
+                });
+            } else {
+                // 비활성 시에는 3인의 일반 F1 드라이버 추가하여 총 19인 유지
+                gridRoster.push({ name: "V. Bottas", team: "SAU", color: 0x00ff66 });
+                gridRoster.push({ name: "K. Antonelli", team: "MER", color: 0x00d2be });
+                gridRoster.push({ name: "L. Lawson", team: "RCB", color: 0x2233aa });
+            }
+
+            for (let i = 0; i < 19; i++) {
+                const driver = gridRoster[i];
+                const aiCar = createF1Chassis(driver.color);
+                
+                // 가로 정렬 배치 분배 (그리드 좌우 교차 배치 에뮬레이션)
+                const offsetSide = (i % 2 === 0 ? -2.5 : 2.5);
+                const progressGridStart = 0.02 + (i * 0.015); // 스타트선 그리드 선상에 순차적 후방 정렬
+
+                aiCar.userData = {
+                    name: driver.name,
+                    team: driver.team,
+                    progress: progressGridStart,
+                    defaultLateralOffset: offsetSide,
+                    lateralOffset: offsetSide,
+                    baseSpeed: (driver.isLegendAI ? 1.55 : 1.3) + Math.random() * 0.35,
+                    currentSpeed: 0.0,
+                    angle: 0.0,
+                    lap: 1,
+                    rank: 20
+                };
+                
+                scene.add(aiCar);
+                ai_cars.push(aiCar);
+            }
+        }
+
+        // ==========================================
+        // 물리 연산 및 서킷Snap 클램핑 락 물리 장치
+        // ==========================================
+        function getClosestPointOnTrack(position) {
+            let minDist = Infinity;
+            let closestIdx = 0;
+
+            for (let i = 0; i < trackPoints.length; i++) {
+                const d = position.distanceTo(trackPoints[i]);
+                if (d < minDist) {
+                    minDist = d;
+                    closestIdx = i;
+                }
+            }
+
+            return {
+                point: trackPoints[closestIdx],
+                index: closestIdx,
+                distance: minDist
+            };
+        }
+
+        function updateCar3DPosition(car, progress, lateralOffset) {
+            const clampedProgress = (progress + 1.0) % 1.0;
+            const pt = trackCurve.getPointAt(clampedProgress);
+            const tangent = trackCurve.getTangentAt(clampedProgress).normalize();
+            
+            const up = new THREE.Vector3(0, 1, 0);
+            const normal = new THREE.Vector3().crossVectors(tangent, up).normalize();
+
+            const finalPos = pt.clone().addScaledVector(normal, lateralOffset);
+            finalPos.y = 0.25;
+
+            car.position.copy(finalPos);
+            
+            const targetLook = pt.clone().add(tangent);
+            car.lookAt(targetLook);
+        }
+
+        function setupControls() {
+            window.addEventListener('keydown', (e) => {
+                keys[e.key.toLowerCase()] = true;
+                
+                if (e.key === 'c' || e.key === 'C') {
+                    cycleCamera();
+                }
+                if (e.key === 'Escape') {
+                    togglePause();
+                }
+                if (e.key === 'r' || e.key === 'R') {
+                    restartRace();
+                }
+                if (e.key === '`' || e.key === '~') {
+                    e.preventDefault();
+                    toggleConsole();
+                }
+            });
+
+            window.addEventListener('keyup', (e) => {
+                keys[e.key.toLowerCase()] = false;
+            });
+        }
+
+        function togglePause() {
+            paused = !paused;
+            document.getElementById('pause-overlay').style.display = paused ? 'flex' : 'none';
+        }
+
+        function cycleCamera() {
+            const idx = cameraModes.indexOf(currentCamMode);
+            currentCamMode = cameraModes[(idx + 1) % cameraModes.length];
+            audio.playBeep(1100, 0.1);
+        }
+
+        function startGridSequence() {
+            countdownTime = 5;
+            audio.playBeep(440, 0.15);
+            
+            const timer = setInterval(() => {
+                const lightIdx = 5 - countdownTime;
+                if (lightIdx >= 0 && lightIdx < 5) {
+                    const light = document.getElementById('light-' + (lightIdx + 1));
+                    if (light) light.className = "w-6 h-6 rounded-full bg-red-600 glow-red border border-red-500";
+                    audio.playBeep(440, 0.15);
+                }
+                
+                countdownTime--;
+
+                if (countdownTime < 0) {
+                    clearInterval(timer);
+                    for (let i = 1; i <= 5; i++) {
+                        const light = document.getElementById('light-' + i);
+                        if (light) light.className = "w-6 h-6 rounded-full bg-emerald-500 glow-green border border-emerald-400";
+                    }
+                    raceStarted = true;
+                    audio.playBeep(880, 0.5);
+                    audio.playRadio();
+                    showAlert("LIGHTS OUT AND AWAY WE GO!", "bg-emerald-600");
+
+                    setTimeout(() => {
+                        document.getElementById('start-lights').style.display = 'none';
+                    }, 2500);
+                }
+            }, 1000);
+        }
+
+        // ==========================================
+        // 불꽃 및 제동 파티클 시스템
+        // ==========================================
+        function createSparks(car) {
+            const sparkCount = 4;
+            const p = car.userData.sparkPoint ? car.userData.sparkPoint.getWorldPosition(new THREE.Vector3()) : car.position;
+            
+            const geometry = new THREE.BufferGeometry();
+            const positions = [];
+            
+            for (let i = 0; i < sparkCount; i++) {
+                positions.push(
+                    p.x + (Math.random() - 0.5) * 0.4,
+                    p.y,
+                    p.z + (Math.random() - 0.5) * 0.4
+                );
+            }
+            
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            const material = new THREE.PointsMaterial({ color: 0xffaa00, size: 0.4, transparent: true, opacity: 0.95 });
+            const sparks = new THREE.Points(geometry, material);
+            scene.add(sparks);
+            
+            setTimeout(() => scene.remove(sparks), 130);
+        }
+
+        function animateLoop() {
+            if (!gameActive) return;
+            requestAnimationFrame(animateLoop);
+
+            if (paused) return;
+
+            const delta = clock.getDelta();
+
+            // 가속 및 마찰 물리 연산
+            updatePhysics(delta);
+            // AI 의사결정 알고리즘
+            updateAI(delta);
+            // 시차 추적 카메라 뷰 업데이트
+            updateCamera();
+
+            renderer.render(scene, camera);
+        }
+
+        // ==========================================
+        // 물리 구동 및 스티어링 제어 튜닝
+        // ==========================================
+        function updatePhysics(delta) {
+            if (!raceStarted) return;
+
+            // 1. 조향각 자유 3D 회전 제어
+            let turning = 0;
+            if (keys['a'] || keys['arrowleft']) {
+                turning = 1; // 좌향 조향
+            }
+            if (keys['d'] || keys['arrowright']) {
+                turning = -1; // 우향 조향
+            }
+
+            // 가속도 및 감속 속도에 연동되는 회전 비율 가중
+            playerStats.angle += turning * physics.turnSpeed * (Math.min(Math.abs(playerStats.speed) + 0.35, 1.25));
+            p_car.rotation.y = playerStats.angle;
+
+            // 2. 가속 스로틀 판별
+            let throttle = 0;
+            if (keys['w'] || keys['arrowup']) {
+                throttle = 1;
+            }
+            if (keys['s'] || keys['arrowdown']) {
+                throttle = -1;
+            }
+
+            // ERS 액티브 부스터 게이지 소비 (단축키: G)
+            let boostMultiplier = 1.0;
+            if (keys['g'] && playerStats.ers > 0 && throttle > 0) {
+                playerStats.ers -= delta * 15;
+                boostMultiplier = physics.ersBoost;
+                document.getElementById('ers-indicator').className = "bg-cyan-600 text-white font-bold font-racing px-3 py-1.5 rounded text-xs uppercase border border-cyan-500 animate-pulse";
+            } else {
+                document.getElementById('ers-indicator').className = "bg-neutral-800 text-neutral-500 font-bold font-racing px-3 py-1.5 rounded text-xs uppercase border border-neutral-700";
+                if (playerStats.ers < 100) playerStats.ers += delta * 4.0;
+            }
+
+            // DRS 활성화 (단축키: Shift)
+            if (keys['shift']) {
+                playerStats.drs = true;
+                boostMultiplier *= 1.15;
+                document.getElementById('drs-indicator').className = "bg-green-600 text-white font-bold font-racing px-3 py-1.5 rounded text-xs uppercase border border-green-500 animate-pulse";
+            } else {
+                playerStats.drs = false;
+                document.getElementById('drs-indicator').className = "bg-neutral-800 text-neutral-500 font-bold font-racing px-3 py-1.5 rounded text-xs uppercase border border-neutral-700";
+            }
+
+            // 마찰 및 동력 가중치 연산
+            if (throttle > 0) {
+                playerStats.speed += physics.accel * delta * boostMultiplier;
+            } else if (throttle < 0) {
+                playerStats.speed -= physics.decel * delta * 1.8;
+            } else {
+                playerStats.speed *= physics.drag;
+            }
+
+            // 하드 제동 (단축키: L-CTRL)
+            if (keys['control']) {
+                playerStats.speed *= 0.85;
+                audio.setSkid(0.85);
+                createSparks(p_car);
+            } else {
+                audio.setSkid(0.0);
+            }
+
+            // 속도 최종 임계치 제한
+            const maxSpeedAllowed = physics.maxSpeed * (playerStats.drs ? 1.15 : 1.0);
+            playerStats.speed = Math.max(-0.6, Math.min(playerStats.speed, maxSpeedAllowed));
+
+            // 3. 차체 절대 좌표 평면 이동 가산
+            const stepX = -Math.sin(playerStats.angle) * playerStats.speed * 42.0 * delta;
+            const stepZ = -Math.cos(playerStats.angle) * playerStats.speed * 42.0 * delta;
+            p_car.position.x += stepX;
+            p_car.position.z += stepZ;
+
+            // 4. 서킷 경계면 정밀 투사 및 슬라이딩 락 (서킷 무탈선 처리)
+            const trackSnap = getClosestPointOnTrack(p_car.position);
+            const C = trackSnap.point;
+            
+            // 전방 탄젠트 연계 법선 계산
+            const nextPt = trackPoints[(trackSnap.index + 1) % trackPoints.length];
+            const tangent = new THREE.Vector3().subVectors(nextPt, C).normalize();
+            const trackNormal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+
+            // 차량의 중앙선 대비 이격 거리 계산
+            const carVec = new THREE.Vector3().subVectors(p_car.position, C);
+            const lateralOffset = carVec.dot(trackNormal);
+
+            // [자유 조작 서킷 한정 락] 가로 이격 거리가 연석 폭인 8.3m를 돌파할 때 경계에 구속
+            if (Math.abs(lateralOffset) > 8.3) {
+                const clampedOffset = THREE.MathUtils.clamp(lateralOffset, -8.3, 8.3);
+                p_car.position.copy(C).addScaledVector(trackNormal, clampedOffset);
+                playerStats.speed *= 0.94; // 충돌 마찰 감속
+                createSparks(p_car);
+            }
+
+            p_car.position.y = 0.25; // 지면 정지 높이 보정
+
+            // 5. 랩 카운터 및 진행도 추적 연산
+            const prevIdx = playerStats.closestIdx;
+            const currIdx = trackSnap.index;
+            playerStats.closestIdx = currIdx;
+            
+            playerStats.progress = currIdx / trackPoints.length;
+            playerStats.lateralOffset = lateralOffset;
+
+            // 서킷 랩 진행 판정 (가장 끝 세그먼트에서 0번 세그먼트로 크로싱 시)
+            if (prevIdx > 350 && currIdx < 50) {
+                onLapCompleted();
+            }
+
+            // HUD 원격 측정 데이터 전송
+            updateHUDTelemetry(delta);
+        }
+
+        // 실시간 랩 완주 카운터 가공 (5랩 타겟 설정)
+        let lastLapTime = 0;
+        let lapsCompleted = 0;
+        function onLapCompleted() {
+            lapsCompleted++;
+            playerStats.lap = lapsCompleted + 1;
+            lastLapTime = playerStats.lapTime;
+            playerStats.lapTime = 0;
+
+            if (playerStats.bestLap === 0 || lastLapTime < playerStats.bestLap) {
+                playerStats.bestLap = lastLapTime;
+                showAlert("🏆 PURPLE SECTOR: NEW PERSONAL BEST LAP!", "bg-purple-600");
+                audio.playRadio();
+            } else {
+                showAlert(`LAP ${lapsCompleted} COMPLETE`, "bg-neutral-800");
+            }
+
+            // 5랩 레이스 결과 트리거
+            if (lapsCompleted >= 5) {
+                gameActive = false;
+                showResults();
+            }
+        }
+
+        function showResults() {
+            document.getElementById('game-hud').style.display = 'none';
+            document.getElementById('results-screen').style.display = 'flex';
+            
+            const rank = p_car.userData.rank || 1;
+            document.getElementById('res-pos').innerText = `P ${rank} / 20`;
+            document.getElementById('res-best').innerText = formatTime(playerStats.bestLap || lastLapTime);
+        }
+
+        // 고속 AI 다이내믹 포지션 주행 드라이버 (서킷 락 적용)
+        function updateAI(delta) {
+            ai_cars.forEach((aiCar) => {
+                const stats = aiCar.userData;
+                
+                // 전원 동시 출발: 레이스가 실제로 시작되었을 때만 주행 로직을 작동시킵니다.
+                if (raceStarted) {
+                    const isClassicLegend = stats.team === 'SEN' || stats.team === 'PRO' || stats.team === 'MSC' || stats.team === 'RAI';
+                    const maxSpeedCap = stats.baseSpeed * (isClassicLegend ? 1.25 : 1.0);
+
+                    // 1. 코너 깊이 연산에 근거한 동적 스피드 조절 (Curvature-Based Braking)
+                    const clampedProgress = (stats.progress + 1.0) % 1.0;
+                    const tangent = trackCurve.getTangentAt(clampedProgress).normalize();
+                    
+                    // 약 40m 전방의 궤도를 미리 읽어 곡률 계산
+                    const lookAheadProgress = (clampedProgress + 0.035) % 1.0;
+                    const futureTangent = trackCurve.getTangentAt(lookAheadProgress).normalize();
+                    const curvature = 1.0 - tangent.dot(futureTangent); // 일직선 = 0.0, 급코너일수록 커짐 (최대 약 0.1)
+
+                    // 곡률에 비례하여 타겟 속도 감소 매핑 (급커브 진입 시 최대 45% 감속)
+                    const speedFactor = THREE.MathUtils.mapLinear(THREE.MathUtils.clamp(curvature, 0, 0.07), 0, 0.07, 1.0, 0.55);
+                    const targetSpeed = maxSpeedCap * speedFactor;
+
+                    // 스무스하게 속도를 선형 보간하여 가속 및 제동 처리
+                    stats.currentSpeed = THREE.MathUtils.lerp(stats.currentSpeed, targetSpeed, 3.5 * delta);
+
+                    // 급감속 시 시각 효과(스파크) 추가
+                    if (targetSpeed < stats.currentSpeed - 0.25) {
+                        if (Math.random() < 0.15) {
+                            createSparks(aiCar);
+                        }
+                    }
+
+                    // 2. 동적 추월 및 충돌 회피 라인 변경 (Dynamic Overtake Logic)
+                    let overtakeOffset = 0;
+
+                    // 플레이어 차량과의 거리 및 오프셋 연산
+                    let dpPlayer = playerStats.progress - stats.progress;
+                    if (dpPlayer < -0.5) dpPlayer += 1.0;
+                    if (dpPlayer > 0.5) dpPlayer -= 1.0;
+
+                    // 전방 일정 거리 내에 플레이어 차량이 있고 레이싱 라인이 겹치는 경우
+                    if (dpPlayer > 0 && dpPlayer < 0.02) {
+                        const offsetDiff = playerStats.lateralOffset - stats.lateralOffset;
+                        if (Math.abs(offsetDiff) < 3.2) {
+                            overtakeOffset = offsetDiff >= 0 ? -4.5 : 4.5; // 비어 있는 좌측 또는 우측 레인으로 추월 라인 형성
+                        }
+                    }
+
+                    // 다른 AI 차량들과의 거리 조절
+                    ai_cars.forEach((otherCar) => {
+                        if (otherCar === aiCar) return;
+                        const otherStats = otherCar.userData;
+                        let dpOther = otherStats.progress - stats.progress;
+                        if (dpOther < -0.5) dpOther += 1.0;
+                        if (dpOther > 0.5) dpOther -= 1.0;
+
+                        if (dpOther > 0 && dpOther < 0.02) {
+                            const offsetDiff = otherStats.lateralOffset - stats.lateralOffset;
+                            if (Math.abs(offsetDiff) < 3.2) {
+                                overtakeOffset = offsetDiff >= 0 ? -4.2 : 4.2;
+                            }
+                        }
+                    });
+
+                    // 최종 가로 오프셋 타겟 결정 후 부드럽게 조정
+                    const targetLateral = THREE.MathUtils.clamp(stats.defaultLateralOffset + overtakeOffset, -7.5, 7.5);
+                    stats.lateralOffset = THREE.MathUtils.lerp(stats.lateralOffset, targetLateral, 2.5 * delta);
+
+                    // 진행률(progress)을 동적으로 축적시켜 차량 전진
+                    stats.progress += (stats.currentSpeed * 0.024) * delta;
+                    
+                    if (stats.progress >= 1.0) {
+                        stats.progress -= 1.0;
+                        stats.lap++;
+                    }
+
+                    // 3. 물리 스무딩 처리 및 바디 롤 기울임 연출 (Smooth Yaw & Suspension Body Roll)
+                    const pt = trackCurve.getPointAt(clampedProgress);
+                    const up = new THREE.Vector3(0, 1, 0);
+                    const normal = new THREE.Vector3().crossVectors(tangent, up).normalize();
+                    const targetPos = pt.clone().addScaledVector(normal, stats.lateralOffset);
+                    targetPos.y = 0.25;
+
+                    // AI의 3D 공간 상 위치를 즉각 덮어씌우는 대신, 관성감을 주어 부드럽게 보간 이동
+                    aiCar.position.lerp(targetPos, 12 * delta);
+
+                    // 서킷 접선 타겟 각도 연산 및 스무스 회전 (Steering)
+                    const targetAngle = Math.atan2(-tangent.x, -tangent.z);
+                    stats.angle = lerpAngle(stats.angle, targetAngle, 7.5 * delta);
+                    aiCar.rotation.y = stats.angle;
+
+                    // 조향 각도 변화율에 연동된 미세한 롤(Roll) 서스펜션 애니메이션
+                    let angleDiff = targetAngle - stats.angle;
+                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+
+                    // 급하게 회전할수록 차체가 바깥으로 유려하게 기울어짐
+                    const rollTarget = THREE.MathUtils.clamp(angleDiff * 1.6, -0.07, 0.07);
+                    aiCar.rotation.z = THREE.MathUtils.lerp(aiCar.rotation.z, rollTarget, 4 * delta);
+
+                } else {
+                    // 카운트다운 신호 대기 시에는 자신의 배정 그리드 위치에 스냅 정렬
+                    const clampedProgress = (stats.progress + 1.0) % 1.0;
+                    const pt = trackCurve.getPointAt(clampedProgress);
+                    const tangent = trackCurve.getTangentAt(clampedProgress).normalize();
+                    const up = new THREE.Vector3(0, 1, 0);
+                    const normal = new THREE.Vector3().crossVectors(tangent, up).normalize();
+                    const startingPos = pt.clone().addScaledVector(normal, stats.lateralOffset);
+                    startingPos.y = 0.25;
+
+                    aiCar.position.copy(startingPos);
+                    
+                    const startAngle = Math.atan2(-tangent.x, -tangent.z);
+                    aiCar.rotation.y = startAngle;
+                    stats.angle = startAngle;
+                    aiCar.rotation.z = 0;
+                }
+            });
+        }
+
+        // 동적 카메라 지향 관성 가중 보정 엔진
+        function updateCamera() {
+            const relativeCameraOffset = new THREE.Vector3();
+
+            if (currentCamMode === 'chase') {
+                relativeCameraOffset.set(0, 2.8, 8.2);
+            } else if (currentCamMode === 'cockpit') {
+                relativeCameraOffset.set(0, 0.78, -0.15);
+            } else if (currentCamMode === 'tv') {
+                relativeCameraOffset.set(0, 1.65, 1.95);
+            } else if (currentCamMode === 'broadcast') {
+                camera.position.set(35, 18, 25);
+                camera.lookAt(p_car.position);
+                return;
+            }
+
+            const cameraOffset = relativeCameraOffset.applyMatrix4(p_car.matrixWorld);
+            camera.position.x = THREE.MathUtils.lerp(camera.position.x, cameraOffset.x, 0.16);
+            camera.position.y = THREE.MathUtils.lerp(camera.position.y, cameraOffset.y, 0.16);
+            camera.position.z = THREE.MathUtils.lerp(camera.position.z, cameraOffset.z, 0.16);
+            
+            const lookTarget = new THREE.Vector3(0, 0.45, -3.5).applyMatrix4(p_car.matrixWorld);
+            camera.lookAt(lookTarget);
+        }
+
+        // 실시간 HUD 계기판 출력 & 리더보드 순위 연산
+        let lastLboardUpdate = 0; // 리더보드 렌더링 최적화용 타이머 변수
+        
+        function updateHUDTelemetry(delta) {
+            const kmh = Math.round(playerStats.speed * 115);
+            document.getElementById('hud-speed').innerText = String(kmh).padStart(3, '0');
+
+            // 기어 변속 비율
+            let calculatedGear = 1;
+            if (kmh > 240) calculatedGear = 8;
+            else if (kmh > 210) calculatedGear = 7;
+            else if (kmh > 180) calculatedGear = 6;
+            else if (kmh > 150) calculatedGear = 5;
+            else if (kmh > 110) calculatedGear = 4;
+            else if (kmh > 70) calculatedGear = 3;
+            else if (kmh > 30) calculatedGear = 2;
+            document.getElementById('hud-gear').innerText = calculatedGear;
+
+            // LED 변속 타이밍
+            const rpmPercent = (kmh % 45) / 45;
+            const leds = document.getElementById('rpm-leds').children;
+            const litCount = Math.floor(rpmPercent * leds.length);
+
+            for (let i = 0; i < leds.length; i++) {
+                if (i < litCount) {
+                    if (i < 4) leds[i].className = "w-4 h-1.5 bg-emerald-500 rounded-sm";
+                    else if (i < 7) leds[i].className = "w-4 h-1.5 bg-red-500 rounded-sm";
+                    else leds[i].className = "w-4 h-1.5 bg-blue-500 rounded-sm glow-blue";
+                } else {
+                    leds[i].className = "w-4 h-1.5 bg-neutral-800 rounded-sm";
+                }
+            }
+
+            audio.setEngineRPM(rpmPercent, playerStats.speed / physics.maxSpeed);
+
+            document.getElementById('ers-percent').innerText = Math.round(playerStats.ers) + "%";
+            document.getElementById('ers-bar').style.width = playerStats.ers + "%";
+
+            playerStats.fuel -= delta * 0.009;
+            document.getElementById('hud-fuel').innerText = "Laps " + Math.max(0.1, playerStats.fuel).toFixed(1);
+
+            playerStats.lapTime += delta;
+            document.getElementById('hud-lap-time').innerText = formatTime(playerStats.lapTime);
+            if (playerStats.bestLap > 0) {
+                document.getElementById('hud-best-time').innerText = formatTime(playerStats.bestLap);
+            }
+
+            // 실시간 랩 수 헤더 업데이트
+            const lapCounterTitle = document.getElementById('hud-lap-counter-title');
+            if (lapCounterTitle) {
+                lapCounterTitle.innerText = `LIVE STANDINGS (LAP ${Math.min(5, playerStats.lap)}/5)`;
+            }
+
+            // --------------------------------------------------
+            // 순위 변동 (Leaderboard Live Standings 계산) - 200ms 쓰로틀링 적용
+            // --------------------------------------------------
+            const now = performance.now();
+            if (now - lastLboardUpdate > 200) {
+                lastLboardUpdate = now;
+
+                const isLegends = config.team === 'legends';
+                let playerDriverName = "YOU";
+
+                if (isLegends) {
+                    const legendNames = {
+                        senna: "A. Senna (YOU)",
+                        prost: "A. Prost (YOU)",
+                        schumacher: "M. Schumacher (YOU)",
+                        raikkonen: "K. Raikkonen (YOU)"
+                    };
+                    playerDriverName = legendNames[config.legendDriver] || "Legend (YOU)";
+                } else {
+                    const normalDriverNames = {
+                        mclaren: "L. Norris (YOU)",
+                        ferrari: "C. Leclerc (YOU)",
+                        redbull: "M. Verstappen (YOU)",
+                        mercedes: "G. Russell (YOU)",
+                        aston: "F. Alonso (YOU)",
+                        alpine: "P. Gasly (YOU)",
+                        williams: "C. Sainz (YOU)",
+                        haas: "E. Ocon (YOU)",
+                        vcarb: "Y. Tsunoda (YOU)",
+                        sauber: "N. Hulkenberg (YOU)"
+                    };
+                    playerDriverName = normalDriverNames[config.team] || "YOU";
+                }
+
+                const playerTeamTag = isLegends 
+                    ? (config.legendDriver === 'senna' ? 'SEN' : config.legendDriver === 'prost' ? 'PRO' : config.legendDriver === 'schumacher' ? 'MSC' : 'RAI') 
+                    : (playerStats.teamTag || 'MCL');
+
+                const participants = [];
+                
+                // 플레이어 추가 (자유 주행 progress 및 랩 수 병합 계산)
+                participants.push({
+                    name: playerDriverName,
+                    team: playerTeamTag,
+                    score: playerStats.lap + playerStats.progress,
+                    isPlayer: true
+                });
+
+                // AI 추가
+                ai_cars.forEach((ai) => {
+                    participants.push({
+                        name: ai.userData.name,
+                        team: ai.userData.team,
+                        score: ai.userData.lap + ai.userData.progress,
+                        isPlayer: false
+                    });
+                });
+
+                // 진행률 총합 내림차순 정렬
+                participants.sort((a, b) => b.score - a.score);
+
+                // 순위 대입 및 리더보드 렌더링
+                const lboardContainer = document.getElementById('leaderboard-rows');
+                lboardContainer.innerHTML = "";
+
+                participants.forEach((p, idx) => {
+                    const rank = idx + 1;
+                    const isUser = p.isPlayer;
+                    
+                    // 플레이어 데이터 기록 바인딩
+                    if (isUser) {
+                        p_car.userData.rank = rank;
+                        // 본인 현재 순위 계기판 실시간 갱신
+                        const playerPosEl = document.getElementById('hud-player-pos');
+                        if (playerPosEl) playerPosEl.innerText = rank;
+                    }
+
+                    const highlightClass = isUser 
+                        ? "bg-red-600/30 font-bold border-l-2 border-white" 
+                        : "bg-neutral-900/40 text-neutral-300";
+
+                    const rowHtml = `
+                        <div class="flex justify-between items-center px-2 py-1 rounded ${highlightClass} transition duration-200">
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs font-black ${isUser ? 'text-white' : 'text-neutral-500'}">P${rank}</span>
+                                <span class="font-bold text-xs">${isUser ? playerDriverName : p.name}</span>
+                                <span class="text-[9px] text-neutral-400 font-sans">[${isUser ? playerTeamTag : p.team}]</span>
+                            </div>
+                            <span class="text-[10px] font-mono font-bold">${isUser ? 'YOU' : 'AI'}</span>
+                        </div>
+                    `;
+                    lboardContainer.innerHTML += rowHtml;
+                });
+            }
+        }
+
+        function formatTime(secs) {
+            const m = Math.floor(secs / 60);
+            const s = Math.floor(secs % 60);
+            const ms = Math.floor((secs % 1) * 1000);
+            return `${m}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+        }
+    </script>
+</body>
+</html>
