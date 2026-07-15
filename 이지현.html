@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cosmic Escape: Falling Blocks</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050505; color: white; font-family: 'Inter', sans-serif; }
+        #game-container { position: relative; width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; }
+        canvas { touch-action: none; background: radial-gradient(circle at center, #1e1b4b 0%, #020617 100%); cursor: none; }
+        .ui-overlay { position: absolute; pointer-events: none; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        .menu-card { pointer-events: auto; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); padding: 2.5rem; border-radius: 1.5rem; border: 1px solid rgba(167, 139, 250, 0.3); text-align: center; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
+        .btn { transition: all 0.2s; cursor: pointer; border-bottom: 4px solid rgba(0,0,0,0.2); }
+        .btn:hover { transform: translateY(-2px); filter: brightness(1.1); }
+        .btn:active { transform: translateY(2px); border-bottom: none; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+    
+    <!-- UI Overlays -->
+    <div id="ui" class="ui-overlay">
+        <!-- Main Menu -->
+        <div id="menu-main" class="menu-card">
+            <h1 class="text-5xl font-black mb-6 text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">COSMIC ESCAPE</h1>
+            <p class="mb-8 text-gray-300">하늘에서 떨어지는 운석을 피하세요!<br>100단계까지 생존할 수 있을까요?</p>
+            <button onclick="game.start()" class="btn bg-purple-600 hover:bg-purple-700 px-10 py-4 rounded-xl font-bold text-lg">게임 시작</button>
+        </div>
+
+        <!-- In-Game HUD -->
+        <div id="hud" class="absolute top-8 left-8 hidden pointer-events-none">
+            <div class="flex gap-6">
+                <div class="flex flex-col">
+                    <span class="text-xs text-purple-400 uppercase tracking-widest">Stage</span>
+                    <span id="ui-stage" class="text-3xl font-bold text-white">1</span>
+                </div>
+                <div class="flex flex-col">
+                    <span class="text-xs text-purple-400 uppercase tracking-widest">Score</span>
+                    <span id="ui-score" class="text-3xl font-bold text-white">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Game Over -->
+        <div id="menu-over" class="menu-card hidden">
+            <h2 class="text-4xl font-bold mb-4 text-red-400">GAME OVER</h2>
+            <p class="mb-6 text-gray-300" id="over-msg">운석과 충돌했습니다.</p>
+            <button onclick="game.start()" class="btn bg-red-600 px-8 py-3 rounded-xl font-bold">다시 시도</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playTone(freq, type, duration) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+    }
+
+    class Particle {
+        constructor(x, y, color) {
+            this.x = x; this.y = y;
+            this.vx = (Math.random() - 0.5) * 4;
+            this.vy = (Math.random() - 0.5) * 4;
+            this.life = 1.0;
+            this.color = color || '#818cf8';
+        }
+        update() { this.x += this.vx; this.y += this.vy; this.life -= 0.02; }
+        draw(ctx) {
+            ctx.fillStyle = this.color.replace(')', `, ${this.life})`).replace('rgb', 'rgba');
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    class Meteor {
+        constructor(canvasWidth, speed) {
+            this.width = 40;
+            this.height = 40;
+            this.x = Math.random() * (canvasWidth - this.width);
+            this.y = -this.height;
+            this.speed = speed;
+        }
+        update() { this.y += this.speed; }
+        draw(ctx) {
+            ctx.fillStyle = '#ef4444';
+            ctx.fillRect(this.x, this.y, this.width, this.height);
+            // Draw a bit of "fire" trail
+            ctx.fillStyle = '#f59e0b';
+            ctx.fillRect(this.x + 5, this.y - 10, this.width - 10, 10);
+        }
+    }
+
+    class Player {
+        constructor(canvasWidth, canvasHeight) {
+            this.width = 50;
+            this.height = 50;
+            this.x = canvasWidth / 2 - this.width / 2;
+            this.y = canvasHeight - 100;
+            this.speed = 10;
+            this.dir = 0; // -1 left, 1 right
+            this.particles = [];
+        }
+        update(canvasWidth) {
+            this.x += this.dir * this.speed;
+            if (this.x < 0) this.x = 0;
+            if (this.x > canvasWidth - this.width) this.x = canvasWidth - this.width;
+            
+            this.particles.push(new Particle(this.x + this.width/2, this.y + this.height, 'rgb(129, 140, 248)'));
+            this.particles = this.particles.filter(p => p.life > 0);
+            this.particles.forEach(p => p.update());
+        }
+        draw(ctx) {
+            this.particles.forEach(p => p.draw(ctx));
+            ctx.fillStyle = '#818cf8';
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#818cf8';
+            ctx.fillRect(this.x, this.y, this.width, this.height);
+            ctx.shadowBlur = 0;
+        }
+    }
+
+    class Game {
+        constructor() {
+            this.canvas = document.getElementById('gameCanvas');
+            this.ctx = this.canvas.getContext('2d');
+            this.state = 'MENU';
+            this.score = 0;
+            this.level = 1;
+            this.meteors = [];
+            this.stars = Array.from({length: 100}, () => ({ x: Math.random()*2000, y: Math.random()*2000, s: Math.random()*2 }));
+            
+            window.addEventListener('keydown', (e) => this.handleInput(e, true));
+            window.addEventListener('keyup', (e) => this.handleInput(e, false));
+            window.addEventListener('resize', () => this.resize());
+            this.resize();
+            this.loop();
+        }
+
+        resize() {
+            this.canvas.width = window.innerWidth;
+            this.canvas.height = window.innerHeight;
+            if (this.player) this.player.y = this.canvas.height - 100;
+        }
+
+        handleInput(e, isDown) {
+            if (this.state !== 'PLAYING') return;
+            if (e.key === 'ArrowLeft') this.player.dir = isDown ? -1 : 0;
+            if (e.key === 'ArrowRight') this.player.dir = isDown ? 1 : 0;
+        }
+
+        start() {
+            this.state = 'PLAYING';
+            this.score = 0;
+            this.level = 1;
+            this.meteors = [];
+            this.player = new Player(this.canvas.width, this.canvas.height);
+            document.querySelectorAll('.menu-card').forEach(e => e.classList.add('hidden'));
+            document.getElementById('hud').classList.remove('hidden');
+            document.getElementById('ui-stage').innerText = this.level;
+            document.getElementById('ui-score').innerText = this.score;
+        }
+
+        update() {
+            if (this.state !== 'PLAYING') return;
+            
+            this.player.update(this.canvas.width);
+            
+            // Spawn meteors
+            if (Math.random() < 0.02 + (this.level * 0.005)) {
+                this.meteors.push(new Meteor(this.canvas.width, 3 + this.level * 0.5));
+            }
+
+            // Update meteors
+            this.meteors.forEach((m, index) => {
+                m.update();
+                
+                // Collision
+                if (m.x < this.player.x + this.player.width &&
+                    m.x + m.width > this.player.x &&
+                    m.y < this.player.y + this.player.height &&
+                    m.y + m.height > this.player.y) {
+                    this.gameOver();
+                }
+
+                if (m.y > this.canvas.height) {
+                    this.meteors.splice(index, 1);
+                    this.score += 10;
+                    document.getElementById('ui-score').innerText = this.score;
+                    if (this.score > 0 && this.score % 500 === 0) {
+                        this.level++;
+                        document.getElementById('ui-stage').innerText = this.level;
+                        playTone(600, 'sine', 0.2);
+                    }
+                }
+            });
+        }
+
+        draw() {
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            
+            // Background
+            this.ctx.fillStyle = 'white';
+            this.stars.forEach(s => {
+                this.ctx.beginPath();
+                this.ctx.arc(s.x, s.y, s.s, 0, Math.PI*2);
+                this.ctx.fill();
+            });
+
+            if (this.state === 'PLAYING') {
+                this.player.draw(this.ctx);
+                this.meteors.forEach(m => m.draw(this.ctx));
+            }
+        }
+
+        gameOver() {
+            this.state = 'OVER';
+            playTone(100, 'sawtooth', 0.5);
+            document.getElementById('menu-over').classList.remove('hidden');
+            document.getElementById('hud').classList.add('hidden');
+        }
+
+        loop() {
+            this.update();
+            this.draw();
+            requestAnimationFrame(() => this.loop());
+        }
+    }
+
+    const game = new Game();
+</script>
+</body>
+</html>
