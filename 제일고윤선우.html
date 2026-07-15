@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>아이작 스타일 로그라이크</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Inter', sans-serif; }
+        canvas { display: block; background-color: #2d2d2d; cursor: crosshair; }
+        .hud { pointer-events: none; }
+    </style>
+</head>
+<body>
+
+    <div id="game-ui" class="absolute top-0 left-0 w-full p-4 hud flex justify-between text-white">
+        <div>
+            <h1 class="text-2xl font-bold">로그라이크 던전</h1>
+            <p id="level-display">방: 1</p>
+        </div>
+        <div class="text-right">
+            <p id="high-score-display" class="text-sm text-yellow-400">최고 기록: 0</p>
+            <p id="hp-display" class="text-xl font-bold text-red-500">HP: 100</p>
+            <p id="score-display">점수: 0</p>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const hpDisplay = document.getElementById('hp-display');
+        const levelDisplay = document.getElementById('level-display');
+        const scoreDisplay = document.getElementById('score-display');
+        const highScoreDisplay = document.getElementById('high-score-display');
+
+        let width, height;
+        let score = 0;
+        let hp = 100;
+        let level = 1;
+        let highScore = parseInt(localStorage.getItem('isaacHighScore')) || 0;
+
+        highScoreDisplay.innerText = `최고 기록: ${highScore}`;
+
+        const keys = {};
+        window.addEventListener('keydown', e => keys[e.key] = true);
+        window.addEventListener('keyup', e => keys[e.key] = false);
+
+        class Player {
+            constructor() {
+                this.x = 0; this.y = 0;
+                this.size = 20;
+                this.speed = 4;
+            }
+            update() {
+                // 화살표 키 이동 제거, WASD만 사용
+                if (keys['w'] || keys['W']) this.y -= this.speed;
+                if (keys['s'] || keys['S']) this.y += this.speed;
+                if (keys['a'] || keys['A']) this.x -= this.speed;
+                if (keys['d'] || keys['D']) this.x += this.speed;
+                
+                this.x = Math.max(this.size, Math.min(width - this.size, this.x));
+                this.y = Math.max(this.size, Math.min(height - this.size, this.y));
+            }
+            draw() {
+                ctx.fillStyle = '#60a5fa';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        let player = new Player();
+        let bullets = [];
+        let enemies = [];
+
+        function spawnEnemies() {
+            enemies = [];
+            for(let i=0; i<level * 2; i++) {
+                enemies.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    size: 15,
+                    hp: level * 10
+                });
+            }
+        }
+
+        window.addEventListener('keydown', (e) => {
+            const directions = { 'ArrowUp': [0, -1], 'ArrowDown': [0, 1], 'ArrowLeft': [-1, 0], 'ArrowRight': [1, 0] };
+            if(directions[e.key]) {
+                bullets.push({ x: player.x, y: player.y, dx: directions[e.key][0]*7, dy: directions[e.key][1]*7 });
+            }
+        });
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            player.x = width/2; player.y = height/2;
+        }
+        window.onresize = resize;
+        resize();
+        spawnEnemies();
+
+        function update() {
+            player.update();
+            
+            bullets.forEach((b, i) => {
+                b.x += b.dx;
+                b.y += b.dy;
+
+                if (b.x < 0 || b.x > width || b.y < 0 || b.y > height) {
+                    bullets.splice(i, 1);
+                    return;
+                }
+
+                enemies.forEach((e, ei) => {
+                    const dx = b.x - e.x;
+                    const dy = b.y - e.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < 20) {
+                        e.hp -= 10;
+                        bullets.splice(i, 1);
+                        if (e.hp <= 0) {
+                            enemies.splice(ei, 1);
+                            score += 10;
+                        }
+                    }
+                });
+            });
+
+            enemies.forEach(e => {
+                const dx = player.x - e.x;
+                const dy = player.y - e.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist > 20) {
+                    e.x += (dx / dist) * (0.5 + level * 0.1);
+                    e.y += (dy / dist) * (0.5 + level * 0.1);
+                }
+                if (dist < 25) {
+                    hp -= 0.5;
+                }
+            });
+
+            if(enemies.length === 0) {
+                level++;
+                spawnEnemies();
+            }
+
+            // 최고 점수 업데이트 로직
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('isaacHighScore', highScore);
+                highScoreDisplay.innerText = `최고 기록: ${highScore}`;
+            }
+
+            hpDisplay.innerText = `HP: ${Math.floor(hp)}`;
+            scoreDisplay.innerText = `점수: ${score}`;
+            levelDisplay.innerText = `방: ${level}`;
+
+            if(hp <= 0) {
+                hp = 100; level = 1; score = 0;
+                spawnEnemies();
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+            player.draw();
+            ctx.fillStyle = 'red';
+            enemies.forEach(e => ctx.fillRect(e.x-10, e.y-10, 20, 20));
+            
+            ctx.fillStyle = 'yellow';
+            bullets.forEach(b => {
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, 5, 0, Math.PI*2);
+                ctx.fill();
+            });
+            
+            requestAnimationFrame(() => { update(); draw(); });
+        }
+        draw();
+    </script>
+</body>
+</html>
