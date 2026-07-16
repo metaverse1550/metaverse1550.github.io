@@ -1,0 +1,1686 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>크레이지 캔버스 택시 (Crazy Canvas Taxi)</title>
+    <!-- Tailwind CSS (UI 레이아웃 및 스타일링용) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Noto+Sans+KR:wght@300;400;700;900&display=swap');
+        
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background-color: #0f172a;
+            user-select: none;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+        }
+
+        .font-orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        /* 캔버스 포커스 아웃 방지 */
+        canvas:focus {
+            outline: none;
+        }
+
+        /* 부드러운 전환 효과 */
+        .transition-all {
+            transition: all 0.3s ease;
+        }
+
+        /* 레트로 네온 효과 */
+        .neon-border {
+            box-shadow: 0 0 10px rgba(234, 179, 8, 0.5), inset 0 0 5px rgba(234, 179, 8, 0.3);
+        }
+        .neon-text-yellow {
+            text-shadow: 0 0 8px rgba(234, 179, 8, 0.8);
+        }
+        .neon-text-red {
+            text-shadow: 0 0 8px rgba(239, 68, 68, 0.8);
+        }
+        .neon-text-green {
+            text-shadow: 0 0 8px rgba(34, 197, 94, 0.8);
+        }
+    </style>
+</head>
+<body class="w-screen h-screen flex items-center justify-center relative">
+
+    <!-- 메인 게임 컨테이너 -->
+    <div id="game-container" class="relative w-full h-full max-w-[1200px] max-h-[800px] bg-slate-900 overflow-hidden shadow-2xl rounded-2xl border-4 border-slate-700 flex flex-col md:flex-row">
+        
+        <!-- 게임 뷰포트 (Canvas) -->
+        <div class="relative flex-1 h-full bg-slate-950">
+            <canvas id="gameCanvas" class="w-full h-full block" tabindex="0"></canvas>
+
+            <!-- 게임 HUD (Canvas 위에 오버레이) -->
+            <div id="hud" class="absolute top-4 left-4 right-4 pointer-events-none flex justify-between items-start">
+                <!-- 상단 좌측: 상태/점수 정보 -->
+                <div class="flex flex-col gap-2">
+                    <div class="bg-slate-900/90 backdrop-blur-md px-4 py-2 rounded-xl border border-slate-700/80 pointer-events-auto flex items-center gap-3">
+                        <span class="text-xs text-slate-400 font-bold">STAGE</span>
+                        <span id="hud-stage" class="text-xl font-black text-yellow-400 font-orbitron">1</span>
+                        <div class="w-px h-6 bg-slate-700"></div>
+                        <span class="text-xs text-slate-400 font-bold">수익</span>
+                        <span id="hud-money" class="text-xl font-black text-emerald-400 font-orbitron">$0</span>
+                        <span class="text-xs text-slate-500 font-orbitron">/ <span id="hud-target">$1,000</span></span>
+                    </div>
+
+                    <!-- 승객 탑승 상태 표시기 -->
+                    <div id="hud-passenger-card" class="bg-slate-900/90 backdrop-blur-md px-4 py-3 rounded-xl border border-slate-700/80 pointer-events-auto flex items-center gap-3 transition-all transform scale-100 opacity-100">
+                        <div id="passenger-status-icon" class="w-10 h-10 rounded-lg flex items-center justify-center bg-slate-800 text-slate-400">
+                            <i data-lucide="user"></i>
+                        </div>
+                        <div>
+                            <div id="hud-passenger-status" class="text-xs font-bold text-slate-400">승객 탐색 중...</div>
+                            <div id="hud-passenger-details" class="text-sm font-black text-yellow-400">인근 도로를 탐색하십시오</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 상단 우측: 속도 및 벌금 / 시간 경고 -->
+                <div class="flex flex-col items-end gap-2">
+                    <!-- 속도계 -->
+                    <div class="bg-slate-900/90 backdrop-blur-md px-5 py-3 rounded-xl border border-slate-700/80 pointer-events-auto flex flex-col items-end">
+                        <div class="text-xs text-slate-400 font-bold mb-0.5">SPEED</div>
+                        <div class="flex items-baseline gap-1">
+                            <span id="hud-speed" class="text-3xl font-black font-orbitron text-white leading-none">0</span>
+                            <span class="text-xs text-slate-500 font-bold">KM/H</span>
+                        </div>
+                    </div>
+
+                    <!-- 실시간 벌금 발생 경고 (신호 위반 시 깜빡임) -->
+                    <div id="hud-fine-alert" class="bg-red-500/90 text-white backdrop-blur-md px-4 py-2 rounded-xl border border-red-400 pointer-events-auto flex items-center gap-2 hidden animate-pulse">
+                        <i data-lucide="shield-alert" class="w-5 h-5 text-yellow-300"></i>
+                        <span class="font-bold text-sm">신호위반 벌금! <span id="hud-fine-amount" class="font-black">-$200</span></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 미니맵 및 내비게이션 침반 오버레이 (우측 하단) -->
+            <div class="absolute bottom-4 right-4 pointer-events-none flex flex-col items-end gap-2">
+                <!-- 방향 내비게이션 컴파스 -->
+                <div id="hud-compass" class="bg-slate-900/90 backdrop-blur-md p-3 rounded-full border border-slate-700/80 pointer-events-auto flex items-center justify-center relative shadow-lg">
+                    <div class="w-14 h-14 rounded-full border-2 border-dashed border-slate-700 flex items-center justify-center relative">
+                        <span class="absolute top-0.5 text-[9px] font-black text-slate-500 font-orbitron">N</span>
+                        <!-- 나침반 바늘 -->
+                        <div id="compass-needle" class="w-1.5 h-10 bg-yellow-400 rounded-full transition-transform duration-75 relative origin-center" style="transform: rotate(0deg);">
+                            <div class="absolute top-0 left-0 right-0 h-4 bg-red-500 rounded-full"></div>
+                        </div>
+                    </div>
+                    <!-- 거리 표시 -->
+                    <div id="compass-distance" class="absolute -bottom-1 bg-slate-950 px-2 py-0.5 rounded text-[10px] font-bold text-yellow-400 font-orbitron border border-slate-800">
+                        OFF
+                    </div>
+                </div>
+
+                <!-- 조작 가이드 안내 요약 -->
+                <div class="bg-slate-900/80 text-slate-400 backdrop-blur-sm px-3 py-1.5 rounded-lg border border-slate-800 text-[10px] pointer-events-auto font-medium">
+                    조작: <span class="text-white font-bold">W A S D</span> / <span class="text-white font-bold">방향키</span> | 핸드브레이크: <span class="text-white font-bold">Space</span>
+                </div>
+            </div>
+
+            <!-- 화면 중앙 일시정지 및 각종 오버레이 -->
+            <div id="center-overlay" class="absolute inset-0 bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center z-20 transition-all hidden">
+                <div class="text-center max-w-md px-6">
+                    <h2 id="overlay-title" class="text-4xl font-black text-yellow-400 mb-2 tracking-wide font-orbitron">GAME PAUSED</h2>
+                    <p id="overlay-desc" class="text-slate-300 text-sm mb-6">게임이 일시정지 되었습니다. 계속하시려면 ESC 또는 아래 버튼을 누르세요.</p>
+                    <button id="overlay-btn" class="w-full bg-yellow-400 hover:bg-yellow-500 text-slate-950 font-black py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 active:scale-95">
+                        <i data-lucide="play" class="w-5 h-5"></i>
+                        <span>계속하기</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 우측 사이드바: 차고(업그레이드) 및 상점, 진행 정보 -->
+        <div id="sidebar" class="w-full md:w-80 bg-slate-900 border-t-2 md:border-t-0 md:border-l-2 border-slate-800 flex flex-col justify-between p-4 z-10">
+            <!-- 스테이지 및 업그레이드 헤더 -->
+            <div>
+                <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
+                    <div class="flex items-center gap-2">
+                        <div class="w-8 h-8 rounded-lg bg-yellow-400 flex items-center justify-center text-slate-950">
+                            <i data-lucide="wrench" class="w-4 h-4"></i>
+                        </div>
+                        <h2 class="font-black text-white text-lg">택시 차고 & 튜닝</h2>
+                    </div>
+                    <button id="btn-pause" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all">
+                        <i data-lucide="pause" class="w-4 h-4"></i>
+                    </button>
+                </div>
+
+                <!-- 업그레이드 슬롯들 -->
+                <div class="flex flex-col gap-3">
+                    <!-- 업그레이드: 최고 속도 -->
+                    <div class="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col gap-2">
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs font-bold text-slate-400 flex items-center gap-1">
+                                <i data-lucide="gauge" class="w-3.5 h-3.5 text-blue-400"></i> 최고 속도 (Engine)
+                            </span>
+                            <span id="upg-speed-cost" class="text-xs font-black text-yellow-400 font-orbitron">$250</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <div class="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden flex gap-0.5">
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                            </div>
+                            <button id="btn-upg-speed" class="px-3 py-1 bg-yellow-400 hover:bg-yellow-500 text-slate-950 font-black text-xs rounded-lg transition-all active:scale-95">강화</button>
+                        </div>
+                    </div>
+
+                    <!-- 업그레이드: 가속력 -->
+                    <div class="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col gap-2">
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs font-bold text-slate-400 flex items-center gap-1">
+                                <i data-lucide="zap" class="w-3.5 h-3.5 text-orange-400"></i> 가속력 (Acceleration)
+                            </span>
+                            <span id="upg-accel-cost" class="text-xs font-black text-yellow-400 font-orbitron">$200</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <div class="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden flex gap-0.5">
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                            </div>
+                            <button id="btn-upg-accel" class="px-3 py-1 bg-yellow-400 hover:bg-yellow-500 text-slate-950 font-black text-xs rounded-lg transition-all active:scale-95">강화</button>
+                        </div>
+                    </div>
+
+                    <!-- 업그레이드: 제동력 -->
+                    <div class="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col gap-2">
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs font-bold text-slate-400 flex items-center gap-1">
+                                <i data-lucide="disc" class="w-3.5 h-3.5 text-red-400"></i> 제동력 (Brakes)
+                            </span>
+                            <span id="upg-brake-cost" class="text-xs font-black text-yellow-400 font-orbitron">$150</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <div class="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden flex gap-0.5">
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                            </div>
+                            <button id="btn-upg-brake" class="px-3 py-1 bg-yellow-400 hover:bg-yellow-500 text-slate-950 font-black text-xs rounded-lg transition-all active:scale-95">강화</button>
+                        </div>
+                    </div>
+
+                    <!-- 업그레이드: 핸들링 -->
+                    <div class="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col gap-2">
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs font-bold text-slate-400 flex items-center gap-1">
+                                <i data-lucide="rotate-cw" class="w-3.5 h-3.5 text-emerald-400"></i> 핸들링 (Handling)
+                            </span>
+                            <span id="upg-handle-cost" class="text-xs font-black text-yellow-400 font-orbitron">$180</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <div class="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden flex gap-0.5">
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                                <div class="upg-bar-item flex-1 bg-slate-700 rounded-sm"></div>
+                            </div>
+                            <button id="btn-upg-handle" class="px-3 py-1 bg-yellow-400 hover:bg-yellow-500 text-slate-950 font-black text-xs rounded-lg transition-all active:scale-95">강화</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 하단: 미션 요약 및 재시작/컨트롤 팁 -->
+            <div class="flex flex-col gap-2 mt-4 pt-4 border-t border-slate-800 text-xs">
+                <div class="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col gap-1">
+                    <span class="font-bold text-slate-400">교통 법규 준수 안내</span>
+                    <p class="text-[11px] leading-relaxed text-slate-500">교차로의 <span class="text-red-400 font-bold">빨간불</span> 신호를 위반하여 통과할 시 즉시 <span class="text-red-400 font-bold">$200</span>의 과태료가 부과됩니다. 초록불에 통과하십시오.</p>
+                </div>
+                <div class="flex gap-2">
+                    <button id="btn-reset" class="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 active:scale-95">
+                        <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> 스테이지 초기화
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 시작 인트로 모달 오버레이 (게임 로드 시) -->
+    <div id="start-modal" class="absolute inset-0 bg-slate-950/95 backdrop-blur-lg flex items-center justify-center z-50 transition-opacity duration-300">
+        <div class="max-w-md w-full bg-slate-900 border-2 border-yellow-400/50 rounded-2xl p-6 text-center shadow-2xl mx-4">
+            <div class="w-16 h-16 bg-yellow-400 rounded-2xl mx-auto flex items-center justify-center text-slate-950 mb-4 shadow-lg shadow-yellow-500/20">
+                <i data-lucide="car" class="w-10 h-10"></i>
+            </div>
+            <h1 class="text-3xl font-black text-white font-orbitron tracking-wide mb-1">CRAZY CANVAS TAXI</h1>
+            <p class="text-xs text-yellow-400 font-bold uppercase tracking-widest mb-6">HTML5 2D 드라이빙 택시 시뮬레이터</p>
+            
+            <div class="space-y-3 text-left bg-slate-950 p-4 rounded-xl border border-slate-800 text-sm text-slate-300 mb-6">
+                <h3 class="font-bold text-white flex items-center gap-1"><i data-lucide="info" class="w-4 h-4 text-yellow-400"></i> 조작법 및 규칙</h3>
+                <ul class="space-y-1.5 text-xs text-slate-400">
+                    <li>🚙 <span class="text-white font-bold">W / S / A / D</span> 또는 <span class="text-white font-bold">방향키</span> : 가속 / 제동 / 조향</li>
+                    <li>🛑 <span class="text-white font-bold">Spacebar</span> : 핸드브레이크 (급감속 / 급선회)</li>
+                    <li>🚦 <span class="text-white font-bold">빨간불</span> 정지선을 넘지 마세요! 위반 시 <span class="text-red-400 font-bold">$200 벌금</span></li>
+                    <li>🙋‍♂️ 길가에 서있는 <span class="text-yellow-400 font-bold">노란 원(승객)</span> 근처에 정차해 승차시킵니다.</li>
+                    <li>📍 <span class="text-emerald-400 font-bold">나침반 바늘</span>이 가리키는 녹색 구역(목적지)으로 수송하십시오.</li>
+                </ul>
+            </div>
+
+            <button id="btn-start" class="w-full bg-yellow-400 hover:bg-yellow-500 text-slate-950 font-black py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/30 active:scale-95 text-lg">
+                <i data-lucide="play" class="w-5 h-5"></i>
+                <span>영업 개시 (운전 시작)</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- 게임 시스템 및 로직 자바스크립트 -->
+    <script>
+        // Lucide 아이콘 초기화
+        lucide.createIcons();
+
+        // ----------------- 상수 및 기본 설정 -----------------
+        const CANVAS_WIDTH = 1200;
+        const CANVAS_HEIGHT = 1200; // 타일 기반의 가상 맵 크기 (카메라 뷰포트가 추적할 타겟 영역)
+        
+        // 업그레이드 최대치 및 비용 설정
+        const MAX_UPGRADE_LEVEL = 5;
+        const UPGRADE_COSTS = {
+            speed: [250, 400, 600, 900, 1300],
+            accel: [200, 350, 500, 750, 1100],
+            brake: [150, 250, 400, 600, 900],
+            handle: [180, 280, 450, 650, 950]
+        };
+
+        // 타일 및 맵 구성 상수
+        const ROAD_WIDTH = 180;
+        const LANES = 4;
+        const LANE_WIDTH = ROAD_WIDTH / LANES;
+
+        // ----------------- 게임 클래스 정의 -----------------
+
+        // 1. 차량 물리 베이스 클래스
+        class Car {
+            constructor(x, y, angle, color) {
+                this.x = x;
+                this.y = y;
+                this.width = 44;
+                this.height = 24;
+                this.angle = angle;
+                this.speed = 0;
+                this.color = color || '#fbbf24';
+
+                // 물리 성질들 (플레이어나 차종별로 동적 오버라이드 가능)
+                this.maxSpeed = 6;
+                this.accel = 0.12;
+                this.brake = 0.25;
+                this.friction = 0.04;
+                this.turnSpeed = 0.04;
+                this.drag = 0.02;
+
+                this.tireTracks = []; // 타이어 자국 저장용 배열
+            }
+
+            // 가속
+            accelerate() {
+                if (this.speed < this.maxSpeed) {
+                    this.speed += this.accel;
+                }
+            }
+
+            // 제동 (브레이크 / 후진)
+            applyBrake() {
+                if (this.speed > 0) {
+                    this.speed -= this.brake;
+                    if (this.speed < 0) this.speed = 0;
+                } else if (this.speed > -this.maxSpeed / 2) {
+                    this.speed -= this.accel * 0.6; // 후진은 조금 더 느림
+                }
+            }
+
+            // 정기 마찰 저항 적용
+            applyFriction() {
+                if (this.speed > 0) {
+                    this.speed -= this.friction;
+                    if (this.speed < 0) this.speed = 0;
+                } else if (this.speed < 0) {
+                    this.speed += this.friction;
+                    if (this.speed > 0) this.speed = 0;
+                }
+            }
+
+            // 조향 조작
+            steer(dir) {
+                // 속도가 낮거나 없을 때는 회전 반경 조정 (현실적인 물리)
+                if (this.speed === 0) return;
+                
+                const speedFactor = Math.min(Math.abs(this.speed) / 2.5, 1.2);
+                const rotation = this.turnSpeed * dir * speedFactor;
+                
+                // 후진할 때는 조향 방향을 역방향으로 변경
+                if (this.speed < 0) {
+                    this.angle -= rotation;
+                } else {
+                    this.angle += rotation;
+                }
+            }
+
+            // 업데이트 함수
+            update(roads, buildings) {
+                this.applyFriction();
+
+                // 회전 각도에 따른 전방/후방 벡터 이동
+                const prevX = this.x;
+                const prevY = this.y;
+
+                this.x += Math.cos(this.angle) * this.speed;
+                this.y += Math.sin(this.angle) * this.speed;
+
+                // 맵 영역 바깥으로 이탈 방지
+                const margin = 20;
+                if (this.x < margin) this.x = margin;
+                if (this.x > CANVAS_WIDTH - margin) this.x = CANVAS_WIDTH - margin;
+                if (this.y < margin) this.y = margin;
+                if (this.y > CANVAS_HEIGHT - margin) this.y = CANVAS_HEIGHT - margin;
+
+                // 건물 충돌 감지
+                let collidedWithBuilding = false;
+                for (let b of buildings) {
+                    if (this.checkCollisionWithRect(b)) {
+                        collidedWithBuilding = true;
+                        break;
+                    }
+                }
+
+                if (collidedWithBuilding) {
+                    // 충돌 시 이전 위치로 복귀시키고 속도 감속 충격
+                    this.x = prevX;
+                    this.y = prevY;
+                    this.speed = -this.speed * 0.3; // 반작용 충격력
+                }
+            }
+
+            // 단순 사각형 충돌 감지 헬퍼 (차량용 축정렬/회전 간이 충돌)
+            checkCollisionWithRect(rect) {
+                // 단순화된 바운딩 박스 검사
+                const halfW = this.width / 2;
+                const halfH = this.height / 2;
+                
+                // 차량 4개 꼭짓점의 위치를 구함
+                const cos = Math.cos(this.angle);
+                const sin = Math.sin(this.angle);
+                const corners = [
+                    { x: this.x + halfW * cos - halfH * sin, y: this.y + halfW * sin + halfH * cos },
+                    { x: this.x - halfW * cos - halfH * sin, y: this.y - halfW * sin + halfH * cos },
+                    { x: this.x - halfW * cos + halfH * sin, y: this.y - halfW * sin - halfH * cos },
+                    { x: this.x + halfW * cos + halfH * sin, y: this.y + halfW * sin - halfH * cos }
+                ];
+
+                // 꼭짓점 중 하나라도 사각형 내에 들어가는지 확인
+                for (let p of corners) {
+                    if (p.x >= rect.x && p.x <= rect.x + rect.width &&
+                        p.y >= rect.y && p.y <= rect.y + rect.height) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            // 타이어 흔적 추가 로직
+            addTireTrack() {
+                const halfW = this.width / 2.5;
+                const halfH = this.height / 2.5;
+                const cos = Math.cos(this.angle);
+                const sin = Math.sin(this.angle);
+
+                // 뒷바퀴 2개의 대략적인 절대좌표 계산
+                const bLeft = {
+                    x: this.x - halfW * cos - halfH * sin,
+                    y: this.y - halfW * sin + halfH * cos
+                };
+                const bRight = {
+                    x: this.x - halfW * cos + halfH * sin,
+                    y: this.y - halfW * sin - halfH * cos
+                };
+
+                this.tireTracks.push({
+                    left: bLeft,
+                    right: bRight,
+                    alpha: 1.0 // 서서히 흐려지는 효과 적용 가능
+                });
+
+                // 너무 길어지면 메모리를 위해 삭제
+                if (this.tireTracks.length > 80) {
+                    this.tireTracks.shift();
+                }
+            }
+
+            // 드로잉 메서드
+            draw(ctx) {
+                // 타이어 자국 그리기
+                ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
+                ctx.lineWidth = 3.5;
+                if (this.tireTracks.length > 1) {
+                    ctx.beginPath();
+                    for (let i = 1; i < this.tireTracks.length; i++) {
+                        const t1 = this.tireTracks[i - 1];
+                        const t2 = this.tireTracks[i];
+                        ctx.moveTo(t1.left.x, t1.left.y);
+                        ctx.lineTo(t2.left.x, t2.left.y);
+                        ctx.moveTo(t1.right.x, t1.right.y);
+                        ctx.lineTo(t2.right.x, t2.right.y);
+                    }
+                    ctx.stroke();
+                }
+
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+
+                // 차량 그림자 그리기
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+                ctx.fillRect(-this.width / 2 + 3, -this.height / 2 + 5, this.width, this.height);
+
+                // 차량 기본 섀시 바디
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.roundRect(-this.width / 2, -this.height / 2, this.width, this.height, 6);
+                ctx.fill();
+
+                // 테두리 강조선
+                ctx.strokeStyle = '#1e293b';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                // 전면 앞유리창 및 뒷유리창
+                ctx.fillStyle = '#0f172a';
+                ctx.fillRect(-2, -this.height / 2 + 3, 10, this.height - 6); // 앞유리
+                ctx.fillRect(-14, -this.height / 2 + 3, 6, this.height - 6);  // 뒷유리
+
+                // 헤드라이트 (앞범퍼 부분)
+                ctx.fillStyle = 'rgba(254, 240, 138, 0.95)';
+                ctx.fillRect(this.width / 2 - 3, -this.height / 2 + 3, 3, 4);
+                ctx.fillRect(this.width / 2 - 3, this.height / 2 - 7, 3, 4);
+
+                // 브레이크등 (뒷범퍼 부분)
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.95)';
+                ctx.fillRect(-this.width / 2, -this.height / 2 + 3, 2, 4);
+                ctx.fillRect(-this.width / 2, this.height / 2 - 7, 2, 4);
+
+                // 바퀴 드로잉
+                ctx.fillStyle = '#334155';
+                ctx.fillRect(-this.width / 3.2, -this.height / 2 - 2, 8, 3);
+                ctx.fillRect(-this.width / 3.2, this.height / 2 - 1, 8, 3);
+                ctx.fillRect(this.width / 4, -this.height / 2 - 2, 8, 3);
+                ctx.fillRect(this.width / 4, this.height / 2 - 1, 8, 3);
+
+                ctx.restore();
+            }
+        }
+
+        // 2. 플레이어 전용 택시 클래스
+        class PlayerTaxi extends Car {
+            constructor(x, y) {
+                // 선명한 노란색 택시 색상
+                super(x, y, 0, '#eab308');
+
+                this.upgradeLevels = {
+                    speed: 1,
+                    accel: 1,
+                    brake: 1,
+                    handle: 1
+                };
+
+                // 물리 변수 초기 스펙 세팅
+                this.updateStats();
+            }
+
+            // 각 업그레이드 슬롯 단계 기반 물리 스펙 업데이트
+            updateStats() {
+                this.maxSpeed = 5.0 + (this.upgradeLevels.speed - 1) * 0.75;
+                this.accel = 0.12 + (this.upgradeLevels.accel - 1) * 0.035;
+                this.brake = 0.25 + (this.upgradeLevels.brake - 1) * 0.06;
+                this.turnSpeed = 0.035 + (this.upgradeLevels.handle - 1) * 0.006;
+            }
+
+            // 오버라이드 드로잉: 지붕 위에 파란색/빨간색 'TAXI' 캡을 추가
+            draw(ctx) {
+                // 기본 차체 드로잉
+                super.draw(ctx);
+
+                // 'TAXI' 전용 캡 오버레이
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+
+                // 검정색 베이스 가로바
+                ctx.fillStyle = '#0f172a';
+                ctx.fillRect(-3, -7, 6, 14);
+
+                // 주황색/하얀색 라이트바 캡
+                ctx.fillStyle = '#f97316';
+                ctx.fillRect(-2, -5, 4, 10);
+
+                // TAXI 이니셜 텍스트
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 5px Orbitron';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('T', 0, 0);
+
+                ctx.restore();
+            }
+        }
+
+        // 3. 일반 인공지능(AI) 차량 클래스
+        class AICar extends Car {
+            constructor(x, y, angle, speed, color, targetDirection) {
+                super(x, y, angle, color);
+                this.speed = speed;
+                this.maxSpeed = speed;
+                this.targetDirection = targetDirection; // 'UP', 'DOWN', 'LEFT', 'RIGHT'
+                this.brakingDistance = 90; // 앞 차 혹은 신호등 감지 제동 거리
+                this.isStoppedForLight = false;
+            }
+
+            // AI의 기본 주행 및 센싱 로직
+            update(roads, buildings, trafficLights, otherCars, playerTaxi) {
+                let mustStop = false;
+                this.isStoppedForLight = false;
+
+                // 1. 신호등 감지 검사
+                for (let light of trafficLights) {
+                    if (light.state === 'RED' || light.state === 'YELLOW') {
+                        // 빨간불 또는 주황불 상태인 신호등의 정지선 감지
+                        const dist = Math.hypot(this.x - light.stopLineX, this.y - light.stopLineY);
+                        if (dist < this.brakingDistance - 10) {
+                            // 방향에 맞춰 오는 차량 정지선 감지
+                            let isHeadingToLight = false;
+                            if (this.targetDirection === 'DOWN' && this.y < light.stopLineY && Math.abs(this.x - light.stopLineX) < ROAD_WIDTH / 2) {
+                                isHeadingToLight = true;
+                            } else if (this.targetDirection === 'UP' && this.y > light.stopLineY && Math.abs(this.x - light.stopLineX) < ROAD_WIDTH / 2) {
+                                isHeadingToLight = true;
+                            } else if (this.targetDirection === 'RIGHT' && this.x < light.stopLineX && Math.abs(this.y - light.stopLineY) < ROAD_WIDTH / 2) {
+                                isHeadingToLight = true;
+                            } else if (this.targetDirection === 'LEFT' && this.x > light.stopLineX && Math.abs(this.y - light.stopLineY) < ROAD_WIDTH / 2) {
+                                isHeadingToLight = true;
+                            }
+
+                            if (isHeadingToLight) {
+                                mustStop = true;
+                                this.isStoppedForLight = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // 2. 전방의 다른 AI 차량 또는 플레이어 충돌 감지 피하기 (안전 거리 확보)
+                const targetsToCheck = [...otherCars, playerTaxi];
+                for (let car of targetsToCheck) {
+                    if (car === this) continue;
+
+                    const dist = Math.hypot(this.x - car.x, this.y - car.y);
+                    if (dist < this.brakingDistance) {
+                        // 진행방향 전방에 있는지 벡터 분석
+                        const angleToTarget = Math.atan2(car.y - this.y, car.x - this.x);
+                        let angleDiff = Math.abs(this.angle - angleToTarget);
+                        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                        angleDiff = Math.abs(angleDiff);
+
+                        // 전방 60도 각도 내에 차량이 위치한 경우
+                        if (angleDiff < Math.PI / 3) {
+                            mustStop = true;
+                            break;
+                        }
+                    }
+                }
+
+                // 이동 지시
+                if (mustStop) {
+                    this.speed -= 0.25; // 급정지
+                    if (this.speed < 0) this.speed = 0;
+                } else {
+                    if (this.speed < this.maxSpeed) {
+                        this.speed += 0.08;
+                    }
+                }
+
+                // 이동 처리
+                this.x += Math.cos(this.angle) * this.speed;
+                this.y += Math.sin(this.angle) * this.speed;
+
+                // 화면 밖 무한 생성 순환 처리 (경계 체크)
+                const buffer = 100;
+                if (this.x < -buffer || this.x > CANVAS_WIDTH + buffer || this.y < -buffer || this.y > CANVAS_HEIGHT + buffer) {
+                    this.respawn();
+                }
+            }
+
+            // 맵 밖으로 나갈 시 기존 도로 위 적절한 위치로 임의 재배치
+            respawn() {
+                // 도로 노선 중 하나를 임의로 선정하여 재배치
+                const spawnPoints = [
+                    { x: CANVAS_WIDTH / 2 - LANE_WIDTH / 2, y: -50, angle: Math.PI / 2, dir: 'DOWN' },
+                    { x: CANVAS_WIDTH / 2 - LANE_WIDTH * 1.5, y: -50, angle: Math.PI / 2, dir: 'DOWN' },
+                    { x: CANVAS_WIDTH / 2 + LANE_WIDTH / 2, y: CANVAS_HEIGHT + 50, angle: -Math.PI / 2, dir: 'UP' },
+                    { x: CANVAS_WIDTH / 2 + LANE_WIDTH * 1.5, y: CANVAS_HEIGHT + 50, angle: -Math.PI / 2, dir: 'UP' },
+                    
+                    { x: -50, y: CANVAS_HEIGHT / 2 + LANE_WIDTH / 2, angle: 0, dir: 'RIGHT' },
+                    { x: -50, y: CANVAS_HEIGHT / 2 + LANE_WIDTH * 1.5, angle: 0, dir: 'RIGHT' },
+                    { x: CANVAS_WIDTH + 50, y: CANVAS_HEIGHT / 2 - LANE_WIDTH / 2, angle: Math.PI, dir: 'LEFT' },
+                    { x: CANVAS_WIDTH + 50, y: CANVAS_HEIGHT / 2 - LANE_WIDTH * 1.5, angle: Math.PI, dir: 'LEFT' }
+                ];
+
+                const point = spawnPoints[Math.floor(Math.random() * spawnPoints.length)];
+                this.x = point.x;
+                this.y = point.y;
+                this.angle = point.angle;
+                this.targetDirection = point.dir;
+                this.speed = 1.5 + Math.random() * 2.0;
+                this.maxSpeed = this.speed;
+                this.tireTracks = [];
+            }
+        }
+
+        // 4. 교통 신호 시스템 (TrafficLight) 클래스
+        class TrafficLight {
+            constructor(x, y, stopLineX, stopLineY, size = 26) {
+                this.x = x;
+                this.y = y;
+                this.stopLineX = stopLineX; // AI 정지 가상 선 기준점
+                this.stopLineY = stopLineY;
+                this.size = size;
+
+                // 신호등 상태: RED, YELLOW, GREEN 순환
+                this.state = 'GREEN';
+                this.timer = 0;
+                
+                // 각 페이즈별 주행 유지 제한시간 (초 단위 변환용 카운터)
+                this.durations = {
+                    GREEN: 350,
+                    YELLOW: 100,
+                    RED: 300
+                };
+            }
+
+            update() {
+                this.timer++;
+                if (this.timer >= this.durations[this.state]) {
+                    this.timer = 0;
+                    this.changeToNextState();
+                }
+            }
+
+            changeToNextState() {
+                switch(this.state) {
+                    case 'GREEN':
+                        this.state = 'YELLOW';
+                        break;
+                    case 'YELLOW':
+                        this.state = 'RED';
+                        break;
+                    case 'RED':
+                        this.state = 'GREEN';
+                        break;
+                }
+            }
+
+            // 미니 신호등 디바이스 화면 렌더링
+            draw(ctx) {
+                ctx.save();
+                ctx.fillStyle = '#1e293b';
+                ctx.strokeStyle = '#64748b';
+                ctx.lineWidth = 2;
+
+                // 신호등 케이스 바디
+                ctx.beginPath();
+                ctx.roundRect(this.x - this.size / 2, this.y - this.size * 1.25, this.size, this.size * 2.5, 6);
+                ctx.fill();
+                ctx.stroke();
+
+                // 가상의 철 기둥
+                ctx.fillStyle = '#475569';
+                ctx.fillRect(this.x - 3, this.y + this.size * 1.25, 6, 12);
+
+                // 빨간불 원형 램프
+                ctx.fillStyle = this.state === 'RED' ? '#ef4444' : '#1e293b';
+                if (this.state === 'RED') {
+                    ctx.shadowColor = '#ef4444';
+                    ctx.shadowBlur = 10;
+                }
+                ctx.beginPath();
+                ctx.arc(this.x, this.y - this.size * 0.6, this.size * 0.3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0; // 리셋
+
+                // 주황불 원형 램프
+                ctx.fillStyle = this.state === 'YELLOW' ? '#eab308' : '#1e293b';
+                if (this.state === 'YELLOW') {
+                    ctx.shadowColor = '#eab308';
+                    ctx.shadowBlur = 10;
+                }
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size * 0.3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+
+                // 초록불 원형 램프
+                ctx.fillStyle = this.state === 'GREEN' ? '#22c55e' : '#1e293b';
+                if (this.state === 'GREEN') {
+                    ctx.shadowColor = '#22c55e';
+                    ctx.shadowBlur = 10;
+                }
+                ctx.beginPath();
+                ctx.arc(this.x, this.y + this.size * 0.6, this.size * 0.3, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.restore();
+            }
+        }
+
+        // 5. 승객 (Passenger) 및 목적지 클래스
+        class Passenger {
+            constructor(x, y, destX, destY, id) {
+                this.x = x;
+                this.y = y;
+                this.destX = destX;
+                this.destY = destY;
+                this.id = id;
+                
+                this.radius = 16;
+                this.glowOffset = 0;
+                this.pulseDir = 1;
+
+                this.fareMultiplier = 1.0; // 승객 유형별 추가 가중치 요금
+            }
+
+            update() {
+                // 승객 위치 시각 펄스 이펙트용 서서히 커지는 애니메이션
+                this.glowOffset += 0.15 * this.pulseDir;
+                if (this.glowOffset > 5 || this.glowOffset < 0) {
+                    this.pulseDir *= -1;
+                }
+            }
+
+            draw(ctx) {
+                ctx.save();
+                // 빛나는 외부 네온 펄스 링
+                ctx.strokeStyle = 'rgba(234, 179, 8, 0.4)';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius + this.glowOffset, 0, Math.PI * 2);
+                ctx.stroke();
+
+                // 실제 대기 승객 마커 원
+                ctx.fillStyle = '#eab308';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius - 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 사람 모양의 이니셜 아이콘
+                ctx.fillStyle = '#0f172a';
+                ctx.font = 'bold 12px Orbitron';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('P', this.x, this.y);
+
+                ctx.restore();
+            }
+
+            // 목적지 이펙트 드로잉 (승차 완료 시 맵 상에 활성화 렌더링)
+            drawDestination(ctx) {
+                ctx.save();
+                
+                // 네온 그린 영역
+                ctx.strokeStyle = 'rgba(34, 197, 94, 0.5)';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.arc(this.destX, this.destY, 45 + this.glowOffset * 2, 0, Math.PI * 2);
+                ctx.stroke();
+
+                ctx.fillStyle = 'rgba(34, 197, 94, 0.18)';
+                ctx.beginPath();
+                ctx.arc(this.destX, this.destY, 45, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 중앙 목적지 피나클 기둥 마커
+                ctx.fillStyle = '#22c55e';
+                ctx.beginPath();
+                ctx.arc(this.destX, this.destY, 8, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 목적지 텍스트 가이드 플래그
+                ctx.fillStyle = '#1e293b';
+                ctx.fillRect(this.destX - 35, this.destY - 45, 70, 20);
+                ctx.strokeStyle = '#22c55e';
+                ctx.strokeRect(this.destX - 35, this.destY - 45, 70, 20);
+
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 9px Noto Sans KR';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('목적지 (DROP)', this.destX, this.destY - 35);
+
+                ctx.restore();
+            }
+        }
+
+        // 6. 폭발/스파크 이펙트 입자 파티클 클래스
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.vx = (Math.random() - 0.5) * 6;
+                this.vy = (Math.random() - 0.5) * 6;
+                this.color = color || '#fbbf24';
+                this.alpha = 1.0;
+                this.decay = 0.03 + Math.random() * 0.04;
+                this.radius = 2 + Math.random() * 3;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.alpha -= this.decay;
+            }
+
+            draw(ctx) {
+                ctx.save();
+                ctx.globalAlpha = this.alpha;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+
+        // ----------------- 메인 게임 엔진 (GAME) -----------------
+        class GameEngine {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                
+                // 프레임 제어 독립 시간 설정 (deltaTime)
+                this.lastTime = 0;
+                
+                // 가상 월드 고정 크기 (도로가 교차하는 맵 모델링)
+                this.worldWidth = CANVAS_WIDTH;
+                this.worldHeight = CANVAS_HEIGHT;
+
+                // 게임 플레이 상태
+                this.gameState = 'INTRO'; // INTRO, PLAY, PAUSED, CLEAR, GAMEOVER
+                this.stage = 1;
+                this.money = 0;
+                this.targetMoney = 1000;
+                this.finePenalty = 200; // 신호위반 벌금액
+
+                // 카메라 객체 (플레이어 차량을 중심 추적)
+                this.camera = {
+                    x: 0,
+                    y: 0,
+                    width: 0,
+                    height: 0
+                };
+
+                // 게임 객체 인스턴스 배열
+                this.player = null;
+                this.aiCars = [];
+                this.trafficLights = [];
+                this.buildings = [];
+                this.passengers = [];
+                this.activePassenger = null; // 현재 택시에 탄 승객
+                this.particles = [];
+
+                // 키 입력 감지 저장소
+                this.keys = {};
+
+                // UI 연동 바인딩 요소 참조
+                this.hudStage = document.getElementById('hud-stage');
+                this.hudMoney = document.getElementById('hud-money');
+                this.hudTarget = document.getElementById('hud-target');
+                this.hudPassengerCard = document.getElementById('hud-passenger-card');
+                this.hudPassengerStatus = document.getElementById('hud-passenger-status');
+                this.hudPassengerDetails = document.getElementById('hud-passenger-details');
+                this.hudSpeed = document.getElementById('hud-speed');
+                this.hudFineAlert = document.getElementById('hud-fine-alert');
+                this.hudFineAmount = document.getElementById('hud-fine-amount');
+                this.compassNeedle = document.getElementById('compass-needle');
+                this.compassDistance = document.getElementById('compass-distance');
+
+                // 모달 및 오버레이 엘리먼트
+                this.centerOverlay = document.getElementById('center-overlay');
+                this.overlayTitle = document.getElementById('overlay-title');
+                this.overlayDesc = document.getElementById('overlay-desc');
+                this.overlayBtn = document.getElementById('overlay-btn');
+
+                // 이벤트 핸들러 등록
+                this.setupInput();
+                this.setupUIEvents();
+                this.resizeCanvas();
+
+                // 반응형 레이아웃 리사이즈 감지
+                window.addEventListener('resize', () => this.resizeCanvas());
+            }
+
+            // 캔버스 크기를 컨테이너 부모 엘리먼트에 채우기
+            resizeCanvas() {
+                this.canvas.width = this.canvas.parentElement.clientWidth;
+                this.canvas.height = this.canvas.parentElement.clientHeight;
+                this.camera.width = this.canvas.width;
+                this.camera.height = this.canvas.height;
+            }
+
+            // 키보드 입동 제어기 설치
+            setupInput() {
+                window.addEventListener('keydown', (e) => {
+                    this.keys[e.key.toLowerCase()] = true;
+                    this.keys[e.code] = true;
+
+                    // ESC 키 누를 시 일시정지 토글
+                    if (e.key === 'Escape') {
+                        this.togglePause();
+                    }
+                });
+
+                window.addEventListener('keyup', (e) => {
+                    this.keys[e.key.toLowerCase()] = false;
+                    this.keys[e.code] = false;
+                });
+            }
+
+            // UI 버튼 및 상점 조작 이벤트 할당
+            setupUIEvents() {
+                // 게임 시작 버튼
+                document.getElementById('btn-start').addEventListener('click', () => {
+                    document.getElementById('start-modal').classList.add('opacity-0');
+                    setTimeout(() => {
+                        document.getElementById('start-modal').classList.add('hidden');
+                        this.gameState = 'PLAY';
+                        this.canvas.focus();
+                    }, 300);
+                });
+
+                // 일시정지 버튼
+                document.getElementById('btn-pause').addEventListener('click', () => {
+                    this.togglePause();
+                });
+
+                // 센터 오버레이 버튼 작동 (상태별 제어)
+                this.overlayBtn.addEventListener('click', () => {
+                    if (this.gameState === 'PAUSED') {
+                        this.togglePause();
+                    } else if (this.gameState === 'CLEAR') {
+                        this.nextStage();
+                    } else if (this.gameState === 'GAMEOVER') {
+                        this.resetStage();
+                    }
+                });
+
+                // 스테이지 리셋 버튼
+                document.getElementById('btn-reset').addEventListener('click', () => {
+                    if (confirm('현재 스테이지를 처음부터 재시작하시겠습니까? (골드는 보존됩니다)')) {
+                        this.resetStage();
+                    }
+                });
+
+                // 상점 업그레이드 슬롯 바인딩
+                document.getElementById('btn-upg-speed').addEventListener('click', () => this.buyUpgrade('speed'));
+                document.getElementById('btn-upg-accel').addEventListener('click', () => this.buyUpgrade('accel'));
+                document.getElementById('btn-upg-brake').addEventListener('click', () => this.buyUpgrade('brake'));
+                document.getElementById('btn-upg-handle').addEventListener('click', () => this.buyUpgrade('handle'));
+            }
+
+            // 상점 업그레이드 로직
+            buyUpgrade(statType) {
+                if (!this.player) return;
+                const currentLevel = this.player.upgradeLevels[statType];
+                if (currentLevel >= MAX_UPGRADE_LEVEL) {
+                    alert('이미 해당 성능이 최대 단계(MAX)입니다!');
+                    return;
+                }
+
+                const cost = UPGRADE_COSTS[statType][currentLevel - 1];
+                if (this.money >= cost) {
+                    this.money -= cost;
+                    this.player.upgradeLevels[statType]++;
+                    this.player.updateStats();
+                    this.updateUI();
+                    
+                    // 성공 파티클 연출
+                    this.triggerSparks(this.player.x, this.player.y, '#eab308', 35);
+                } else {
+                    alert('수익 잔액이 부족합니다! 승객을 추가로 이송하십시오.');
+                }
+            }
+
+            // 일시정지 토글
+            togglePause() {
+                if (this.gameState === 'PLAY') {
+                    this.gameState = 'PAUSED';
+                    this.showCenterOverlay('GAME PAUSED', '게임이 일시정지 되었습니다.', '계속하기', 'play');
+                } else if (this.gameState === 'PAUSED') {
+                    this.gameState = 'PLAY';
+                    this.hideCenterOverlay();
+                    this.canvas.focus();
+                }
+            }
+
+            // 신규 스테이지 / 초기화 시 기본 게임 월드 생성
+            buildWorld() {
+                // 1. 플레이어 생성 (교차로 근처 대기)
+                this.player = new PlayerTaxi(CANVAS_WIDTH / 2 - ROAD_WIDTH / 4, CANVAS_HEIGHT - 120);
+
+                // 2. 가상의 시가 격자 도시 빌딩(장해물) 배치
+                this.buildings = [];
+                
+                // 가로/세로 주요 격자 도로 패턴을 제외한 빈 공간에 빌딩 숲 조성
+                // 맵 크기는 가로 1200, 세로 1200
+                const gridSpacingX = CANVAS_WIDTH / 2;
+                const gridSpacingY = CANVAS_HEIGHT / 2;
+
+                // 4개의 큰 구역 타운에 격자 빌딩 형성
+                // 좌상단 타운
+                this.buildings.push({ x: 80, y: 80, width: 360, height: 360 });
+                // 우상단 타운
+                this.buildings.push({ x: 760, y: 80, width: 360, height: 360 });
+                // 좌하단 타운
+                this.buildings.push({ x: 80, y: 760, width: 360, height: 360 });
+                // 우하단 타운
+                this.buildings.push({ x: 760, y: 760, width: 360, height: 360 });
+
+                // 3. 교통 신호등 배치 (네거리에 배치)
+                this.trafficLights = [];
+                const midX = CANVAS_WIDTH / 2;
+                const midY = CANVAS_HEIGHT / 2;
+
+                // 정지선 위치는 각각의 도로 진입 전 위치
+                this.trafficLights.push(new TrafficLight(midX - ROAD_WIDTH / 2 - 20, midY - ROAD_WIDTH / 2 - 20, midX - ROAD_WIDTH / 2, midY - ROAD_WIDTH / 2, 22)); // 좌측 신호
+                this.trafficLights.push(new TrafficLight(midX + ROAD_WIDTH / 2 + 20, midY + ROAD_WIDTH / 2 + 20, midX + ROAD_WIDTH / 2, midY + ROAD_WIDTH / 2, 22)); // 우측 신호
+
+                // 4. 일반 AI 차량 다수 생성 (도로선 위 배치)
+                this.aiCars = [];
+                const carColors = ['#ef4444', '#3b82f6', '#10b981', '#a855f7', '#6366f1', '#64748b'];
+                
+                // 스테이지가 높아질수록 교통량이 증가함
+                const carCount = 5 + this.stage * 4;
+                for (let i = 0; i < carCount; i++) {
+                    const color = carColors[Math.floor(Math.random() * carColors.length)];
+                    const aiSpeed = 1.8 + Math.random() * 2.0;
+                    
+                    // 무작위 스폰 지점 생성
+                    const aiCar = new AICar(0, 0, 0, aiSpeed, color, 'DOWN');
+                    aiCar.respawn();
+                    this.aiCars.push(aiCar);
+                }
+
+                // 5. 대기 승객들 초기 분배
+                this.passengers = [];
+                this.activePassenger = null;
+                this.spawnPassengers();
+
+                // 이펙트 클리어
+                this.particles = [];
+            }
+
+            // 도로망 가생이 안전 지대에 승객 임의 분포
+            spawnPassengers() {
+                this.passengers = [];
+                const passengerCount = 3 + this.stage; // 스테이지가 증가할 수록 승객 밀도도 커짐
+                
+                for (let i = 0; i < passengerCount; i++) {
+                    // 승객은 항상 인도(건물 옆 빈공터)나 횡단보도 옆 길가에 있도록 생성
+                    const locations = [
+                        // 좌상단 블록 주변
+                        { x: 470, y: 150, destX: 100, destY: 720 },
+                        { x: 120, y: 470, destX: 1100, destY: 1080 },
+                        // 우상단 블록 주변
+                        { x: 730, y: 250, destX: 200, destY: 150 },
+                        { x: 1080, y: 470, destX: 470, destY: 730 },
+                        // 좌하단 블록 주변
+                        { x: 150, y: 730, destX: 730, destY: 1050 },
+                        { x: 470, y: 950, destX: 1050, destY: 200 },
+                        // 우하단 블록 주변
+                        { x: 730, y: 850, destX: 120, destY: 480 },
+                        { x: 1050, y: 730, destX: 740, destY: 120 }
+                    ];
+
+                    const loc = locations[Math.floor(Math.random() * locations.length)];
+                    // 중복 위치 방지 체크 후 승객 생성
+                    if (!this.passengers.some(p => p.x === loc.x && p.y === loc.y)) {
+                        const newPassenger = new Passenger(loc.x, loc.y, loc.destX, loc.destY, i);
+                        this.passengers.push(newPassenger);
+                    }
+                }
+            }
+
+            // 게임 플레이 루프 실행 전용 이니셜라이저
+            start() {
+                this.stage = 1;
+                this.money = 0;
+                this.targetMoney = 1000;
+                this.buildWorld();
+                this.updateUI();
+
+                // 프레임 애니메이션 루프 시작
+                requestAnimationFrame((time) => this.loop(time));
+            }
+
+            // 메인 루프 (deltaTime 반영)
+            loop(time) {
+                const dt = time - this.lastTime;
+                this.lastTime = time;
+
+                this.update();
+                this.draw();
+
+                requestAnimationFrame((time) => this.loop(time));
+            }
+
+            // 모든 요소의 상태 업데이트 연산
+            update() {
+                if (this.gameState !== 'PLAY') return;
+
+                // 1. 플레이어 업데이트
+                // 방향키 조작 판별 및 전달
+                if (this.keys['w'] || this.keys['arrowup']) {
+                    this.player.accelerate();
+                }
+                if (this.keys['s'] || this.keys['arrowdown']) {
+                    this.player.applyBrake();
+                }
+                if (this.keys['a'] || this.keys['arrowleft']) {
+                    this.player.steer(-1);
+                }
+                if (this.keys['d'] || this.keys['arrowright']) {
+                    this.player.steer(1);
+                }
+
+                // 스페이스바 브레이크 (타이어 미끄러짐 및 스키드마크 축적)
+                if (this.keys['space'] || this.keys['spacebar']) {
+                    this.player.speed *= 0.82; // 감속 대폭 반영
+                    if (Math.abs(this.player.speed) > 1.5) {
+                        this.player.addTireTrack(); // 타이어 자국 연출 발생
+                        this.triggerSparks(this.player.x, this.player.y, '#475569', 1);
+                    }
+                }
+
+                // 마찰/충돌 고려한 위치 계산 업데이트
+                this.player.update([], this.buildings);
+
+                // 2. 신호위반 과태료 측정 체크 (빨간불 통과 시 벌금 차감)
+                this.checkTrafficLightViolations();
+
+                // 3. 교통 신호등 가동 연산
+                for (let light of this.trafficLights) {
+                    light.update();
+                }
+
+                // 4. 일반 AI 차량 기동 연산 및 플레이어 간의 충돌 감지
+                for (let ai of this.aiCars) {
+                    ai.update([], this.buildings, this.trafficLights, this.aiCars, this.player);
+
+                    // 플레이어 택시와 AI 자동차 간 충돌 처리 (동적 감쇠 적용)
+                    const distToPlayer = Math.hypot(ai.x - this.player.x, ai.y - this.player.y);
+                    if (distToPlayer < 36) {
+                        this.triggerSparks((ai.x + this.player.x) / 2, (ai.y + this.player.y) / 2, '#ffffff', 8);
+                        
+                        // 물리 충돌 반동
+                        const tempSpeed = this.player.speed;
+                        this.player.speed = -this.player.speed * 0.45;
+                        ai.speed = -ai.speed * 0.45;
+
+                        // 약간 벌금 보상이나 팁이 깎이도록 수익 차감
+                        if (this.money > 0) {
+                            this.money = Math.max(0, this.money - 15);
+                            this.updateUI();
+                        }
+                    }
+                }
+
+                // 5. 대기중인 승객 시스템 체크
+                if (!this.activePassenger) {
+                    // 택시에 안 탄 경우 - 주변 승객 픽업 대기 검사
+                    for (let i = 0; i < this.passengers.length; i++) {
+                        const p = this.passengers[i];
+                        p.update();
+
+                        const dist = Math.hypot(this.player.x - p.x, this.player.y - p.y);
+                        // 승객 정차 픽업 범위 (35픽셀 반경 안쪽에서 속도가 현저히 느려지면 탑승)
+                        if (dist < 40 && Math.abs(this.player.speed) < 2.0) {
+                            this.activePassenger = p;
+                            this.passengers.splice(i, 1); // 픽업 완료로 월드맵 리스트에서 제명
+                            
+                            // 픽업 축하 스파크
+                            this.triggerSparks(p.x, p.y, '#eab308', 20);
+                            this.updateUI();
+                            break;
+                        }
+                    }
+                } else {
+                    // 승객 탑승 상태 - 목적지 충돌 골인 검사
+                    this.activePassenger.update();
+                    const distToDest = Math.hypot(this.player.x - this.activePassenger.destX, this.player.y - this.activePassenger.destY);
+                    
+                    if (distToDest < 50 && Math.abs(this.player.speed) < 2.0) {
+                        // 요금 수령 공식 계산 (기본요금 $300 + 거리 가중 비례산식)
+                        const rideDist = Math.hypot(this.activePassenger.x - this.activePassenger.destX, this.activePassenger.y - this.activePassenger.destY);
+                        const earnedFare = Math.floor(250 + (rideDist * 0.65));
+                        
+                        this.money += earnedFare;
+                        this.triggerSparks(this.player.x, this.player.y, '#10b981', 30);
+                        
+                        this.activePassenger = null; // 승객 하차 초기화
+                        this.updateUI();
+
+                        // 스테이지 승리 목표 정량 수익 달성 판별
+                        if (this.money >= this.targetMoney) {
+                            this.gameState = 'CLEAR';
+                            this.showCenterOverlay('STAGE CLEAR!', `목표 수익 $${this.targetMoney}를 초과 달성했습니다!\n현재 총 보유액: $${this.money}`, '다음 구역으로 가기', 'arrow-right');
+                        }
+
+                        // 다 태우고 남은 승객 없으면 자동 추가 리필 보급
+                        if (this.passengers.length === 0) {
+                            this.spawnPassengers();
+                        }
+                    }
+                }
+
+                // 6. 폭발/화재 잔상 파티클 소멸 연산
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    const p = this.particles[i];
+                    p.update();
+                    if (p.alpha <= 0) {
+                        this.particles.splice(i, 1);
+                    }
+                }
+
+                // 7. 실시간 HUD 데이터 갱신
+                this.hudSpeed.textContent = Math.floor(Math.abs(this.player.speed) * 15);
+                this.updateCompass();
+            }
+
+            // 신호 위반 범칙금 검사
+            checkTrafficLightViolations() {
+                // 플레이어가 가로지르는 교차로에 진입했을 때, 해당 신호등이 빨간색/주황색이며 정지선을 무시했는지 확인
+                for (let light of this.trafficLights) {
+                    if (light.state === 'RED') {
+                        // 정지선 통과 여부 및 정차 유무 체크
+                        const distToStopLine = Math.hypot(this.player.x - light.stopLineX, this.player.y - light.stopLineY);
+                        // 정지선 주차 반경 근접 및 속도가 상당할 때 신호 위반 간주
+                        if (distToStopLine < 45 && Math.abs(this.player.speed) > 2.5) {
+                            this.triggerFinePenalty();
+                        }
+                    }
+                }
+            }
+
+            // 벌금 발생 이벤트 트리거 및 위반 경고 오버레이 깜빡임 효과
+            triggerFinePenalty() {
+                if (this.fineAlertTimeout) return; // 연속으로 패널티가 중첩 차감되는 버그 완충 방지
+
+                this.money = Math.max(0, this.money - this.finePenalty);
+                this.updateUI();
+
+                this.hudFineAlert.classList.remove('hidden');
+                this.triggerSparks(this.player.x, this.player.y, '#ef4444', 25);
+
+                this.fineAlertTimeout = setTimeout(() => {
+                    this.hudFineAlert.classList.add('hidden');
+                    this.fineAlertTimeout = null;
+                }, 2000);
+            }
+
+            // 파티클 생성 헬퍼
+            triggerSparks(x, y, color, count) {
+                for (let i = 0; i < count; i++) {
+                    this.particles.push(new Particle(x, y, color));
+                }
+            }
+
+            // 나침반 내비게이션 방향 침바늘 정렬 연산
+            updateCompass() {
+                if (!this.activePassenger) {
+                    // 승차 고객이 없으면 가장 인접한 대기 승객 방향 지시
+                    if (this.passengers.length === 0) {
+                        this.compassNeedle.style.transform = 'rotate(0deg)';
+                        this.compassDistance.textContent = 'OFF';
+                        return;
+                    }
+                    
+                    let nearestPass = this.passengers[0];
+                    let minDist = Math.hypot(this.player.x - nearestPass.x, this.player.y - nearestPass.y);
+                    
+                    for (let p of this.passengers) {
+                        const d = Math.hypot(this.player.x - p.x, this.player.y - p.y);
+                        if (d < minDist) {
+                            minDist = d;
+                            nearestPass = p;
+                        }
+                    }
+
+                    const angle = Math.atan2(nearestPass.y - this.player.y, nearestPass.x - this.player.x);
+                    this.compassNeedle.style.transform = `rotate(${angle * 180 / Math.PI - 90}deg)`;
+                    this.compassDistance.textContent = `${Math.floor(minDist)}M`;
+                } else {
+                    // 이미 탑승했으면 목적지 방향 가이드
+                    const destX = this.activePassenger.destX;
+                    const destY = this.activePassenger.destY;
+                    const dist = Math.hypot(this.player.x - destX, this.player.y - destY);
+                    
+                    const angle = Math.atan2(destY - this.player.y, destX - this.player.x);
+                    this.compassNeedle.style.transform = `rotate(${angle * 180 / Math.PI - 90}deg)`;
+                    this.compassDistance.textContent = `${Math.floor(dist)}M`;
+                }
+            }
+
+            // 화면상에 모든 객체 렌더링
+            draw() {
+                // 1. 화면 초기화
+                this.ctx.fillStyle = '#0f172a'; // 격조 높은 다크 블루 테마
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+                // 2. 플레이어 중심 기반 카메라 추적 행렬 제어
+                this.camera.x = this.player.x - this.camera.width / 2;
+                this.camera.y = this.player.y - this.camera.height / 2;
+
+                // 카메라 월드 경계 고정 (가장자리에 닿을 때 뷰가 가상영역을 이탈 방지)
+                if (this.camera.x < 0) this.camera.x = 0;
+                if (this.camera.x > this.worldWidth - this.camera.width) this.camera.x = this.worldWidth - this.camera.width;
+                if (this.camera.y < 0) this.camera.y = 0;
+                if (this.camera.y > this.worldHeight - this.camera.height) this.camera.y = this.worldHeight - this.camera.height;
+
+                this.ctx.save();
+                // 카메라 변환 이동 행렬 적용
+                this.ctx.translate(-this.camera.x, -this.camera.y);
+
+                // --- 카메라 적용 가상공간 드로잉 시작 ---
+
+                // 아스팔트 바닥 베이스 배경 격자 텍스처
+                this.drawBackground();
+
+                // 가로 및 세로 격자 도로 노선 선명하게 표현
+                this.drawRoads();
+
+                // 대기 구역 승객 링 그리기
+                for (let p of this.passengers) {
+                    p.draw(this.ctx);
+                }
+
+                // 현재 손님이 타고 있다면, 해당 손님의 목적지 드롭 영역 표시
+                if (this.activePassenger) {
+                    this.activePassenger.drawDestination(this.ctx);
+                }
+
+                // 빌딩 건축물 장애물 그리기
+                this.drawBuildings();
+
+                // 인공지능 도로 차량들 드로잉
+                for (let ai of this.aiCars) {
+                    ai.draw(this.ctx);
+                }
+
+                // 가로 교차 신호등 드로잉
+                for (let light of this.trafficLights) {
+                    light.draw(this.ctx);
+                }
+
+                // 플레이어의 택시 그리기
+                this.player.draw(this.ctx);
+
+                // 스파크 파티클 렌더링
+                for (let p of this.particles) {
+                    p.draw(this.ctx);
+                }
+
+                // --- 카메라 가상 공간 드로잉 끝 ---
+                this.ctx.restore();
+            }
+
+            // 바닥 그리드 바둑판 장식 패턴 그리기
+            drawBackground() {
+                this.ctx.strokeStyle = '#1e293b';
+                this.ctx.lineWidth = 1;
+                const gridSize = 40;
+                
+                this.ctx.beginPath();
+                for (let x = 0; x < this.worldWidth; x += gridSize) {
+                    this.ctx.moveTo(x, 0);
+                    this.ctx.lineTo(x, this.worldHeight);
+                }
+                for (let y = 0; y < this.worldHeight; y += gridSize) {
+                    this.ctx.moveTo(0, y);
+                    this.ctx.lineTo(this.worldWidth, y);
+                }
+                this.ctx.stroke();
+            }
+
+            // 도시 도로 그리기
+            drawRoads() {
+                const midX = CANVAS_WIDTH / 2;
+                const midY = CANVAS_HEIGHT / 2;
+
+                // 회색 아스팔트 노선 (가로, 세로 교차로)
+                this.ctx.fillStyle = '#1e293b';
+                // 가로 도로
+                this.ctx.fillRect(0, midY - ROAD_WIDTH / 2, CANVAS_WIDTH, ROAD_WIDTH);
+                // 세로 도로
+                this.ctx.fillRect(midX - ROAD_WIDTH / 2, 0, ROAD_WIDTH, CANVAS_HEIGHT);
+
+                // 도로 경계 연석 및 잔디 인도 아웃라인 묘사
+                this.ctx.strokeStyle = '#475569';
+                this.ctx.lineWidth = 3;
+                this.ctx.strokeRect(0, midY - ROAD_WIDTH / 2, CANVAS_WIDTH, ROAD_WIDTH);
+                this.ctx.strokeRect(midX - ROAD_WIDTH / 2, 0, ROAD_WIDTH, CANVAS_HEIGHT);
+
+                // 횡단보도 선 및 황색 중앙선 드로잉
+                this.ctx.save();
+                this.ctx.strokeStyle = '#eab308'; // 중앙 황색 더블 실선
+                this.ctx.lineWidth = 2.5;
+                this.ctx.setLineDash([12, 10]);
+
+                // 가로 도로 중앙선
+                this.ctx.beginPath();
+                this.ctx.moveTo(0, midY);
+                this.ctx.lineTo(CANVAS_WIDTH, midY);
+                // 세로 도로 중앙선
+                this.ctx.moveTo(midX, 0);
+                this.ctx.lineTo(midX, CANVAS_HEIGHT);
+                this.ctx.stroke();
+
+                // 흰색 차선 구분 점선
+                this.ctx.strokeStyle = '#ffffff';
+                this.ctx.lineWidth = 1.5;
+                this.ctx.setLineDash([8, 15]);
+
+                this.ctx.beginPath();
+                // 가로 도로 위아래 보조 레인선
+                this.ctx.moveTo(0, midY - LANE_WIDTH);
+                this.ctx.lineTo(CANVAS_WIDTH, midY - LANE_WIDTH);
+                this.ctx.moveTo(0, midY + LANE_WIDTH);
+                this.ctx.lineTo(CANVAS_WIDTH, midY + LANE_WIDTH);
+
+                // 세로 도로 보조 레인선
+                this.ctx.moveTo(midX - LANE_WIDTH, 0);
+                this.ctx.lineTo(midX - LANE_WIDTH, CANVAS_HEIGHT);
+                this.ctx.moveTo(midX + LANE_WIDTH, 0);
+                this.ctx.lineTo(midX + LANE_WIDTH, CANVAS_HEIGHT);
+                this.ctx.stroke();
+
+                // 횡단보도(Zebra Crossing) 및 정지선 데코레이션
+                this.ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                this.ctx.setLineDash([]); // 대쉬 해제
+                
+                // 가로/세로 교차 지점 네 군데의 입구 횡단보도
+                const crosswalkOffset = ROAD_WIDTH / 2 + 30;
+                
+                // 좌측 입구 횡단보도
+                this.ctx.fillRect(midX - crosswalkOffset - 15, midY - ROAD_WIDTH / 2 + 5, 12, ROAD_WIDTH - 10);
+                // 우측 입구 횡단보도
+                this.ctx.fillRect(midX + crosswalkOffset, midY - ROAD_WIDTH / 2 + 5, 12, ROAD_WIDTH - 10);
+                // 상단 입구 횡단보도
+                this.ctx.fillRect(midX - ROAD_WIDTH / 2 + 5, midY - crosswalkOffset - 15, ROAD_WIDTH - 10, 12);
+                // 하단 입구 횡단보도
+                this.ctx.fillRect(midX - ROAD_WIDTH / 2 + 5, midY + crosswalkOffset, ROAD_WIDTH - 10, 12);
+
+                this.ctx.restore();
+            }
+
+            // 고층 빌딩 네온 스타일 장애물 묘사
+            drawBuildings() {
+                for (let b of this.buildings) {
+                    this.ctx.save();
+                    // 건물 기본 바닥 음영 섀도우
+                    this.ctx.fillStyle = 'rgba(2, 6, 23, 0.7)';
+                    this.ctx.fillRect(b.x + 8, b.y + 8, b.width, b.height);
+
+                    // 본체 건물 벽면 외장
+                    this.ctx.fillStyle = '#1e293b';
+                    this.ctx.strokeStyle = '#334155';
+                    this.ctx.lineWidth = 4;
+                    this.ctx.beginPath();
+                    this.ctx.roundRect(b.x, b.y, b.width, b.height, 12);
+                    this.ctx.fill();
+                    this.ctx.stroke();
+
+                    // 빌딩 옥상 아웃라인 네온 야경 빛 연출
+                    this.ctx.strokeStyle = 'rgba(99, 102, 241, 0.35)'; // 은은한 청색 네온
+                    this.ctx.lineWidth = 2.5;
+                    this.ctx.strokeRect(b.x + 10, b.y + 10, b.width - 20, b.height - 20);
+
+                    // 고층 빌딩 창문 네온 장식 그리드 불빛 표현
+                    this.ctx.fillStyle = 'rgba(254, 240, 138, 0.15)'; // 노란 밤샘 조명
+                    const windowSize = 14;
+                    const spacing = 35;
+                    for (let wx = b.x + 30; wx < b.x + b.width - 30; wx += spacing) {
+                        for (let wy = b.y + 30; wy < b.y + b.height - 30; wy += spacing) {
+                            // 일부 창문만 라이트 업 되도록 난수 부여
+                            if ((wx + wy) % 3 === 0) {
+                                this.ctx.fillStyle = 'rgba(254, 240, 138, 0.5)';
+                            } else if ((wx + wy) % 5 === 0) {
+                                this.ctx.fillStyle = 'rgba(96, 165, 250, 0.4)'; // 푸른 불빛
+                            } else {
+                                this.ctx.fillStyle = 'rgba(15, 23, 42, 0.6)'; // 소등
+                            }
+                            this.ctx.fillRect(wx, wy, windowSize, windowSize);
+                        }
+                    }
+
+                    this.ctx.restore();
+                }
+            }
+
+            // 실시간 상태 데이터가 포함된 HUD 갱신
+            updateUI() {
+                this.hudStage.textContent = this.stage;
+                this.hudMoney.textContent = `$${this.money.toLocaleString()}`;
+                this.hudTarget.textContent = `$${this.targetMoney.toLocaleString()}`;
+
+                // 승객 탑승 상태 표시 카드 최신화
+                if (!this.activePassenger) {
+                    this.hudPassengerCard.className = "bg-slate-900/90 backdrop-blur-md px-4 py-3 rounded-xl border border-slate-700/80 pointer-events-auto flex items-center gap-3 transition-all";
+                    document.getElementById('passenger-status-icon').className = "w-10 h-10 rounded-lg flex items-center justify-center bg-slate-800 text-slate-400";
+                    document.getElementById('passenger-status-icon').innerHTML = `<i data-lucide="user"></i>`;
+                    this.hudPassengerStatus.textContent = "승객 탐색 중...";
+                    this.hudPassengerDetails.textContent = "가까운 인근 도로를 돌며 승객을 픽업하십시오.";
+                } else {
+                    this.hudPassengerCard.className = "bg-slate-900/90 backdrop-blur-md px-4 py-3 rounded-xl border border-emerald-500/50 pointer-events-auto flex items-center gap-3 transition-all";
+                    document.getElementById('passenger-status-icon').className = "w-10 h-10 rounded-lg flex items-center justify-center bg-emerald-500/20 text-emerald-400";
+                    document.getElementById('passenger-status-icon').innerHTML = `<i data-lucide="navigation"></i>`;
+                    this.hudPassengerStatus.textContent = "승객 탑승 중!";
+                    this.hudPassengerDetails.textContent = "지정된 목적지(녹색 링)까지 수송하십시오.";
+                }
+
+                // 사이드바 상점 강화 슬롯 게이지 업데이트
+                if (this.player) {
+                    this.updateGarageUpgradeUI('speed', this.player.upgradeLevels.speed);
+                    this.updateGarageUpgradeUI('accel', this.player.upgradeLevels.accel);
+                    this.updateGarageUpgradeUI('brake', this.player.upgradeLevels.brake);
+                    this.updateGarageUpgradeUI('handle', this.player.upgradeLevels.handle);
+                }
+
+                lucide.createIcons();
+            }
+
+            // 업그레이드 슬롯 바 갱신 처리기
+            updateGarageUpgradeUI(statType, level) {
+                const barContainer = document.getElementById(`btn-upg-${statType}`).previousElementSibling;
+                const bars = barContainer.querySelectorAll('.upg-bar-item');
+                const costSpan = document.getElementById(`upg-${statType}-cost`);
+
+                // 게이지 채우기
+                bars.forEach((bar, index) => {
+                    if (index < level) {
+                        bar.className = "upg-bar-item flex-1 bg-yellow-400 rounded-sm";
+                    } else {
+                        bar.className = "upg-bar-item flex-1 bg-slate-800 rounded-sm";
+                    }
+                });
+
+                // 가격 표시 갱신
+                if (level >= MAX_UPGRADE_LEVEL) {
+                    costSpan.textContent = "MAX";
+                    document.getElementById(`btn-upg-${statType}`).disabled = true;
+                    document.getElementById(`btn-upg-${statType}`).className = "px-3 py-1 bg-slate-800 text-slate-500 font-bold text-xs rounded-lg transition-all cursor-not-allowed";
+                } else {
+                    const cost = UPGRADE_COSTS[statType][level - 1];
+                    costSpan.textContent = `$${cost}`;
+                }
+            }
+
+            // 화면 가운대 팝업 모달 노출 제어
+            showCenterOverlay(title, description, buttonText, buttonIconName) {
+                this.overlayTitle.textContent = title;
+                this.overlayDesc.innerHTML = description.replace(/\n/g, '<br>');
+                
+                // 버튼 구성 요소 변경
+                this.overlayBtn.innerHTML = `
+                    <i data-lucide="${buttonIconName}" class="w-5 h-5"></i>
+                    <span>${buttonText}</span>
+                `;
+                lucide.createIcons();
+                this.centerOverlay.classList.remove('hidden');
+            }
+
+            // 화면 가운데 모달 숨기기
+            hideCenterOverlay() {
+                this.centerOverlay.classList.add('hidden');
+            }
+
+            // 스테이지 리셋 (수익 손절없이 초기 스폰)
+            resetStage() {
+                this.buildWorld();
+                this.gameState = 'PLAY';
+                this.hideCenterOverlay();
+                this.updateUI();
+                this.canvas.focus();
+            }
+
+            // 다음 스테이지 진입 연출
+            nextStage() {
+                this.stage++;
+                this.targetMoney = 1000 + (this.stage - 1) * 750; // 목표 수치 점증
+                this.buildWorld();
+                this.gameState = 'PLAY';
+                this.hideCenterOverlay();
+                this.updateUI();
+                this.canvas.focus();
+            }
+        }
+
+        // ----------------- 즉시 실행 및 초기 구동 진입 -----------------
+        window.onload = function() {
+            const game = new GameEngine();
+            game.start();
+        };
+    </script>
+</body>
+</html>
