@@ -1,0 +1,2410 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tactical Strike: Infiltration Blackout</title>
+    <!-- Tailwind CSS for sleek HUD UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+            background-color: #020202;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        
+        /* Tactical Helmet Cam Viewport Effects */
+        #viewport-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* Vignette and Color Grading overlay for hyper-realistic look */
+        #vignette {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            background: radial-gradient(circle, rgba(0,0,0,0) 45%, rgba(0,0,0,0.75) 100%);
+            z-index: 15;
+        }
+
+        /* Digital Noise/Grain Overlay for bodycam realistic noise */
+        #grain {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            opacity: 0.04;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+            z-index: 16;
+        }
+
+        /* Dynamic Crosshair */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 16px;
+            height: 16px;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 25;
+        }
+        #crosshair::before, #crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(50, 255, 50, 0.7);
+        }
+        #crosshair::before { top: 7px; left: 0; width: 16px; height: 2px; }
+        #crosshair::after { top: 0; left: 7px; width: 2px; height: 16px; }
+        
+        /* Damage Flash overlay */
+        #damage-flash {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle, rgba(255,0,0,0) 30%, rgba(180,0,0,0.7) 100%);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.12s ease-out;
+            z-index: 20;
+        }
+        
+        /* Tactical CRT Scanlines for military feed */
+        .scanlines {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.12) 50%
+            );
+            background-size: 100% 3px;
+            pointer-events: none;
+            z-index: 18;
+            opacity: 0.35;
+        }
+    </style>
+</head>
+<body class="relative w-screen h-screen overflow-hidden">
+
+    <div id="viewport-container">
+        <!-- Canvas Container -->
+        <div id="canvas-container" class="w-full h-full"></div>
+
+        <!-- Atmospheric Video Overlays -->
+        <div id="vignette"></div>
+        <div id="grain"></div>
+        <div id="damage-flash"></div>
+        <div class="scanlines"></div>
+
+        <!-- HUD Overlay -->
+        <div id="hud" class="absolute inset-0 pointer-events-none z-30 flex flex-col justify-between p-6 text-white font-mono hidden">
+            
+            <!-- Top Row: Objective, Payload and Alert level -->
+            <div class="flex justify-between items-start">
+                <!-- Tactical Mission Brief & Payload Tracker -->
+                <div class="flex flex-col gap-2">
+                    <div class="bg-black/85 border border-emerald-500/40 p-4 rounded backdrop-blur-md max-w-sm">
+                        <div class="flex justify-between items-center">
+                            <div class="text-[10px] text-emerald-400 font-bold uppercase tracking-widest">▲ CURRENT OBJECTIVE</div>
+                            <!-- Current Stage Tracker -->
+                            <span id="stage-badge" class="bg-emerald-600/30 border border-emerald-500/50 text-emerald-300 text-[10px] px-2 py-0.5 rounded font-black">STAGE 1 / 5</span>
+                        </div>
+                        <div id="objective-text" class="text-xs mt-1.5 font-semibold text-gray-100">기지 안쪽 서버 제어실 내부로 직접 진입하여 전술 폭탄(C4)을 설치하십시오.</div>
+                        
+                        <!-- Payload Carrying Status Indicator -->
+                        <div class="mt-3 flex items-center gap-2 border-t border-zinc-800 pt-2">
+                            <span class="inline-block w-2.5 h-2.5 bg-yellow-500 rounded-sm animate-pulse"></span>
+                            <span id="payload-status" class="text-[10px] text-yellow-400 font-bold uppercase">SABOTAGE PAYLOAD: CARRIED (휴대 중)</span>
+                        </div>
+
+                        <!-- Bomb Detonation Timer Progress -->
+                        <div id="bomb-timer-container" class="mt-2 hidden">
+                            <div class="text-[10px] text-red-500 font-bold">폭탄 기폭 대기 카운트다운 (30s):</div>
+                            <div class="flex items-center gap-2 mt-1">
+                                <div class="w-24 bg-gray-900 h-1.5 rounded overflow-hidden">
+                                    <div id="bomb-progress-bar" class="bg-red-500 h-full w-full"></div>
+                                </div>
+                                <span id="bomb-countdown" class="text-[10px] text-red-500 font-bold">30.00s</span>
+                            </div>
+                            <div id="defusal-warning" class="text-[9px] text-yellow-500 animate-pulse mt-1 hidden">⚠️ 경고: 적 기지 경비병이 폭탄 무력화를 시도 중입니다!</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live Camera Feed and Security Index -->
+                <div class="bg-black/85 border border-red-500/40 p-4 rounded backdrop-blur-md flex flex-col items-end">
+                    <div class="text-[10px] text-gray-400 font-bold tracking-widest">TACTICAL NETWORK</div>
+                    <div class="flex items-center gap-2 mt-1">
+                        <span id="alert-indicator" class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <span id="alert-level" class="text-xs font-bold text-emerald-400">NORMAL (LEVEL 0)</span>
+                    </div>
+                    <div id="alert-subtext" class="text-[9px] text-zinc-500 mt-1">초소 탐조등 및 감시카메라를 피하십시오.</div>
+                </div>
+            </div>
+
+            <!-- Center Crosshair and Prompts -->
+            <div class="absolute inset-0 flex flex-col items-center justify-center">
+                <!-- Crosshair -->
+                <div id="crosshair"></div>
+                
+                <!-- Interaction Prompt -->
+                <div id="interaction-prompt" class="mt-28 bg-black/90 border border-yellow-500/60 px-4 py-2 rounded text-xs text-yellow-400 font-bold animate-pulse hidden">
+                    [F 누르고 있기] 전술 C4 장치 부착
+                </div>
+                
+                <!-- Installation Progress -->
+                <div id="install-progress-container" class="mt-24 bg-black/90 border border-emerald-500/60 p-4 rounded w-64 hidden">
+                    <div id="install-title-text" class="text-[10px] text-emerald-400 font-bold mb-1 text-center">전술 폭탄 회로 연결 중...</div>
+                    <div class="w-full bg-zinc-800 h-2 rounded overflow-hidden border border-zinc-700">
+                        <div id="install-progress-bar" class="bg-emerald-500 h-full w-0 transition-all duration-75"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom Row: Vital Signs & Combat Inventory -->
+            <div class="flex justify-between items-end">
+                <!-- Player Vital Signs -->
+                <div class="bg-black/85 border border-emerald-500/40 p-4 rounded backdrop-blur-md w-64">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-[10px] text-emerald-400 font-bold">VITAL HP</span>
+                        <span id="hp-value" class="text-xs font-bold text-white">100 / 100</span>
+                    </div>
+                    <div class="w-full bg-zinc-900 h-2 rounded overflow-hidden border border-zinc-800">
+                        <div id="hp-bar" class="bg-emerald-500 h-full w-full transition-all duration-350"></div>
+                    </div>
+
+                    <div class="flex justify-between items-center mt-3 mb-1">
+                        <span class="text-[10px] text-cyan-400 font-bold">TACTICAL KEVLAR</span>
+                        <span id="shield-value" class="text-xs font-bold text-white">100 / 100</span>
+                    </div>
+                    <div class="w-full bg-zinc-900 h-1.5 rounded overflow-hidden border border-zinc-800">
+                        <div id="shield-bar" class="bg-cyan-500 h-full w-full transition-all duration-350"></div>
+                    </div>
+                </div>
+
+                <!-- Battle log system -->
+                <div id="feed-container" class="flex flex-col gap-1 items-center max-h-24 overflow-hidden w-72 text-[10px] text-zinc-400 pointer-events-none mb-2">
+                    <!-- Dynamic Logs -->
+                </div>
+
+                <!-- Weapon Status & Ammo Reservoir -->
+                <div class="bg-black/85 border border-emerald-500/40 p-4 rounded backdrop-blur-md w-48 text-right">
+                    <div class="text-[10px] text-emerald-400 font-bold tracking-widest">MK-18 S-MOD</div>
+                    <div class="flex justify-end items-baseline gap-0.5 mt-1">
+                        <span id="ammo-clip" class="text-3xl font-black text-white">30</span>
+                        <span class="text-zinc-600 text-lg">/</span>
+                        <span id="ammo-reserve" class="text-md text-zinc-400 font-semibold">120</span>
+                    </div>
+                    <div class="text-[9px] text-zinc-500 mt-1 uppercase" id="weapon-status">LASER SIGHT / FLASH ACTIVE</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Start / Deployment Screen -->
+    <div id="start-screen" class="absolute inset-0 bg-zinc-950/95 z-50 flex flex-col justify-center items-center text-white font-mono p-6">
+        <div class="max-w-2xl w-full border border-yellow-500/30 bg-zinc-900/90 p-8 rounded shadow-2xl relative overflow-hidden">
+            <div class="absolute -top-10 -right-10 w-40 h-40 bg-yellow-500/10 rounded-full blur-3xl"></div>
+            
+            <h1 class="text-2xl font-black tracking-widest text-yellow-500 text-center mb-1">OPERATION BLACKOUT</h1>
+            <p class="text-[10px] text-zinc-400 text-center uppercase tracking-widest mb-8 border-b border-zinc-800 pb-4">Special Sabotage 5-Stage Campaign</p>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm mb-8">
+                <div class="border border-zinc-800 p-4 rounded bg-zinc-950/50">
+                    <h3 class="text-xs text-yellow-400 font-bold uppercase mb-2">■ 기지 심장부 단일 국소 교전</h3>
+                    <p class="text-zinc-300 text-xs leading-relaxed">
+                        대원, 불필요한 이동을 줄이고 신속한 폭파 공작을 완수하기 위해 <span class="text-red-400 font-semibold">서버 제어 센터 (A구역) 인근의 단일 콤팩트 구역</span>으로 투입됩니다.
+                        침투 단계는 항상 3명의 경비병이 배치되지만, C4 설치 직후 탈출 시에는 난이도별(Stage 1~5)로 각각 <span class="text-yellow-400 font-bold">3, 4, 5, 6, 7명의 정예 기동대</span>가 급파되어 탈출 구역을 포위합니다.
+                        <br><br>
+                        <span class="text-emerald-400 font-bold">⚠️ 단계별 난이도 보정 (완화):</span><br>
+                        - <b class="text-yellow-400">단계 상승에 따른 적들의 화력 및 속도 성장 폭이 하향</b>되었습니다.<br>
+                        - C4 부착 및 해킹 우회 시간이 이제 이전보다 훨씬 부드럽고 가볍게 상승합니다. 적들의 해체 시도도 늦어졌습니다.
+                    </p>
+                </div>
+                <div class="border border-zinc-800 p-4 rounded bg-zinc-950/50">
+                    <h3 class="text-xs text-yellow-400 font-bold uppercase mb-2">■ 전술 조작 가이드</h3>
+                    <ul class="text-xs text-zinc-300 space-y-1.5">
+                        <li><b class="text-emerald-400">W, A, S, D</b> : 기동</li>
+                        <li><b class="text-emerald-400">마우스 움직임</b> : 헤드 조준 및 탐색</li>
+                        <li><b class="text-emerald-400">마우스 좌클릭</b> : 소총 발사</li>
+                        <li><b class="text-emerald-400">R 키</b> : 신속 재장전</li>
+                        <li><b class="text-emerald-400">Shift 키</b> : 고속 기동 (대쉬)</li>
+                        <li><b class="text-emerald-400">Space 키</b> : 장애물 도약 (점프)</li>
+                        <li><b class="text-emerald-400">F 키 [유지]</b> : 융합 폭탄 회로 연결</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Warning and Instruction Notice -->
+            <div class="text-center text-[10px] text-zinc-500 mb-6 bg-zinc-950 p-2.5 rounded border border-zinc-800">
+                ⚠️ <span class="text-red-400 font-bold">주의:</span> 전술 폭파 시간은 단 <span class="text-red-400 font-bold">30초</span>입니다! 설치 후 시작 지점의 녹색 복귀원으로 도달하면 기폭 확인 오버레이와 함께 즉시 다음 구역으로 이송됩니다.
+            </div>
+
+            <div class="flex justify-center">
+                <button id="btn-start" class="bg-yellow-500 hover:bg-yellow-400 text-black font-bold tracking-wider uppercase px-8 py-3 rounded transition-all transform hover:scale-105 shadow-lg shadow-yellow-500/20 text-xs">
+                    1단계 침투 작전 투입 (DEPLOY STAGE 1)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pause Screen -->
+    <div id="pause-screen" class="absolute inset-0 bg-black/90 z-40 hidden flex-col justify-center items-center text-white font-mono">
+        <div class="text-center">
+            <h2 class="text-3xl font-black tracking-widest text-yellow-500 animate-pulse mb-2">TACTICAL FEED PAUSED</h2>
+            <p class="text-xs text-zinc-400 uppercase tracking-widest mb-6">통신 일시 대기 상태</p>
+            <button id="btn-resume" class="bg-yellow-500 hover:bg-yellow-400 text-black font-bold uppercase px-6 py-2 rounded transition-all text-xs">
+                연결 재개 (RESUME LINK)
+            </button>
+        </div>
+    </div>
+
+    <!-- Stage Clear Transition Screen -->
+    <div id="stage-clear-screen" class="absolute inset-0 bg-black/95 z-40 hidden flex-col justify-center items-center text-white font-mono p-6">
+        <div class="max-w-md w-full border border-emerald-500/40 bg-zinc-900 p-8 rounded shadow-2xl text-center">
+            <div class="w-12 h-12 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500/40">
+                <span class="text-emerald-500 text-2xl font-bold">✓</span>
+            </div>
+            <h2 id="stage-clear-title" class="text-xl font-black text-emerald-400 uppercase mb-1">STAGE 1 COMPLETED</h2>
+            <p class="text-xs text-zinc-400 uppercase tracking-wider mb-6">성공적인 탈출 및 안전 이탈 완료</p>
+            
+            <div class="bg-zinc-950 p-4 rounded border border-zinc-800 text-left text-xs text-zinc-300 mb-6 space-y-1.5">
+                <div>• 현재 작전 처치 수: <span id="sc-stage-kills" class="font-bold text-white">0</span></div>
+                <div>• 전장 보안 지수: <span class="font-bold text-red-400">CLEARED</span></div>
+                <div>• C4 폭발 상태: <span class="font-bold text-emerald-400">성공 (30초 한계점 돌파)</span></div>
+            </div>
+
+            <button id="btn-next-stage" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold tracking-wider uppercase py-3 rounded text-xs transition-all">
+                다음 구역 침투 (NEXT STAGE DEPLOYMENT)
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="gameover-screen" class="absolute inset-0 bg-black/95 z-50 hidden flex-col justify-center items-center text-white font-mono p-6">
+        <div class="max-w-md w-full border border-red-600/40 bg-zinc-900 p-8 rounded shadow-2xl text-center">
+            <div class="w-12 h-12 bg-red-600/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/40">
+                <span class="text-red-500 text-xl font-bold">☠</span>
+            </div>
+            <h2 class="text-xl font-black tracking-widest text-red-500 uppercase mb-1">MIA / 작전 중 실종</h2>
+            <p class="text-xs text-zinc-400 uppercase tracking-wider mb-6">전투원 생명 전송 피드가 차단되었습니다.</p>
+            
+            <div class="bg-zinc-950 p-4 rounded border border-zinc-800 text-left text-xs text-zinc-300 mb-6 space-y-2">
+                <div>• 적 사살 횟수: <span id="go-kills" class="font-bold text-red-400">0</span></div>
+                <div>• 최고 경보 지수: <span id="go-alert" class="font-bold text-yellow-400">NORMAL</span></div>
+                <div>• C4 설치 유무: <span id="go-bomb" class="font-bold text-cyan-400">비활성</span></div>
+            </div>
+
+            <button id="btn-restart-fail" class="w-full bg-red-600 hover:bg-red-500 text-white font-bold tracking-wider uppercase py-3 rounded text-xs transition-all">
+                신규 전술 작전 투입 (REDEPLOY)
+            </button>
+        </div>
+    </div>
+
+    <!-- Mission Success Screen (Campign End) -->
+    <div id="success-screen" class="absolute inset-0 bg-black/95 z-50 hidden flex-col justify-center items-center text-white font-mono p-6">
+        <div class="max-w-md w-full border border-yellow-500/40 bg-zinc-900 p-8 rounded shadow-2xl text-center">
+            <div class="w-12 h-12 bg-yellow-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-yellow-500/40">
+                <span class="text-yellow-500 text-2xl font-bold">👑</span>
+            </div>
+            <h2 class="text-xl font-black tracking-widest text-yellow-400 uppercase mb-1">CAMPAIGN COMPLETE</h2>
+            <p class="text-xs text-zinc-400 uppercase tracking-wider mb-6">최고 등급 특수 기지 5회 연속 폭파 완수</p>
+            
+            <div class="bg-zinc-950 p-4 rounded border border-zinc-800 text-left text-xs text-zinc-300 mb-6 space-y-2">
+                <div class="flex justify-between">
+                    <span>최종 작전 지휘 등급:</span>
+                    <span id="sc-rank" class="font-black text-lg text-yellow-400">S</span>
+                </div>
+                <hr class="border-zinc-800">
+                <div class="flex justify-between">
+                    <span>총합 침투 무력화 수:</span>
+                    <span id="sc-kills" class="font-bold text-white">0명</span>
+                </div>
+                <div class="flex justify-between">
+                    <span>총 소요 시간:</span>
+                    <span id="sc-time" class="font-bold text-white">00:00</span>
+                </div>
+                <div class="flex justify-between">
+                    <span>전 단계 총 입은 피해:</span>
+                    <span id="sc-damage" class="font-bold text-red-400">0 HP</span>
+                </div>
+                <div class="flex justify-between">
+                    <span>캠페인 가산 보너스:</span>
+                    <span class="font-bold text-emerald-400">CAMPAIGN END (+25000)</span>
+                </div>
+                <hr class="border-zinc-800">
+                <div class="flex justify-between text-emerald-400 font-bold">
+                    <span>최종 전술 점수:</span>
+                    <span id="sc-score">0</span>
+                </div>
+            </div>
+
+            <button id="btn-restart-success" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold tracking-wider uppercase py-3 rounded text-xs transition-all">
+                캠페인 전면 리부트
+            </button>
+        </div>
+    </div>
+
+    <!-- Script Block -->
+    <script>
+        // -------------------------------------------------------------
+        // SAFETY POINTER LOCK FUNCTION (SecurityError Prevention Wrapper)
+        // -------------------------------------------------------------
+        function safeRequestPointerLock(element) {
+            if (!element) return;
+            try {
+                const promise = element.requestPointerLock();
+                // If modern browser returns a Promise, handle rejection safely
+                if (promise && typeof promise.catch === 'function') {
+                    promise.catch((err) => {
+                        console.warn("Pointer lock request deferred/blocked by browser safety constraints:", err.message);
+                    });
+                }
+            } catch (err) {
+                console.warn("Synchronous pointer lock request error:", err.message);
+            }
+        }
+
+        // -------------------------------------------------------------
+        // AUDIO SYSTEM (Procedural Synth via Web Audio API)
+        // -------------------------------------------------------------
+        class AudioSystem {
+            constructor() {
+                this.ctx = null;
+            }
+            init() {
+                if (this.ctx) return;
+                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            playShoot() {
+                this.init();
+                if (!this.ctx) return;
+                
+                let bufferSize = this.ctx.sampleRate * 0.25,
+                    buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate),
+                    data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+                
+                let noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+                
+                let filter = this.ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(2000, this.ctx.currentTime);
+                filter.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 0.15);
+                
+                let gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(0.6, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+                
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.ctx.destination);
+                noise.start();
+            }
+            playEnemyShoot() {
+                this.init();
+                if (!this.ctx) return;
+                let osc = this.ctx.createOscillator();
+                let gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(180, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.12);
+                gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.12);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.12);
+            }
+            playReload() {
+                this.init();
+                if (!this.ctx) return;
+                let t = this.ctx.currentTime;
+                this.playTone(550, 0.05, t, 0.1, 'sawtooth');
+                this.playTone(700, 0.05, t + 0.35, 0.12, 'sawtooth');
+                this.playTone(350, 0.08, t + 0.7, 0.15, 'triangle');
+            }
+            playHurt() {
+                this.init();
+                if (!this.ctx) return;
+                let osc = this.ctx.createOscillator();
+                let gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(80, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(30, this.ctx.currentTime + 0.3);
+                gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.3);
+            }
+            playAlert() {
+                this.init();
+                if (!this.ctx) return;
+                let t = this.ctx.currentTime;
+                this.playTone(950, 0.2, t, 0.25, 'sawtooth');
+                this.playTone(950, 0.2, t + 0.3, 0.25, 'sawtooth');
+            }
+            playTone(freq, duration, startTime, volume = 0.1, type = 'sine') {
+                let osc = this.ctx.createOscillator();
+                let gain = this.ctx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, startTime);
+                gain.gain.setValueAtTime(volume, startTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(startTime);
+                osc.stop(startTime + duration);
+            }
+        }
+        const audio = new AudioSystem();
+
+        // -------------------------------------------------------------
+        // ENUMS & CONFIGURATIONS
+        // -------------------------------------------------------------
+        const ALERT_LEVELS = {
+            NORMAL: 0,
+            CAUTION: 1,
+            ALARM: 2
+        };
+
+        const ENEMY_STATES = {
+            PATROL: 0,
+            SUSPICIOUS: 1,
+            CHASE: 2,
+            DEFUSE: 3
+        };
+
+        // -------------------------------------------------------------
+        // COMPONENT: InputManager
+        // -------------------------------------------------------------
+        class InputManager {
+            constructor() {
+                this.keys = {};
+                this.mouse = { x: 0, y: 0 };
+                this.isLocked = false;
+                
+                window.addEventListener('keydown', (e) => {
+                    this.keys[e.key.toLowerCase()] = true;
+                });
+                window.addEventListener('keyup', (e) => {
+                    this.keys[e.key.toLowerCase()] = false;
+                });
+                
+                const container = document.body;
+                container.addEventListener('click', () => {
+                    if (game && game.isPlaying && !this.isLocked) {
+                        safeRequestPointerLock(container);
+                    }
+                });
+                
+                document.addEventListener('pointerlockchange', () => {
+                    this.isLocked = document.pointerLockElement === container;
+                    if (!this.isLocked && game && game.isPlaying) {
+                        game.pauseGame();
+                    }
+                });
+                
+                document.addEventListener('mousemove', (e) => {
+                    if (this.isLocked && game && game.isPlaying) {
+                        this.mouse.x = e.movementX || 0;
+                        this.mouse.y = e.movementY || 0;
+                        game.player.handleMouseMove(this.mouse.x, this.mouse.y);
+                    }
+                });
+
+                window.addEventListener('mousedown', (e) => {
+                    if (this.isLocked && game && game.isPlaying) {
+                        if (e.button === 0) {
+                            game.player.weapon.shoot();
+                        }
+                    }
+                });
+            }
+            isKeyDown(key) {
+                return !!this.keys[key.toLowerCase()];
+            }
+        }
+
+        // -------------------------------------------------------------
+        // COMPONENT: CollisionSystem
+        // -------------------------------------------------------------
+        class CollisionSystem {
+            constructor() {
+                this.staticBoxes = [];
+            }
+            
+            addBox(mesh) {
+                const box = new THREE.Box3().setFromObject(mesh);
+                this.staticBoxes.push(box);
+            }
+            
+            checkCollision(position, radius = 1.0) {
+                const playerSphere = new THREE.Sphere(position, radius);
+                for (let box of this.staticBoxes) {
+                    if (box.intersectsSphere(playerSphere)) {
+                        let closestPoint = new THREE.Vector3();
+                        box.clampPoint(position, closestPoint);
+                        let dir = new THREE.Vector3().subVectors(position, closestPoint);
+                        if (dir.length() === 0) {
+                            dir.set(0, 0, 1);
+                        }
+                        dir.normalize().multiplyScalar(radius);
+                        position.copy(closestPoint).add(dir);
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            // Exclude objects marked as .userData.isSensor so bullets do not hit indicators
+            checkRaycast(origin, direction, maxDistance = 200) {
+                const raycaster = new THREE.Raycaster(origin, direction, 0, maxDistance);
+                const intersects = raycaster.intersectObjects(game.scene.children, true);
+                for (let hit of intersects) {
+                    if (hit.object && hit.object.userData && hit.object.userData.isSensor) {
+                        continue;
+                    }
+                    return hit;
+                }
+                return null;
+            }
+        }
+
+        // -------------------------------------------------------------
+        // COMPONENT: Player
+        // -------------------------------------------------------------
+        class Player {
+            constructor() {
+                // Compact Map start position: Spawns in front of the gate (at Z = 22) facing the bunker (Z = -15)
+                this.position = new THREE.Vector3(0, 1.8, 22); 
+                this.velocity = new THREE.Vector3();
+                this.rotation = new THREE.Euler(0, 0, 0, 'YXZ');
+                this.camera = game.camera;
+                
+                this.hp = 100;
+                this.maxHp = 100;
+                this.shield = 100;
+                this.maxShield = 100;
+                this.isDead = false;
+                
+                this.speed = 10;
+                this.runMultiplier = 1.6;
+                this.jumpStrength = 6.0;
+                this.isGrounded = true;
+                
+                this.weapon = new Weapon(this);
+                this.cameraShake = 0;
+                this.bobTimer = 0;
+                this.damageDealt = 0;
+                this.damageReceived = 0;
+
+                this.camera.position.copy(this.position);
+
+                // Add Realism Helmet Flashlight
+                this.flashlight = new THREE.SpotLight(0xffffff, 5, 45, Math.PI / 5, 0.4, 0.8);
+                this.flashlight.position.set(0, 0, 0);
+                this.flashlight.castShadow = true;
+                this.camera.add(this.flashlight);
+                
+                // Invisible target for the flashlight to lock onto
+                const flashTarget = new THREE.Object3D();
+                flashTarget.position.set(0, 0, -1);
+                this.camera.add(flashTarget);
+                this.flashlight.target = flashTarget;
+            }
+            
+            update(dt) {
+                if (this.isDead) return;
+
+                // Handle Camera shake decay
+                if (this.cameraShake > 0) {
+                    this.camera.position.x += (Math.random() - 0.5) * this.cameraShake;
+                    this.camera.position.y += (Math.random() - 0.5) * this.cameraShake;
+                    this.cameraShake *= 0.82;
+                    if (this.cameraShake < 0.01) this.cameraShake = 0;
+                }
+
+                // Handle Movement
+                let moveX = 0;
+                let moveZ = 0;
+                
+                if (game.input.isKeyDown('w')) moveZ -= 1;
+                if (game.input.isKeyDown('s')) moveZ += 1;
+                if (game.input.isKeyDown('a')) moveX -= 1;
+                if (game.input.isKeyDown('d')) moveX += 1;
+                
+                let isRunning = game.input.isKeyDown('shift') && moveZ < 0;
+                let currentSpeed = this.speed * (isRunning ? this.runMultiplier : 1.0);
+                
+                const forward = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(0, this.rotation.y, 0));
+                const right = new THREE.Vector3(1, 0, 0).applyEuler(new THREE.Euler(0, this.rotation.y, 0));
+                
+                const moveDirection = new THREE.Vector3()
+                    .addScaledVector(forward, -moveZ)
+                    .addScaledVector(right, moveX)
+                    .normalize();
+                
+                this.velocity.x = moveDirection.x * currentSpeed;
+                this.velocity.z = moveDirection.z * currentSpeed;
+                
+                if (!this.isGrounded) {
+                    this.velocity.y -= 15.0 * dt;
+                } else {
+                    this.velocity.y = 0;
+                    if (game.input.isKeyDown(' ')) {
+                        this.velocity.y = this.jumpStrength;
+                        this.isGrounded = false;
+                    }
+                }
+                
+                let tempPos = this.position.clone().addScaledVector(this.velocity, dt);
+                
+                if (tempPos.y <= 1.8) {
+                    tempPos.y = 1.8;
+                    this.isGrounded = true;
+                }
+                
+                // Map borders (Compacted down significantly)
+                if (tempPos.x < -20) tempPos.x = -20;
+                if (tempPos.x > 20) tempPos.x = 20;
+                if (tempPos.z < -30) tempPos.z = -30;
+                if (tempPos.z > 35) tempPos.z = 35;
+
+                game.collision.checkCollision(tempPos, 1.2);
+                
+                this.position.copy(tempPos);
+                this.camera.position.copy(this.position);
+                
+                // Head Bobbing logic for camera realism
+                if (this.isGrounded && (Math.abs(this.velocity.x) > 0.1 || Math.abs(this.velocity.z) > 0.1)) {
+                    this.bobTimer += dt * (isRunning ? 13 : 9);
+                    this.camera.position.y += Math.sin(this.bobTimer) * (isRunning ? 0.08 : 0.04);
+                }
+                
+                this.weapon.update(dt);
+            }
+            
+            handleMouseMove(mx, my) {
+                if (this.isDead) return;
+                const sensitivity = 0.0022;
+                this.rotation.y -= mx * sensitivity;
+                this.rotation.x -= my * sensitivity;
+                this.rotation.x = Math.max(-Math.PI / 2.3, Math.min(Math.PI / 2.3, this.rotation.x));
+                this.camera.quaternion.setFromEuler(this.rotation);
+            }
+            
+            takeDamage(amount) {
+                if (this.isDead) return;
+                audio.playHurt();
+                
+                this.damageReceived += amount;
+                
+                if (this.shield > 0) {
+                    let absorption = Math.min(this.shield, amount * 0.7);
+                    this.shield -= absorption;
+                    amount -= absorption;
+                }
+                
+                this.hp = Math.max(0, this.hp - amount);
+                this.cameraShake = 0.5;
+                
+                const flash = document.getElementById('damage-flash');
+                flash.style.opacity = '1';
+                setTimeout(() => { flash.style.opacity = '0'; }, 150);
+                
+                game.ui.updateHUD();
+                
+                if (this.hp <= 0) {
+                    this.die();
+                }
+            }
+            
+            die() {
+                this.isDead = true;
+                game.ui.showGameOver();
+            }
+        }
+
+        // -------------------------------------------------------------
+        // COMPONENT: Weapon (Realism Upgraded MK18)
+        // -------------------------------------------------------------
+        class Weapon {
+            constructor(player) {
+                this.player = player;
+                this.clipSize = 30;
+                this.clipAmmo = 30;
+                this.reserveAmmo = 120;
+                this.isReloading = false;
+                this.fireRate = 0.095; // M4 realistic cycle
+                this.fireCooldown = 0;
+                this.recoilOffset = new THREE.Vector3();
+                this.recoilIntensity = 0.07;
+                
+                this.mesh = this.buildWeaponMesh();
+                game.camera.add(this.mesh);
+                
+                this.flashLight = new THREE.PointLight(0xffdd66, 0, 15);
+                this.flashLight.position.set(0.3, -0.3, -2.5);
+                game.camera.add(this.flashLight);
+
+                // Add Realistic Laser Sight Line
+                const laserGeo = new THREE.CylinderGeometry(0.005, 0.005, 50);
+                const laserMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.6 });
+                this.laserMesh = new THREE.Mesh(laserGeo, laserMat);
+                this.laserMesh.rotation.x = Math.PI / 2;
+                this.laserMesh.position.set(0.24, -0.32, -25);
+                this.laserMesh.userData.isSensor = true; // High Quality fix: do not register hit triggers on laser sights
+                game.camera.add(this.laserMesh);
+            }
+            
+            buildWeaponMesh() {
+                const weaponGroup = new THREE.Group();
+                
+                // Realistic receiver
+                const recGeo = new THREE.BoxGeometry(0.09, 0.13, 0.75);
+                const recMat = new THREE.MeshStandardMaterial({ color: 0x1d1e22, roughness: 0.7, metalness: 0.6 });
+                const receiver = new THREE.Mesh(recGeo, recMat);
+                receiver.position.set(0.3, -0.4, -0.95);
+                weaponGroup.add(receiver);
+                
+                // Quad rail handguard
+                const handGeo = new THREE.BoxGeometry(0.085, 0.10, 0.5);
+                const handMat = new THREE.MeshStandardMaterial({ color: 0x2e2f33, roughness: 0.8 });
+                const hand = new THREE.Mesh(handGeo, handMat);
+                hand.position.set(0.3, -0.38, -1.35);
+                weaponGroup.add(hand);
+
+                // Barrel & Flash Hider
+                const barGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.55);
+                const barMat = new THREE.MeshStandardMaterial({ color: 0x0c0d0e, roughness: 0.5, metalness: 0.8 });
+                const barrel = new THREE.Mesh(barGeo, barMat);
+                barrel.rotation.x = Math.PI / 2;
+                barrel.position.set(0.3, -0.36, -1.75);
+                weaponGroup.add(barrel);
+                
+                // Curved tactical PMAG magazine
+                const magGeo = new THREE.BoxGeometry(0.07, 0.32, 0.15);
+                const magMat = new THREE.MeshStandardMaterial({ color: 0x151619, roughness: 0.8 });
+                const magazine = new THREE.Mesh(magGeo, magMat);
+                magazine.position.set(0.3, -0.58, -1.05);
+                magazine.rotation.x = 0.2;
+                weaponGroup.add(magazine);
+
+                // Detailed Holographic sight EOTech style
+                const scopeBase = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.04, 0.18), new THREE.MeshStandardMaterial({ color: 0x111112 }));
+                scopeBase.position.set(0.3, -0.295, -0.95);
+                weaponGroup.add(scopeBase);
+
+                const scopeHood = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.07, 0.15), new THREE.MeshStandardMaterial({ color: 0x222225, roughness: 0.6 }));
+                scopeHood.position.set(0.3, -0.25, -0.95);
+                weaponGroup.add(scopeHood);
+
+                return weaponGroup;
+            }
+            
+            update(dt) {
+                if (this.fireCooldown > 0) {
+                    this.fireCooldown -= dt;
+                }
+                
+                this.recoilOffset.lerp(new THREE.Vector3(0, 0, 0), dt * 11);
+                this.mesh.position.set(
+                    0.25 + this.recoilOffset.x,
+                    -0.35 + this.recoilOffset.y,
+                    -0.8 + this.recoilOffset.z
+                );
+                
+                if (game.input.isKeyDown('r') && !this.isReloading && this.clipAmmo < this.clipSize && this.reserveAmmo > 0) {
+                    this.reload();
+                }
+
+                if (this.flashLight.intensity > 0) {
+                    this.flashLight.intensity -= dt * 38;
+                }
+            }
+            
+            shoot() {
+                if (this.isReloading || this.fireCooldown > 0 || game.player.isDead) return;
+                
+                if (this.clipAmmo <= 0) {
+                    this.reload();
+                    return;
+                }
+                
+                audio.playShoot();
+                this.clipAmmo--;
+                this.fireCooldown = this.fireRate;
+                
+                this.recoilOffset.z += this.recoilIntensity * 1.4;
+                this.recoilOffset.y += (Math.random() - 0.22) * this.recoilIntensity;
+                this.player.rotation.x += 0.007; // subtle cinematic kickback
+                
+                this.flashLight.intensity = 6;
+                
+                game.particles.spawnMuzzleSpark(this.player.position);
+                
+                const camDir = new THREE.Vector3();
+                game.camera.getWorldDirection(camDir);
+                
+                const hit = game.collision.checkRaycast(this.player.position, camDir, 180);
+                
+                if (hit) {
+                    const hitNormal = (hit.face && hit.face.normal) ? hit.face.normal : new THREE.Vector3(0, 1, 0);
+                    game.particles.spawnImpact(hit.point, hitNormal);
+                    
+                    let object = hit.object;
+                    while (object.parent && !object.userData.isEnemy) {
+                        object = object.parent;
+                    }
+                    
+                    if (object.userData.isEnemy) {
+                        object.userData.ref.takeDamage(34);
+                        this.player.damageDealt += 34;
+                    }
+                }
+                
+                game.ui.updateHUD();
+            }
+            
+            reload() {
+                if (this.isReloading || this.reserveAmmo <= 0 || this.clipAmmo === this.clipSize) return;
+                
+                this.isReloading = true;
+                audio.playReload();
+                
+                document.getElementById('weapon-status').innerText = "MAG CHANGING...";
+                
+                const startRot = this.mesh.rotation.x;
+                let t = 0;
+                const reloadInterval = setInterval(() => {
+                    t += 0.16;
+                    this.mesh.rotation.x = startRot + Math.sin(t) * 0.5;
+                }, 30);
+                
+                setTimeout(() => {
+                    clearInterval(reloadInterval);
+                    this.mesh.rotation.x = startRot;
+                    
+                    let needed = this.clipSize - this.clipAmmo;
+                    let load = Math.min(this.reserveAmmo, needed);
+                    
+                    this.clipAmmo += load;
+                    this.reserveAmmo -= load;
+                    this.isReloading = false;
+                    
+                    document.getElementById('weapon-status').innerText = "LASER SIGHT / FLASH ACTIVE";
+                    game.ui.updateHUD();
+                }, 1100);
+            }
+        }
+
+        // -------------------------------------------------------------
+        // COMPONENT: Enemy / AI Soldier
+        // -------------------------------------------------------------
+        class Enemy {
+            constructor(spawnPos, patrolPath) {
+                this.position = spawnPos.clone();
+                this.patrolPath = patrolPath || [spawnPos.clone(), spawnPos.clone().add(new THREE.Vector3(8, 0, 0))];
+                this.currentPatrolIdx = 0;
+                
+                this.hp = 100;
+                this.maxHp = 100;
+                this.isDead = false;
+                this.state = ENEMY_STATES.PATROL;
+                
+                // Difficulty Scaling Nerfed (Gently balances combat and mitigates spikes)
+                const levelScale = (game ? game.currentLevel : 1);
+                this.speed = 3.8 + (levelScale * 0.15); // Nerfed growth (from 4.3 + levelScale * 0.35)
+                this.chaseSpeed = 5.8 + (levelScale * 0.20); // Nerfed growth (from 6.6 + levelScale * 0.45)
+                this.visionRange = 30 + (levelScale * 1.5); // Nerfed growth (from 34 + 3)
+                this.visionAngle = Math.PI / 2.5; // Slightly reduced visual cone
+                
+                this.shootCooldown = 0;
+                this.shootInterval = Math.max(0.65, 1.25 - (levelScale * 0.08)); // Slower fire rate (min 0.65s, up from 0.45s)
+                
+                this.group = this.buildEnemyMesh();
+                this.group.position.copy(this.position);
+                this.group.userData = { isEnemy: true, ref: this };
+                game.scene.add(this.group);
+            }
+            
+            buildEnemyMesh() {
+                const group = new THREE.Group();
+                
+                // Torso
+                const torsoGeo = new THREE.CylinderGeometry(0.38, 0.32, 1.3);
+                const torsoMat = new THREE.MeshStandardMaterial({ color: 0x333b3d, roughness: 0.9 });
+                const torso = new THREE.Mesh(torsoGeo, torsoMat);
+                torso.position.y = 0.95;
+                torso.castShadow = true;
+                group.add(torso);
+                
+                // Kevlar Helmet
+                const headGeo = new THREE.SphereGeometry(0.28, 16, 16);
+                const headMat = new THREE.MeshStandardMaterial({ color: 0x1e2426, roughness: 0.8 });
+                const head = new THREE.Mesh(headGeo, headMat);
+                head.position.y = 1.7;
+                group.add(head);
+
+                // Tactical Goggles
+                const goggles = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.26, 0.08, 0.16),
+                    new THREE.MeshBasicMaterial({ color: 0x050505 })
+                );
+                goggles.position.set(0, 1.7, 0.22);
+                group.add(goggles);
+                
+                // Gun
+                const gunGeo = new THREE.BoxGeometry(0.09, 0.09, 0.85);
+                const gunMat = new THREE.MeshStandardMaterial({ color: 0x111112 });
+                this.gunMesh = new THREE.Mesh(gunGeo, gunMat);
+                this.gunMesh.position.set(0.3, 1.1, 0.45);
+                group.add(this.gunMesh);
+                
+                return group;
+            }
+            
+            update(dt) {
+                if (this.isDead) return;
+                
+                if (this.shootCooldown > 0) this.shootCooldown -= dt;
+                
+                switch (this.state) {
+                    case ENEMY_STATES.PATROL:
+                        this.patrolBehavior(dt);
+                        this.lookForPlayer();
+                        break;
+                    case ENEMY_STATES.CHASE:
+                        this.chaseBehavior(dt);
+                        break;
+                    case ENEMY_STATES.DEFUSE:
+                        this.defuseBehavior(dt);
+                        break;
+                }
+                
+                this.group.position.copy(this.position);
+            }
+            
+            patrolBehavior(dt) {
+                if (this.patrolPath.length === 0) return;
+                
+                let target = this.patrolPath[this.currentPatrolIdx];
+                let dist = this.position.distanceTo(target);
+                
+                if (dist < 1.0) {
+                    this.currentPatrolIdx = (this.currentPatrolIdx + 1) % this.patrolPath.length;
+                } else {
+                    let dir = new THREE.Vector3().subVectors(target, this.position).normalize();
+                    this.position.addScaledVector(dir, this.speed * dt);
+                    
+                    let angle = Math.atan2(dir.x, dir.z);
+                    this.group.rotation.y = angle;
+                }
+            }
+            
+            lookForPlayer() {
+                if (game.player.isDead) return;
+                
+                let playerPos = game.player.position.clone();
+                let dist = this.position.distanceTo(playerPos);
+                
+                if (dist < this.visionRange) {
+                    let toPlayer = new THREE.Vector3().subVectors(playerPos, this.position).normalize();
+                    let forward = new THREE.Vector3(0, 0, 1).applyEuler(this.group.rotation);
+                    let angle = forward.angleTo(toPlayer);
+                    
+                    if (angle < this.visionAngle || game.securityLevel === ALERT_LEVELS.ALARM) {
+                        const hit = game.collision.checkRaycast(this.position.clone().add(new THREE.Vector3(0, 1.5, 0)), toPlayer, dist);
+                        if (!hit || hit.distance > dist - 2) {
+                            this.triggerAggro();
+                        }
+                    }
+                }
+            }
+            
+            triggerAggro() {
+                if (this.state === ENEMY_STATES.CHASE) return;
+                this.state = ENEMY_STATES.CHASE;
+                game.triggerAlert(ALERT_LEVELS.CAUTION);
+                game.ui.addLog("⚠️ [적 경비병] 거수자 탐지! 사격 개시!");
+            }
+            
+            chaseBehavior(dt) {
+                if (game.player.isDead) {
+                    this.state = ENEMY_STATES.PATROL;
+                    return;
+                }
+
+                if (game.bomb.isInstalled && game.bomb.timeRemaining < 25 && Math.random() < 0.15) {
+                    const bombDist = this.position.distanceTo(game.bomb.position);
+                    if (bombDist < 30) {
+                        this.state = ENEMY_STATES.DEFUSE;
+                        return;
+                    }
+                }
+                
+                let playerPos = game.player.position.clone();
+                let dist = this.position.distanceTo(playerPos);
+                let dir = new THREE.Vector3().subVectors(playerPos, this.position).normalize();
+                
+                let angle = Math.atan2(dir.x, dir.z);
+                this.group.rotation.y = angle;
+                
+                if (dist > 10) {
+                    this.position.addScaledVector(dir, this.chaseSpeed * dt);
+                } else if (dist < 4) {
+                    this.position.addScaledVector(dir, -this.chaseSpeed * 0.45 * dt);
+                }
+                
+                if (this.shootCooldown <= 0 && dist < 30) {
+                    this.shoot();
+                }
+            }
+
+            defuseBehavior(dt) {
+                let bombPos = game.bomb.position.clone();
+                let dist = this.position.distanceTo(bombPos);
+                let dir = new THREE.Vector3().subVectors(bombPos, this.position).normalize();
+                
+                let angle = Math.atan2(dir.x, dir.z);
+                this.group.rotation.y = angle;
+
+                if (dist > 2.5) {
+                    this.position.addScaledVector(dir, this.chaseSpeed * 1.2 * dt);
+                } else {
+                    game.bomb.attemptDefuse(dt);
+                }
+
+                let playerPos = game.player.position.clone();
+                let playerDist = this.position.distanceTo(playerPos);
+                if (playerDist < 12 && this.shootCooldown <= 0) {
+                    this.shoot();
+                }
+            }
+            
+            shoot() {
+                this.shootCooldown = this.shootInterval + Math.random() * 0.25;
+                audio.playEnemyShoot();
+                
+                game.particles.spawnMuzzleSpark(this.position.clone().add(new THREE.Vector3(0.3, 1.1, 0.45)));
+
+                const levelScale = game.currentLevel;
+                // 명중률 하향 (Accuracy Nerfed: Stage 5에서도 무조건 맞지 않고 유저가 피격 가능하도록 조절)
+                let accuracy = game.securityLevel === ALERT_LEVELS.ALARM ? (0.60 + levelScale * 0.02) : (0.40 + levelScale * 0.02);
+                
+                if (Math.random() < accuracy) {
+                    // 데미지 하향 (Damage Nerfed: Stage 1 = 11.5 HP, Stage 5 = 17.5 HP)
+                    game.player.takeDamage(10 + levelScale * 1.5); 
+                } else {
+                    game.ui.addLog("☄ 탄두가 헬멧 우측을 스쳐 갑니다!");
+                }
+            }
+            
+            takeDamage(amount) {
+                if (this.isDead) return;
+                this.hp -= amount;
+                
+                this.group.children.forEach(mesh => {
+                    if (mesh.material) {
+                        const originalColor = mesh.material.color.getHex();
+                        mesh.material.color.setHex(0xb30000);
+                        setTimeout(() => { if (!this.isDead && mesh.material) mesh.material.color.setHex(originalColor); }, 90);
+                    }
+                });
+                
+                if (this.state !== ENEMY_STATES.CHASE) {
+                    this.state = ENEMY_STATES.CHASE;
+                    game.triggerAlert(ALERT_LEVELS.CAUTION);
+                }
+                
+                if (this.hp <= 0) {
+                    this.die();
+                }
+            }
+            
+            die() {
+                this.isDead = true;
+                game.kills++;
+                game.stageKills++;
+                game.ui.addLog("☠ 적 초병 무력화 성공!");
+                
+                this.group.rotation.z = Math.PI / 2;
+                this.group.position.y = 0.2;
+                
+                setTimeout(() => {
+                    game.scene.remove(this.group);
+                }, 4000);
+            }
+        }
+
+        // -------------------------------------------------------------
+        // COMPONENT: SecurityCamera
+        // -------------------------------------------------------------
+        class SecurityCamera {
+            constructor(position, baseRotation) {
+                this.position = position.clone();
+                this.rotationY = baseRotation;
+                this.sweepAngle = 0;
+                this.sweepRange = Math.PI / 3.5;
+                
+                const levelScale = (game ? game.currentLevel : 1);
+                // 회전 스캔 속도 하향 (Sweep Speed Nerfed)
+                this.sweepSpeed = 0.50 + (levelScale * 0.08); 
+                this.active = true;
+
+                this.group = this.buildCameraMesh();
+                this.group.position.copy(this.position);
+                game.scene.add(this.group);
+
+                const laserGeo = new THREE.CylinderGeometry(0.012, 0.012, 22);
+                const laserMat = new THREE.MeshBasicMaterial({ color: 0xff0033, transparent: true, opacity: 0.4 });
+                this.laser = new THREE.Mesh(laserGeo, laserMat);
+                this.laser.rotation.x = Math.PI / 2;
+                this.laser.position.set(0, -1, 11);
+                this.laser.userData.isSensor = true; 
+                this.head.add(this.laser);
+            }
+
+            buildCameraMesh() {
+                const group = new THREE.Group();
+
+                const bracketGeo = new THREE.BoxGeometry(0.2, 0.4, 0.5);
+                const bracketMat = new THREE.MeshStandardMaterial({ color: 0x222225 });
+                const bracket = new THREE.Mesh(bracketGeo, bracketMat);
+                group.add(bracket);
+
+                this.head = new THREE.Group();
+                this.head.position.set(0, 0, 0.35);
+
+                const cameraBodyGeo = new THREE.BoxGeometry(0.25, 0.25, 0.7);
+                const cameraBodyMat = new THREE.MeshStandardMaterial({ color: 0x9999aa });
+                const body = new THREE.Mesh(cameraBodyGeo, cameraBodyMat);
+                body.position.set(0, 0, 0.25);
+                this.head.add(body);
+
+                const lensGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.08);
+                const lensMat = new THREE.MeshBasicMaterial({ color: 0x050505 });
+                const lens = new THREE.Mesh(lensGeo, lensMat);
+                lens.rotation.x = Math.PI / 2;
+                lens.position.set(0, 0, 0.6);
+                this.head.add(lens);
+
+                group.add(this.head);
+                return group;
+            }
+
+            update(dt) {
+                if (!this.active) return;
+
+                this.sweepAngle += this.sweepSpeed * dt;
+                let currentYaw = this.rotationY + Math.sin(this.sweepAngle) * this.sweepRange;
+                this.head.rotation.y = currentYaw;
+                this.head.rotation.x = 0.28;
+
+                let forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.head.quaternion);
+                forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.rotationY);
+
+                let playerPos = game.player.position.clone();
+                let cameraCenter = this.position.clone().add(new THREE.Vector3(0, 0, 0.35));
+                let dist = cameraCenter.distanceTo(playerPos);
+
+                if (dist < 20) {
+                    let toPlayer = new THREE.Vector3().subVectors(playerPos, cameraCenter).normalize();
+                    let angle = forward.angleTo(toPlayer);
+
+                    if (angle < 0.25) {
+                        const hit = game.collision.checkRaycast(cameraCenter, toPlayer, dist);
+                        if (!hit || hit.distance > dist - 2) {
+                            this.triggerDetection();
+                        }
+                    }
+                }
+            }
+
+            triggerDetection() {
+                if (game.securityLevel === ALERT_LEVELS.ALARM) return;
+                game.triggerAlert(ALERT_LEVELS.ALARM);
+                game.ui.addLog("🚨 [통신 침입자 식별] CCTV 카메라가 위협 요소를 감지했습니다!");
+            }
+        }
+
+        // -------------------------------------------------------------
+        // COMPONENT: WatchtowerSearchlight
+        // -------------------------------------------------------------
+        class WatchtowerSearchlight {
+            constructor(position) {
+                this.position = position.clone();
+                this.sweepAngle = 0;
+                
+                const levelScale = (game ? game.currentLevel : 1);
+                // 서치라이트 수색 속도 하향 (Searchlight Speed Nerfed)
+                this.sweepSpeed = 0.55 + (levelScale * 0.10); 
+
+                // Glowing Searchlight Source
+                const lightGeo = new THREE.SphereGeometry(0.6, 16, 16);
+                const lightMat = new THREE.MeshBasicMaterial({ color: 0xffffaa });
+                this.mesh = new THREE.Mesh(lightGeo, lightMat);
+                this.mesh.position.copy(this.position);
+                game.scene.add(this.mesh);
+
+                // Actual Spotlight projecting down on ground
+                this.spotlight = new THREE.SpotLight(0xffffff, 15, 45, Math.PI / 8, 0.5, 0.4);
+                this.spotlight.position.copy(this.position);
+                this.spotlight.castShadow = true;
+                game.scene.add(this.spotlight);
+
+                // Invisible Target representing the sweeping point
+                this.target = new THREE.Object3D();
+                this.target.position.set(this.position.x, 0, this.position.z - 15);
+                game.scene.add(this.target);
+                this.spotlight.target = this.target;
+
+                // Visual light cone representation (low opacity cylinder)
+                const coneGeo = new THREE.CylinderGeometry(0.1, 5, 20, 16, 1, true);
+                const coneMat = new THREE.MeshBasicMaterial({
+                    color: 0xffffff,
+                    transparent: true,
+                    opacity: 0.15,
+                    side: THREE.DoubleSide
+                });
+                this.cone = new THREE.Mesh(coneGeo, coneMat);
+                this.cone.userData.isSensor = true; 
+                game.scene.add(this.cone);
+            }
+
+            update(dt) {
+                this.sweepAngle += this.sweepSpeed * dt;
+                
+                // Sweep in circular pattern closer to the bunker entrance on the compact map
+                let targetX = this.position.x + Math.sin(this.sweepAngle) * 12;
+                let targetZ = this.position.z - 10 + Math.cos(this.sweepAngle * 0.7) * 8;
+                this.target.position.set(targetX, 0.1, targetZ);
+
+                // Re-align visual light cone
+                let conePos = new THREE.Vector3().addVectors(this.position, this.target.position).multiplyScalar(0.5);
+                this.cone.position.copy(conePos);
+                this.cone.lookAt(this.target.position);
+                this.cone.rotation.x += Math.PI / 2;
+
+                // Check intersection with Player
+                let playerDistToSpot = game.player.position.distanceTo(new THREE.Vector3(targetX, 1.8, targetZ));
+                if (playerDistToSpot < 5.5 && game.securityLevel !== ALERT_LEVELS.ALARM) {
+                    game.triggerAlert(ALERT_LEVELS.ALARM);
+                    game.ui.addLog("🚨 [감시망 돌파 실패] 서치라이트에 발각되었습니다! 전원 전투 배치!");
+                }
+            }
+        }
+
+        // -------------------------------------------------------------
+        // COMPONENT: Bomb System
+        // -------------------------------------------------------------
+        class Bomb {
+            constructor(position) {
+                this.position = position.clone();
+                this.isInstalled = false;
+                this.isDefused = false;
+                this.installProgress = 0;
+                this.timeRemaining = 30.0; 
+                this.isDefusing = false;
+                this.defuseProgress = 0;
+
+                this.group = new THREE.Group();
+                this.group.position.copy(this.position);
+                
+                // Yellow Alert Area (Install Site)
+                const ringGeo = new THREE.RingGeometry(3.5, 3.7, 32);
+                const ringMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, side: THREE.DoubleSide });
+                this.ring = new THREE.Mesh(ringGeo, ringMat);
+                this.ring.rotation.x = Math.PI / 2;
+                this.ring.position.y = 0.05;
+                this.ring.userData.isSensor = true; 
+                game.scene.add(this.ring);
+
+                // Floating marker label (Virtual hologram indicator)
+                const labelGeo = new THREE.BoxGeometry(0.6, 0.6, 0.05);
+                const labelMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, wireframe: true });
+                this.labelMesh = new THREE.Mesh(labelGeo, labelMat);
+                this.labelMesh.position.set(0, 2.0, 0);
+                this.group.add(this.labelMesh);
+
+                game.scene.add(this.group);
+            }
+
+            update(dt) {
+                this.labelMesh.rotation.y += dt * 1.5;
+                this.labelMesh.rotation.x += dt * 0.7;
+
+                let dist = game.player.position.distanceTo(this.position);
+                const prompt = document.getElementById('interaction-prompt');
+                const progressUI = document.getElementById('install-progress-container');
+
+                if (!this.isInstalled && dist < 4) {
+                    prompt.classList.remove('hidden');
+                    
+                    if (game.input.isKeyDown('f')) {
+                        progressUI.classList.remove('hidden');
+                        
+                        // 설치 난이도 대폭 하향 (Installation Progress Rate Buffed)
+                        // Stage 1: ~3.0s | Stage 2: ~4.0s | Stage 3: ~5.0s | Stage 4: ~6.0s | Stage 5: ~8.0s
+                        const stageRates = [33.4, 25.0, 20.0, 16.6, 12.5];
+                        const rate = stageRates[game.currentLevel - 1] || 12.5;
+                        
+                        document.getElementById('install-title-text').innerText = `전술 C4 회로 해킹 바이패스 중... (STAGE ${game.currentLevel})`;
+                        this.installProgress += dt * rate;
+                        document.getElementById('install-progress-bar').style.width = `${Math.min(100, this.installProgress)}%`;
+
+                        if (this.installProgress >= 100) {
+                            this.deployBomb();
+                        }
+                    } else {
+                        this.installProgress = Math.max(0, this.installProgress - dt * 60);
+                        document.getElementById('install-progress-bar').style.width = `${this.installProgress}%`;
+                        if (this.installProgress === 0) {
+                            progressUI.classList.add('hidden');
+                        }
+                    }
+                } else {
+                    prompt.classList.add('hidden');
+                }
+
+                if (this.isInstalled && !this.isDefused) {
+                    this.timeRemaining -= dt;
+                    
+                    if (Math.floor(this.timeRemaining * 4) % 2 === 0) {
+                        this.labelMesh.material.color.setHex(0xff0000);
+                    } else {
+                        this.labelMesh.material.color.setHex(0x111111);
+                    }
+
+                    document.getElementById('bomb-countdown').innerText = `${Math.max(0, this.timeRemaining).toFixed(2)}s`;
+                    let progressWidth = (this.timeRemaining / 30.0) * 100; 
+                    document.getElementById('bomb-progress-bar').style.width = `${progressWidth}%`;
+
+                    if (this.isDefusing) {
+                        document.getElementById('defusal-warning').classList.remove('hidden');
+                    } else {
+                        document.getElementById('defusal-warning').classList.add('hidden');
+                    }
+
+                    this.isDefusing = false;
+
+                    if (this.timeRemaining <= 0) {
+                        this.detonate();
+                    }
+                }
+            }
+
+            deployBomb() {
+                this.isInstalled = true;
+                game.ui.addLog(`💣 [폭탄 안착 완료] 전술 기폭 장치 가동! 30초 카운트다운!`);
+                document.getElementById('install-progress-container').classList.add('hidden');
+                document.getElementById('bomb-timer-container').classList.remove('hidden');
+                document.getElementById('payload-status').innerText = "SABOTAGE PAYLOAD: PLANTED (설치됨)";
+                document.getElementById('payload-status').className = "text-[10px] text-red-500 font-bold uppercase";
+                document.getElementById('objective-text').innerText = "기지 입구의 안전 복귀지(ESCAPE ZONE)로 신속 퇴각하십시오!";
+                
+                game.showEscapeZone();
+                game.triggerAlert(ALERT_LEVELS.ALARM);
+
+                // Visual suitcase C4 bomb on server spot
+                const c4Suitcase = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.7, 0.4, 0.5),
+                    new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.9 })
+                );
+                c4Suitcase.position.y = 0.2;
+                this.group.add(c4Suitcase);
+
+                const wiring = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.4, 0.1, 0.3),
+                    new THREE.MeshBasicMaterial({ color: 0xff0000 })
+                );
+                wiring.position.set(0, 0.42, 0);
+                this.group.add(wiring);
+
+                this.ring.material.color.setHex(0xff0033);
+            }
+
+            attemptDefuse(dt) {
+                this.isDefusing = true;
+                
+                const levelScale = game.currentLevel;
+                // 적의 C4 해제 속도 감쇄
+                const defuseRate = 6.0 * (1.0 + (levelScale - 1) * 0.10); 
+                
+                this.defuseProgress += dt * defuseRate;
+                if (this.defuseProgress >= 100) {
+                    this.isDefused = true;
+                    game.ui.addLog("⚠️ [작전 실패] 적 부대에 의해 전술 폭탄 C4 해킹 회로가 완전히 단절되었습니다!");
+                    game.player.die();
+                }
+            }
+
+            detonate() {
+                game.particles.spawnExplosion(this.position);
+                audio.playAlert();
+                
+                game.bombDetonated = true;
+                game.ui.addLog("💥 [작전지 초토화 완료] 타격 지점이 폭파되었습니다! 안전지대로 신속히 탈출하십시오!");
+                document.getElementById('bomb-timer-container').classList.add('hidden');
+                
+                game.scene.remove(this.group);
+                game.scene.remove(this.ring);
+            }
+        }
+
+        // -------------------------------------------------------------
+        // COMPONENT: Particles / Visual Effects (Enhanced Memory & WebGL safe)
+        // -------------------------------------------------------------
+        class ParticleSystem {
+            constructor() {
+                this.particles = [];
+                // Cache particle geometries to avoid calling .dispose() on shared variables
+                this.sparkGeo = new THREE.BoxGeometry(0.05, 0.05, 0.05);
+                this.muzzleGeo = new THREE.BoxGeometry(0.04, 0.04, 0.25);
+                this.explosionGeo = new THREE.SphereGeometry(0.6, 6, 6);
+
+                // Pre-created static materials to improve garbage collector workload
+                this.sparkMat = new THREE.MeshBasicMaterial({ color: 0xffb74d });
+                this.muzzleMat = new THREE.MeshBasicMaterial({ color: 0xfff9c4 });
+                this.explosionMats = [
+                    new THREE.MeshBasicMaterial({ color: 0xff5722 }),
+                    new THREE.MeshBasicMaterial({ color: 0xffc107 }),
+                    new THREE.MeshBasicMaterial({ color: 0x212121 })
+                ];
+            }
+
+            spawnImpact(position, normal) {
+                const pCount = 12;
+                for (let i = 0; i < pCount; i++) {
+                    const spark = new THREE.Mesh(this.sparkGeo, this.sparkMat);
+                    spark.position.copy(position);
+                    
+                    let velocity = normal.clone().multiplyScalar(5 + Math.random() * 5);
+                    velocity.x += (Math.random() - 0.5) * 3.5;
+                    velocity.y += (Math.random() - 0.5) * 3.5;
+                    velocity.z += (Math.random() - 0.5) * 3.5;
+
+                    game.scene.add(spark);
+                    this.particles.push({
+                        mesh: spark,
+                        vel: velocity,
+                        life: 0.4
+                    });
+                }
+            }
+
+            spawnMuzzleSpark(weaponPos) {
+                const spark = new THREE.Mesh(this.muzzleGeo, this.muzzleMat);
+                const dir = new THREE.Vector3();
+                game.camera.getWorldDirection(dir);
+                spark.position.copy(weaponPos).addScaledVector(dir, 1.4);
+                spark.rotation.copy(game.camera.rotation);
+
+                game.scene.add(spark);
+                this.particles.push({
+                    mesh: spark,
+                    vel: dir.multiplyScalar(160),
+                    life: 0.08
+                });
+            }
+
+            spawnExplosion(pos) {
+                const pCount = 120;
+                for (let i = 0; i < pCount; i++) {
+                    const mat = this.explosionMats[Math.floor(Math.random() * this.explosionMats.length)];
+                    const fire = new THREE.Mesh(this.explosionGeo, mat);
+                    
+                    fire.position.copy(pos);
+                    fire.position.y += Math.random() * 2.5;
+                    
+                    let vel = new THREE.Vector3(
+                        (Math.random() - 0.5) * 28,
+                        Math.random() * 20,
+                        (Math.random() - 0.5) * 28
+                    );
+
+                    game.scene.add(fire);
+                    this.particles.push({
+                        mesh: fire,
+                        vel: vel,
+                        life: 1.8 + Math.random() * 1.2
+                    });
+                }
+            }
+
+            update(dt) {
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    const p = this.particles[i];
+                    p.life -= dt;
+                    p.mesh.position.addScaledVector(p.vel, dt);
+                    p.vel.y -= 9.8 * dt * 0.12;
+
+                    if (p.life <= 0) {
+                        game.scene.remove(p.mesh);
+                        this.particles.splice(i, 1);
+                    }
+                }
+            }
+        }
+
+        // -------------------------------------------------------------
+        // COMPONENT: UIManager
+        // -------------------------------------------------------------
+        class UIManager {
+            constructor() {
+                this.logContainer = document.getElementById('feed-container');
+            }
+
+            addLog(text) {
+                const log = document.createElement('div');
+                log.className = "bg-black/80 px-2.5 py-1 rounded border border-zinc-800 flex items-center shadow-lg";
+                log.innerText = text;
+                this.logContainer.appendChild(log);
+                
+                if (this.logContainer.children.length > 5) {
+                    this.logContainer.removeChild(this.logContainer.firstChild);
+                }
+                
+                setTimeout(() => {
+                    log.style.opacity = '0.4';
+                }, 4000);
+            }
+
+            updateHUD() {
+                const p = game.player;
+                document.getElementById('hp-value').innerText = `${Math.ceil(p.hp)} / 100`;
+                document.getElementById('hp-bar').style.width = `${p.hp}%`;
+                
+                document.getElementById('shield-value').innerText = `${Math.ceil(p.shield)} / 100`;
+                document.getElementById('shield-bar').style.width = `${p.shield}%`;
+
+                document.getElementById('ammo-clip').innerText = p.weapon.clipAmmo;
+                document.getElementById('ammo-reserve').innerText = p.weapon.reserveAmmo;
+                document.getElementById('stage-badge').innerText = `STAGE ${game.currentLevel} / 5`;
+            }
+
+            showStageClear() {
+                document.exitPointerLock();
+                document.getElementById('hud').classList.add('hidden');
+                document.getElementById('stage-clear-screen').classList.remove('hidden');
+                document.getElementById('stage-clear-title').innerText = `STAGE ${game.currentLevel} CLEARED`;
+                document.getElementById('sc-stage-kills').innerText = `${game.stageKills}명`;
+            }
+
+            showGameOver() {
+                document.exitPointerLock();
+                document.getElementById('hud').classList.add('hidden');
+                document.getElementById('gameover-screen').classList.remove('hidden');
+                
+                document.getElementById('go-kills').innerText = game.kills;
+                document.getElementById('go-alert').innerText = 
+                    game.securityLevel === ALERT_LEVELS.ALARM ? "ALARM (CRITICAL)" : "NORMAL";
+                document.getElementById('go-bomb').innerText = game.bomb.isInstalled ? "성공" : "미완료";
+            }
+
+            showSuccess(scoreData) {
+                document.exitPointerLock();
+                document.getElementById('hud').classList.add('hidden');
+                document.getElementById('success-screen').classList.remove('hidden');
+
+                document.getElementById('sc-rank').innerText = scoreData.rank;
+                document.getElementById('sc-kills').innerText = `${scoreData.kills}명`;
+                document.getElementById('sc-time').innerText = scoreData.timeStr;
+                document.getElementById('sc-damage').innerText = `${scoreData.dmg} HP`;
+                document.getElementById('sc-score').innerText = scoreData.totalScore.toLocaleString();
+            }
+        }
+
+        // -------------------------------------------------------------
+        // MAIN GAME ENGINE CORE
+        // -------------------------------------------------------------
+        class Game {
+            constructor() {
+                this.isPlaying = false;
+                this.isPaused = false;
+                this.scene = null;
+                this.camera = null;
+                this.renderer = null;
+                this.clock = new THREE.Clock();
+                
+                this.player = null;
+                this.input = null;
+                this.collision = null;
+                this.particles = null;
+                this.ui = null;
+                
+                this.enemies = [];
+                this.cameras = [];
+                this.searchlights = [];
+                this.bomb = null;
+                this.escapeZone = null;
+                this.stageWallGroup = null; // Dynamic obstacle wall reference
+                
+                // 5-Stage System Variables
+                this.currentLevel = 1;
+                this.stageKills = 0;
+                this.kills = 0;
+                this.totalDamageReceived = 0;
+                this.campaignStartTime = 0;
+
+                this.securityLevel = ALERT_LEVELS.NORMAL;
+                this.startTime = 0;
+                this.bombDetonated = false;
+
+                // 1. Initialize WebGL 3D Engine first
+                this.initEngine();
+                
+                // 2. Initialize input, collision, particles, UI managers BEFORE building the world
+                this.input = new InputManager();
+                this.collision = new CollisionSystem();
+                this.particles = new ParticleSystem();
+                this.ui = new UIManager();
+
+                // 3. Now build the world (This safely calls this.collision.addBox since it is already initialized)
+                this.buildWorld();
+                this.registerCollisions();
+            }
+
+            initEngine() {
+                const container = document.getElementById('canvas-container');
+                
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x0a0f1d);
+                this.scene.fog = new THREE.FogExp2(0x0a0f1d, 0.04); // Slightly denser fog for compact visual atmosphere
+
+                this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+                this.scene.add(this.camera);
+
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                container.appendChild(this.renderer.domElement);
+
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+            }
+
+            buildWorld() {
+                // Highly realistic Dark Ambient (Night shadow style) - UPGRADED BRIGHTNESS
+                const ambient = new THREE.AmbientLight(0x4d5b7c, 2.2);
+                this.scene.add(ambient);
+
+                // Deep moonlight - UPGRADED BRIGHTNESS & INTENSITY
+                const sun = new THREE.DirectionalLight(0xa3c2f0, 2.0);
+                sun.position.set(20, 40, -15);
+                sun.castShadow = true;
+                sun.shadow.mapSize.width = 1024;
+                sun.shadow.mapSize.height = 1024;
+                this.scene.add(sun);
+
+                // Ground Road - Resized to fit the compact arena
+                const groundGeo = new THREE.PlaneGeometry(100, 100);
+                const groundMat = new THREE.MeshStandardMaterial({ 
+                    color: 0x141822, 
+                    roughness: 0.90 
+                });
+                const ground = new THREE.Mesh(groundGeo, groundMat);
+                ground.rotation.x = -Math.PI / 2;
+                ground.receiveShadow = true;
+                ground.userData.isGround = true; 
+                this.scene.add(ground);
+
+                this.buildTacticalBase();
+            }
+
+            buildTacticalBase() {
+                // Compact Map Structure: Focuses tightly around Bunker Server Room (Z = -15) and Gate Checkpoint (Z = 22)
+                
+                // Main Server bunker (Command Centre) - Centered at Z = -15
+                this.createDetailedBunker(0, -15, 20, 14, 7.0);
+                
+                // Fortified Entrance Checkpoint Gate (Moved closer to Z = 22)
+                this.createCheckpointGate(0, 22);
+
+                // High Tech Radar Tower (Large Base Dish)
+                this.createRadarTower(-15, -25, 12);
+
+                // Helicopter Landing Pad (Helipad)
+                this.createHelipad(14, 12);
+
+                // Industrial Power Generator
+                this.createGeneratorBox(-14, 5);
+
+                // Sandbag barricades (Placed strategically in the smaller playable region)
+                this.createSandbagLine(-5, 8, 0.4, 4);
+                this.createSandbagLine(5, 8, -0.4, 4);
+                this.createSandbagLine(-10, -5, 0.9, 5);
+                this.createSandbagLine(10, -5, -0.9, 5);
+
+                // Military fuel containers & barrels
+                this.createFuelBarrel(-4, 0);
+                this.createFuelBarrel(-5, -1);
+                this.createFuelBarrel(10, -10);
+
+                // Core Floodlights (Adds strong visual clarity in tight quarters)
+                this.createBaseFloodlight(0, 10, 15);
+                this.createBaseFloodlight(-12, 6, -10);
+                this.createBaseFloodlight(12, 6, -10);
+
+                // Map boundary walls to seal the compact playable region (prevents walking out)
+                const wallMat = new THREE.MeshStandardMaterial({ color: 0x121417 });
+                const leftBoundary = new THREE.Mesh(new THREE.BoxGeometry(1, 10, 80), wallMat);
+                leftBoundary.position.set(-22, 5, 0);
+                this.scene.add(leftBoundary);
+                this.collision.addBox(leftBoundary);
+
+                const rightBoundary = new THREE.Mesh(new THREE.BoxGeometry(1, 10, 80), wallMat);
+                rightBoundary.position.set(22, 5, 0);
+                this.scene.add(rightBoundary);
+                this.collision.addBox(rightBoundary);
+
+                const backBoundary = new THREE.Mesh(new THREE.BoxGeometry(50, 10, 1), wallMat);
+                backBoundary.position.set(0, 5, -32);
+                this.scene.add(backBoundary);
+                this.collision.addBox(backBoundary);
+
+                const frontBoundary = new THREE.Mesh(new THREE.BoxGeometry(50, 10, 1), wallMat);
+                frontBoundary.position.set(0, 5, 36);
+                this.scene.add(frontBoundary);
+                this.collision.addBox(frontBoundary);
+            }
+
+            // Realism hollowed tactical bunker design
+            createDetailedBunker(x, z, w, d, h) {
+                const wallMat = new THREE.MeshStandardMaterial({ color: 0x1d2128, roughness: 0.8, metalness: 0.3 });
+                const thickness = 1.0;
+
+                // 1. Left Side Wall
+                const leftWall = new THREE.Mesh(new THREE.BoxGeometry(thickness, h, d), wallMat);
+                leftWall.position.set(x - w/2 + thickness/2, h/2, z);
+                leftWall.castShadow = true;
+                leftWall.receiveShadow = true;
+                this.scene.add(leftWall);
+                this.collision.addBox(leftWall);
+
+                // 2. Right Side Wall
+                const rightWall = new THREE.Mesh(new THREE.BoxGeometry(thickness, h, d), wallMat);
+                rightWall.position.set(x + w/2 - thickness/2, h/2, z);
+                rightWall.castShadow = true;
+                rightWall.receiveShadow = true;
+                this.scene.add(rightWall);
+                this.collision.addBox(rightWall);
+
+                // 3. Back Secure Wall
+                const backWall = new THREE.Mesh(new THREE.BoxGeometry(w, h, thickness), wallMat);
+                backWall.position.set(x, h/2, z - d/2 + thickness/2);
+                backWall.castShadow = true;
+                backWall.receiveShadow = true;
+                this.scene.add(backWall);
+                this.collision.addBox(backWall);
+
+                // 4. Front Entrance Wall - Left panel
+                const frontWallLeft = new THREE.Mesh(new THREE.BoxGeometry(w/3.2, h, thickness), wallMat);
+                frontWallLeft.position.set(x - w/3, h/2, z + d/2 - thickness/2);
+                frontWallLeft.castShadow = true;
+                frontWallLeft.receiveShadow = true;
+                this.scene.add(frontWallLeft);
+                this.collision.addBox(frontWallLeft);
+
+                // 5. Front Entrance Wall - Right panel (leaves a large gap in the center)
+                const frontWallRight = new THREE.Mesh(new THREE.BoxGeometry(w/3.2, h, thickness), wallMat);
+                frontWallRight.position.set(x + w/3, h/2, z + d/2 - thickness/2);
+                frontWallRight.castShadow = true;
+                frontWallRight.receiveShadow = true;
+                this.scene.add(frontWallRight);
+                this.collision.addBox(frontWallRight);
+
+                // 6. Heavy Reinforced Roof Slab
+                const roof = new THREE.Mesh(new THREE.BoxGeometry(w, thickness, d), wallMat);
+                roof.position.set(x, h + thickness/2, z);
+                roof.castShadow = true;
+                roof.receiveShadow = true;
+                this.scene.add(roof);
+                this.collision.addBox(roof);
+
+                // Internal server computing arrays with neon indicators
+                const rackGeo = new THREE.BoxGeometry(1.6, h - 2.2, 3.2);
+                const rackMat = new THREE.MeshStandardMaterial({ color: 0x0c0e12, metalness: 0.8, roughness: 0.4 });
+                
+                for (let i = -w/2 + 3; i <= w/2 - 3; i += 5.2) {
+                    if (Math.abs(i) < 2.5) continue; 
+
+                    const rack = new THREE.Mesh(rackGeo, rackMat);
+                    rack.position.set(x + i, (h - 2.2)/2 + 0.1, z - 2.2);
+                    rack.castShadow = true;
+                    rack.receiveShadow = true;
+                    this.scene.add(rack);
+                    this.collision.addBox(rack);
+
+                    // Pulsating system LEDs
+                    const ledGeo = new THREE.BoxGeometry(0.12, 0.12, 0.12);
+                    const ledMat = new THREE.MeshBasicMaterial({ color: 0x00ff44 });
+                    const led = new THREE.Mesh(ledGeo, ledMat);
+                    led.position.set(x + i, (h - 2.2)/2 + (Math.random() - 0.5) * 2, z - 0.5);
+                    led.userData.isSensor = true;
+                    this.scene.add(led);
+                }
+            }
+
+            createBuilding(x, z, width, depth, height, colorCode) {
+                const buildGeo = new THREE.BoxGeometry(width, height, depth);
+                const buildMat = new THREE.MeshStandardMaterial({ color: colorCode, roughness: 0.85 });
+                const mesh = new THREE.Mesh(buildGeo, buildMat);
+                mesh.position.set(x, height / 2, z);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                this.scene.add(mesh);
+                
+                if (this.collision) this.collision.addBox(mesh);
+            }
+
+            createRadarTower(x, z, h) {
+                const group = new THREE.Group();
+                group.position.set(x, h/2, z);
+
+                // Tall support mast
+                const mastGeo = new THREE.CylinderGeometry(0.6, 1.4, h, 8);
+                const mastMat = new THREE.MeshStandardMaterial({ color: 0x3d4650, roughness: 0.7, metalness: 0.8 });
+                const mast = new THREE.Mesh(mastGeo, mastMat);
+                mast.castShadow = true;
+                group.add(mast);
+
+                // Radar Dish Base
+                const dishGeo = new THREE.CylinderGeometry(3.2, 0.3, 1, 16, 1, true);
+                const dishMat = new THREE.MeshStandardMaterial({ color: 0x6e7c8c, side: THREE.DoubleSide, roughness: 0.6 });
+                this.radarDish = new THREE.Mesh(dishGeo, dishMat);
+                this.radarDish.position.y = h/2 + 0.6;
+                this.radarDish.rotation.x = Math.PI / 4;
+                group.add(this.radarDish);
+
+                // Emissive blinking red beacon beacon
+                const beaconGeo = new THREE.SphereGeometry(0.35, 8, 8);
+                const beaconMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+                const beacon = new THREE.Mesh(beaconGeo, beaconMat);
+                beacon.position.y = h/2 + 1.4;
+                beacon.userData.isSensor = true;
+                group.add(beacon);
+
+                this.scene.add(group);
+                this.collision.addBox(mast);
+            }
+
+            createHelipad(x, z) {
+                const padGeo = new THREE.BoxGeometry(10, 0.15, 10);
+                const padMat = new THREE.MeshStandardMaterial({ color: 0x222933, roughness: 0.9 });
+                const pad = new THREE.Mesh(padGeo, padMat);
+                pad.position.set(x, 0.08, z);
+                pad.receiveShadow = true;
+                pad.userData.isGround = true;
+                this.scene.add(pad);
+
+                // Paint marker (The H Letter)
+                const barMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                const barL = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.17, 5), barMat);
+                barL.position.set(x - 1.5, 0.12, z);
+                const barR = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.17, 5), barMat);
+                barR.position.set(x + 1.5, 0.12, z);
+                const barC = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.17, 0.5), barMat);
+                barC.position.set(x, 0.12, z);
+
+                this.scene.add(barL);
+                this.scene.add(barR);
+                this.scene.add(barC);
+            }
+
+            createCheckpointGate(x, z) {
+                const pillarGeo = new THREE.BoxGeometry(1.2, 4.0, 1.2);
+                const pillarMat = new THREE.MeshStandardMaterial({ color: 0x252a32, roughness: 0.8 });
+                const pillarL = new THREE.Mesh(pillarGeo, pillarMat);
+                pillarL.position.set(x - 5.0, 2.0, z);
+                const pillarR = new THREE.Mesh(pillarGeo, pillarMat);
+                pillarR.position.set(x + 5.0, 2.0, z);
+
+                pillarL.castShadow = true;
+                pillarR.castShadow = true;
+                this.scene.add(pillarL);
+                this.scene.add(pillarR);
+                this.collision.addBox(pillarL);
+                this.collision.addBox(pillarR);
+
+                // Striped checkpoint pole
+                const poleGeo = new THREE.CylinderGeometry(0.10, 0.12, 10.0, 8);
+                const poleMat = new THREE.MeshStandardMaterial({ color: 0xc93232, metalness: 0.5 });
+                const pole = new THREE.Mesh(poleGeo, poleMat);
+                pole.rotation.z = Math.PI / 2;
+                pole.position.set(x, 1.6, z);
+                this.scene.add(pole);
+                this.collision.addBox(pole);
+            }
+
+            createGeneratorBox(x, z) {
+                const group = new THREE.Group();
+                group.position.set(x, 1.25, z);
+
+                const boxGeo = new THREE.BoxGeometry(2.5, 2.5, 3.5);
+                const boxMat = new THREE.MeshStandardMaterial({ color: 0x4a5542, metalness: 0.6, roughness: 0.6 });
+                const box = new THREE.Mesh(boxGeo, boxMat);
+                box.castShadow = true;
+                group.add(box);
+
+                // Glowing electrical core light
+                const coreGeo = new THREE.SphereGeometry(0.15, 8, 8);
+                const coreMat = new THREE.MeshBasicMaterial({ color: 0xffea00 });
+                const core = new THREE.Mesh(coreGeo, coreMat);
+                core.position.set(0, 1.4, 1.8);
+                core.userData.isSensor = true;
+                group.add(core);
+
+                this.scene.add(group);
+                this.collision.addBox(box);
+            }
+
+            createBaseFloodlight(x, h, z) {
+                const flood = new THREE.PointLight(0xfffaed, 5.0, 50);
+                flood.position.set(x, h, z);
+                this.scene.add(flood);
+
+                const fixGeo = new THREE.BoxGeometry(0.6, 0.4, 0.6);
+                const fixMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                const fixture = new THREE.Mesh(fixGeo, fixMat);
+                fixture.position.set(x, h, z);
+                fixture.userData.isSensor = true;
+                this.scene.add(fixture);
+            }
+
+            createFenceLine(minX, maxX, minZ, maxZ) {
+                const postGeo = new THREE.CylinderGeometry(0.1, 0.1, 3.5);
+                const postMat = new THREE.MeshStandardMaterial({ color: 0x2e353b });
+
+                for (let x = minX; x <= maxX; x += 15) {
+                    const post = new THREE.Mesh(postGeo, postMat);
+                    post.position.set(x, 1.75, minZ);
+                    this.scene.add(post);
+                    this.collision.addBox(post);
+
+                    const postFar = new THREE.Mesh(postGeo, postMat);
+                    postFar.position.set(x, 1.75, maxZ);
+                    this.scene.add(postFar);
+                    this.collision.addBox(postFar);
+                }
+            }
+
+            createSandbagLine(x, z, rotY, size) {
+                const group = new THREE.Group();
+                group.position.set(x, 0.6, z);
+                group.rotation.y = rotY;
+
+                const bagGeo = new THREE.BoxGeometry(size, 1.1, 0.9);
+                const bagMat = new THREE.MeshStandardMaterial({ color: 0x5d584e, roughness: 0.95 });
+                const mesh = new THREE.Mesh(bagGeo, bagMat);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                group.add(mesh);
+
+                this.scene.add(group);
+                this.collision.addBox(mesh);
+            }
+
+            createFuelBarrel(x, z) {
+                const barrelGeo = new THREE.CylinderGeometry(0.4, 0.4, 1.3, 16);
+                const barrelMat = new THREE.MeshStandardMaterial({ color: 0x5c2b29, metalness: 0.7, roughness: 0.6 });
+                const barrel = new THREE.Mesh(barrelGeo, barrelMat);
+                barrel.position.set(x, 0.65, z);
+                barrel.castShadow = true;
+                barrel.receiveShadow = true;
+                this.scene.add(barrel);
+                this.collision.addBox(barrel);
+            }
+
+            registerCollisions() {
+                this.scene.traverse(child => {
+                    if (child instanceof THREE.Mesh && child.receiveShadow && child !== this.scene.children[0] && !child.userData.isGround && !child.userData.isSensor) {
+                        this.collision.addBox(child);
+                    }
+                });
+            }
+
+            clearDynamicActors() {
+                for (let enemy of this.enemies) {
+                    this.scene.remove(enemy.group);
+                }
+                this.enemies = [];
+
+                for (let cam of this.cameras) {
+                    this.scene.remove(cam.group);
+                }
+                this.cameras = [];
+
+                for (let light of this.searchlights) {
+                    this.scene.remove(light.mesh);
+                    this.scene.remove(light.cone);
+                    this.scene.remove(light.target);
+                }
+                this.searchlights = [];
+
+                if (this.bomb) {
+                    this.scene.remove(this.bomb.group);
+                    this.scene.remove(this.bomb.ring);
+                }
+                this.bomb = null;
+
+                if (this.escapeZone) {
+                    this.scene.remove(this.escapeZone);
+                }
+                this.escapeZone = null;
+
+                // Clear dynamic Stage wall
+                if (this.stageWallGroup) {
+                    this.scene.remove(this.stageWallGroup);
+                    this.stageWallGroup = null;
+                }
+            }
+
+            spawnMissions() {
+                this.clearDynamicActors();
+
+                this.bombDetonated = false;
+                this.stageKills = 0;
+                this.securityLevel = ALERT_LEVELS.NORMAL;
+
+                const indicator = document.getElementById('alert-indicator');
+                const text = document.getElementById('alert-level');
+                const subtext = document.getElementById('alert-subtext');
+                indicator.className = "w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse";
+                text.innerText = "NORMAL (LEVEL 0)";
+                text.className = "text-xs font-bold text-emerald-400";
+                subtext.innerText = "초소 탐조등 및 감시카메라를 피하십시오.";
+
+                document.getElementById('weapon-status').innerText = "LASER SIGHT / FLASH ACTIVE";
+                document.getElementById('payload-status').innerText = "SABOTAGE PAYLOAD: CARRIED (휴대 중)";
+                document.getElementById('payload-status').className = "text-[10px] text-yellow-400 font-bold uppercase";
+
+                // Target Bomb (Z = -12 inside Server bunker)
+                this.bomb = new Bomb(new THREE.Vector3(0, 0, -12));
+
+                // Escape zone (Spawns back where player initially spawned, near the gate Z = 22)
+                const escGeo = new THREE.CylinderGeometry(4.0, 4.5, 0.3, 32);
+                const escMat = new THREE.MeshBasicMaterial({ color: 0x00ff88, transparent: true, opacity: 0 });
+                this.escapeZone = new THREE.Mesh(escGeo, escMat);
+                this.escapeZone.position.set(0, 0.15, 22);
+                this.escapeZone.userData.isSensor = true;
+                this.scene.add(this.escapeZone);
+
+                // Surveillance cameras (Positioned on the bunker front entrance)
+                this.cameras.push(new SecurityCamera(new THREE.Vector3(-6, 5.5, -7), 0.4));
+                this.cameras.push(new SecurityCamera(new THREE.Vector3(6, 5.5, -7), -0.4));
+
+                // Searchlights (Sweeping the front yard of bunker)
+                this.searchlights.push(new WatchtowerSearchlight(new THREE.Vector3(-12, 7.0, -2)));
+                this.searchlights.push(new WatchtowerSearchlight(new THREE.Vector3(12, 7.0, -2)));
+
+                // AI Guard Patrol Nodes adjusted for compact size (Spawns base 3 guards)
+                const path1 = [
+                    new THREE.Vector3(-12, 0, 5),
+                    new THREE.Vector3(-12, 0, -5),
+                    new THREE.Vector3(-4, 0, -5)
+                ];
+                const path2 = [
+                    new THREE.Vector3(12, 0, 5),
+                    new THREE.Vector3(5, 0, -2),
+                    new THREE.Vector3(12, 0, -10)
+                ];
+                const path3 = [
+                    new THREE.Vector3(-6, 0, -10),
+                    new THREE.Vector3(6, 0, -10)
+                ];
+
+                // [밸런스 패치] 침투 단계(폭탄 설치 전)에는 항상 기본 초병 3명만 스폰하여 은밀한 저격/잠입을 용이하게 합니다.
+                this.enemies.push(new Enemy(new THREE.Vector3(-12, 0, 5), path1));
+                this.enemies.push(new Enemy(new THREE.Vector3(12, 0, 5), path2));
+                this.enemies.push(new Enemy(new THREE.Vector3(-6, 0, -10), path3));
+
+                // [Stage 2+ Feature] Spawn dynamic obstacle wall right in front of the gate (Z = 14)
+                if (this.currentLevel >= 2) {
+                    this.stageWallGroup = new THREE.Group();
+                    this.stageWallGroup.position.set(0, 2, 14);
+
+                    const wallGeo = new THREE.BoxGeometry(8, 4, 1.2);
+                    const wallMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2a, roughness: 0.9, metalness: 0.1 });
+                    const mainWall = new THREE.Mesh(wallGeo, wallMat);
+                    mainWall.castShadow = true;
+                    mainWall.receiveShadow = true;
+                    this.stageWallGroup.add(mainWall);
+
+                    // Yellow warning stripes for military aesthetic
+                    const stripeGeo = new THREE.BoxGeometry(0.3, 4.1, 1.25);
+                    const stripeMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+                    for (let i = -3; i <= 3; i += 1.5) {
+                        const stripe = new THREE.Mesh(stripeGeo, stripeMat);
+                        stripe.position.set(i, 0, 0);
+                        stripe.rotation.z = -Math.PI / 4;
+                        stripe.userData.isSensor = true; // Prevents raycast bullets hitting decorative stripes
+                        this.stageWallGroup.add(stripe);
+                    }
+                    this.scene.add(this.stageWallGroup);
+                }
+
+                // Force Three.js world update to resolve absolute bounding coordinates prior to recalculating physics
+                this.scene.updateMatrixWorld(true);
+
+                // Dynamically reset and rebuild the static collision boxes to capture the newly generated stage walls
+                this.collision.staticBoxes = [];
+                this.registerCollisions();
+            }
+
+            showEscapeZone() {
+                this.escapeZone.material.opacity = 0.5;
+                
+                const ringGeo = new THREE.RingGeometry(4.0, 4.2, 32);
+                const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ff88, side: THREE.DoubleSide });
+                const r = new THREE.Mesh(ringGeo, ringMat);
+                r.rotation.x = Math.PI/2;
+                r.position.y = 0.05;
+                r.userData.isSensor = true; 
+                this.escapeZone.add(r);
+            }
+
+            triggerAlert(level) {
+                if (level <= this.securityLevel) return;
+                this.securityLevel = level;
+                
+                audio.playAlert();
+
+                const indicator = document.getElementById('alert-indicator');
+                const text = document.getElementById('alert-level');
+                const subtext = document.getElementById('alert-subtext');
+
+                if (level === ALERT_LEVELS.CAUTION) {
+                    indicator.className = "w-2.5 h-2.5 rounded-full bg-yellow-500 animate-pulse";
+                    text.innerText = "CAUTION (LEVEL 1)";
+                    text.className = "text-xs font-bold text-yellow-500";
+                    subtext.innerText = "적 가드들이 전투 모드로 순찰 경로를 연장합니다.";
+                } else if (level === ALERT_LEVELS.ALARM) {
+                    indicator.className = "w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse";
+                    text.innerText = "ALARM (LEVEL 2)";
+                    text.className = "text-xs font-bold text-red-500";
+                    subtext.innerText = "비상 사태! 특수 기동조 증원군이 투입됩니다!";
+
+                    this.spawnReinforcements();
+                }
+            }
+
+            spawnReinforcements() {
+                // [요청 사항 반영] C4 폭탄이 성공적으로 설치된 후 밀려오는 특수 기동대 스폰 수를 Stage별로 3, 4, 5, 6, 7명으로 정확히 배치합니다.
+                const totalSpawnCount = 2 + this.currentLevel; 
+                this.ui.addLog(`☠ [기폭 비상 발령] 정예 탈출 차단 기동대 ${totalSpawnCount}명 급파!`);
+                
+                // Pre-defined strategic flanking locations for dynamic reinforcements
+                const spawnPoints = [
+                    new THREE.Vector3(-15, 0, 15),  // Left Flank
+                    new THREE.Vector3(15, 0, 15),   // Right Flank
+                    new THREE.Vector3(0, 0, 5),     // Center Courtyard
+                    new THREE.Vector3(-10, 0, 25),  // Entrance Left Flank
+                    new THREE.Vector3(10, 0, 25),   // Entrance Right Flank
+                    new THREE.Vector3(-18, 0, -5),  // Deep Western Radar
+                    new THREE.Vector3(18, 0, -5)    // Deep Eastern Helipad
+                ];
+
+                // Spawn exactly the configured number of reinforcement soldiers
+                for (let i = 0; i < totalSpawnCount; i++) {
+                    const spawnPos = spawnPoints[i] || new THREE.Vector3((Math.random() - 0.5) * 20, 0, (Math.random() - 0.5) * 15);
+                    this.enemies.push(new Enemy(spawnPos));
+                }
+            }
+
+            startGame() {
+                this.isPlaying = true;
+                this.campaignStartTime = this.clock.getElapsedTime();
+                this.startTime = this.clock.getElapsedTime();
+                this.player = new Player();
+                
+                this.spawnMissions();
+                this.ui.updateHUD();
+
+                document.getElementById('start-screen').classList.add('hidden');
+                document.getElementById('hud').classList.remove('hidden');
+                
+                safeRequestPointerLock(document.body);
+                
+                this.ui.addLog(`⚡ [캠페인 시작] STAGE 1 투입. 기지 심장부로 침투하십시오.`);
+                this.animate();
+            }
+
+            nextStage() {
+                this.currentLevel++;
+                document.getElementById('stage-clear-screen').classList.add('hidden');
+                document.getElementById('hud').classList.remove('hidden');
+                
+                // Reset player status & carry statistics forward
+                this.player.hp = 100;
+                this.player.shield = 100;
+                // Compact Map start position: Spawns in front of the gate (at Z = 22)
+                this.player.position.set(0, 1.8, 22);
+                this.player.camera.position.copy(this.player.position);
+                this.player.velocity.set(0, 0, 0);
+                this.player.weapon.clipAmmo = 30;
+                this.player.weapon.reserveAmmo = 120;
+
+                this.spawnMissions();
+                this.ui.updateHUD();
+                
+                safeRequestPointerLock(document.body);
+                this.ui.addLog(`⚡ [캠페인 진입] STAGE ${this.currentLevel} 투입. 폭탄 설치 후 더욱 조밀한 적군이 습격합니다.`);
+            }
+
+            pauseGame() {
+                this.isPaused = true;
+                document.getElementById('pause-screen').classList.remove('hidden');
+            }
+
+            resumeGame() {
+                this.isPaused = false;
+                document.getElementById('pause-screen').classList.add('hidden');
+                safeRequestPointerLock(document.body);
+            }
+
+            restartGame() {
+                location.reload();
+            }
+
+            calculateResults() {
+                const totalTime = this.clock.getElapsedTime() - this.campaignStartTime;
+                const m = Math.floor(totalTime / 60);
+                const s = Math.floor(totalTime % 60);
+                const timeStr = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+
+                let hpRemaining = this.player.hp;
+                
+                let basePoints = 25000;
+                let killBonus = this.kills * 1500;
+                let hpBonus = hpRemaining * 150;
+                let timePenalty = Math.max(0, 600 - totalTime) * 35;
+
+                let totalScore = basePoints + killBonus + hpBonus + Math.floor(timePenalty);
+
+                let rank = "C";
+                if (totalScore > 45000) rank = "S";
+                else if (totalScore > 35000) rank = "A";
+                else if (totalScore > 25000) rank = "B";
+
+                return {
+                    rank: rank,
+                    kills: this.kills,
+                    timeStr: timeStr,
+                    dmg: Math.floor(this.player.damageReceived),
+                    totalScore: totalScore
+                };
+            }
+
+            animate() {
+                if (!this.isPlaying) return;
+                
+                requestAnimationFrame(() => this.animate());
+                
+                if (this.isPaused) return;
+
+                const dt = Math.min(0.05, this.clock.getDelta());
+
+                // 1. UPDATE CORE MODULES
+                this.player.update(dt);
+                this.particles.update(dt);
+                this.bomb.update(dt);
+
+                // Rotate Military Radar Dish Base slowly for realism
+                if (this.radarDish) {
+                    this.radarDish.rotation.z += dt * 0.4;
+                }
+
+                // Update Watchtower Sweepers
+                for (let searchlight of this.searchlights) {
+                    searchlight.update(dt);
+                }
+
+                // Update Enemies AI
+                for (let i = this.enemies.length - 1; i >= 0; i--) {
+                    const enemy = this.enemies[i];
+                    enemy.update(dt);
+                    if (enemy.isDead && enemy.group.parent === null) {
+                        this.enemies.splice(i, 1);
+                    }
+                }
+
+                // Update CCTV Cameras
+                for (let camera of this.cameras) {
+                    camera.update(dt);
+                }
+
+                // 2. CHECK WIN CONDITION & STAGE TRANSITION (INSTANT TRANSITION ON REACHING ESCAPE ZONE POST-PLANT)
+                if (this.bomb && this.bomb.isInstalled) {
+                    let escDist = this.player.position.distanceTo(this.escapeZone.position);
+                    if (escDist < 5.0) { // Check proximity immediately upon installation (Radius increased to 5.0 for snappy activation)
+                        // Check if final stage
+                        if (this.currentLevel < 5) {
+                            this.ui.showStageClear();
+                            this.bomb.isInstalled = false; // Prevent loop double trigger
+                        } else {
+                            this.isPlaying = false;
+                            this.ui.showSuccess(this.calculateResults());
+                        }
+                    }
+                }
+
+                // 3. RENDER THREE.JS VIEWPORT
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+
+        // Initialize and bind button clicks
+        let game = null;
+
+        window.onload = () => {
+            game = new Game();
+
+            document.getElementById('btn-start').addEventListener('click', () => {
+                audio.init();
+                game.startGame();
+            });
+
+            document.getElementById('btn-resume').addEventListener('click', () => {
+                game.resumeGame();
+            });
+
+            document.getElementById('btn-next-stage').addEventListener('click', () => {
+                game.nextStage();
+            });
+
+            document.getElementById('btn-restart-fail').addEventListener('click', () => {
+                game.restartGame();
+            });
+
+            document.getElementById('btn-restart-success').addEventListener('click', () => {
+                game.restartGame();
+            });
+        };
+    </script>
+</body>
+</html>
