@@ -1,0 +1,1637 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SWAT Tactical Simulator - 4-Story Modern School</title>
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #a5d8ff; /* 맑은 하늘색 */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        /* 크로스헤어 */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 14px;
+            height: 14px;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+            pointer-events: none;
+        }
+        #crosshair::before, #crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(16, 185, 129, 0.95);
+        }
+        #crosshair::before {
+            top: 6px;
+            left: -5px;
+            width: 24px;
+            height: 2px;
+        }
+        #crosshair::after {
+            top: -5px;
+            left: 6px;
+            width: 2px;
+            height: 24px;
+        }
+        /* 격발 화면 점멸 */
+        #shoot-flash {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(255, 255, 255, 0.12);
+            z-index: 5;
+            pointer-events: none;
+            display: none;
+        }
+        /* 피격 마커 */
+        #hit-marker {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 24px;
+            height: 24px;
+            transform: translate(-50%, -50%) rotate(45deg);
+            z-index: 11;
+            pointer-events: none;
+            display: none;
+        }
+        #hit-marker::before, #hit-marker::after, .hm-p1, .hm-p2 {
+            content: '';
+            position: absolute;
+            background: #00ffcc;
+        }
+        #hit-marker::before { top: 0; left: 0; width: 10px; height: 2px; }
+        #hit-marker::after { top: 0; left: 0; width: 2px; height: 10px; }
+        .hm-p1 { bottom: 0; right: 0; width: 10px; height: 2px; }
+        .hm-p2 { bottom: 0; right: 0; width: 2px; height: 10px; }
+    </style>
+</head>
+<body>
+
+    <!-- 3D WebGL Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- HUD Overlay -->
+    <div id="hud" class="absolute inset-0 z-10 pointer-events-none flex flex-col justify-between p-6">
+        <!-- 상단 정보 영역 -->
+        <div class="flex justify-between items-start">
+            <div class="bg-white/80 border border-emerald-500/30 text-emerald-900 p-4 rounded-lg shadow-md backdrop-blur-sm min-w-[220px]">
+                <div class="text-[10px] uppercase tracking-widest text-emerald-600 font-black">TACTICAL CAMPUS CORES</div>
+                <div class="text-xl font-extrabold mt-0.5" id="stage-display">STAGE 1: 전체구역 소탕</div>
+                <div class="text-xs text-emerald-800/80 mt-1 font-bold" id="location-display">현재 위치: 로비 (1F)</div>
+            </div>
+
+            <div class="flex flex-col items-center">
+                <div class="bg-white/95 border-2 border-emerald-600 px-6 py-2 rounded-xl text-center shadow-lg backdrop-blur-sm">
+                    <span class="text-[10px] text-emerald-700 block tracking-wider font-bold">REMAINING TIME</span>
+                    <span class="text-3xl font-mono font-black text-emerald-600" id="timer-display">02:00</span>
+                </div>
+                <!-- 상호작용 프롬프트 메세지 박스 -->
+                <div id="interaction-prompt" class="mt-4 px-4 py-2 bg-black/85 text-white border border-emerald-400 text-xs font-bold rounded-lg tracking-wider hidden transition-all duration-150 animate-bounce">
+                    [E] 키를 눌러 상호작용
+                </div>
+            </div>
+
+            <div class="bg-white/80 border border-emerald-500/30 text-emerald-900 p-4 rounded-lg shadow-md backdrop-blur-sm text-right min-w-[220px]">
+                <div class="text-[10px] uppercase tracking-widest text-emerald-600 font-bold">TRAINING TARGETS</div>
+                <div class="text-2xl font-black mt-0.5"><span id="eliminated-display" class="text-emerald-600 font-mono">0</span> / <span id="total-enemies-display" class="font-mono">4</span></div>
+                <div class="text-xs text-emerald-800/70 mt-1 font-semibold" id="floor-access-display">접근 구역: 전층 오픈 (1~4F)</div>
+            </div>
+        </div>
+
+        <div id="crosshair"></div>
+        <div id="hit-marker">
+            <div class="hm-p1"></div>
+            <div class="hm-p2"></div>
+        </div>
+        <div id="shoot-flash"></div>
+
+        <!-- 하단 무장 및 성적 영역 -->
+        <div class="flex justify-between items-end">
+            <div class="bg-white/80 border border-emerald-500/30 text-emerald-900 p-4 rounded-lg shadow-md backdrop-blur-sm min-w-[180px]">
+                <div class="text-[10px] uppercase tracking-widest text-emerald-600 font-bold">ACCURACY</div>
+                <div class="text-xl font-bold mt-0.5" id="accuracy-display">100%</div>
+                <div class="w-full bg-emerald-100 h-2 rounded-full mt-2 overflow-hidden">
+                    <div id="accuracy-bar" class="bg-emerald-500 h-full w-full transition-all duration-300"></div>
+                </div>
+            </div>
+
+            <div class="bg-white/90 border border-emerald-500/40 text-emerald-900 p-4 rounded-lg shadow-md backdrop-blur-sm flex items-center gap-6 min-w-[280px]">
+                <div class="flex-1">
+                    <div class="text-[10px] uppercase tracking-widest text-emerald-600 font-bold">WEAPON SYSTEM</div>
+                    <div class="text-lg font-black tracking-wide">M4 CARBINE (TACTICAL)</div>
+                    <div class="text-[10px] text-emerald-700/70 mt-0.5">CAL. 5.56x45MM CQB</div>
+                </div>
+                <div class="text-right">
+                    <div class="text-[10px] text-emerald-600 font-bold">AMMO</div>
+                    <div class="text-3xl font-black font-mono mt-0.5"><span id="current-ammo">30</span><span class="text-lg text-emerald-400">/30</span></div>
+                    <div class="text-xs text-emerald-700/60 mt-1">RELOADS: <span id="mags-left" class="font-bold">5</span> / 5</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 로비 / 일시 정지 화면 오버레이 -->
+    <div id="screen-overlay" class="absolute inset-0 z-20 bg-emerald-950/40 backdrop-blur-md flex flex-col items-center justify-center p-4">
+        <div class="max-w-2xl w-full text-center space-y-8 bg-white border-2 border-emerald-500/50 p-8 rounded-2xl shadow-2xl">
+            <div class="space-y-2">
+                <div class="inline-block border border-emerald-500 px-3 py-1 rounded-full text-xs text-emerald-600 tracking-[0.2em] font-extrabold bg-emerald-50">SWAT CAMPUS SIMULATOR</div>
+                <h1 class="text-3xl md:text-4xl font-extrabold text-emerald-900 tracking-tight uppercase">MODERN 4-STORY HIGH CAMPUS</h1>
+                <p class="text-emerald-800/80 text-sm md:text-base">맑고 투명한 오전 햇살이 들어오는 현대적인 4층 학교 건물 전술 훈련입니다.<br>각 교실과 과학실, 도서관 및 4층 교장실/특별구역을 조밀하게 수색하십시오.</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4 text-left border-y border-emerald-100 py-6 my-4 text-xs md:text-sm">
+                <div class="space-y-2">
+                    <h3 class="text-emerald-700 font-bold uppercase tracking-wider">미션 및 입체 AI 수색 규칙</h3>
+                    <ul class="text-xs text-emerald-800 space-y-1 list-disc list-inside">
+                        <li><strong>Stage 1 (전체 수색)</strong>: 1~4층 전체 전술 구역 동시 진입 (타겟 4명)</li>
+                        <li><strong>Stage 2 (전술 밀도 심화)</strong>: 지능화된 소탕 타겟 순회 추격 (타겟 7명)</li>
+                        <li><strong>Stage 3 (완전 소탕 최고난도)</strong>: 기민하게 도망치는 타겟 기동 포위 (타겟 10명)</li>
+                        <li><strong>★ 계단 타기 지능형 AI</strong>: 타겟들이 위험을 감지하면 복도를 전력질주하고 계단을 직접 오르내리며 다른 층으로 유기적으로 피난/도주합니다!</li>
+                    </ul>
+                </div>
+                <div class="space-y-2 border-l border-emerald-100 pl-4">
+                    <h3 class="text-emerald-700 font-bold uppercase tracking-wider">컨트롤 가이드</h3>
+                    <div class="grid grid-cols-2 gap-y-1.5 gap-x-2 text-xs text-emerald-800">
+                        <div>전술 이동: <span class="bg-emerald-50 px-1.5 py-0.5 rounded text-emerald-600 font-bold font-mono">W A S D</span></div>
+                        <div>신속 달리기: <span class="bg-emerald-50 px-1.5 py-0.5 rounded text-emerald-600 font-bold font-mono">Shift</span></div>
+                        <div>점프 기동: <span class="bg-emerald-50 px-1.5 py-0.5 rounded text-emerald-600 font-bold font-mono">Space</span></div>
+                        <div>사격 격발: <span class="bg-emerald-50 px-1.5 py-0.5 rounded text-emerald-600 font-bold font-mono">좌클릭</span></div>
+                        <div>상호 작용: <span class="bg-emerald-50 px-1.5 py-0.5 rounded text-emerald-600 font-bold font-mono">E</span></div>
+                        <div>전술 탄창교체: <span class="bg-emerald-50 px-1.5 py-0.5 rounded text-emerald-600 font-bold font-mono">R</span></div>
+                        <div>조준선 회전: <span class="bg-emerald-50 px-1.5 py-0.5 rounded text-emerald-600 font-bold font-mono">마우스</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex flex-col items-center gap-2">
+                <button id="start-btn" class="pointer-events-auto px-8 py-4 bg-emerald-500 hover:bg-emerald-400 text-white font-extrabold text-lg rounded-xl transition-all duration-200 transform active:scale-95 shadow-lg shadow-emerald-500/30 tracking-widest uppercase">
+                    시뮬레이터 시작 (CLICK TO START)
+                </button>
+                <p class="text-[11px] text-emerald-600/70 mt-2">※ 화면 클릭 시 포인터 고정 모드가 적용되며 전술 이동 시점이 활성화됩니다.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 결과 화면 오버레이 -->
+    <div id="result-overlay" class="absolute inset-0 z-20 bg-emerald-950/50 backdrop-blur-lg flex flex-col items-center justify-center p-4 hidden">
+        <div class="max-w-md w-full text-center space-y-6 bg-white border border-emerald-500/40 p-8 rounded-2xl shadow-2xl">
+            <h2 id="result-title" class="text-3xl font-black tracking-wide text-emerald-600 uppercase">MISSION SUCCESS</h2>
+            <p id="result-subtitle" class="text-xs text-emerald-700/60 uppercase tracking-widest font-bold">훈련 성적 평가 보고서</p>
+
+            <div class="bg-emerald-50 p-4 rounded-xl border border-emerald-100 text-left space-y-3 font-mono text-sm text-emerald-900">
+                <div class="flex justify-between border-b border-emerald-100/60 pb-2">
+                    <span>훈련 완료 단계</span>
+                    <span id="res-stage-title" class="text-emerald-700 font-bold">STAGE 1</span>
+                </div>
+                <div class="flex justify-between border-b border-emerald-100/60 pb-2">
+                    <span>사살 제압 표적</span>
+                    <span id="res-kills" class="text-emerald-600 font-bold">0 / 0</span>
+                </div>
+                <div class="flex justify-between border-b border-emerald-100/60 pb-2">
+                    <span>사격 종합 정확도</span>
+                    <span id="res-accuracy" class="text-emerald-600 font-bold">0%</span>
+                </div>
+                <div class="flex justify-between border-b border-emerald-100/60 pb-2">
+                    <span>잔여 시간 보너스</span>
+                    <span id="res-time" class="text-emerald-800">0초</span>
+                </div>
+                <div class="flex justify-between pt-1 text-base">
+                    <span class="font-bold text-emerald-700">종합 전술 점수</span>
+                    <span id="res-score" class="text-emerald-600 font-bold text-xl">0 PTS</span>
+                </div>
+            </div>
+
+            <div class="flex gap-4">
+                <button id="res-restart-btn" class="flex-1 py-4 bg-zinc-200 hover:bg-zinc-300 text-zinc-800 font-extrabold text-sm rounded-xl transition-all">
+                    처음부터 재도전
+                </button>
+                <button id="res-next-btn" class="flex-1 py-4 bg-emerald-500 hover:bg-emerald-400 text-white font-extrabold text-sm rounded-xl transition-all shadow-lg shadow-emerald-500/30">
+                    다음 구역 진입
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Game Logic -->
+    <script>
+        // --- 글로벌 오디오 합성 장치 ---
+        class SoundFX {
+            constructor() { this.ctx = null; }
+            init() { if (!this.ctx) { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } }
+            playShoot() {
+                this.init(); if (!this.ctx) return;
+                const bufferSize = this.ctx.sampleRate * 0.12;
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) { data[i] = Math.random() * 2 - 1; }
+                const noise = this.ctx.createBufferSource(); noise.buffer = buffer;
+                const filter = this.ctx.createBiquadFilter(); filter.type = 'bandpass'; filter.frequency.value = 900; filter.Q.value = 3.0;
+                const gain = this.ctx.createGain(); gain.gain.setValueAtTime(0.35, this.ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+                noise.connect(filter); filter.connect(gain); gain.connect(this.ctx.destination); noise.start();
+            }
+            playReload() {
+                this.init(); if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                this.playTone(300, 0.08, 0.08, now);
+                this.playTone(450, 0.08, 0.08, now + 0.15);
+                this.playTone(180, 0.1, 0.1, now + 0.35);
+            }
+            playHit() { this.init(); if (!this.ctx) return; this.playTone(900, 0.05, 0.1, this.ctx.currentTime); }
+            playDry() { this.init(); if (!this.ctx) return; this.playTone(100, 0.04, 0.05, this.ctx.currentTime); }
+            playDoor() {
+                this.init(); if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                this.playTone(180, 0.15, 0.07, now);
+                this.playTone(140, 0.25, 0.05, now + 0.1);
+            }
+            playTone(freq, dur, vol, time) {
+                const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
+                osc.type = 'sine'; osc.frequency.setValueAtTime(freq, time);
+                gain.gain.setValueAtTime(vol, time); gain.gain.exponentialRampToValueAtTime(0.001, time + dur);
+                osc.connect(gain); gain.connect(this.ctx.destination);
+                osc.start(time); osc.stop(time + dur);
+            }
+        }
+        const sfx = new SoundFX();
+
+        // --- 4층 현대식 학교 규모 정보 정의 ---
+        const FLOOR_HEIGHT = 6.0;
+
+        const STAGE_RULES = {
+            1: { title: "STAGE 1", desc: "4층 건물 전술 수색", timeLimit: 120, allowedFloors: [1, 2, 3, 4], enemiesCount: 4 },
+            2: { title: "STAGE 2", desc: "동적 층간 전술 소탕", timeLimit: 180, allowedFloors: [1, 2, 3, 4], enemiesCount: 7 },
+            3: { title: "STAGE 3", desc: "학교 전체 기밀작전", timeLimit: 240, allowedFloors: [1, 2, 3, 4], enemiesCount: 10 }
+        };
+
+        // 웅장한 1층 전술 구조물 배치 (로비, 행정실, 교무실, 보건실)
+        const FIRST_FLOOR_STRUCTURES = [
+            // --- 1. 중앙 로비 구역 (Center Lobby) ---
+            { x: -10, z: -10, w: 10, h: 5.5, d: 1, y: 0, color: 0xe2e8f0, name: "로비 가림벽 A" },
+            { x: 10, z: -10, w: 10, h: 5.5, d: 1, y: 0, color: 0xe2e8f0, name: "로비 가림벽 B" },
+            { x: 0, z: -5, w: 6, h: 1.2, d: 1.8, y: 0, color: 0xcd853f, isProp: true, name: "리셉션 메인카운터" },
+            { x: 0, z: -1, w: 1.5, h: 2.2, d: 0.2, y: 0, color: 0x22c55e, isProp: true, name: "로비 안내판" },
+            { x: -7, z: -2, w: 3, h: 0.8, d: 1.2, y: 0, color: 0x334155, isProp: true, name: "대기 소파 A" },
+            { x: 7, z: -2, w: 3, h: 0.8, d: 1.2, y: 0, color: 0x334155, isProp: true, name: "대기 소파 B" },
+            { x: -5, z: 5, w: 1.2, h: 5.5, d: 1.2, y: 0, color: 0xf1f5f9, name: "로비 중앙 원주" },
+            { x: 5, z: 5, w: 1.2, h: 5.5, d: 1.2, y: 0, color: 0xf1f5f9, name: "로비 우측 원주" },
+
+            // 로비 현관 연결용 외벽
+            { x: -18, z: 19.8, w: 24, h: 5.5, d: 0.8, y: 0, color: 0xeeeeee, name: "로비 외벽 좌" },
+            { x: 18, z: 19.8, w: 24, h: 5.5, d: 0.8, y: 0, color: 0xeeeeee, name: "로비 외벽 우" },
+            { x: -4.5, z: 19.8, w: 3, h: 5.5, d: 0.8, y: 0, color: 0xeeeeee, name: "로비 외벽 우측 틈" },
+            { x: 4.5, z: 19.8, w: 3, h: 5.5, d: 0.8, y: 0, color: 0xeeeeee, name: "로비 외벽 좌측 틈" },
+
+            // --- 2. 행정실 구역 (Administration Office) ---
+            { x: -16.1, z: -18, w: 0.8, h: 5.5, d: 14, y: 0, color: 0xcbd5e1, name: "행정실 측벽" },
+            { x: -23, z: -11, w: 13.8, h: 5.5, d: 1, y: 0, color: 0xcbd5e1, name: "행정실 전벽 좌" },
+            { x: -6.7, z: -11, w: 13.4, h: 5.5, d: 1, y: 0, color: 0xcbd5e1, name: "행정실 전벽 우" },
+            { x: -20, z: -12, w: 6, h: 1.1, d: 1.5, y: 0, color: 0x94a3b8, isProp: true, name: "접수 데스크" },
+            { x: -26, z: -16, w: 2, h: 2.4, d: 1.5, y: 0, color: 0x475569, isProp: true, name: "캐비닛 타워" },
+
+            // --- 3. 교무실 구역 (Staff Room) ---
+            { x: 16.1, z: -18, w: 0.8, h: 5.5, d: 14, y: 0, color: 0xcbd5e1, name: "교무실 측벽" },
+            { x: 23, z: -11, w: 13.8, h: 5.5, d: 1, y: 0, color: 0xcbd5e1, name: "교무실 전벽 우" },
+            { x: 6.7, z: -11, w: 13.4, h: 5.5, d: 1, y: 0, color: 0xcbd5e1, name: "교무실 전벽 좌" },
+            { x: 18, z: -15, w: 4, h: 1.1, d: 4, y: 0, color: 0x8b5a2b, isProp: true, name: "교사 책상 A" },
+            { x: 24, z: -15, w: 4, h: 1.1, d: 4, y: 0, color: 0x8b5a2b, isProp: true, name: "교사 책상 B" },
+
+            // --- 4. 보건실 구역 (Infirmary) ---
+            { x: -16.1, z: 18, w: 0.8, h: 5.5, d: 14, y: 0, color: 0xf1f5f9, name: "보건실 분할측벽" },
+            { x: -23, z: 11, w: 13.8, h: 5.5, d: 1, y: 0, color: 0xf1f5f9, name: "보건실 전면벽 좌" },
+            { x: -6.7, z: 11, w: 13.4, h: 5.5, d: 1, y: 0, color: 0xf1f5f9, name: "보건실 전면벽 우" },
+            { x: -23, z: 15, w: 2.5, h: 0.9, d: 4.5, y: 0, color: 0xffffff, isProp: true, name: "요양용 침대" },
+
+            // --- 5. 급식실 입구 구역 (Canteen entrance) ---
+            { x: 16.1, z: 18, w: 0.8, h: 5.5, d: 14, y: 0, color: 0xe2e8f0, name: "급식실 통로벽" },
+            { x: 23, z: 11, w: 13.8, h: 5.5, d: 1, y: 0, color: 0xe2e8f0, name: "급식실 전벽 우" },
+            { x: 6.7, z: 11, w: 13.4, h: 5.5, d: 1, y: 0, color: 0xe2e8f0, name: "급식실 전벽 좌" }
+        ];
+
+        // 2~4층의 현대식 구획벽 및 배치 구조 (총 4개층 규모로 완전히 고정)
+        const UPPER_FLOOR_STRUCTURES = [
+            // --- 2층 일반 교실 2A & 2B (Classrooms, Y=6) ---
+            { x: -20, z: -11, w: 20, h: 5.5, d: 0.8, y: 6, color: 0xfef3c7, name: "2A 교실 앞벽 외" },
+            { x: -3.7, z: -11, w: 7.4, h: 5.5, d: 0.8, y: 6, color: 0xfef3c7, name: "2A 교실 앞벽 내" },
+            { x: -10.1, z: -14, w: 0.8, h: 5.5, d: 12, y: 6, color: 0xfef3c7, name: "2A 교실 옆벽" },
+            { x: -18, z: -11, w: 2, h: 1.0, d: 1.2, y: 6, color: 0xb45309, isProp: true, name: "2A 교단 교탁" },
+            { x: -18, z: -19.6, w: 6, h: 1.8, d: 0.2, y: 6, color: 0x14532d, isProp: true, name: "2A 칠판" },
+
+            { x: 20, z: -11, w: 20, h: 5.5, d: 0.8, y: 6, color: 0xfef3c7, name: "2B 교실 앞벽 외" },
+            { x: 3.7, z: -11, w: 7.4, h: 5.5, d: 0.8, y: 6, color: 0xfef3c7, name: "2B 교실 앞벽 내" },
+            { x: 10.1, z: -14, w: 0.8, h: 5.5, d: 12, y: 6, color: 0xfef3c7, name: "2B 교실 옆벽" },
+            { x: 18, z: -11, w: 2, h: 1.0, d: 1.2, y: 6, color: 0xb45309, isProp: true, name: "2B 교탁" },
+
+            // 과학실 & 컴퓨터실 (2층, Y=6)
+            { x: -20, z: 11, w: 20, h: 5.5, d: 0.8, y: 6, color: 0xe0f2fe, name: "과학실 앞벽 외" },
+            { x: -3.7, z: 11, w: 7.4, h: 5.5, d: 0.8, y: 6, color: 0xe0f2fe, name: "과학실 앞벽 내" },
+            { x: -10.1, z: 14, w: 0.8, h: 5.5, d: 12, y: 6, color: 0xe0f2fe, name: "과학실 옆벽" },
+            { x: -18, z: 12, w: 6, h: 0.9, d: 1.5, y: 6, color: 0x334155, isProp: true, name: "과학실 실험대" },
+
+            { x: 20, z: 11, w: 20, h: 5.5, d: 0.8, y: 6, color: 0xbae6fd, name: "컴퓨터실 앞벽 외" },
+            { x: 3.7, z: 11, w: 7.4, h: 5.5, d: 0.8, y: 6, color: 0xbae6fd, name: "컴퓨터실 앞벽 내" },
+            { x: 10.1, z: 14, w: 0.8, h: 5.5, d: 12, y: 6, color: 0xbae6fd, name: "컴퓨터실 옆벽" },
+            { x: 11, z: 15, w: 1.5, h: 2.2, d: 1.5, y: 6, color: 0x0f172a, isProp: true, name: "서버랙 장비" },
+
+            // --- 3층 리모델링 구역: 도서관, 자습실, 다목적실 (Y=12) ---
+            { x: -10, z: -7, w: 0.8, h: 5.5, d: 14, y: 12, color: 0xe2e8f0, name: "도서관 전벽 좌" },
+            { x: -10, z: 11.25, w: 0.8, h: 5.5, d: 13.5, y: 12, color: 0xe2e8f0, name: "도서관 전벽 우" },
+            { x: -15, z: 0, w: 4, h: 1.1, d: 2, y: 12, color: 0x8b5a2b, isProp: true, name: "도서관 안내 데스크" },
+            { x: -22, z: -12, w: 8, h: 2.4, d: 1.4, y: 12, color: 0x5c4033, isProp: true, name: "도서관 서가대 A" },
+            { x: -22, z: 6, w: 8, h: 2.4, d: 1.4, y: 12, color: 0x5c4033, isProp: true, name: "도서관 서가대 B" },
+
+            { x: 10, z: -10, w: 0.8, h: 5.5, d: 14, y: 12, color: 0xfef3c7, name: "자습실 전벽 남" },
+            { x: 10, z: 8.6, w: 0.8, h: 5.5, d: 18.8, y: 12, color: 0xfef3c7, name: "자습실 전벽 북" },
+            { x: 18, z: 0, w: 16, h: 5.5, d: 0.8, y: 12, color: 0xfef3c7, name: "자습실 파티션 구획" },
+            { x: 15, z: -10, w: 1.5, h: 1.2, d: 1.5, y: 12, color: 0xd2b48c, isProp: true, name: "1인형 독서 칸막이" },
+
+            { x: 10, z: -5.9, w: 0.8, h: 5.5, d: 22.2, y: 12, color: 0xe0f2fe, name: "다목적실 뒷벽 남" },
+            { x: 10, z: 11.1, w: 0.8, h: 5.5, d: 13.8, y: 12, color: 0xe0f2fe, name: "다목적실 뒷벽 북" },
+            { x: 20, z: 15, w: 12, h: 0.4, d: 4, y: 12, color: 0x5c4033, isProp: true, name: "발표 단상" },
+
+            // --- 4층 고해상도 전술 구역: 교장실, 시청각실, 동아리실 (Y=18) ---
+            { x: -20, z: -6, w: 20, h: 5.5, d: 0.8, y: 18, color: 0xfbcfe8, name: "교장실 앞벽 외" },
+            { x: -3.7, z: -6, w: 7.4, h: 5.5, d: 0.8, y: 18, color: 0xfbcfe8, name: "교장실 앞벽 내" },
+            { x: -10.1, z: -13, w: 0.8, h: 5.5, d: 14, y: 18, color: 0xfbcfe8, name: "교장실 구획벽" },
+            { x: -20, z: -15, w: 3, h: 1.1, d: 1.5, y: 18, color: 0x3d2b1f, isProp: true, name: "원목 집무 책상" },
+            { x: -25, z: -12, w: 0.8, h: 2.4, d: 4, y: 18, color: 0x3d2b1f, isProp: true, name: "교장실 대형 책장" },
+
+            { x: 20, z: -6, w: 20, h: 5.5, d: 0.8, y: 18, color: 0xe2e8f0, name: "시청각실 앞벽 외" },
+            { x: 3.7, z: -6, w: 7.4, h: 5.5, d: 0.8, y: 18, color: 0xe2e8f0, name: "시청각실 앞벽 내" },
+            { x: 10.1, z: -13, w: 0.8, h: 5.5, d: 14, y: 18, color: 0xe2e8f0, name: "시청각실 내부벽" },
+            { x: 15, z: -12, w: 5, h: 0.5, d: 1.2, y: 18, color: 0x475569, isProp: true, name: "계단형 객석 A" },
+            { x: 15, z: -15, w: 5, h: 1.0, d: 1.2, y: 18, color: 0x475569, isProp: true, name: "계단형 객석 B" },
+
+            { x: -20, z: 8, w: 20, h: 5.5, d: 0.8, y: 18, color: 0xa5f3fc, name: "밴드실 앞벽 외" },
+            { x: -3.7, z: 8, w: 7.4, h: 5.5, d: 0.8, y: 18, color: 0xa5f3fc, name: "밴드실 앞벽 내" },
+            { x: -10.1, z: 14, w: 0.8, h: 5.5, d: 12, y: 18, color: 0xa5f3fc, name: "밴드실 내부 구획벽" },
+            { x: -18, z: 14, w: 2.2, h: 1.0, d: 2.0, y: 18, color: 0x111111, isProp: true, name: "그랜드 피아노" },
+            { x: -13, z: 15, w: 1.4, h: 1.2, d: 1.4, y: 18, color: 0xbe123c, isProp: true, name: "드럼 세트" },
+
+            { x: 20, z: 8, w: 20, h: 5.5, d: 0.8, y: 18, color: 0xfef08a, name: "미술실 앞벽 외" },
+            { x: 3.7, z: 8, w: 7.4, h: 5.5, d: 0.8, y: 18, color: 0xfef08a, name: "미술실 앞벽 내" },
+            { x: 10.1, z: 14, w: 0.8, h: 5.5, d: 12, y: 18, color: 0xfef08a, name: "미술실 구획벽" },
+            { x: 15, z: 13, w: 1.0, h: 1.6, d: 0.8, y: 18, color: 0xd97706, isProp: true, name: "나무 이젤" }
+        ];
+
+        // 층간을 잇는 기하학적 계단 구조 정의 (4층 빌딩이므로 총 3개 층계 비행 구조)
+        const STAIRS_LAYOUT = [
+            { yStart: 0, yEnd: 6, direction: "up", x: -2, z: 2, w: 4, d: 8 },
+            { yStart: 6, yEnd: 12, direction: "up", x: 2, z: -2, w: 4, d: 8 },
+            { yStart: 12, yEnd: 18, direction: "up", x: -2, z: 2, w: 4, d: 8 }
+        ];
+
+        // --- 인풋 매니저 ---
+        class InputManager {
+            constructor() {
+                this.keys = { forward: false, backward: false, left: false, right: false, run: false, jump: false, interact: false };
+                this.mouseDeltaX = 0; this.mouseDeltaY = 0;
+                this.mouseClicked = false; this.reloadRequested = false;
+                this.initListeners();
+            }
+            initListeners() {
+                window.addEventListener('keydown', (e) => {
+                    switch(e.code) {
+                        case 'KeyW': this.keys.forward = true; break;
+                        case 'KeyS': this.keys.backward = true; break;
+                        case 'KeyA': this.keys.left = true; break;
+                        case 'KeyD': this.keys.right = true; break;
+                        case 'ShiftLeft': this.keys.run = true; break;
+                        case 'Space': this.keys.jump = true; break;
+                        case 'KeyE': this.keys.interact = true; break;
+                        case 'KeyR': this.reloadRequested = true; break;
+                    }
+                });
+                window.addEventListener('keyup', (e) => {
+                    switch(e.code) {
+                        case 'KeyW': this.keys.forward = false; break;
+                        case 'KeyS': this.keys.backward = false; break;
+                        case 'KeyA': this.keys.left = false; break;
+                        case 'KeyD': this.keys.right = false; break;
+                        case 'ShiftLeft': this.keys.run = false; break;
+                        case 'Space': this.keys.jump = false; break;
+                        case 'KeyE': this.keys.interact = false; break;
+                    }
+                });
+                window.addEventListener('mousemove', (e) => {
+                    if (document.pointerLockElement) {
+                        this.mouseDeltaX = e.movementX || 0;
+                        this.mouseDeltaY = e.movementY || 0;
+                    }
+                });
+                window.addEventListener('mousedown', (e) => {
+                    if (document.pointerLockElement && e.button === 0) {
+                        this.mouseClicked = true;
+                    }
+                });
+            }
+            resetDeltas() {
+                this.mouseDeltaX = 0; this.mouseDeltaY = 0;
+                this.mouseClicked = false;
+                this.keys.interact = false;
+                this.reloadRequested = false;
+            }
+        }
+
+        // --- 카메라 컨트롤러 ---
+        class CameraController {
+            constructor(camera) {
+                this.camera = camera;
+                this.pitch = 0; this.yaw = 0;
+                this.sensitivity = 0.0022;
+            }
+            update(deltaX, deltaY, recoilY = 0) {
+                this.yaw -= deltaX * this.sensitivity;
+                this.pitch -= (deltaY * this.sensitivity) - recoilY;
+                this.pitch = Math.max(-Math.PI / 2.15, Math.min(Math.PI / 2.15, this.pitch));
+                this.camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
+            }
+        }
+
+        // --- 씬 매니저 ---
+        class SceneManager {
+            constructor(container) {
+                this.container = container;
+                this.init();
+            }
+            init() {
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0xb3e5fc);
+                this.scene.fog = new THREE.FogExp2(0xe1f5fe, 0.004);
+
+                this.camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 450);
+                this.scene.add(this.camera);
+
+                this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+                this.container.appendChild(this.renderer.domElement);
+                window.addEventListener('resize', () => this.onResize());
+
+                this.setupLights();
+            }
+            setupLights() {
+                const ambient = new THREE.AmbientLight(0xffffff, 0.72);
+                this.scene.add(ambient);
+
+                const sun = new THREE.DirectionalLight(0xfffff4, 0.95);
+                sun.position.set(45, 90, 35);
+                sun.castShadow = true;
+                sun.shadow.mapSize.width = 2048;
+                sun.shadow.mapSize.height = 2048;
+                sun.shadow.camera.near = 0.5;
+                sun.shadow.camera.far = 280;
+                const d = 70;
+                sun.shadow.camera.left = -d; sun.shadow.camera.right = d;
+                sun.shadow.camera.top = d; sun.shadow.camera.bottom = -d;
+                sun.shadow.bias = -0.0003;
+                this.scene.add(sun);
+            }
+            onResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+            render() { this.renderer.render(this.scene, this.camera); }
+        }
+
+        // --- 개폐 가능한 인터랙티브 문/창문 클래스 ---
+        class InteractableObject {
+            constructor(game, id, type, name, x, y, z, w, h, d, color, slidingAxis = 'x', isDouble = false) {
+                this.game = game;
+                this.id = id;
+                this.type = type; // 'door' or 'window'
+                this.name = name;
+                this.x = x; this.y = y; this.z = z;
+                this.w = w; this.h = h; this.d = d;
+                this.color = color;
+                this.slidingAxis = slidingAxis;
+                this.isDouble = isDouble;
+
+                this.isOpen = false;
+                this.currentProgress = 0.0;
+                
+                this.colBound = { x: x, y: y, z: z, w: w, h: h, d: d, isProp: false };
+                this.game.collidableBounds.push(this.colBound);
+
+                this.createMesh();
+            }
+
+            createMesh() {
+                this.meshGroup = new THREE.Group();
+                this.panels = [];
+
+                const glassMat = new THREE.MeshStandardMaterial({ color: this.color, transparent: true, opacity: 0.42, roughness: 0.1 });
+
+                if (this.isDouble) {
+                    const pw = this.w / 2;
+                    const leftPanel = new THREE.Group();
+                    const leftGlass = new THREE.Mesh(new THREE.BoxGeometry(pw - 0.1, this.h, this.d - 0.02), glassMat);
+                    leftPanel.add(leftGlass);
+                    leftPanel.position.set(-pw / 2, this.h / 2, 0);
+                    this.meshGroup.add(leftPanel);
+                    this.panels.push({ obj: leftPanel, dir: -1 });
+
+                    const rightPanel = new THREE.Group();
+                    const rightGlass = new THREE.Mesh(new THREE.BoxGeometry(pw - 0.1, this.h, this.d - 0.02), glassMat);
+                    rightPanel.add(rightGlass);
+                    rightPanel.position.set(pw / 2, this.h / 2, 0);
+                    this.meshGroup.add(rightPanel);
+                    this.panels.push({ obj: rightPanel, dir: 1 });
+                } else {
+                    const panel = new THREE.Group();
+                    const glass = new THREE.Mesh(new THREE.BoxGeometry(this.w - 0.1, this.h - 0.1, this.d - 0.02), glassMat);
+                    panel.add(glass);
+                    panel.position.set(0, this.h / 2, 0);
+                    this.meshGroup.add(panel);
+                    this.panels.push({ obj: panel, dir: 1 });
+                }
+
+                this.meshGroup.position.set(this.x, this.y, this.z);
+                this.game.sceneManager.scene.add(this.meshGroup);
+                this.game.collidableMeshes.push(this.meshGroup);
+            }
+
+            toggle() {
+                this.isOpen = !this.isOpen;
+                sfx.playDoor();
+            }
+
+            update(deltaTime) {
+                const targetProgress = this.isOpen ? 1.0 : 0.0;
+                if (Math.abs(this.currentProgress - targetProgress) > 0.01) {
+                    this.currentProgress = THREE.MathUtils.lerp(this.currentProgress, targetProgress, 7 * deltaTime);
+                    
+                    this.panels.forEach(p => {
+                        const offset = this.currentProgress * (this.type === 'window' ? this.h * 0.95 : this.w * 0.85);
+                        if (this.slidingAxis === 'x') {
+                            p.obj.position.x = (p.dir * (this.isDouble ? (this.w / 4) : 0)) + (p.dir * offset);
+                        } else if (this.slidingAxis === 'y') {
+                            p.obj.position.y = (this.h / 2) + offset;
+                        } else if (this.slidingAxis === 'z') {
+                            p.obj.position.z = p.dir * offset;
+                        }
+                    });
+
+                    if (this.isOpen && this.currentProgress > 0.8) {
+                        this.colBound.w = 0; this.colBound.d = 0; // 열리면 통과 가능
+                    } else {
+                        this.colBound.w = this.w; this.colBound.d = this.d; // 닫히면 충돌 차단
+                    }
+                }
+            }
+        }
+
+        // --- 플레이어 전술 이동 및 사격 제어 (Player) ---
+        class Player {
+            constructor(game, sceneManager, inputManager, cameraController) {
+                this.game = game;
+                this.sceneManager = sceneManager;
+                this.inputManager = inputManager;
+                this.cameraController = cameraController;
+
+                this.position = new THREE.Vector3(0, 1.6, 14);
+                this.velocity = new THREE.Vector3(0, 0, 0);
+                this.sceneManager.camera.position.copy(this.position);
+
+                this.radius = 0.72;
+                this.eyeHeight = 1.6;
+
+                this.gravity = 15.0;
+                this.jumpForce = 5.2;
+                this.isGrounded = true;
+                this.targetFloorY = 0.0;
+
+                this.ammo = 30; this.maxAmmo = 30; this.magazines = 5;
+                this.isReloading = false; this.reloadTimer = 0; this.reloadDuration = 1.3;
+                this.shootCooldown = 0; this.recoilKick = 0;
+                this.shotsFired = 0; this.shotsHit = 0;
+
+                this.createWeapon();
+            }
+
+            createWeapon() {
+                this.weapon = new THREE.Group();
+                const sandTan = new THREE.MeshStandardMaterial({ color: 0xcdb79e, roughness: 0.5 });
+                const matBlack = new THREE.MeshStandardMaterial({ color: 0x1f1f1f, metalness: 0.8 });
+
+                const body = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.05, 0.25), sandTan);
+                body.position.set(0, 0, -0.1);
+                this.weapon.add(body);
+
+                const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.32), matBlack);
+                barrel.rotation.x = Math.PI / 2;
+                barrel.position.set(0, 0.01, -0.34);
+                this.weapon.add(barrel);
+
+                const mag = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.12, 0.055), matBlack);
+                mag.position.set(0, -0.08, -0.12);
+                mag.rotation.x = 0.18;
+                this.weapon.add(mag);
+
+                this.sceneManager.camera.add(this.weapon);
+                this.weapon.position.set(0.18, -0.16, -0.35);
+                this.weapon.rotation.y = -Math.PI;
+            }
+
+            shoot() {
+                if (this.isReloading || this.shootCooldown > 0) return;
+                if (this.ammo <= 0) { sfx.playDry(); this.reload(); return; }
+
+                this.ammo--; this.shotsFired++;
+                sfx.playShoot();
+                this.shootCooldown = 0.12;
+                this.recoilKick = 0.018;
+                this.weapon.position.z += 0.045;
+
+                this.game.ui.updateAmmo(this.ammo, this.magazines);
+                this.triggerMuzzleFlash();
+
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera(new THREE.Vector2(0, 0), this.sceneManager.camera);
+
+                const colliders = [...this.game.enemies.map(e => e.mesh), ...this.game.collidableMeshes];
+                const hits = raycaster.intersectObjects(colliders, true);
+
+                if (hits.length > 0) {
+                    const hit = hits[0];
+                    this.game.createImpact(hit.point, hit.face.normal);
+
+                    let hitEnemy = null;
+                    for (let e of this.game.enemies) {
+                        if (e.mesh === hit.object || e.mesh.getObjectById(hit.object.id) || hit.object.parent === e.mesh) {
+                            hitEnemy = e; break;
+                        }
+                    }
+
+                    if (hitEnemy && !hitEnemy.isDead) {
+                        this.shotsHit++;
+                        sfx.playHit();
+                        this.game.ui.triggerHitMarker();
+                        hitEnemy.takeDamage();
+                    }
+                }
+                this.game.ui.updateAccuracy(this.shotsFired, this.shotsHit);
+            }
+
+            triggerMuzzleFlash() {
+                const flashLight = new THREE.PointLight(0xffdf80, 2, 5);
+                const flashMesh = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), new THREE.MeshBasicMaterial({ color: 0xfff0aa }));
+                const barrelEnd = new THREE.Vector3();
+                this.weapon.children[1].getWorldPosition(barrelEnd);
+                flashLight.position.copy(barrelEnd);
+                flashMesh.position.copy(barrelEnd);
+
+                this.sceneManager.scene.add(flashLight);
+                this.sceneManager.scene.add(flashMesh);
+                setTimeout(() => {
+                    this.sceneManager.scene.remove(flashLight);
+                    this.sceneManager.scene.remove(flashMesh);
+                }, 40);
+            }
+
+            reload() {
+                if (this.isReloading || this.magazines <= 0 || this.ammo === this.maxAmmo) return;
+                this.isReloading = true;
+                this.reloadTimer = this.reloadDuration;
+                sfx.playReload();
+                this.weapon.position.y = -0.28;
+                this.weapon.rotation.z = -0.25;
+            }
+
+            completeReload() {
+                this.isReloading = false;
+                this.magazines--; this.ammo = this.maxAmmo;
+                this.game.ui.updateAmmo(this.ammo, this.magazines);
+                this.weapon.position.set(0.18, -0.16, -0.35);
+                this.weapon.rotation.set(0, -Math.PI, 0);
+            }
+
+            update(deltaTime) {
+                if (this.recoilKick > 0) this.recoilKick -= deltaTime * 0.12;
+                if (this.shootCooldown > 0) this.shootCooldown -= deltaTime;
+
+                this.weapon.position.z = THREE.MathUtils.lerp(this.weapon.position.z, -0.35, 12 * deltaTime);
+
+                if (this.inputManager.mouseClicked) this.shoot();
+
+                if (this.isReloading) {
+                    this.reloadTimer -= deltaTime;
+                    if (this.reloadTimer <= 0) this.completeReload();
+                    return;
+                }
+
+                if (this.inputManager.reloadRequested) this.reload();
+
+                this.cameraController.update(
+                    this.inputManager.mouseDeltaX,
+                    this.inputManager.mouseDeltaY,
+                    this.recoilKick
+                );
+
+                // E키 인터랙션 탐지 검사
+                let nearestObject = null;
+                let minDist = 4.2;
+
+                this.game.interactables.forEach(obj => {
+                    const d = this.position.distanceTo(new THREE.Vector3(obj.x, this.position.y, obj.z));
+                    if (d < minDist) {
+                        minDist = d;
+                        nearestObject = obj;
+                    }
+                });
+
+                const prompt = document.getElementById('interaction-prompt');
+                if (nearestObject) {
+                    prompt.innerText = `[E] ${nearestObject.name} ${nearestObject.isOpen ? '닫기' : '열기'}`;
+                    prompt.classList.remove('hidden');
+
+                    if (this.inputManager.keys.interact) {
+                        nearestObject.toggle();
+                        this.inputManager.keys.interact = false;
+                    }
+                } else {
+                    prompt.classList.add('hidden');
+                }
+
+                // 3D 공간 연산 방향 산출
+                const moveSpeed = this.inputManager.keys.run ? 7.6 : 4.2;
+                const moveDir = new THREE.Vector3();
+                if (this.inputManager.keys.forward) moveDir.z -= 1;
+                if (this.inputManager.keys.backward) moveDir.z += 1;
+                if (this.inputManager.keys.left) moveDir.x -= 1;
+                if (this.inputManager.keys.right) moveDir.x += 1;
+                moveDir.normalize();
+
+                const actualMove = moveDir.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), this.cameraController.yaw);
+                const nextPos = this.position.clone().addScaledVector(actualMove, moveSpeed * deltaTime);
+
+                // --- 충돌 판정 (AABB Slide) ---
+                for (let wall of this.game.collidableBounds) {
+                    if (wall.w === 0 && wall.d === 0) continue;
+
+                    const minX = wall.x - wall.w / 2 - this.radius;
+                    const maxX = wall.x + wall.w / 2 + this.radius;
+                    const minZ = wall.z - wall.d / 2 - this.radius;
+                    const maxZ = wall.z + wall.d / 2 + this.radius;
+
+                    const playerYMin = nextPos.y - this.eyeHeight;
+                    const playerYMax = nextPos.y;
+                    const wallYMin = wall.y;
+                    const wallYMax = wall.y + wall.h;
+
+                    const isOverlapY = (playerYMin < wallYMax) && (playerYMax > wallYMin);
+
+                    if (isOverlapY && nextPos.x > minX && nextPos.x < maxX && nextPos.z > minZ && nextPos.z < maxZ) {
+                        const diffX = Math.abs(this.position.x - wall.x) - (wall.w / 2 + this.radius);
+                        const diffZ = Math.abs(this.position.z - wall.z) - (wall.d / 2 + this.radius);
+                        if (diffX > diffZ) nextPos.x = this.position.x;
+                        else nextPos.z = this.position.z;
+                    }
+                }
+
+                // 월드 펜스 영역 제한
+                const bound = 28.5;
+                nextPos.x = Math.max(-bound, Math.min(bound, nextPos.x));
+                nextPos.z = Math.max(-bound, Math.min(bound, nextPos.z));
+
+                // --- 하방 레이캐스트 접지 물리 ---
+                const rayOrigin = new THREE.Vector3(nextPos.x, this.position.y + 0.8, nextPos.z);
+                const downRay = new THREE.Raycaster(rayOrigin, new THREE.Vector3(0, -1, 0));
+                const grounds = downRay.intersectObjects([...this.game.walkableMeshes], true);
+
+                let groundDetectedY = 0.0;
+                let onGround = false;
+
+                if (grounds.length > 0) {
+                    groundDetectedY = grounds[0].point.y;
+                    const currentFeetY = this.position.y - this.eyeHeight;
+                    if (groundDetectedY <= currentFeetY + 1.2) {
+                        onGround = true;
+                        this.targetFloorY = groundDetectedY;
+                    }
+                }
+
+                if (this.isGrounded && this.inputManager.keys.jump) {
+                    this.velocity.y = this.jumpForce;
+                    this.isGrounded = false;
+                    onGround = false;
+                }
+
+                if (this.velocity.y > 0) {
+                    onGround = false;
+                }
+
+                if (onGround) {
+                    const targetCameraY = this.targetFloorY + this.eyeHeight;
+                    if (Math.abs(this.position.y - targetCameraY) < 1.5) {
+                        nextPos.y = THREE.MathUtils.lerp(this.position.y, targetCameraY, 20 * deltaTime);
+                    } else {
+                        nextPos.y = targetCameraY;
+                    }
+                    this.velocity.y = 0;
+                    this.isGrounded = true;
+                } else {
+                    this.velocity.y -= this.gravity * deltaTime;
+                    nextPos.y += this.velocity.y * deltaTime;
+                    this.isGrounded = false;
+
+                    if (grounds.length > 0) {
+                        const feetY = nextPos.y - this.eyeHeight;
+                        if (feetY <= groundDetectedY + 0.05 && this.velocity.y <= 0) {
+                            nextPos.y = groundDetectedY + this.eyeHeight;
+                            this.velocity.y = 0;
+                            this.isGrounded = true;
+                        }
+                    }
+
+                    if (nextPos.y < 1.6) {
+                        nextPos.y = 1.6;
+                        this.velocity.y = 0;
+                        this.isGrounded = true;
+                    }
+                }
+
+                this.position.copy(nextPos);
+                this.sceneManager.camera.position.copy(this.position);
+
+                const currentFloorNum = Math.max(1, Math.floor(this.position.y / FLOOR_HEIGHT) + 1);
+                document.getElementById('location-display').innerText = `현재 위치: ${currentFloorNum}F 내부`;
+            }
+        }
+
+        // --- 훈련용 지능형 적 인공지능 (Enemy) ---
+        class Enemy {
+            constructor(game, id, spawnPos, allowedFloors) {
+                this.game = game;
+                this.id = id;
+                this.isDead = false;
+                this.health = 1;
+
+                this.allowedFloors = allowedFloors;
+                this.position = new THREE.Vector3(spawnPos.x, (spawnPos.floor - 1) * FLOOR_HEIGHT, spawnPos.z);
+                this.currentFloor = spawnPos.floor;
+
+                this.state = 'idle';
+                this.stateTimer = Math.random() * 3 + 1;
+                this.speed = 1.9;
+
+                this.targetPos = this.position.clone();
+                this.pathQueue = []; // 층간 계단 전술이동용 목적지 큐 리스트
+                
+                this.createHumanoid();
+            }
+
+            createHumanoid() {
+                this.mesh = new THREE.Group();
+
+                const vestMat = new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.7 });
+                const pantsMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.9 });
+                const skinMat = new THREE.MeshStandardMaterial({ color: 0xfed7aa });
+
+                // 몸통
+                const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.2, 1.0, 8), vestMat);
+                torso.position.y = 0.9;
+                torso.castShadow = true;
+                this.mesh.add(torso);
+
+                // 머리
+                const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8), skinMat);
+                head.position.y = 1.5;
+                this.mesh.add(head);
+
+                // 다리
+                const legL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.5, 0.1), pantsMat); legL.position.set(-0.1, 0.25, 0);
+                const legR = legL.clone(); legR.position.x = 0.1;
+                this.mesh.add(legL); this.mesh.add(legR);
+
+                // 팔
+                const armL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.45, 0.08), vestMat); armL.position.set(-0.28, 0.95, 0);
+                const armR = armL.clone(); armR.position.x = 0.28;
+                this.mesh.add(armL); this.mesh.add(armR);
+
+                // 가슴 과녁 불스아이(Target Ring) 배치
+                const targetRing = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.15, 0.15, 0.02, 16),
+                    new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.5 })
+                );
+                targetRing.rotation.x = Math.PI / 2;
+                targetRing.position.set(0, 0.9, 0.21);
+                this.mesh.add(targetRing);
+
+                const targetCenter = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.06, 0.06, 0.03, 16),
+                    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 })
+                );
+                targetCenter.rotation.x = Math.PI / 2;
+                targetCenter.position.set(0, 0.9, 0.22);
+                this.mesh.add(targetCenter);
+
+                this.mesh.position.copy(this.position);
+                this.game.sceneManager.scene.add(this.mesh);
+            }
+
+            takeDamage() {
+                if (this.isDead) return;
+                this.health--;
+                if (this.health <= 0) this.eliminate();
+            }
+
+            eliminate() {
+                this.isDead = true;
+                this.game.handleEnemyDefeat();
+
+                let elapsed = 0; const duration = 0.4;
+                const origRotX = this.mesh.rotation.x;
+
+                const anim = () => {
+                    elapsed += 0.04;
+                    const ratio = Math.min(elapsed / duration, 1.0);
+                    this.mesh.rotation.x = THREE.MathUtils.lerp(origRotX, -Math.PI / 2, ratio);
+                    this.mesh.position.y = THREE.MathUtils.lerp((this.currentFloor - 1) * FLOOR_HEIGHT, (this.currentFloor - 1) * FLOOR_HEIGHT - 0.2, ratio);
+
+                    if (ratio < 1.0) {
+                        setTimeout(anim, 30);
+                    } else {
+                        setTimeout(() => this.game.sceneManager.scene.remove(this.mesh), 1500);
+                    }
+                };
+                anim();
+            }
+
+            // 계단을 통해 플레이어로부터 더 먼 위/아래층으로 도망치는 지능 기동
+            escapeFromPlayer() {
+                this.state = 'escape';
+                this.speed = 4.6;
+                this.stateTimer = 6.0; // 도주 상태 유지 시간 증폭
+
+                // 모든 층의 웨이포인트 수색
+                const availablePoints = this.game.waypoints.filter(pt => this.allowedFloors.includes(pt.floor));
+                if (availablePoints.length > 0) {
+                    let bestWaypoint = availablePoints[0];
+                    let maxDist = 0;
+
+                    // 플레이어와 기하학적 거리가 가장 먼 극단적 노출 포인트 선정
+                    availablePoints.forEach(pt => {
+                        const testPos = new THREE.Vector3(pt.x, (pt.floor - 1) * FLOOR_HEIGHT, pt.z);
+                        const d = testPos.distanceTo(this.game.player.position);
+                        if (d > maxDist) { maxDist = d; bestWaypoint = pt; }
+                    });
+
+                    // 층간 정밀 계단 비행 노드 생성 등록
+                    const targetVec = new THREE.Vector3(bestWaypoint.x, (bestWaypoint.floor - 1) * FLOOR_HEIGHT, bestWaypoint.z);
+                    this.pathQueue = this.game.getFloorPath(this.currentFloor, bestWaypoint.floor, targetVec);
+                    
+                    if (this.pathQueue.length > 0) {
+                        this.targetPos = this.pathQueue.shift();
+                        this.currentFloor = Math.max(1, Math.floor(this.targetPos.y / FLOOR_HEIGHT) + 1);
+                    }
+                }
+            }
+
+            update(deltaTime) {
+                if (this.isDead) return;
+
+                const distToPlayer = this.position.distanceTo(this.game.player.position);
+
+                // 긴밀 소탕 반경(9.5m) 안으로 들어오면 계단을 타며 유기적 도망 개시
+                if (this.state !== 'escape' && distToPlayer < 9.5) {
+                    this.escapeFromPlayer();
+                }
+
+                this.stateTimer -= deltaTime;
+
+                if (this.state === 'idle') {
+                    if (this.stateTimer <= 0) {
+                        this.state = 'walk'; 
+                        this.speed = 1.9;
+                        this.stateTimer = Math.random() * 6 + 4;
+
+                        // 무작위 순찰 경로 및 전 층 이동 보장 기법
+                        const currentAllowedPts = this.game.waypoints.filter(pt => this.allowedFloors.includes(pt.floor));
+                        if (currentAllowedPts.length > 0) {
+                            const randPt = currentAllowedPts[Math.floor(Math.random() * currentAllowedPts.length)];
+                            const targetVec = new THREE.Vector3(randPt.x, (randPt.floor - 1) * FLOOR_HEIGHT, randPt.z);
+                            
+                            this.pathQueue = this.game.getFloorPath(this.currentFloor, randPt.floor, targetVec);
+                            if (this.pathQueue.length > 0) {
+                                this.targetPos = this.pathQueue.shift();
+                                this.currentFloor = Math.max(1, Math.floor(this.targetPos.y / FLOOR_HEIGHT) + 1);
+                            }
+                        }
+                    }
+                } else {
+                    const direction = new THREE.Vector3().subVectors(this.targetPos, this.position);
+                    const len = direction.length();
+
+                    // 경로 분기점에 근접했을 때 다음 길목 추출
+                    if (len < 0.6) {
+                        if (this.pathQueue.length > 0) {
+                            this.targetPos = this.pathQueue.shift();
+                            this.currentFloor = Math.max(1, Math.floor(this.targetPos.y / FLOOR_HEIGHT) + 1);
+                        } else {
+                            this.state = 'idle'; 
+                            this.stateTimer = Math.random() * 3 + 1;
+                        }
+                    } else {
+                        direction.normalize();
+                        this.mesh.rotation.y = Math.atan2(direction.x, direction.z);
+
+                        const step = direction.multiplyScalar(this.speed * deltaTime);
+                        this.position.add(step);
+                        this.mesh.position.copy(this.position);
+                    }
+                }
+            }
+        }
+
+        // --- 유저 인터페이스 (UI) ---
+        class UI {
+            constructor(game) { this.game = game; }
+            updateTimer(timeRemaining) {
+                const mins = Math.floor(timeRemaining / 60);
+                const secs = timeRemaining % 60;
+                document.getElementById('timer-display').innerText =
+                    `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            }
+            updateKills(eliminated, total) {
+                document.getElementById('eliminated-display').innerText = eliminated;
+                document.getElementById('total-enemies-display').innerText = total;
+            }
+            updateAmmo(ammo, mags) {
+                document.getElementById('current-ammo').innerText = ammo;
+                document.getElementById('mags-left').innerText = mags;
+            }
+            updateAccuracy(fired, hit) {
+                const acc = fired > 0 ? Math.round((hit / fired) * 100) : 100;
+                document.getElementById('accuracy-display').innerText = `${acc}%`;
+                document.getElementById('accuracy-bar').style.width = `${acc}%`;
+            }
+            triggerHitMarker() {
+                const marker = document.getElementById('hit-marker');
+                marker.style.display = 'block';
+                setTimeout(() => marker.style.display = 'none', 100);
+            }
+            showLobbyOverlay(show, resume = false) {
+                const overlay = document.getElementById('screen-overlay');
+                const btn = document.getElementById('start-btn');
+                if (show) { overlay.style.display = 'flex'; btn.innerText = resume ? "훈련 계속하기 (RESUME)" : "시뮬레이터 시작 (CLICK TO START)"; }
+                else { overlay.style.display = 'none'; }
+            }
+            showResultPanel(isSuccess, stats) {
+                const panel = document.getElementById('result-overlay');
+                const title = document.getElementById('result-title');
+                const nextBtn = document.getElementById('res-next-btn');
+
+                if (isSuccess) {
+                    title.innerText = "MISSION SUCCESS";
+                    title.className = "text-3xl font-black tracking-wide text-emerald-600 uppercase";
+                    nextBtn.style.display = 'block';
+                } else {
+                    title.innerText = "MISSION FAILED (TIMEOUT)";
+                    title.className = "text-3xl font-black tracking-wide text-red-500 uppercase";
+                    nextBtn.style.display = 'none';
+                }
+
+                document.getElementById('res-stage-title').innerText = `CAMPUS STAGE ${stats.stage}`;
+                document.getElementById('res-kills').innerText = `${stats.kills} / ${stats.totalEnemies}`;
+                document.getElementById('res-accuracy').innerText = `${stats.accuracy}%`;
+                document.getElementById('res-time').innerText = `${stats.timeRemaining}초 (+${stats.timeBonus} PTS)`;
+                document.getElementById('res-score').innerText = `${stats.score} PTS`;
+
+                panel.classList.remove('hidden');
+            }
+            hideResultPanel() { document.getElementById('result-overlay').classList.add('hidden'); }
+        }
+
+        // --- 게임 루프 매니저 (GameLoop) ---
+        class GameLoop {
+            constructor(update, render) {
+                this.update = update; this.render = render;
+                this.clock = new THREE.Clock(); this.isActive = false;
+            }
+            start() { this.isActive = true; this.clock.getDelta(); this.loop(); }
+            stop() { this.isActive = false; }
+            loop() {
+                if (!this.isActive) return;
+                requestAnimationFrame(() => this.loop());
+                const delta = Math.min(this.clock.getDelta(), 0.1);
+                this.update(delta); this.render();
+            }
+        }
+
+        // --- 메인 게임 통합 컨트롤러 (Game) ---
+        class Game {
+            constructor() {
+                this.currentStage = 1;
+                this.isPaused = true;
+                this.isGameOver = false;
+
+                this.enemies = [];
+                this.collidableMeshes = [];
+                this.collidableBounds = [];
+                this.walkableMeshes = [];
+                this.interactables = [];
+
+                this.eliminatedCount = 0;
+                this.timeRemaining = 120;
+                this.timerInterval = null;
+
+                this.initWaypoints();
+                this.initManagers();
+                this.buildProceduralCampus();
+                this.loadStageState(1);
+
+                this.gameLoop.start();
+            }
+
+            initWaypoints() {
+                this.waypoints = [
+                    // 1층 방별 안전 도주 순찰점
+                    { x: -20, z: -15, floor: 1 }, { x: 21, z: -15, floor: 1 },
+                    { x: -20, z: 15, floor: 1 }, { x: 21, z: 15, floor: 1 },
+                    { x: 0, z: 8, floor: 1 }, { x: 0, z: -12, floor: 1 },
+                    // 2층 교실/과학실/컴퓨터실 내부 정밀 유도 노드
+                    { x: -18, z: -15, floor: 2 },
+                    { x: 18, z: -15, floor: 2 },
+                    { x: -18, z: 14, floor: 2 },
+                    { x: 18, z: 14, floor: 2 },
+                    // 3층 도서관, 자습실, 다목적실 정밀 유도 노드
+                    { x: -20, z: -10, floor: 3 },
+                    { x: 18, z: -12, floor: 3 },
+                    { x: 15, z: 8, floor: 3 },
+                    // 4층 리모델링 구역 정밀 유도 웨이포인트
+                    { x: -18, z: -14, floor: 4 }, // 교장실 내부
+                    { x: 18, z: -14, floor: 4 },  // 시청각실 내부
+                    { x: -18, z: 14, floor: 4 },  // 음악 동아리실 내부
+                    { x: 18, z: 14, floor: 4 },   // 미술 동아리실 내부
+                    { x: 0, z: -10, floor: 4 },   // 4층 복도 북단
+                    { x: 0, z: 10, floor: 4 }     // 4층 복도 남단
+                ];
+            }
+
+            // 적 AI의 층간 연결 계단 기동 경로를 생성해주는 전술 알고리즘
+            getFloorPath(startFloor, endFloor, finalPos) {
+                const path = [];
+                let current = startFloor;
+                while (current !== endFloor) {
+                    if (current < endFloor) {
+                        // 계단을 타고 위층으로 올라가기
+                        if (current === 1) {
+                            path.push(new THREE.Vector3(-2, 0, 5.5));
+                            path.push(new THREE.Vector3(-2, 6, -1.5));
+                            current = 2;
+                        } else if (current === 2) {
+                            path.push(new THREE.Vector3(2, 6, 1.5));
+                            path.push(new THREE.Vector3(2, 12, -5.5));
+                            current = 3;
+                        } else if (current === 3) {
+                            path.push(new THREE.Vector3(-2, 12, 5.5));
+                            path.push(new THREE.Vector3(-2, 18, -1.5));
+                            current = 4;
+                        }
+                    } else {
+                        // 계단을 타고 아래층으로 내려가기
+                        if (current === 4) {
+                            path.push(new THREE.Vector3(-2, 18, -1.5));
+                            path.push(new THREE.Vector3(-2, 12, 5.5));
+                            current = 3;
+                        } else if (current === 3) {
+                            path.push(new THREE.Vector3(2, 12, -5.5));
+                            path.push(new THREE.Vector3(2, 6, 1.5));
+                            current = 2;
+                        } else if (current === 2) {
+                            path.push(new THREE.Vector3(-2, 6, -1.5));
+                            path.push(new THREE.Vector3(-2, 0, 5.5));
+                            current = 1;
+                        }
+                    }
+                }
+                path.push(finalPos);
+                return path;
+            }
+
+            initManagers() {
+                this.sceneManager = new SceneManager(document.getElementById('canvas-container'));
+                this.inputManager = new InputManager();
+                this.cameraController = new CameraController(this.sceneManager.camera);
+                this.ui = new UI(this);
+                this.gameLoop = new GameLoop(
+                    (delta) => this.update(delta),
+                    () => this.sceneManager.render()
+                );
+                this.player = new Player(this, this.sceneManager, this.inputManager, this.cameraController);
+            }
+
+            buildProceduralCampus() {
+                // 초록빛 운동장
+                const grassGeo = new THREE.PlaneGeometry(350, 350);
+                const grassMat = new THREE.MeshStandardMaterial({ color: 0x55aa44, roughness: 0.95 });
+                const grass = new THREE.Mesh(grassGeo, grassMat);
+                grass.rotation.x = -Math.PI / 2;
+                grass.receiveShadow = true;
+                this.sceneManager.scene.add(grass);
+                this.walkableMeshes.push(grass);
+
+                // 4층 구조의 건물 층계 바닥 & 천장 빌딩화
+                const floorGeo = new THREE.BoxGeometry(60, 0.2, 40);
+                const floorMat = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.65 });
+
+                for (let f = 0; f < 4; f++) {
+                    const yOffset = f * FLOOR_HEIGHT;
+                    const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+                    floorMesh.position.set(0, yOffset, 0);
+                    floorMesh.receiveShadow = true;
+                    this.sceneManager.scene.add(floorMesh);
+                    this.walkableMeshes.push(floorMesh);
+
+                    if (f < 3) {
+                        const ceilMesh = new THREE.Mesh(floorGeo, new THREE.MeshStandardMaterial({ color: 0xe2e8f0 }));
+                        ceilMesh.position.set(0, yOffset + 5.9, 0);
+                        this.sceneManager.scene.add(ceilMesh);
+                    }
+                }
+
+                // 옥상(4층의 천장 부분, Y=24) 보호 펜스벽 설치
+                const roofFenceGeo = new THREE.BoxGeometry(60, 1.4, 0.4);
+                const fenceL = new THREE.Mesh(roofFenceGeo, new THREE.MeshStandardMaterial({ color: 0xcbd5e1 }));
+                fenceL.position.set(0, 18 + 5.9 + 0.7, -20);
+                this.sceneManager.scene.add(fenceL);
+                this.collidableMeshes.push(fenceL);
+                this.collidableBounds.push({ x: 0, z: -20, w: 60, h: 1.4, d: 0.4, y: 24 });
+
+                // 층간 유기적 통행 계단 및 가상 슬로프 빌드
+                STAIRS_LAYOUT.forEach(st => {
+                    const stepsCount = 18;
+                    const stepW = st.w;
+                    const stepH = 0.2;
+                    const stepD = st.d / stepsCount;
+
+                    for (let s = 0; s < stepsCount; s++) {
+                        const progress = s / stepsCount;
+                        const stairBox = new THREE.Mesh(
+                            new THREE.BoxGeometry(stepW, stepH, stepD + 0.2),
+                            new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.7 })
+                        );
+                        const stairZ = st.z + (st.d / 2) - (s * stepD) - (stepD / 2);
+                        const stairY = st.yStart + (progress * FLOOR_HEIGHT) + (stepH / 2);
+
+                        stairBox.position.set(st.x, stairY, stairZ);
+                        this.sceneManager.scene.add(stairBox);
+                    }
+
+                    const rampGeo = new THREE.BoxGeometry(st.w, 0.1, Math.sqrt(st.d * st.d + FLOOR_HEIGHT * FLOOR_HEIGHT));
+                    const ramp = new THREE.Mesh(rampGeo, new THREE.MeshBasicMaterial({ visible: false }));
+                    ramp.rotation.x = Math.atan2(FLOOR_HEIGHT, st.d);
+                    ramp.position.set(st.x, st.yStart + (FLOOR_HEIGHT / 2), st.z);
+                    this.sceneManager.scene.add(ramp);
+                    this.walkableMeshes.push(ramp);
+                });
+
+                // 1층 방 구조체 생성
+                FIRST_FLOOR_STRUCTURES.forEach(st => {
+                    this.createStructuralMesh(st);
+                });
+
+                // 2~4층 기본 구조체 배치 적용
+                UPPER_FLOOR_STRUCTURES.forEach(st => {
+                    this.createStructuralMesh(st);
+                });
+
+                // --- 각 구역 인터랙티브 문(Sliding Doors) 배치 ---
+                // 1) 로비 대형 유리 현관문
+                this.interactables.push(new InteractableObject(
+                    this, 'front_door', 'door', '현관 정문 (Lobby)',
+                    0, 0, 19.8, 6.0, 3.2, 0.18, 0x38bdf8, 'x', true
+                ));
+
+                // 2) 1층 교내 전용 룸 개폐 도어들 (행정실, 교무실, 보건실, 급식실)
+                this.interactables.push(new InteractableObject(
+                    this, 'admin_door', 'door', '행정실 문',
+                    -14.5, 0, -11, 2.2, 2.6, 0.15, 0xef4444, 'x', false
+                ));
+                this.interactables.push(new InteractableObject(
+                    this, 'teachers_door', 'door', '교무실 문',
+                    14.5, 0, -11, 2.2, 2.6, 0.15, 0x3b82f6, 'x', false
+                ));
+                this.interactables.push(new InteractableObject(
+                    this, 'nurse_door', 'door', '보건실 문',
+                    -14.5, 0, 11, 2.2, 2.6, 0.15, 0x10b981, 'x', false
+                ));
+
+                // 3) 2층 교실, 실험실, 컴퓨터실 슬라이딩 도어
+                this.interactables.push(new InteractableObject(
+                    this, 'class2a_door', 'door', '2A 교실문',
+                    -8.5, 6, -11, 2.2, 2.6, 0.15, 0xeab308, 'x', false
+                ));
+                this.interactables.push(new InteractableObject(
+                    this, 'class2b_door', 'door', '2B 교실문',
+                    8.5, 6, -11, 2.2, 2.6, 0.15, 0xeab308, 'x', false
+                ));
+                this.interactables.push(new InteractableObject(
+                    this, 'scilab_door', 'door', '과학실 입구문',
+                    -8.5, 6, 11, 2.2, 2.6, 0.15, 0x06b6d4, 'x', false
+                ));
+                this.interactables.push(new InteractableObject(
+                    this, 'pc_door', 'door', '컴퓨터실 입구문',
+                    8.5, 6, 11, 2.2, 2.6, 0.15, 0x6366f1, 'x', false
+                ));
+
+                // 4) 3층 도서관, 자습실, 다목적실 슬라이딩 도어
+                this.interactables.push(new InteractableObject(
+                    this, 'library_door', 'door', '도서관 입구문',
+                    -10, 12, 1.25, 0.15, 2.6, 2.5, 0x14b8a6, 'z', false
+                ));
+                this.interactables.push(new InteractableObject(
+                    this, 'study_door', 'door', '자습 독서실문',
+                    10, 12, -1.9, 0.15, 2.6, 2.2, 0xd946ef, 'z', false
+                ));
+                this.interactables.push(new InteractableObject(
+                    this, 'multi_door', 'door', '다목적 강당문',
+                    10, 12, 3, 0.15, 2.6, 2.2, 0xf43f5e, 'z', false
+                ));
+
+                // 5) 4층 교장실, 시청각실, 동아리실 전용 슬라이딩 도어
+                this.interactables.push(new InteractableObject(
+                    this, 'principal_door', 'door', '교장실 입구문',
+                    -8.5, 18, -6, 2.2, 2.6, 0.15, 0xfbcfe8, 'x', false
+                ));
+                this.interactables.push(new InteractableObject(
+                    this, 'av_door', 'door', '시청각실 입구문',
+                    8.5, 18, -6, 2.2, 2.6, 0.15, 0xe2e8f0, 'x', false
+                ));
+                this.interactables.push(new InteractableObject(
+                    this, 'band_door', 'door', '음악동아리 입구문',
+                    -8.5, 18, 8, 2.2, 2.6, 0.15, 0xa5f3fc, 'x', false
+                ));
+                this.interactables.push(new InteractableObject(
+                    this, 'art_door', 'door', '미술동아리 입구문',
+                    8.5, 18, 8, 2.2, 2.6, 0.15, 0xfef08a, 'x', false
+                ));
+
+                // --- 각 층 전술 개폐형 수직 창문 배치 (4층 건물이므로 f < 4로 제한) ---
+                for (let f = 0; f < 4; f++) {
+                    const y = f * FLOOR_HEIGHT + 1.2;
+                    // 남측 창문 쌍
+                    this.interactables.push(new InteractableObject(
+                        this, `win_south_a_${f}`, 'window', `${f+1}층 남측 창문 A`,
+                        -16, y, 19.8, 3.2, 1.8, 0.12, 0xbae6fd, 'y', false
+                    ));
+                    this.interactables.push(new InteractableObject(
+                        this, `win_south_b_${f}`, 'window', `${f+1}층 남측 창문 B`,
+                        16, y, 19.8, 3.2, 1.8, 0.12, 0xbae6fd, 'y', false
+                    ));
+                    // 북측 창문 쌍
+                    this.interactables.push(new InteractableObject(
+                        this, `win_north_a_${f}`, 'window', `${f+1}층 북측 창문 A`,
+                        -16, y, -19.8, 3.2, 1.8, 0.12, 0xbae6fd, 'y', false
+                    ));
+                    this.interactables.push(new InteractableObject(
+                        this, `win_north_b_${f}`, 'window', `${f+1}층 북측 창문 B`,
+                        16, y, -19.8, 3.2, 1.8, 0.12, 0xbae6fd, 'y', false
+                    ));
+                }
+
+                // 3층 도서관 관측 창문
+                this.interactables.push(new InteractableObject(
+                    this, 'library_win', 'window', '도서관 복도 관측창',
+                    -10, 12 + 1.2, 3.5, 0.12, 1.8, 2.0, 0xbae6fd, 'y', false
+                ));
+            }
+
+            createStructuralMesh(st) {
+                const geo = new THREE.BoxGeometry(st.w, st.h, st.d);
+                const mat = new THREE.MeshStandardMaterial({
+                    color: st.color,
+                    roughness: st.isProp ? 0.45 : 0.85,
+                    metalness: st.isProp ? 0.35 : 0.05
+                });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(st.x, st.y + st.h / 2, st.z);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+
+                this.sceneManager.scene.add(mesh);
+                this.collidableMeshes.push(mesh);
+                this.collidableBounds.push(st);
+            }
+
+            loadStageState(stageNum) {
+                this.currentStage = stageNum;
+                this.rules = STAGE_RULES[stageNum];
+
+                this.isGameOver = false;
+                this.eliminatedCount = 0;
+                this.timeRemaining = this.rules.timeLimit;
+
+                this.enemies.forEach(e => {
+                    if (e.mesh) this.sceneManager.scene.remove(e.mesh);
+                });
+                this.enemies = [];
+
+                // 스테이지 진입 시 모든 인터랙션 가구들 상태 안전 리셋
+                this.interactables.forEach(obj => {
+                    obj.isOpen = false;
+                    obj.currentProgress = 0.0;
+                    obj.colBound.w = obj.w;
+                    obj.colBound.d = obj.d;
+                });
+
+                this.spawnStageTargets();
+
+                this.player.position.set(0, 1.6, 14);
+                this.player.velocity.set(0, 0, 0);
+                this.player.ammo = this.player.maxAmmo;
+                this.player.magazines = 5;
+                this.player.shotsFired = 0;
+                this.player.shotsHit = 0;
+
+                document.getElementById('stage-display').innerText = `${this.rules.title}: ${this.rules.desc}`;
+                document.getElementById('floor-access-display').innerText = `허가 구역: 전층 오픈 (1~4F)`;
+                this.ui.updateKills(0, this.rules.enemiesCount);
+                this.ui.updateAmmo(30, 5);
+                this.ui.updateAccuracy(0, 0);
+                this.ui.updateTimer(this.timeRemaining);
+
+                this.startMissionTimer();
+                this.ui.setupUIHandlers();
+            }
+
+            spawnStageTargets() {
+                // 4층 건물 전술 기동을 위해 모든 노드를 대상군으로 선정
+                const availableNodes = [...this.waypoints];
+
+                for (let i = 0; i < this.rules.enemiesCount; i++) {
+                    if (availableNodes.length === 0) this.initWaypoints();
+                    const idx = Math.floor(Math.random() * availableNodes.length);
+                    const spawnNode = availableNodes.splice(idx, 1)[0];
+
+                    const enemy = new Enemy(this, i, spawnNode, this.rules.allowedFloors);
+                    this.enemies.push(enemy);
+                }
+            }
+
+            startMissionTimer() {
+                if (this.timerInterval) clearInterval(this.timerInterval);
+                this.timerInterval = setInterval(() => {
+                    if (this.isPaused || this.isGameOver) return;
+                    this.timeRemaining--;
+                    this.ui.updateTimer(this.timeRemaining);
+
+                    if (this.timeRemaining <= 0) {
+                        this.endGame(false);
+                    }
+                }, 1000);
+            }
+
+            handleEnemyDefeat() {
+                this.eliminatedCount++;
+                this.ui.updateKills(this.eliminatedCount, this.rules.enemiesCount);
+
+                if (this.eliminatedCount >= this.rules.enemiesCount) {
+                    this.endGame(true);
+                }
+            }
+
+            createImpact(pos, normal) {
+                const count = 5;
+                const geom = new THREE.BufferGeometry();
+                const posArr = [];
+                const velocities = [];
+
+                for (let i = 0; i < count; i++) {
+                    posArr.push(pos.x, pos.y, pos.z);
+                    velocities.push(
+                        (normal.x + (Math.random() - 0.5) * 0.5) * 3,
+                        (normal.y + (Math.random() - 0.5) * 0.5) * 3,
+                        (normal.z + (Math.random() - 0.5) * 0.5) * 3
+                    );
+                }
+
+                geom.setAttribute('position', new THREE.Float32BufferAttribute(posArr, 3));
+                const mat = new THREE.PointsMaterial({ color: 0xef4444, size: 0.08, transparent: true, opacity: 1.0 });
+                const points = new THREE.Points(geom, mat);
+                this.sceneManager.scene.add(points);
+
+                let life = 0.25;
+                const step = () => {
+                    life -= 0.025;
+                    const arr = points.geometry.attributes.position.array;
+                    for (let i = 0; i < count; i++) {
+                        arr[i*3] += velocities[i*3] * 0.016;
+                        arr[i*3+1] += velocities[i*3+1] * 0.016;
+                        arr[i*3+2] += velocities[i*3+2] * 0.016;
+                    }
+                    points.geometry.attributes.position.needsUpdate = true;
+                    mat.opacity = life / 0.25;
+
+                    if (life > 0) requestAnimationFrame(step);
+                    else this.sceneManager.scene.remove(points);
+                };
+                step();
+            }
+
+            update(deltaTime) {
+                if (this.isPaused || this.isGameOver) return;
+
+                this.player.update(deltaTime);
+                
+                this.interactables.forEach(obj => obj.update(deltaTime));
+
+                this.inputManager.resetDeltas();
+                this.enemies.forEach(e => e.update(deltaTime));
+            }
+
+            endGame(isSuccess) {
+                this.isGameOver = true;
+                this.isPaused = true;
+                clearInterval(this.timerInterval);
+
+                document.exitPointerLock();
+
+                const acc = this.player.shotsFired > 0 ? Math.round((this.player.shotsHit / this.player.shotsFired) * 100) : 0;
+                const timeBonus = isSuccess ? this.timeRemaining * 10 : 0;
+                const killScore = this.eliminatedCount * 250;
+                const accScore = acc * 10;
+                const totalScore = killScore + accScore + timeBonus;
+
+                this.ui.showResultPanel(isSuccess, {
+                    stage: this.currentStage,
+                    kills: this.eliminatedCount,
+                    totalEnemies: this.rules.enemiesCount,
+                    accuracy: acc,
+                    timeRemaining: this.timeRemaining,
+                    timeBonus: timeBonus,
+                    score: totalScore
+                });
+            }
+        }
+
+        // --- UI 버튼 인터랙션 등록 핸들러 ---
+        UI.prototype.setupUIHandlers = function() {
+            const startBtn = document.getElementById('start-btn');
+            startBtn.onclick = () => {
+                this.game.sceneManager.renderer.domElement.requestPointerLock();
+            };
+
+            document.addEventListener('pointerlockchange', () => {
+                if (document.pointerLockElement === this.game.sceneManager.renderer.domElement) {
+                    this.game.isPaused = false;
+                    this.showLobbyOverlay(false);
+                } else {
+                    this.game.isPaused = true;
+                    if (!this.game.isGameOver) {
+                        this.showLobbyOverlay(true, true);
+                    }
+                }
+            });
+
+            const restartBtn = document.getElementById('res-restart-btn');
+            const nextBtn = document.getElementById('res-next-btn');
+
+            restartBtn.onclick = () => {
+                this.hideResultPanel();
+                this.game.loadStageState(1);
+                this.game.sceneManager.renderer.domElement.requestPointerLock();
+            };
+
+            nextBtn.onclick = () => {
+                this.hideResultPanel();
+                const nextS = this.game.currentStage < 3 ? this.game.currentStage + 1 : 1;
+                this.game.loadStageState(nextS);
+                this.game.sceneManager.renderer.domElement.requestPointerLock();
+            };
+        };
+
+        // --- 시스템 부트스트랩 ---
+        window.onload = () => {
+            const game = new Game();
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,1846 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Card Wizard Duel - Canvas Card Game</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+        body {
+            background: #06040d;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.9);
+            border-radius: 16px;
+            overflow: hidden;
+            border: 2px solid #5a2c9d;
+            background: #010103;
+        }
+        canvas {
+            display: block;
+            cursor: default;
+        }
+        #ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas" width="1024" height="768"></canvas>
+    <div id="ui-overlay"></div>
+</div>
+
+<script>
+/**
+ * CARD WIZARD DUEL (Premium Visual Remake)
+ * HTML5 Canvas 기반 1vs1 턴제 마법 대결 카드 게임
+ */
+
+const CANVAS_WIDTH = 1024;
+const CANVAS_HEIGHT = 768;
+
+// 전체 카드의 비주얼 여백 확보를 위해 20% 축소 조정
+const CARD_WIDTH = 100;
+const CARD_HEIGHT = 148;
+
+// 색상 팔레트
+const COLORS = {
+    bgGradStart: '#080514',
+    bgGradEnd: '#010103',
+    cardBackGradStart: '#4a154b',
+    cardBackGradEnd: '#1a052e',
+    primary: '#c77dff',
+    secondary: '#3c096c',
+    accent: '#ffaa00',
+    textLight: '#f8f9fa',
+    hpBar: '#ff3e3e',
+    manaBar: '#00b4d8',
+    glowColor: 'rgba(199, 125, 255, 0.5)'
+};
+
+const GAME_STATE = {
+    MENU: 'MENU',
+    PLAYING: 'PLAYING',
+    GAME_OVER: 'GAME_OVER'
+};
+
+const CARD_TEMPLATES = [
+    { id: 'fireball', name: '파이어볼', type: 'ATTACK', cost: 2, value: 18, color: '#ff4d4d', desc: '강력한 화염구를 던져 상대에게 18의 피해를 줍니다.', effectType: 'FIRE' },
+    { id: 'ice_spear', name: '아이스 스피어', type: 'ATTACK', cost: 1, value: 10, color: '#33d6ff', desc: '차가운 얼음 송곳으로 상대에게 10의 피해를 줍니다.', effectType: 'ICE' },
+    { id: 'lightning', name: '라이트닝 볼트', type: 'ATTACK', cost: 3, value: 28, color: '#ffda33', desc: '벼락을 내리쳐 상대에게 28의 막대한 피해를 줍니다. (뇌우 시 피해 극대화)', effectType: 'LIGHTNING' },
+    { id: 'meteor_strike', name: '메테오 스트라이크', type: 'ATTACK', cost: 4, value: 40, color: '#ff2200', desc: '하늘에서 운석을 소환해 40의 피해를 주고 필드를 화산으로 바꿉니다.', effectType: 'FIRE' },
+    { id: 'blizzard', name: '블리자드', type: 'ATTACK', cost: 3, value: 20, color: '#a3e5ff', desc: '상대에게 20의 피해를 줍니다. 이미 툰드라 필드인 경우 아군 체력을 10 회복합니다.', effectType: 'ICE' },
+    { id: 'heal_potion', name: '치유의 물약', type: 'HEAL', cost: 1, value: 15, color: '#33ff57', desc: '체력을 15만큼 회복합니다.', effectType: 'HEAL' },
+    { id: 'mana_surge', name: '마나 폭발', type: 'MANA', cost: 0, value: 2, color: '#b233ff', desc: '마나를 즉시 2 회복합니다. (카드 드로우 1장 추가)', effectType: 'MANA' },
+    { id: 'blood_contract', name: '암흑의 의식', type: 'MANA', cost: 1, value: 4, color: '#a80a0a', desc: '피의 대가로 아군 생명력을 12 소모해 마나 4 회복 및 카드를 1장 드로우합니다.', effectType: 'DARK' },
+    { id: 'volcano_field', name: '지옥의 화산', type: 'FIELD', cost: 2, value: 5, color: '#ff5500', desc: '지옥의 화산을 소환합니다. 매 턴 시작 시 해당 차례 플레이어에게 5의 피해를 줍니다.', effectType: 'FIRE' },
+    { id: 'tundra_field', name: '얼어붙은 툰드라', type: 'FIELD', cost: 2, value: 1, color: '#33ccff', desc: '툰드라 장벽을 펼칩니다. 모든 공격 카드의 마나 소모량이 1 증가합니다.', effectType: 'ICE' },
+    { id: 'storm_field', name: '뇌우의 요람', type: 'FIELD', cost: 2, value: 10, color: '#e0a1ff', desc: '뇌전 기류를 충전합니다. 라이트닝 볼트의 피해량이 10만큼 증가합니다.', effectType: 'LIGHTNING' },
+    { id: 'counter_trap', name: '반격의 장벽', type: 'TRAP', cost: 1, value: 15, color: '#ffaa00', desc: '비밀 함정을 설치합니다. 상대가 나를 공격할 때 피해를 무효화하고 15의 반사 피해를 줍니다.', effectType: 'SHIELD' },
+    { id: 'siphon_trap', name: '마나 흡수기', type: 'TRAP', cost: 1, value: 1, color: '#a14fff', desc: '비밀 함정을 설치합니다. 상대가 주문을 시전할 때 상대 마나 1을 빼앗아 내 마나로 변환합니다.', effectType: 'MANA' },
+    { id: 'illusion_trap', name: '환영 거울 함정', type: 'TRAP', cost: 1, value: 0, color: '#44ffaa', desc: '비밀 함정을 설치합니다. 다음 상대의 공격 무효화 및 공격 피해량만큼 아군 체력을 회복합니다.', effectType: 'HEAL' },
+    { id: 'phoenix_trap', name: '피닉스의 깃털', type: 'TRAP', cost: 2, value: 30, color: '#ff3366', desc: '비밀 함정을 설치합니다. 내가 체력이 0 이하가 되어 패배할 위기일 때 부활하여 체력 30을 회복합니다.', effectType: 'FIRE' }
+];
+
+// --- 헬퍼 함수 ---
+function lerp(start, end, amt) {
+    return (1 - amt) * start + amt * end;
+}
+
+function checkCollision(mx, my, rect) {
+    return mx >= rect.x && mx <= rect.x + rect.w && my >= rect.y && my <= rect.y + rect.h;
+}
+
+function drawRoundedRect(ctx, x, y, width, height, radius, fill, stroke, strokeColor, lineWidth = 1) {
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + width - radius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+    ctx.lineTo(x + width, y + height - radius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    ctx.lineTo(x + radius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+    if (fill) ctx.fill();
+    if (stroke) {
+        ctx.strokeStyle = strokeColor || '#000';
+        ctx.lineWidth = lineWidth;
+        ctx.stroke();
+    }
+}
+
+// --- 별빛 데이터 클래스 (야외용) ---
+class Star {
+    constructor() {
+        this.x = Math.random() * CANVAS_WIDTH;
+        this.y = Math.random() * (CANVAS_HEIGHT * 0.65); // 밤하늘 영역에만 배치
+        this.size = Math.random() * 2 + 0.5;
+        this.brightness = Math.random();
+        this.speed = Math.random() * 0.02 + 0.01;
+    }
+
+    update() {
+        this.brightness += this.speed;
+        if (this.brightness > 1 || this.brightness < 0) {
+            this.speed = -this.speed;
+        }
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0.1, this.brightness);
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+// --- 비/눈/재 날씨 효과 파티클 ---
+class WeatherEffect {
+    constructor(type) {
+        this.type = type; // 'SNOW', 'ASH', 'RAIN'
+        this.reset();
+        this.y = Math.random() * CANVAS_HEIGHT;
+    }
+
+    reset() {
+        this.x = Math.random() * CANVAS_WIDTH;
+        this.y = -20;
+        this.size = Math.random() * 3 + 1;
+        this.vx = (Math.random() - 0.5) * 2;
+        this.vy = Math.random() * 2 + 1;
+        this.alpha = Math.random() * 0.5 + 0.3;
+    }
+
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        if (this.y > CANVAS_HEIGHT || this.x < 0 || this.x > CANVAS_WIDTH) {
+            this.reset();
+        }
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.globalAlpha = this.alpha;
+        if (this.type === 'SNOW') {
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (this.type === 'ASH') {
+            ctx.fillStyle = '#ff5500';
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = '#ff3300';
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fill();
+        } else {
+            ctx.strokeStyle = 'rgba(161, 79, 255, 0.4)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(this.x, this.y);
+            ctx.lineTo(this.x + this.vx, this.y + 10);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+}
+
+class Particle {
+    constructor(x, y, color, type) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.type = type; 
+        this.vx = (Math.random() - 0.5) * 12;
+        this.vy = (Math.random() - 0.5) * 12 - (type === 'HEAL' ? 5 : 0);
+        this.alpha = 1;
+        this.decay = Math.random() * 0.025 + 0.015;
+        this.size = Math.random() * 8 + 4;
+    }
+
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        if (this.type === 'FIRE') {
+            this.vy -= 0.2;
+        } else if (this.type === 'LIGHTNING') {
+            this.vx += (Math.random() - 0.5) * 6;
+        } else if (this.type === 'DARK') {
+            this.vy -= 0.1;
+        }
+        this.alpha -= this.decay;
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.globalAlpha = this.alpha;
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = this.color;
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        if (this.type === 'SHIELD') {
+            ctx.moveTo(this.x, this.y - this.size);
+            ctx.lineTo(this.x + this.size, this.y);
+            ctx.lineTo(this.x, this.y + this.size);
+            ctx.lineTo(this.x - this.size, this.y);
+            ctx.closePath();
+            ctx.fill();
+        } else {
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+}
+
+// 화면 플로팅 메시지
+class FloatingText {
+    constructor(text, x, y, color = '#ff4d4d', fontSize = 28) {
+        this.text = text;
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.fontSize = fontSize;
+        this.alpha = 1.0;
+        this.vy = -1.8;
+    }
+
+    update() {
+        this.y += this.vy;
+        this.alpha -= 0.014;
+    }
+
+    draw(ctx) {
+        if (this.alpha <= 0) return;
+        ctx.save();
+        ctx.globalAlpha = this.alpha;
+        ctx.fillStyle = this.color;
+        ctx.font = `bold ${this.fontSize}px 'Segoe UI', Arial`;
+        ctx.textAlign = 'center';
+        ctx.shadowBlur = 6;
+        ctx.shadowColor = 'rgba(0,0,0,0.9)';
+        ctx.fillText(this.text, this.x, this.y);
+        ctx.restore();
+    }
+}
+
+
+// --- 1. CARD CLASS ---
+class Card {
+    constructor(template, isEnemy = false) {
+        this.id = template.id + '_' + Math.random().toString(36).substr(2, 9);
+        this.templateId = template.id;
+        this.name = template.name;
+        this.type = template.type;
+        this.cost = template.cost;
+        this.value = template.value;
+        this.color = template.color;
+        this.desc = template.desc;
+        this.effectType = template.effectType;
+        
+        this.isEnemy = isEnemy;
+
+        this.x = 0;
+        this.y = 0;
+        this.targetX = 0;
+        this.targetY = 0;
+        
+        this.width = CARD_WIDTH;
+        this.height = CARD_HEIGHT;
+        this.scale = 1.0;
+        this.targetScale = 1.0;
+        this.isHovered = false;
+        this.isSelected = false;
+        
+        // 물리 연출용 파라미터
+        this.speed = 0.16;
+        this.rotation = 0;
+        this.targetRotation = 0;
+
+        // 공격 돌진 시의 잔상 보관용 큐
+        this.ghostTrails = [];
+    }
+
+    getActualCost(currentField) {
+        if (currentField && currentField.templateId === 'tundra_field' && this.type === 'ATTACK') {
+            return this.cost + 1;
+        }
+        return this.cost;
+    }
+
+    update() {
+        this.x = lerp(this.x, this.targetX, this.speed);
+        this.y = lerp(this.y, this.targetY, this.speed);
+        this.rotation = lerp(this.rotation, this.targetRotation, this.speed);
+        
+        if (this.isSelected) {
+            this.targetScale = 1.15;
+        } else if (this.isHovered && !this.isEnemy) {
+            this.targetScale = 1.25;
+        } else {
+            this.targetScale = 1.0;
+        }
+        
+        this.scale = lerp(this.scale, this.targetScale, this.speed);
+
+        // 잔상 업데이트 및 관리 (속도가 빠를 때만 추적)
+        if (this.speed > 0.3) {
+            this.ghostTrails.push({ x: this.x, y: this.y, rot: this.rotation, scale: this.scale });
+            if (this.ghostTrails.length > 5) {
+                this.ghostTrails.shift();
+            }
+        } else {
+            if (this.ghostTrails.length > 0) {
+                this.ghostTrails.shift();
+            }
+        }
+    }
+
+    draw(ctx, currentField = null) {
+        // 원래 템플릿의 기준 크기
+        const designW = 125;
+        const designH = 185;
+        // 기준 크기 대비 축소 비율 (100 / 125 = 0.8)
+        const baseScale = CARD_WIDTH / designW;
+
+        // 잔상 드로잉
+        if (this.ghostTrails.length > 0) {
+            this.ghostTrails.forEach((trail, index) => {
+                ctx.save();
+                ctx.globalAlpha = (index / this.ghostTrails.length) * 0.35;
+                ctx.translate(trail.x + this.width / 2, trail.y + this.height / 2);
+                ctx.scale(trail.scale * baseScale, trail.scale * baseScale);
+                ctx.rotate(trail.rot);
+                ctx.translate(-(designW / 2), -(designH / 2));
+                this.drawCardFront(ctx, currentField, true);
+                ctx.restore();
+            });
+        }
+
+        ctx.save();
+        // 카드 원점 중심 변환 적용 (축소 배율 통합 보정)
+        ctx.translate(this.x + this.width / 2, this.y + this.height / 2);
+        ctx.scale(this.scale * baseScale, this.scale * baseScale);
+        ctx.rotate(this.rotation);
+        ctx.translate(-(designW / 2), -(designH / 2));
+
+        if (this.isEnemy) {
+            this.drawCardBack(ctx);
+        } else {
+            this.drawCardFront(ctx, currentField, false);
+        }
+
+        ctx.restore();
+    }
+
+    drawCardFront(ctx, currentField = null, isTrail = false) {
+        const w = 125;
+        const h = 185;
+
+        if (!isTrail) {
+            ctx.shadowColor = this.isHovered ? this.color : 'rgba(0, 0, 0, 0.5)';
+            ctx.shadowBlur = this.isHovered ? 20 : 10;
+            ctx.shadowOffsetY = this.isHovered ? 4 : 2;
+        }
+
+        // 마력 테두리 효과
+        ctx.fillStyle = '#120f21';
+        drawRoundedRect(ctx, 0, 0, w, h, 12, true, true, this.isHovered ? this.color : '#4f3b78', this.isHovered ? 2.5 : 1.5);
+        ctx.shadowBlur = 0; 
+
+        // 카드 상단 비주얼 장식
+        const headGrad = ctx.createLinearGradient(6, 6, w - 6, 6);
+        headGrad.addColorStop(0, COLORS.secondary);
+        headGrad.addColorStop(1, '#1b0c30');
+        ctx.fillStyle = headGrad;
+        drawRoundedRect(ctx, 6, 6, w - 12, 34, 8, true, false);
+
+        // 네온 코스트 배지
+        ctx.fillStyle = this.color;
+        if (!isTrail) {
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = this.color;
+        }
+        ctx.beginPath();
+        ctx.arc(w - 22, 23, 11, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 12px "Segoe UI"';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(this.getActualCost(currentField), w - 22, 23);
+
+        // 카드 타이틀 명칭
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 13px "Nanum Gothic", "Segoe UI"';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(this.name, 14, 23);
+
+        // 일러스트 플레이스홀더 영역 (마법진 연출 가미)
+        const illuGrad = ctx.createRadialGradient(
+            w/2, 78, 10,
+            w/2, 78, 45
+        );
+        illuGrad.addColorStop(0, this.color);
+        illuGrad.addColorStop(1, '#0c071a');
+        
+        ctx.fillStyle = illuGrad;
+        drawRoundedRect(ctx, 10, 46, w - 20, 68, 6, true, true, '#3c096c', 1.5);
+
+        // 고유 시그니처 룬 문양 시각화
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(w/2, 80, 24, 0, Math.PI*2);
+        ctx.stroke();
+        ctx.restore();
+
+        // 어두운 반투명 아우라 원으로 백그라운드 구성
+        ctx.save();
+        ctx.fillStyle = 'rgba(10, 6, 20, 0.7)';
+        ctx.beginPath();
+        ctx.arc(w/2, 80, 21, 0, Math.PI*2);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 9px "Nanum Gothic", "Segoe UI"';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        let centerTxt = `공격 -${this.value}`;
+        if (this.type === 'HEAL') centerTxt = `치유 +${this.value}`;
+        else if (this.type === 'MANA') centerTxt = `마나 +${this.value}`;
+        else if (this.type === 'FIELD') centerTxt = `필드 전개`;
+        else if (this.type === 'TRAP') centerTxt = `비밀 함정`;
+        ctx.fillText(centerTxt, w/2, 80);
+
+        // 카드 상세 속성 묘사 텍스트보드
+        ctx.fillStyle = '#0a0614';
+        drawRoundedRect(ctx, 10, 118, w - 20, 56, 6, true, false);
+
+        ctx.fillStyle = '#aba5cc';
+        ctx.font = '9px "Nanum Gothic", Arial';
+        ctx.textAlign = 'center';
+        
+        const words = this.desc.split(' ');
+        let line = '';
+        let lines = [];
+        let yPos = 131;
+
+        for (let n = 0; n < words.length; n++) {
+            let testLine = line + words[n] + ' ';
+            let metrics = ctx.measureText(testLine);
+            if (metrics.width > w - 24 && n > 0) {
+                lines.push(line);
+                line = words[n] + ' ';
+            } else {
+                line = testLine;
+            }
+        }
+        lines.push(line);
+
+        for (let i = 0; i < Math.min(lines.length, 3); i++) {
+            ctx.fillText(lines[i], w / 2, yPos);
+            yPos += 11;
+        }
+
+        // 마우스 호버/선택 시 외부 황금 테두리 장식
+        if (this.isSelected && !isTrail) {
+            ctx.strokeStyle = COLORS.accent;
+            ctx.lineWidth = 3;
+            drawRoundedRect(ctx, -2, -2, w + 4, h + 4, 14, false, true);
+        }
+    }
+
+    drawCardBack(ctx) {
+        const w = 125;
+        const h = 185;
+
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+        ctx.shadowBlur = 12;
+        ctx.shadowOffsetY = 3;
+
+        const backGrad = ctx.createLinearGradient(0, 0, w, h);
+        backGrad.addColorStop(0, COLORS.cardBackGradStart);
+        backGrad.addColorStop(1, COLORS.cardBackGradEnd);
+
+        ctx.fillStyle = backGrad;
+        drawRoundedRect(ctx, 0, 0, w, h, 12, true, true, '#8a2be2', 2);
+        ctx.shadowBlur = 0;
+
+        // 정밀 마법 카드뒷면 기하학 도트 연출
+        ctx.strokeStyle = 'rgba(199, 125, 255, 0.4)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(w / 2, h / 2, 38, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.strokeStyle = 'rgba(199, 125, 255, 0.2)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.rect(12, 12, w - 24, h - 24);
+        ctx.stroke();
+
+        ctx.fillStyle = '#ff9e00';
+        ctx.beginPath();
+        ctx.moveTo(w / 2, h / 2 - 14);
+        ctx.lineTo(w / 2 + 12, h / 2 + 10);
+        ctx.lineTo(w / 2 - 12, h / 2 + 10);
+        ctx.closePath();
+        ctx.fill();
+    }
+}
+
+
+// --- 2. DECK CLASS ---
+class Deck {
+    constructor(isEnemy = false) {
+        this.cards = [];
+        this.discardPile = [];
+        this.isEnemy = isEnemy;
+        this.init();
+    }
+
+    init() {
+        this.cards = [];
+        this.discardPile = [];
+        for (let i = 0; i < 4; i++) {
+            CARD_TEMPLATES.forEach(template => {
+                this.cards.push(new Card(template, this.isEnemy));
+            });
+        }
+        this.shuffle();
+    }
+
+    shuffle() {
+        for (let i = this.cards.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [this.cards[i], this.cards[j]] = [this.cards[j], this.cards[i]];
+        }
+    }
+
+    drawCard() {
+        if (this.cards.length === 0) {
+            if (this.discardPile.length > 0) {
+                this.cards = [...this.discardPile];
+                this.discardPile = [];
+                this.cards.forEach(card => {
+                    card.isHovered = false;
+                    card.isSelected = false;
+                    card.rotation = 0;
+                    card.targetRotation = 0;
+                });
+                this.shuffle();
+            } else {
+                return null;
+            }
+        }
+        return this.cards.pop();
+    }
+
+    discard(card) {
+        this.discardPile.push(card);
+    }
+}
+
+
+// --- 3. PLAYER CLASS (Wizards with Enhanced Magic Circle Shield) ---
+class Player {
+    constructor(name, maxHp = 100, isEnemy = false) {
+        this.name = name;
+        this.maxHp = maxHp;
+        this.hp = maxHp;
+        this.maxMana = 3;
+        this.mana = 3;
+        
+        this.isEnemy = isEnemy;
+        this.deck = new Deck(isEnemy);
+        this.hand = [];
+        
+        // 캐릭터의 기본 홈(Home) 좌표 정의
+        this.homeX = 140;
+        this.homeY = isEnemy ? 130 : CANVAS_HEIGHT - 130;
+        this.x = this.homeX;
+        this.y = this.homeY;
+        this.radius = 45;
+
+        this.avatarColor = isEnemy ? '#d90429' : '#7209b7';
+        this.setTrap = null;
+
+        // 부유 효과 및 숨쉬기 애니메이션용 상태 타이머
+        this.idleTimer = Math.random() * 100;
+        this.orbAngle = 0;
+
+        // 피격 시 찌그러짐과 복원 운동을 위한 제어 파라미터
+        this.hurtTimer = 0;
+        this.hurtScaleX = 1.0;
+        this.hurtScaleY = 1.0;
+
+        // 회전하는 백그라운드 마법 장벽 각도
+        this.magicCircleAngle = 0;
+    }
+
+    initMatch() {
+        this.hp = this.maxHp;
+        this.mana = 1;
+        this.deck.init();
+        this.hand = [];
+        this.setTrap = null;
+        for (let i = 0; i < 4; i++) {
+            this.draw();
+        }
+    }
+
+    draw(match = null) {
+        const drawnCard = this.deck.drawCard();
+        if (drawnCard) {
+            drawnCard.isEnemy = this.isEnemy;
+            this.hand.push(drawnCard);
+            this.reorganizeHandPositions();
+
+            // 만약 카드 더미에서 다시 덱으로 섞여 들어가 드로우된 경우, 가운데 더미 배열에서 즉각 필터링 제거
+            if (match && match.centerPile) {
+                match.centerPile = match.centerPile.filter(c => c.id !== drawnCard.id);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    reorganizeHandPositions() {
+        const totalCards = this.hand.length;
+        if (totalCards === 0) return;
+
+        const containerWidth = 620;
+        const spacing = Math.min(CARD_WIDTH + 15, containerWidth / totalCards);
+        const startX = (CANVAS_WIDTH - (spacing * (totalCards - 1) + CARD_WIDTH)) / 2;
+
+        for (let i = 0; i < totalCards; i++) {
+            const card = this.hand[i];
+            const tX = startX + i * spacing;
+            const tY = this.isEnemy ? 170 : CANVAS_HEIGHT - CARD_HEIGHT - 125;
+            
+            if (card.x === 0 && card.y === 0) {
+                card.x = this.isEnemy ? CANVAS_WIDTH - 120 : 50;
+                card.y = this.isEnemy ? 120 : CANVAS_HEIGHT - 120;
+            }
+            card.targetX = tX;
+            card.targetY = tY;
+
+            // 부드러운 패치 부채꼴 회전값 미세 가산
+            const mid = (totalCards - 1) / 2;
+            card.targetRotation = (i - mid) * 0.04;
+        }
+    }
+
+    useCard(index, actualCost = null) {
+        if (index < 0 || index >= this.hand.length) return null;
+        const card = this.hand[index];
+        const costToPay = actualCost !== null ? actualCost : card.cost;
+        if (this.mana >= costToPay) {
+            this.mana -= costToPay;
+            this.hand.splice(index, 1);
+            this.deck.discard(card);
+            this.reorganizeHandPositions();
+            return card;
+        }
+        return null;
+    }
+
+    heal(amount) {
+        this.hp = Math.min(this.maxHp, this.hp + amount);
+    }
+
+    takeDamage(amount) {
+        this.hp = Math.max(0, this.hp - amount);
+        this.hurtTimer = 1.0; // 타격 즉시 찌그러짐 자극
+    }
+
+    gainMana(amount) {
+        this.mana = Math.min(10, this.mana + amount);
+    }
+
+    update() {
+        this.hand.forEach(card => card.update());
+
+        // 아래위로 둥실둥실 부유하는 애니메이션 (Idle Bobbing Animation)
+        this.idleTimer += 0.04;
+        this.y = this.homeY + Math.sin(this.idleTimer) * 10;
+
+        // 마구 회전하는 쉴드/위성 오브 구체 및 마법 장막 회전각 갱신
+        this.orbAngle += 0.035;
+        this.magicCircleAngle += 0.01;
+
+        // 피격 찌그러짐 스프링 감쇠 적용
+        if (this.hurtTimer > 0) {
+            this.hurtTimer -= 0.05;
+            // 피격 즉시 X축 늘어남, Y축 찌그러짐 후 서서히 원래 상태로 (1.0) 수렴
+            const amp = Math.sin(this.hurtTimer * Math.PI * 4) * 0.22 * this.hurtTimer;
+            this.hurtScaleX = 1.0 + amp;
+            this.hurtScaleY = 1.0 - amp;
+        } else {
+            this.hurtScaleX = 1.0;
+            this.hurtScaleY = 1.0;
+        }
+    }
+
+    drawCharacter(ctx, isActive) {
+        ctx.save();
+
+        // 찌그러짐/피격 물리 변환 행렬 적용 (캐릭터 중심점 기준)
+        ctx.translate(this.x, this.y);
+        ctx.scale(this.hurtScaleX, this.hurtScaleY);
+        ctx.translate(-this.x, -this.y);
+
+        // 1. 대형 백그라운드 회전 기하학 마법진 (Magic Circle Shield)
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.magicCircleAngle);
+        ctx.translate(-this.x, -this.y);
+        
+        ctx.strokeStyle = this.hurtTimer > 0.1 ? '#ff3e3e' : this.avatarColor;
+        ctx.lineWidth = 1.5;
+        ctx.globalAlpha = isActive ? 0.45 : 0.15;
+
+        // 외부 장식 톱니 마법 서클
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius + 24, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // 육각 기하학 레이아웃
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+            const angle = (i * Math.PI) / 3;
+            const tx = this.x + Math.cos(angle) * (this.radius + 24);
+            const ty = this.y + Math.sin(angle) * (this.radius + 24);
+            if (i === 0) ctx.moveTo(tx, ty);
+            else ctx.lineTo(tx, ty);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+
+        // 2. 아우라 글로우 서클 그리기 (부유 높이 연동)
+        const glowRad = this.radius + 18 + Math.sin(this.idleTimer) * 4;
+        ctx.shadowBlur = isActive ? 30 : 15;
+        ctx.shadowColor = this.hurtTimer > 0.1 ? '#ff3e3e' : this.avatarColor;
+        ctx.fillStyle = isActive ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.03)';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, glowRad, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // 3. 마법사 바디 아바타 링
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = 'rgba(0,0,0,0.6)';
+        ctx.fillStyle = '#0f0a1c';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = this.hurtTimer > 0.1 ? '#ff4d4d' : this.avatarColor;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        // 마법 문양 내부 각인 선
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius - 8, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // 마법사 대표 고유 비주얼 일러스트
+        ctx.fillStyle = '#fff';
+        ctx.font = '38px "Segoe UI"';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(this.isEnemy ? '👿' : '🧙', this.x, this.y - 2);
+
+        // 주변을 공전하는 마력 구체 데코레이션
+        const orbX = this.x + Math.cos(this.orbAngle) * (this.radius + 15);
+        const orbY = this.y + Math.sin(this.orbAngle) * (this.radius + 15);
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = this.avatarColor;
+        ctx.fillStyle = this.avatarColor;
+        ctx.beginPath();
+        ctx.arc(orbX, orbY, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // 텍스트 네임태그 펜스
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 15px "Nanum Gothic", Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(this.name, this.x, this.y + this.radius + 24);
+
+        ctx.restore();
+    }
+}
+
+
+// --- 4. TURN MANAGER CLASS ---
+class TurnManager {
+    constructor() {
+        this.turnCount = 1;
+        this.isPlayerTurn = true; 
+        this.turnStateTime = 0;
+    }
+
+    reset() {
+        this.turnCount = 1;
+        this.isPlayerTurn = true;
+    }
+
+    nextTurn() {
+        this.isPlayerTurn = !this.isPlayerTurn;
+        if (this.isPlayerTurn) {
+            this.turnCount++;
+        }
+    }
+}
+
+
+// --- 5. MATCH MANAGER CLASS (With Advanced Attack Motion & Cast Ring Sparkles) ---
+class MatchManager {
+    constructor(game) {
+        this.game = game;
+        this.player = new Player('아키메이지 (나)', 100, false);
+        this.enemy = new Player('다크 소서러 (AI)', 100, true);
+        this.turnManager = new TurnManager();
+        this.particles = [];
+        this.floatingTexts = [];
+        
+        this.aiDecisionTimer = 0;
+        this.aiActionDelay = 1400; 
+        this.isAiActing = false;
+
+        this.currentField = null;
+
+        // 가운데에 사용된 카드들이 누적되어 쌓이는 전술 제단 스택 공간
+        this.centerPile = [];
+
+        // 야외 감성의 반짝이는 별무리 및 기상 효과 시스템 연동
+        this.stars = [];
+        for (let i = 0; i < 60; i++) {
+            this.stars.push(new Star());
+        }
+
+        this.weatherParticles = [];
+        for (let i = 0; i < 40; i++) {
+            this.weatherParticles.push(new WeatherEffect('ASH'));
+        }
+
+        this.init();
+    }
+
+    init() {
+        this.player.initMatch();
+        this.enemy.initMatch();
+        this.turnManager.reset();
+        
+        this.player.maxMana = 1;
+        this.player.mana = 1;
+        this.enemy.maxMana = 1;
+        this.enemy.mana = 1;
+
+        this.particles = [];
+        this.floatingTexts = [];
+        this.isAiActing = false;
+        this.aiDecisionTimer = 0;
+        this.currentField = null;
+        this.centerPile = [];
+    }
+
+    startNewTurn() {
+        this.turnManager.nextTurn();
+        
+        const activePlayer = this.turnManager.isPlayerTurn ? this.player : this.enemy;
+        
+        activePlayer.maxMana = Math.min(10, Math.floor((this.turnManager.turnCount + 1) / 2) + 1);
+        activePlayer.mana = activePlayer.maxMana;
+
+        const drawSuccess = activePlayer.draw(this);
+
+        // Volcano 필드 속성 발동
+        if (this.currentField && this.currentField.templateId === 'volcano_field') {
+            activePlayer.takeDamage(5);
+            this.addFloatingText(`화산 분화 타격 -5`, activePlayer.x, activePlayer.y - 45, '#ff5500', 28);
+            this.createSpellImpactParticles(activePlayer.x, activePlayer.y, activePlayer.x, activePlayer.y, '#ff5500', 'FIRE');
+            this.game.triggerShake(15, 8);
+        }
+        
+        const turnOwnerName = activePlayer.name;
+        this.addFloatingText(`${turnOwnerName}의 차례 시작`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 80, COLORS.accent, 34);
+
+        if (!drawSuccess && activePlayer.hand.length === 0) {
+            this.game.endGame(this.turnManager.isPlayerTurn ? 'LOSE' : 'WIN');
+        }
+
+        if (!this.turnManager.isPlayerTurn) {
+            this.isAiActing = true;
+            this.aiDecisionTimer = window.performance.now();
+        }
+    }
+
+    executeCard(card, isEnemyAction) {
+        const caster = isEnemyAction ? this.enemy : this.player;
+        const target = isEnemyAction ? this.player : this.enemy;
+
+        // --- 마나 강탈 트랩 체크 ---
+        if (target.setTrap && target.setTrap.templateId === 'siphon_trap') {
+            this.addFloatingText(`🚨 함정 발동: 마나 흡수기!`, target.x, target.y - 75, '#a14fff', 28);
+            this.createSpellImpactParticles(target.x, target.y, caster.x, caster.y, '#a14fff', 'MANA');
+            caster.mana = Math.max(0, caster.mana - 1);
+            target.gainMana(1);
+            target.setTrap = null; 
+        }
+
+        // 1. 카드를 화면 정중앙으로 모셔 시전(Casting) 준비 및 회전율 부여
+        card.targetX = CANVAS_WIDTH / 2 - card.width / 2;
+        card.targetY = CANVAS_HEIGHT / 2 - card.height / 2;
+        card.targetRotation = 0.25;
+        card.speed = 0.11; // 시전 공간에 서서히 머무름
+
+        // 1.5 시전 개시 궤도 번쩍임 (Casting Circle Sparkle)
+        for (let i = 0; i < 20; i++) {
+            const sparkAngle = Math.random() * Math.PI * 2;
+            const rx = caster.x + Math.cos(sparkAngle) * (caster.radius + 5);
+            const ry = caster.y + Math.sin(sparkAngle) * (caster.radius + 5);
+            const p = new Particle(rx, ry, card.color, card.effectType);
+            p.vx = Math.cos(sparkAngle) * 5;
+            p.vy = Math.sin(sparkAngle) * 5;
+            this.particles.push(p);
+        }
+
+        // 2. 마법 연출 딜레이를 두고 시전
+        setTimeout(() => {
+            if (card.type === 'ATTACK') {
+                // [공격 물리 돌격 애니메이션] 카드가 직접 대상을 물리 타격하듯 슬램!
+                card.speed = 0.48; // 충돌 돌격을 위해 최고속 변환
+                card.targetX = target.x - card.width / 2;
+                card.targetY = target.y - card.height / 2;
+                card.targetRotation = isEnemyAction ? 0.75 : -0.75;
+
+                // 대상을 물리 타격하는 시점에 데미지 계산 및 물리 충돌 이펙트
+                setTimeout(() => {
+                    if (target.setTrap && target.setTrap.templateId === 'counter_trap') {
+                        this.addFloatingText(`🚨 함정 발동: 반격의 장벽!`, target.x, target.y - 75, '#ffaa00', 28);
+                        this.createSpellImpactParticles(target.x, target.y, caster.x, caster.y, '#ffaa00', 'SHIELD');
+                        caster.takeDamage(15);
+                        this.addFloatingText(`-15 반사 피해`, caster.x, caster.y - 45, '#ff4d4d', 32);
+                        this.game.triggerShake(18, 14);
+                        target.setTrap = null; 
+                    } else if (target.setTrap && target.setTrap.templateId === 'illusion_trap') {
+                        this.addFloatingText(`🚨 함정 발동: 환영 거울!`, target.x, target.y - 75, '#44ffaa', 28);
+                        this.createSpellImpactParticles(target.x, target.y, target.x, target.y, '#44ffaa', 'HEAL');
+                        
+                        let damage = card.value;
+                        if (this.currentField && this.currentField.templateId === 'storm_field' && card.effectType === 'LIGHTNING') {
+                            damage += 10;
+                        }
+                        target.heal(damage);
+                        this.addFloatingText(`+${damage} 피해 흡수 치유!`, target.x, target.y - 45, '#33ff57', 30);
+                        this.game.triggerShake(12, 8);
+                        target.setTrap = null;
+                    } else {
+                        let damage = card.value;
+                        if (this.currentField && this.currentField.templateId === 'storm_field' && card.effectType === 'LIGHTNING') {
+                            damage += 10;
+                        }
+                        target.takeDamage(damage);
+                        this.addFloatingText(`-${damage}`, target.x, target.y - 45, '#ff4d4d', 34);
+                        this.game.triggerShake(14, 10);
+                        this.createSpellImpactParticles(card.x + card.width/2, card.y + card.height/2, target.x, target.y, card.color, card.effectType);
+
+                        // 메테오 스트라이크: 지옥의 화산 필드 변환 이벤트 트리거
+                        if (card.templateId === 'meteor_strike') {
+                            const volcanoCard = CARD_TEMPLATES.find(t => t.id === 'volcano_field');
+                            if (volcanoCard) {
+                                this.currentField = volcanoCard;
+                                this.weatherParticles = [];
+                                for (let k = 0; k < 50; k++) {
+                                    this.weatherParticles.push(new WeatherEffect('ASH'));
+                                }
+                                this.addFloatingText(`🌋 전장 기후 개편: 지옥의 화산!`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 120, '#ff5500', 32);
+                                this.game.triggerShake(18, 12);
+                            }
+                        }
+
+                        // 블리자드: 툰드라 공명 아군 회복 트리거
+                        if (card.templateId === 'blizzard' && this.currentField && this.currentField.templateId === 'tundra_field') {
+                            caster.heal(10);
+                            this.addFloatingText(`툰드라 공명: +10 체력 회복`, caster.x, caster.y - 75, '#33ff57', 22);
+                            this.createSpellImpactParticles(caster.x, caster.y, caster.x, caster.y, '#33ff57', 'HEAL');
+                        }
+                    }
+
+                    // 카드가 화면 밖으로 날아가지 않고, 스택에 맞춰 부드러운 회전 각도로 가운데(Center Pile) 정착
+                    card.speed = 0.14;
+                    const pileIdx = this.centerPile.length;
+                    card.targetX = CANVAS_WIDTH / 2 - card.width / 2 + (Math.sin(pileIdx) * 7);
+                    card.targetY = CANVAS_HEIGHT / 2 - card.height / 2 + (Math.cos(pileIdx) * 7);
+                    card.targetRotation = (Math.sin(pileIdx * 45) * 0.18);
+                    card.targetScale = 0.6; // 가운데 뭉쳐있을 때 알맞게 카드 스케일 축소
+                    card.isHovered = false;
+                    card.isSelected = false;
+
+                    this.centerPile.push(card);
+
+                    this.postCardExecutionCheck(caster, target);
+
+                }, 190); // 찰나의 시간에 격하게 충돌
+
+            } else {
+                // 보조/필드/트랩 계열은 제자리 시전 연출 실행
+                const targetX = card.type === 'HEAL' ? caster.x : CANVAS_WIDTH / 2;
+                const targetY = card.type === 'HEAL' ? caster.y : CANVAS_HEIGHT / 2;
+                
+                this.createSpellImpactParticles(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, targetX, targetY, card.color, card.effectType);
+
+                if (card.type === 'HEAL') {
+                    caster.heal(card.value);
+                    this.addFloatingText(`+${card.value} 체력 회복`, caster.x, caster.y - 45, '#33ff57', 32);
+                } else if (card.type === 'MANA') {
+                    caster.gainMana(card.value);
+                    caster.draw(this);
+                    this.addFloatingText(`+${card.value} 마나 증폭 / 카드 드로우`, caster.x, caster.y - 45, '#b233ff', 24);
+
+                    // 피의 계약 성립에 따른 체력 공출 정산
+                    if (card.templateId === 'blood_contract') {
+                        caster.takeDamage(12);
+                        this.addFloatingText(`피의 대가: -12 체력`, caster.x, caster.y - 75, '#ff4d4d', 22);
+                        this.game.triggerShake(10, 6);
+                    }
+                } else if (card.type === 'FIELD') {
+                    this.currentField = card;
+                    // 날씨 파티클 테마 즉시 교체
+                    const fId = card.templateId;
+                    const type = fId === 'volcano_field' ? 'ASH' : (fId === 'tundra_field' ? 'SNOW' : 'RAIN');
+                    this.weatherParticles = [];
+                    for (let k = 0; k < 50; k++) {
+                        this.weatherParticles.push(new WeatherEffect(type));
+                    }
+                    this.addFloatingText(`전장 기후 교체: ${card.name}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 120, card.color, 32);
+                    this.game.triggerShake(16, 9);
+                } else if (card.type === 'TRAP') {
+                    caster.setTrap = card;
+                    this.addFloatingText(`전술 비밀 함정 배치`, caster.x, caster.y - 45, '#ffaa00', 24);
+                }
+
+                // 보조 마법 역시 화면 밖 대신 가운데(Center Pile) 더미로 부드럽게 복귀 정착
+                card.speed = 0.14;
+                const pileIdx = this.centerPile.length;
+                card.targetX = CANVAS_WIDTH / 2 - card.width / 2 + (Math.sin(pileIdx) * 7);
+                card.targetY = CANVAS_HEIGHT / 2 - card.height / 2 + (Math.cos(pileIdx) * 7);
+                card.targetRotation = (Math.sin(pileIdx * 45) * 0.18);
+                card.targetScale = 0.6; // 중앙 더미 카드 스케일 축소
+                card.isHovered = false;
+                card.isSelected = false;
+
+                this.centerPile.push(card);
+
+                setTimeout(() => {
+                    this.postCardExecutionCheck(caster, target);
+                }, 300);
+            }
+
+        }, 800); // 0.8초간 대기하며 마력 집중 연출
+    }
+
+    postCardExecutionCheck(caster, target) {
+        // 기사회생 피닉스 함정 체크
+        if (target.hp <= 0 && target.setTrap && target.setTrap.templateId === 'phoenix_trap') {
+            target.hp = 30;
+            this.addFloatingText(`🚨 기사회생: 피닉스 영혼 부활!`, target.x, target.y - 75, '#ff3366', 30);
+            this.createSpellImpactParticles(target.x, target.y, target.x, target.y, '#ff3366', 'FIRE');
+            this.game.triggerShake(22, 16);
+            target.setTrap = null; 
+        }
+        if (caster.hp <= 0 && caster.setTrap && caster.setTrap.templateId === 'phoenix_trap') {
+            caster.hp = 30;
+            this.addFloatingText(`🚨 기사회생: 피닉스 영혼 부활!`, caster.x, caster.y - 75, '#ff3366', 30);
+            this.createSpellImpactParticles(caster.x, caster.y, caster.x, caster.y, '#ff3366', 'FIRE');
+            this.game.triggerShake(22, 16);
+            caster.setTrap = null; 
+        }
+
+        // 승패 트리거 판별
+        if (this.player.hp <= 0) {
+            this.game.endGame('LOSE');
+        } else if (this.enemy.hp <= 0) {
+            this.game.endGame('WIN');
+        } else if (this.player.hand.length === 0 && this.player.deck.cards.length === 0 && this.player.deck.discardPile.length === 0) {
+            this.game.endGame('LOSE');
+        } else if (this.enemy.hand.length === 0 && this.enemy.deck.cards.length === 0 && this.enemy.deck.discardPile.length === 0) {
+            this.game.endGame('WIN');
+        }
+    }
+
+    handleAiLogic(currentTime) {
+        if (!this.isAiActing) return;
+
+        if (currentTime - this.aiDecisionTimer >= this.aiActionDelay) {
+            let playableCardIndex = -1;
+            let bestActualCost = 0;
+            
+            for (let i = 0; i < this.enemy.hand.length; i++) {
+                const card = this.enemy.hand[i];
+                const actualCost = card.getActualCost(this.currentField);
+                
+                if (card.type === 'FIELD' && this.currentField && this.currentField.templateId === card.templateId) {
+                    continue;
+                }
+                if (card.type === 'TRAP' && this.enemy.setTrap) {
+                    continue;
+                }
+
+                if (actualCost <= this.enemy.mana) {
+                    playableCardIndex = i;
+                    bestActualCost = actualCost;
+                    break;
+                }
+            }
+
+            if (playableCardIndex !== -1) {
+                const card = this.enemy.useCard(playableCardIndex, bestActualCost);
+                if (card) {
+                    this.addFloatingText(`AI가 '${card.name}' 비술 시전!`, CANVAS_WIDTH / 2, 220, '#ff9e00', 24);
+                    this.executeCard(card, true);
+                    this.aiDecisionTimer = currentTime + 800; // 돌격 모션 지연으로 시간 보충
+                }
+            } else {
+                this.isAiActing = false;
+                this.addFloatingText('AI가 턴을 종결합니다.', CANVAS_WIDTH / 2, 220, '#ccc', 20);
+                setTimeout(() => {
+                    this.startNewTurn();
+                }, 1000);
+            }
+        }
+    }
+
+    createSpellImpactParticles(sx, sy, tx, ty, color, type) {
+        const numParticles = 30;
+        for (let i = 0; i < numParticles; i++) {
+            const p = new Particle(tx, ty, color, type);
+            this.particles.push(p);
+        }
+    }
+
+    addFloatingText(text, x, y, color, size) {
+        this.floatingTexts.push(new FloatingText(text, x, y, color, size));
+    }
+
+    update(currentTime) {
+        this.player.update();
+        this.enemy.update();
+
+        // 야외 배경 요소별 프레임 계산 업데이트
+        this.stars.forEach(star => star.update());
+        this.weatherParticles.forEach(p => p.update());
+
+        // 가운데 쌓이는 카드들의 LERP 애니메이션 위치 추적 갱신
+        this.centerPile.forEach(card => card.update());
+
+        // 파티클 및 플로팅 문자 리프레싱
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            this.particles[i].update();
+            if (this.particles[i].alpha <= 0) this.particles.splice(i, 1);
+        }
+
+        for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
+            this.floatingTexts[i].update();
+            if (this.floatingTexts[i].alpha <= 0) this.floatingTexts.splice(i, 1);
+        }
+
+        if (!this.turnManager.isPlayerTurn) {
+            this.handleAiLogic(currentTime);
+        }
+    }
+
+    draw(ctx) {
+        // 1. 반짝이는 별빛 렌더링
+        this.stars.forEach(star => star.draw(ctx));
+
+        // 2. 원경의 산맥 및 고대 마법 유적 탑 실루엣 (그라데이션으로 야외 느낌 강조)
+        this.drawMountainScenery(ctx);
+
+        // 3. 기상 날씨 이펙트 파티클 레이어
+        this.weatherParticles.forEach(p => p.draw(ctx));
+
+        // 4. 소서러 캐릭터 그리기 (부유 모션 연동)
+        this.player.drawCharacter(ctx, this.turnManager.isPlayerTurn);
+        this.enemy.drawCharacter(ctx, !this.turnManager.isPlayerTurn);
+
+        // 4.5. [신규 추가] 가운데 쌓인 전장 주문 카드 더미 그리기 (손패 아래 층에 렌더링되게 정렬)
+        this.centerPile.forEach(card => card.draw(ctx, this.currentField));
+
+        // 5. 카드들 렌더링
+        this.player.hand.forEach(card => card.draw(ctx, this.currentField));
+        this.enemy.hand.forEach(card => card.draw(ctx, this.currentField));
+
+        // 6. 투사 폭발 이펙트들
+        this.particles.forEach(p => p.draw(ctx));
+        this.floatingTexts.forEach(t => t.draw(ctx));
+    }
+
+    /**
+     * 야외 전장 분위기를 자아내기 위해 고대 유적과 원경 산맥을 드로잉하는 함수
+     */
+    drawMountainScenery(ctx) {
+        ctx.save();
+        
+        // 뒤쪽 산맥 (가장 어둡고 깊은 레이어)
+        ctx.fillStyle = 'rgba(10, 6, 26, 0.7)';
+        ctx.beginPath();
+        ctx.moveTo(0, CANVAS_HEIGHT * 0.65);
+        ctx.quadraticCurveTo(CANVAS_WIDTH * 0.25, CANVAS_HEIGHT * 0.45, CANVAS_WIDTH * 0.5, CANVAS_HEIGHT * 0.62);
+        ctx.quadraticCurveTo(CANVAS_WIDTH * 0.75, CANVAS_HEIGHT * 0.40, CANVAS_WIDTH, CANVAS_HEIGHT * 0.65);
+        ctx.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT);
+        ctx.lineTo(0, CANVAS_HEIGHT);
+        ctx.closePath();
+        ctx.fill();
+
+        // 앞쪽 고대 마법 유적 오벨리스크 실루엣 데코
+        ctx.fillStyle = 'rgba(21, 14, 43, 0.9)';
+        // 좌측 타워 오벨리스크
+        ctx.fillRect(80, CANVAS_HEIGHT * 0.45, 45, CANVAS_HEIGHT * 0.2);
+        ctx.beginPath();
+        ctx.moveTo(80, CANVAS_HEIGHT * 0.45);
+        ctx.lineTo(102, CANVAS_HEIGHT * 0.40);
+        ctx.lineTo(125, CANVAS_HEIGHT * 0.45);
+        ctx.closePath();
+        ctx.fill();
+
+        // 우측 오벨리스크 타워
+        ctx.fillRect(CANVAS_WIDTH - 125, CANVAS_HEIGHT * 0.45, 45, CANVAS_HEIGHT * 0.2);
+        ctx.beginPath();
+        ctx.moveTo(CANVAS_WIDTH - 125, CANVAS_HEIGHT * 0.45);
+        ctx.lineTo(CANVAS_WIDTH - 103, CANVAS_HEIGHT * 0.40);
+        ctx.lineTo(CANVAS_WIDTH - 80, CANVAS_HEIGHT * 0.45);
+        ctx.closePath();
+        ctx.fill();
+
+        // 가까운 지면 언덕 레이어
+        ctx.fillStyle = 'rgba(12, 8, 28, 0.95)';
+        ctx.beginPath();
+        ctx.moveTo(0, CANVAS_HEIGHT * 0.62);
+        ctx.quadraticCurveTo(CANVAS_WIDTH * 0.5, CANVAS_HEIGHT * 0.52, CANVAS_WIDTH, CANVAS_HEIGHT * 0.62);
+        ctx.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT);
+        ctx.lineTo(0, CANVAS_HEIGHT);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.restore();
+    }
+}
+
+
+// --- 6. UI CLASS ---
+class UI {
+    constructor(game, matchManager) {
+        this.game = game;
+        this.match = matchManager;
+        this.turnButtonRect = { x: CANVAS_WIDTH - 170, y: CANVAS_HEIGHT / 2 + 50, w: 130, h: 50 };
+        this.isButtonHovered = false;
+    }
+
+    updateMouseHover(mx, my) {
+        this.isButtonHovered = checkCollision(mx, my, this.turnButtonRect);
+    }
+
+    /**
+     * [수정] 카드가 예쁘게 안착될 수 있는 마법의 실선 틀과 누적된 장수를 표시하는 세련된 네온 배지 우측 가이드라인 이전 배치
+     */
+    drawCenterPileUI(ctx) {
+        const slotW = CARD_WIDTH * 0.6;
+        const slotH = CARD_HEIGHT * 0.6;
+
+        ctx.save();
+        // 1. 수집 가이드 라인 점선 슬롯 그리기 (전장의 가운데 필드 센터는 본질적으로 고정)
+        ctx.strokeStyle = 'rgba(199, 125, 255, 0.28)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        drawRoundedRect(ctx, CANVAS_WIDTH / 2 - slotW / 2, CANVAS_HEIGHT / 2 - slotH / 2, slotW, slotH, 8, false, true);
+        ctx.restore();
+
+        // 2. [수정] 누적 주문 수량 가이드 배지를 적 카드와 겹치던 가림 센터를 피해 우측 컬럼(Y: 304)으로 완벽히 이동!
+        ctx.save();
+        const rx = CANVAS_WIDTH - 170;
+        const ry = CANVAS_HEIGHT / 2 - 20; // Y: 364
+        ctx.fillStyle = 'rgba(15, 10, 30, 0.85)';
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = COLORS.primary;
+        drawRoundedRect(ctx, rx, ry, 130, 50, 8, true, true, COLORS.primary, 1.2);
+        ctx.shadowBlur = 0;
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 11px "Segoe UI", "Nanum Gothic"';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`🔮 누적 주문`, rx + 65, ry + 17);
+        ctx.font = 'bold 13px "Segoe UI"';
+        ctx.fillStyle = COLORS.accent;
+        ctx.fillText(`${this.match.centerPile.length} 장`, rx + 65, ry + 35);
+        ctx.restore();
+    }
+
+    draw(ctx) {
+        // 캐릭터 스탯 패널
+        this.drawStatsBar(ctx, this.match.enemy, 35, true);
+        this.drawStatsBar(ctx, this.match.player, CANVAS_HEIGHT - 115, false);
+
+        // 가운데 누적 마법진 가이드 드로잉 (가이드라인 내포)
+        this.drawCenterPileUI(ctx);
+
+        // 중앙 현황판
+        this.drawTurnInfo(ctx);
+
+        // 턴 버튼
+        this.drawTurnButton(ctx);
+
+        // 필드 및 함정 패널 정보 통합
+        this.drawFieldAndTraps(ctx);
+    }
+
+    drawFieldAndTraps(ctx) {
+        ctx.save();
+        const fx = 35;
+        const fy = CANVAS_HEIGHT / 2 - 40;
+        
+        ctx.fillStyle = 'rgba(8, 5, 20, 0.9)';
+        drawRoundedRect(ctx, fx, fy, 140, 80, 10, true, true, COLORS.primary, 1.5);
+        
+        ctx.fillStyle = '#b3accf';
+        ctx.font = 'bold 11px "Segoe UI", "Nanum Gothic"';
+        ctx.textAlign = 'center';
+        ctx.fillText('현재 전장 기후', fx + 70, fy + 22);
+        
+        if (this.match.currentField) {
+            ctx.fillStyle = this.match.currentField.color;
+            ctx.font = 'bold 13px "Nanum Gothic"';
+            ctx.fillText(this.match.currentField.name, fx + 70, fy + 48);
+        } else {
+            ctx.fillStyle = '#655f80';
+            ctx.font = '12px "Nanum Gothic"';
+            ctx.fillText('일반 황야', fx + 70, fy + 48);
+        }
+
+        // 함정 비공개 표기
+        if (this.match.player.setTrap) {
+            ctx.fillStyle = 'rgba(255, 170, 0, 0.2)';
+            drawRoundedRect(ctx, this.match.player.x - 55, this.match.player.y - 82, 110, 24, 6, true, true, '#ffaa00', 1);
+            ctx.fillStyle = '#ffaa00';
+            ctx.font = 'bold 10px "Nanum Gothic"';
+            ctx.textAlign = 'center';
+            ctx.fillText('🔒 아군 함정 감지', this.match.player.x, this.match.player.y - 66);
+        }
+        if (this.match.enemy.setTrap) {
+            ctx.fillStyle = 'rgba(255, 77, 77, 0.2)';
+            drawRoundedRect(ctx, this.match.enemy.x - 55, this.match.enemy.y + 57, 110, 24, 6, true, true, '#ff4d4d', 1);
+            ctx.fillStyle = '#ff4d4d';
+            ctx.font = 'bold 10px "Nanum Gothic"';
+            ctx.textAlign = 'center';
+            ctx.fillText('⚠️ 적 함정 활성', this.match.enemy.x, this.match.enemy.y + 72);
+        }
+        ctx.restore();
+    }
+
+    drawStatsBar(ctx, player, yOffset, isEnemy) {
+        const bgX = 210; 
+        const bgW = 450;
+        const bgH = 80;
+
+        ctx.save();
+        ctx.fillStyle = 'rgba(10, 6, 23, 0.9)';
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = 'rgba(0,0,0,0.5)';
+        drawRoundedRect(ctx, bgX, yOffset, bgW, bgH, 12, true, true, '#3c096c', 1.5);
+        ctx.shadowBlur = 0;
+
+        // HP 바 게이지
+        const hpPercent = player.hp / player.maxHp;
+        const hpBarW = 195;
+        const hpBarH = 14;
+        const hpX = bgX + 20;
+        const hpY = yOffset + 38;
+
+        ctx.fillStyle = '#1e1130';
+        drawRoundedRect(ctx, hpX, hpY, hpBarW, hpBarH, 4, true, false);
+
+        const hpGrad = ctx.createLinearGradient(hpX, hpY, hpX + hpBarW, hpY);
+        hpGrad.addColorStop(0, '#f25c54');
+        hpGrad.addColorStop(1, '#f68080');
+        ctx.fillStyle = hpGrad;
+        if (hpPercent > 0) {
+            drawRoundedRect(ctx, hpX, hpY, hpBarW * hpPercent, hpBarH, 4, true, false);
+        }
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px "Segoe UI"';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`HP: ${player.hp} / ${player.maxHp}`, hpX + hpBarW / 2, hpY + hpBarH / 2 + 1);
+
+        // MANA 바 게이지
+        const manaBarW = 195;
+        const manaBarH = 14;
+        const manaX = bgX + 235;
+        const manaY = yOffset + 38;
+
+        ctx.fillStyle = '#1e1130';
+        drawRoundedRect(ctx, manaX, manaY, manaBarW, manaBarH, 4, true, false);
+
+        const manaGrad = ctx.createLinearGradient(manaX, manaY, manaX + manaBarW, manaY);
+        manaGrad.addColorStop(0, '#00b4d8');
+        manaGrad.addColorStop(1, '#90e0ef');
+        ctx.fillStyle = manaGrad;
+        if (player.mana > 0) {
+            drawRoundedRect(ctx, manaX, manaY, manaBarW * (player.mana / player.maxMana), manaBarH, 4, true, false);
+        }
+
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`MANA: ${player.mana} / ${player.maxMana}`, manaX + manaBarW / 2, manaY + manaBarH / 2 + 1);
+
+        // 덱 및 무덤 수량 카드수
+        ctx.fillStyle = '#9f98c2';
+        ctx.font = '12px "Nanum Gothic", Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText(`덱 잔량: ${player.deck.cards.length}장`, hpX, hpY - 14);
+        ctx.fillText(`무덤 보관: ${player.deck.discardPile.length}장`, manaX, manaY - 14);
+
+        ctx.restore();
+    }
+
+    drawTurnInfo(ctx) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(8, 4, 18, 0.95)';
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = COLORS.primary;
+        // [수정] 카드를 완전히 덮어쓰던 가림 센터를 비우고 우측 사이드바 컬럼(Y: 260)으로 완전히 대피시켰습니다!
+        const rx = CANVAS_WIDTH - 170;
+        const ry = CANVAS_HEIGHT / 2 - 90; // Y: 294
+        drawRoundedRect(ctx, rx, ry, 130, 50, 8, true, true, COLORS.primary, 1.5);
+        ctx.shadowBlur = 0;
+
+        ctx.fillStyle = COLORS.accent;
+        ctx.font = 'bold 11px "Segoe UI"';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        const turnText = this.match.turnManager.isPlayerTurn ? '나의 턴' : '적의 턴';
+        ctx.fillText(`ROUND ${this.match.turnManager.turnCount}`, rx + 65, ry + 16);
+        ctx.font = 'bold 13px "Segoe UI", "Nanum Gothic"';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(turnText, rx + 65, ry + 34);
+        ctx.restore();
+    }
+
+    drawTurnButton(ctx) {
+        if (!this.match.turnManager.isPlayerTurn) return; 
+
+        ctx.save();
+        const btn = this.turnButtonRect;
+        
+        if (this.isButtonHovered) {
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = COLORS.accent;
+            ctx.fillStyle = '#ffaa00';
+        } else {
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.fillStyle = '#ede8f5';
+        }
+
+        drawRoundedRect(ctx, btn.x, btn.y, btn.w, btn.h, 10, true, true, '#312c40', 2.5);
+        ctx.shadowBlur = 0;
+
+        ctx.fillStyle = this.isButtonHovered ? '#fff' : '#221c33';
+        ctx.font = 'bold 15px "Nanum Gothic", "Segoe UI"';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('턴 종료', btn.x + btn.w / 2, btn.y + btn.h / 2);
+
+        ctx.restore();
+    }
+}
+
+
+// --- 7. MAIN GAME ENGINE CLASS ---
+class Game {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.state = GAME_STATE.MENU;
+
+        this.match = null;
+        this.ui = null;
+        this.winner = ''; 
+
+        this.mx = 0;
+        this.my = 0;
+
+        this.shakeDuration = 0;
+        this.shakeIntensity = 0;
+
+        this.menuStartBtn = { x: CANVAS_WIDTH / 2 - 110, y: CANVAS_HEIGHT / 2 + 50, w: 220, h: 55 };
+        this.restartBtn = { x: CANVAS_WIDTH / 2 - 110, y: CANVAS_HEIGHT / 2 + 100, w: 220, h: 55 };
+
+        // 기본 밤하늘 성단 구성을 위한 스타들 생성 (메뉴에서도 흐르도록)
+        this.menuStars = [];
+        for (let i = 0; i < 60; i++) {
+            this.menuStars.push(new Star());
+        }
+
+        this.init();
+    }
+
+    init() {
+        this.canvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
+        this.canvas.addEventListener('mousedown', this.handleMouseDown.bind(this));
+        
+        this.canvas.addEventListener('touchstart', (e) => {
+            const touch = e.touches[0];
+            const rect = this.canvas.getBoundingClientRect();
+            this.mx = touch.clientX - rect.left;
+            this.my = touch.clientY - rect.top;
+            this.handleMouseDown();
+        });
+
+        this.loop(0);
+    }
+
+    triggerShake(duration, intensity) {
+        this.shakeDuration = duration;
+        this.shakeIntensity = intensity;
+    }
+
+    startMatch() {
+        this.match = new MatchManager(this);
+        this.ui = new UI(this, this.match);
+        this.state = GAME_STATE.PLAYING;
+    }
+
+    endGame(result) {
+        this.winner = result;
+        this.state = GAME_STATE.GAME_OVER;
+    }
+
+    handleMouseMove(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        this.mx = e.clientX - rect.left;
+        this.my = e.clientY - rect.top;
+
+        if (this.state === GAME_STATE.PLAYING && this.match) {
+            this.ui.updateMouseHover(this.mx, this.my);
+
+            if (this.match.turnManager.isPlayerTurn) {
+                let anyHovered = false;
+                for (let i = this.match.player.hand.length - 1; i >= 0; i--) {
+                    const card = this.match.player.hand[i];
+                    const cardBox = { x: card.x, y: card.y, w: card.width, h: card.height };
+                    
+                    if (!anyHovered && checkCollision(this.mx, this.my, cardBox)) {
+                        card.isHovered = true;
+                        anyHovered = true; 
+                    } else {
+                        card.isHovered = false;
+                    }
+                }
+            }
+        }
+    }
+
+    handleMouseDown() {
+        if (this.state === GAME_STATE.MENU) {
+            if (checkCollision(this.mx, this.my, this.menuStartBtn)) {
+                this.startMatch();
+            }
+        } else if (this.state === GAME_STATE.PLAYING && this.match) {
+            if (this.match.turnManager.isPlayerTurn) {
+                if (checkCollision(this.mx, this.my, this.ui.turnButtonRect)) {
+                    this.match.startNewTurn();
+                    return;
+                }
+
+                let selectedIndex = -1;
+                for (let i = this.match.player.hand.length - 1; i >= 0; i--) {
+                    const card = this.match.player.hand[i];
+                    if (card.isHovered) {
+                        selectedIndex = i;
+                        break;
+                    }
+                }
+
+                if (selectedIndex !== -1) {
+                    const selectedCard = this.match.player.hand[selectedIndex];
+                    const actualCost = selectedCard.getActualCost(this.match.currentField);
+                    
+                    if (this.match.player.mana >= actualCost) {
+                        const castCard = this.match.player.useCard(selectedIndex, actualCost);
+                        if (castCard) {
+                            this.match.executeCard(castCard, false);
+                        }
+                    } else {
+                        this.match.addFloatingText('시전 마나가 고갈되었습니다!', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 320, '#ff4d4d', 26);
+                    }
+                }
+            }
+        } else if (this.state === GAME_STATE.GAME_OVER) {
+            if (checkCollision(this.mx, this.my, this.restartBtn)) {
+                this.startMatch();
+            }
+        }
+    }
+
+    update(currentTime) {
+        if (this.state === GAME_STATE.PLAYING && this.match) {
+            this.match.update(currentTime);
+        } else if (this.state === GAME_STATE.MENU) {
+            this.menuStars.forEach(s => s.update());
+        }
+    }
+
+    draw() {
+        this.ctx.save();
+        
+        if (this.shakeDuration > 0) {
+            const dx = (Math.random() - 0.5) * this.shakeIntensity;
+            const dy = (Math.random() - 0.5) * this.shakeIntensity;
+            this.ctx.translate(dx, dy);
+            this.shakeDuration--;
+        }
+
+        // 백그라운드 야외 대기 무드 그라데이션
+        let bgStart = COLORS.bgGradStart;
+        let bgEnd = COLORS.bgGradEnd;
+        if (this.state === GAME_STATE.PLAYING && this.match && this.match.currentField) {
+            const fId = this.match.currentField.templateId;
+            if (fId === 'volcano_field') {
+                bgStart = '#1a0404';
+                bgEnd = '#030101';
+            } else if (fId === 'tundra_field') {
+                bgStart = '#02101f';
+                bgEnd = '#010408';
+            } else if (fId === 'storm_field') {
+                bgStart = '#130821';
+                bgEnd = '#030108';
+            }
+        }
+
+        const bgGrad = this.ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+        bgGrad.addColorStop(0, bgStart);
+        bgGrad.addColorStop(1, bgEnd);
+        this.ctx.fillStyle = bgGrad;
+        this.ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+        // 격자 구조 데코 라인
+        this.drawBackgroundGrid();
+
+        if (this.state === GAME_STATE.MENU) {
+            this.menuStars.forEach(s => s.draw(this.ctx));
+            this.drawMenu();
+        } else if (this.state === GAME_STATE.PLAYING) {
+            if (this.match) {
+                this.match.draw(this.ctx);
+                this.ui.draw(this.ctx);
+            }
+        } else if (this.state === GAME_STATE.GAME_OVER) {
+            this.drawGameOver();
+        }
+
+        this.ctx.restore();
+    }
+
+    drawBackgroundGrid() {
+        this.ctx.strokeStyle = 'rgba(199, 125, 255, 0.03)';
+        this.ctx.lineWidth = 1;
+        const gridSize = 40;
+        for (let x = 0; x < CANVAS_WIDTH; x += gridSize) {
+            this.ctx.beginPath();
+            this.ctx.moveTo(x, 0);
+            this.ctx.lineTo(x, CANVAS_HEIGHT);
+            this.ctx.stroke();
+        }
+        for (let y = 0; y < CANVAS_HEIGHT; y += gridSize) {
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, y);
+            this.ctx.lineTo(CANVAS_WIDTH, y);
+            this.ctx.stroke();
+        }
+    }
+
+    drawMenu() {
+        this.ctx.save();
+        
+        const textGlow = Math.sin(Date.now() / 250) * 8 + 15;
+        this.ctx.shadowColor = COLORS.primary;
+        this.ctx.shadowBlur = textGlow;
+        this.ctx.fillStyle = '#fff';
+        this.ctx.font = 'bold 56px "Segoe UI", Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('CARD WIZARD DUEL', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 80);
+        this.ctx.shadowBlur = 0;
+
+        this.ctx.fillStyle = '#b3accf';
+        this.ctx.font = '18px "Nanum Gothic", Arial';
+        this.ctx.fillText('밤하늘 아래 펼쳐지는 위대한 원소 마법의 결투', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20);
+
+        // 결투 시작 버튼
+        const btn = this.menuStartBtn;
+        const isHover = checkCollision(this.mx, this.my, btn);
+        
+        if (isHover) {
+            this.ctx.shadowBlur = 20;
+            this.ctx.shadowColor = COLORS.primary;
+            this.ctx.fillStyle = COLORS.primary;
+        } else {
+            this.ctx.shadowBlur = 5;
+            this.ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            this.ctx.fillStyle = COLORS.secondary;
+        }
+        drawRoundedRect(this.ctx, btn.x, btn.y, btn.w, btn.h, 12, true, true, COLORS.primary, 2);
+        this.ctx.restore();
+
+        this.ctx.fillStyle = '#fff';
+        this.ctx.font = 'bold 18px "Nanum Gothic", Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText('배틀 대결 시작', btn.x + btn.w / 2, btn.y + btn.h / 2);
+
+        this.ctx.fillStyle = '#4f3b78';
+        this.ctx.font = '13px "Nanum Gothic", Arial';
+        this.ctx.fillText('조작 가이드: 자신의 턴에 활성화된 마법 카드를 클릭하여 전방 시전 및 격돌시키세요.', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 60);
+
+        this.ctx.restore();
+    }
+
+    drawGameOver() {
+        this.ctx.save();
+        
+        const isWin = this.winner === 'WIN';
+        
+        this.ctx.fillStyle = 'rgba(5, 2, 10, 0.9)';
+        this.ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+        this.ctx.shadowBlur = 25;
+        this.ctx.shadowColor = isWin ? '#33ff57' : '#ff4d4d';
+        this.ctx.fillStyle = isWin ? '#33ff57' : '#ff4d4d';
+        this.ctx.font = 'bold 64px "Segoe UI", Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText(isWin ? 'VICTORY' : 'DEFEATED', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 80);
+        this.ctx.shadowBlur = 0;
+
+        this.ctx.fillStyle = '#f8f9fa';
+        this.ctx.font = '20px "Nanum Gothic", Arial';
+        const reason = isWin ? '어둠의 소서러를 완패시키고 마법계의 최강자 지위를 수호했습니다.' : '적 마법 결계에 당해 마력이 고갈되었습니다.';
+        this.ctx.fillText(reason, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 10);
+
+        const btn = this.restartBtn;
+        const isHover = checkCollision(this.mx, this.my, btn);
+
+        if (isHover) {
+            this.ctx.shadowBlur = 20;
+            this.ctx.shadowColor = COLORS.accent;
+            this.ctx.fillStyle = COLORS.accent;
+        } else {
+            this.ctx.shadowBlur = 5;
+            this.ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            this.ctx.fillStyle = '#4a154b';
+        }
+        drawRoundedRect(this.ctx, btn.x, btn.y, btn.w, btn.h, 12, true, true, COLORS.accent, 2);
+
+        this.ctx.fillStyle = '#fff';
+        this.ctx.font = 'bold 18px "Nanum Gothic", Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText('다시 대결하기', btn.x + btn.w / 2, btn.y + btn.h / 2);
+
+        this.ctx.restore();
+    }
+
+    loop(currentTime) {
+        this.update(currentTime);
+        this.draw();
+        requestAnimationFrame(this.loop.bind(this));
+    }
+}
+
+let ctx;
+window.onload = () => {
+    const game = new Game();
+    ctx = game.ctx;
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,2492 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Open World Survival Crafting Game - Step 5</title>
+    <!-- Tailwind CSS for UI styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        /* 크로스헤어 */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 16px;
+            height: 16px;
+            pointer-events: none;
+            z-index: 10;
+            transition: all 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        #crosshair::before, #crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(255, 255, 255, 0.9);
+            transition: background-color 0.15s ease;
+        }
+        #crosshair::before {
+            top: 7px;
+            left: 0px;
+            width: 16px;
+            height: 2px;
+        }
+        #crosshair::after {
+            top: 0px;
+            left: 7px;
+            width: 2px;
+            height: 16px;
+        }
+        .crosshair-active {
+            transform: translate(-50%, -50%) scale(1.4) rotate(45deg) !important;
+        }
+        .crosshair-active::before, .crosshair-active::after {
+            background-color: #f43f5e !important;
+        }
+        /* 피격 화면 붉은 플래시 효과 */
+        #damage-flash {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle, rgba(239, 68, 68, 0) 40%, rgba(239, 68, 68, 0.4) 100%);
+            pointer-events: none;
+            z-index: 15;
+            opacity: 0;
+            transition: opacity 0.1s ease;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+
+    <!-- Game Canvas -->
+    <div id="canvas-container"></div>
+
+    <!-- 피격 붉은 이펙트 오버레이 -->
+    <div id="damage-flash"></div>
+
+    <!-- UI Overlay (z-index: 10) -->
+    <div class="absolute inset-0 pointer-events-none z-10 flex flex-col justify-between p-6">
+        
+        <!-- 상단 헤더: 지역 정보 및 상태 알림 -->
+        <div class="flex justify-between items-start w-full">
+            <div class="bg-black/60 backdrop-blur-md px-5 py-3 rounded-xl border border-white/10 pointer-events-auto shadow-lg">
+                <div class="text-xs text-gray-400 font-bold uppercase tracking-widest">현재 위치</div>
+                <div id="biome-display" class="text-xl font-black text-emerald-400">오픈월드 탐색 중</div>
+                <div id="coord-display" class="text-[10px] font-mono text-gray-400 mt-1">X: 0.0 | Y: 0.0 | Z: 0.0</div>
+            </div>
+
+            <!-- 위협 경고 패널 (야생 동물 타겟팅 및 어그로 상황 표기) -->
+            <div id="danger-warning-panel" class="hidden bg-rose-950/80 backdrop-blur-md px-5 py-3 rounded-xl border border-rose-500/40 text-center pointer-events-auto animate-bounce shadow-2xl">
+                <div class="text-xs text-rose-300 font-bold uppercase tracking-wider">⚠️ 전투 상황 발생</div>
+                <div class="text-sm font-black text-rose-400">포악한 랩터가 대상을 타겟팅했습니다!</div>
+            </div>
+
+            <!-- 현재 건축 모드 안내판 (건설 중일 때 노출) -->
+            <div id="build-hud-panel" class="hidden bg-emerald-950/80 backdrop-blur-md p-4 rounded-xl border border-emerald-500/30 text-xs text-emerald-100 pointer-events-auto max-w-xs shadow-lg animate-pulse">
+                <div class="font-bold text-emerald-400 mb-1">📐 정밀 스냅 건축 모드 작동 중</div>
+                <p class="leading-relaxed text-[11px] text-gray-300">
+                    마우스 <span class="text-white font-bold bg-emerald-800 px-1.5 py-0.5 rounded">좌클릭</span>: 배치 확정<br>
+                    마우스 <span class="text-white font-bold bg-emerald-800 px-1.5 py-0.5 rounded">우클릭</span>: 건설 취소<br>
+                    * 토대 정방향 십자 및 가장자리 스냅이 지원됩니다.
+                </p>
+            </div>
+
+            <!-- 조작 가이드 -->
+            <div class="bg-black/60 backdrop-blur-md p-4 rounded-xl border border-white/10 text-xs text-gray-300 pointer-events-auto max-w-xs shadow-lg">
+                <div class="font-bold text-yellow-400 mb-2 border-b border-white/10 pb-1">🎮 조작 가이드 (Step 5)</div>
+                <ul class="space-y-1 font-mono text-[11px]">
+                    <li><span class="text-white bg-gray-700 px-1 rounded">W,A,S,D</span> 이동 / <span class="text-white bg-gray-700 px-1 rounded">Shift</span> 달리기</li>
+                    <li><span class="text-white bg-gray-700 px-1 rounded">V</span> 가방 & 제작 / <span class="text-white bg-gray-700 px-1 rounded">I</span> 즉시 제작창</li>
+                    <li><span class="text-white bg-gray-700 px-1 rounded">Wheel</span> 시점 토글 (1인칭 ↔ 고정 3인칭)</li>
+                    <li><span class="text-white bg-gray-700 px-1 rounded">좌클릭</span> 공격 및 채집 / 건축 배치 확정</li>
+                    <li><span class="text-white bg-gray-700 px-1 rounded">우클릭</span> 건축 모드 취소</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- 크로스헤어 -->
+        <div id="crosshair"></div>
+
+        <!-- 실시간 수집 및 생물 조우 알림 팝업 로그 컨테이너 -->
+        <div id="loot-log-container" class="absolute bottom-36 left-6 space-y-2 pointer-events-none"></div>
+
+        <!-- 하단: 플레이어 상태바 & 생존 스탯 디스플레이 -->
+        <div class="w-full max-w-4xl mx-auto space-y-4 pointer-events-auto">
+            
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 bg-black/70 backdrop-blur-md p-4 rounded-2xl border border-white/10 shadow-2xl">
+                
+                <!-- LV & EXP -->
+                <div class="flex flex-col justify-center border-r border-white/10 pr-2">
+                    <div class="flex justify-between items-end">
+                        <span class="text-xs text-gray-400 font-bold">LEVEL</span>
+                        <span id="player-level" class="text-2xl font-black text-yellow-400">1</span>
+                    </div>
+                    <div class="w-full bg-gray-800 h-2 rounded-full mt-2 overflow-hidden">
+                        <div id="player-exp-bar" class="bg-yellow-400 h-full rounded-full transition-all duration-300" style="width: 15%"></div>
+                    </div>
+                    <div class="flex justify-between items-center mt-1">
+                        <span id="player-exp-text" class="text-[9px] text-gray-500 font-mono">15 / 100 EXP</span>
+                        <span id="auto-exp-indicator" class="text-[9px] text-yellow-400 animate-pulse font-bold">🔥 초고속 성장 중</span>
+                    </div>
+                </div>
+
+                <!-- HP (체력) -->
+                <div class="flex flex-col justify-center">
+                    <div class="flex justify-between items-center text-xs mb-1 font-bold">
+                        <span class="text-rose-400">❤️ 체력 (HP)</span>
+                        <span id="hp-text">100 / 100</span>
+                    </div>
+                    <div class="w-full bg-gray-800 h-3 rounded-full overflow-hidden">
+                        <div id="hp-bar" class="bg-rose-500 h-full rounded-full transition-all duration-100" style="width: 100%"></div>
+                    </div>
+                </div>
+
+                <!-- STAMINA (기력) -->
+                <div class="flex flex-col justify-center">
+                    <div class="flex justify-between items-center text-xs mb-1 font-bold">
+                        <span class="text-cyan-400">⚡ 기력 (STAMINA)</span>
+                        <span id="stamina-text">100 / 100</span>
+                    </div>
+                    <div class="w-full bg-gray-800 h-3 rounded-full overflow-hidden">
+                        <div id="stamina-bar" class="bg-cyan-500 h-full rounded-full transition-all duration-100" style="width: 100%"></div>
+                    </div>
+                </div>
+
+                <!-- WEIGHT (무게) -->
+                <div class="flex flex-col justify-center">
+                    <div class="flex justify-between items-center text-xs mb-1 font-bold">
+                        <span class="text-amber-400">📦 무게 (WEIGHT)</span>
+                        <span id="weight-text">0.0 / 150.0 kg</span>
+                    </div>
+                    <div class="w-full bg-gray-800 h-3 rounded-full overflow-hidden">
+                        <div id="weight-bar" class="bg-amber-500 h-full rounded-full transition-all duration-200" style="width: 0%"></div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- 하단 정보 인디케이터 -->
+            <div class="flex justify-between items-center text-xs text-gray-400 px-2 font-mono">
+                <div>장착 도구: <span id="hud-equipped-tool" class="text-emerald-400 font-bold">맨손 (Fists)</span></div>
+                <div class="animate-pulse text-rose-400 font-black">● 5단계: 배회/도주/공격을 행하는 야생 공룡 생태계 소환 완료</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 통합 생존자 대시보드 (V, I 단축키로 제어 - 멀티탭 디자인) -->
+    <div id="survival-dashboard" class="hidden absolute inset-0 z-30 flex items-center justify-center bg-black/80 backdrop-blur-md pointer-events-auto">
+        <div class="w-full max-w-4xl bg-gray-800/95 border border-white/10 rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[85vh]">
+            
+            <!-- 상단 헤더 & 탭 메뉴 -->
+            <div class="p-6 border-b border-white/10 bg-gray-900/60 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div class="flex items-center gap-3">
+                    <span class="text-3xl">🛠️</span>
+                    <div>
+                        <h2 class="text-xl font-black text-white">생존자 휴대용 단말기 (Survival PDA)</h2>
+                        <p class="text-xs text-gray-400">공룡 사냥 전리품(생고기, 가죽)과 스탯 속도 폭증 배율을 확인하세요.</p>
+                    </div>
+                </div>
+                <!-- 탭 목록 -->
+                <div class="flex bg-gray-950/60 p-1.5 rounded-xl border border-white/5">
+                    <button onclick="switchTab('inventory')" id="tab-btn-inventory" class="px-4 py-2 text-xs font-bold rounded-lg transition-all text-white bg-emerald-500">
+                        🎒 인벤토리 & 스탯
+                    </button>
+                    <button onclick="switchTab('crafting')" id="tab-btn-crafting" class="px-4 py-2 text-xs font-bold rounded-lg transition-all text-gray-400 hover:text-white ml-1">
+                        🔨 즉시 제작
+                    </button>
+                    <button onclick="switchTab('engrams')" id="tab-btn-engrams" class="px-4 py-2 text-xs font-bold rounded-lg transition-all text-gray-400 hover:text-white ml-1">
+                        ✨ 엔그램 기술 해금
+                    </button>
+                </div>
+                <button onclick="toggleDashboard()" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-xl text-xs font-bold transition-all">
+                    닫기 (ESC)
+                </button>
+            </div>
+
+            <!-- 메인 컨텐츠 영역 (스크롤 가능) -->
+            <div class="flex-1 overflow-y-auto p-6">
+                
+                <!-- 탭 1: 인벤토리 및 스탯 성장 -->
+                <div id="tab-content-inventory" class="space-y-6">
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <!-- 스탯 분배 및 캐릭터 상황 판넬 -->
+                        <div class="bg-gray-900/60 p-5 rounded-2xl border border-white/5 space-y-4 flex flex-col justify-between">
+                            <div class="space-y-4">
+                                <div class="flex items-center justify-between border-b border-white/5 pb-2">
+                                    <h3 class="text-base font-black text-yellow-400">🧬 생존자 신체 정보</h3>
+                                    <!-- 자동 레벨업 / 자동 스탯 토글 스위치 -->
+                                    <div class="flex items-center gap-2 bg-black/40 px-2 py-1 rounded-lg border border-white/5">
+                                        <span class="text-[10px] text-gray-400 font-bold">자동 스탯</span>
+                                        <input type="checkbox" id="toggle-auto-stats" class="w-4 h-4 accent-emerald-500 cursor-pointer" checked onchange="toggleAutoStats(this.checked)">
+                                    </div>
+                                </div>
+                                <div class="flex justify-between items-center text-xs">
+                                    <span>미분배 스탯 포인트:</span>
+                                    <span id="stat-points-display" class="font-black text-xl text-emerald-400 font-mono">0</span>
+                                </div>
+                                <!-- 스탯 강화 리스트 -->
+                                <div class="space-y-2.5">
+                                    <!-- 체력 -->
+                                    <div class="flex items-center justify-between bg-black/40 p-2 rounded-xl">
+                                        <div class="text-[11px]">
+                                            <div class="font-bold">최대 체력</div>
+                                            <div class="text-[10px] text-gray-400" id="stat-val-hp">현재: 100</div>
+                                        </div>
+                                        <button onclick="upgradeStat('hp')" class="stat-up-btn px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-xs font-bold rounded-lg disabled:opacity-30 disabled:pointer-events-none">+</button>
+                                    </div>
+                                    <!-- 기력 -->
+                                    <div class="flex items-center justify-between bg-black/40 p-2 rounded-xl">
+                                        <div class="text-[11px]">
+                                            <div class="font-bold">최대 기력</div>
+                                            <div class="text-[10px] text-gray-400" id="stat-val-stamina">현재: 100</div>
+                                        </div>
+                                        <button onclick="upgradeStat('stamina')" class="stat-up-btn px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-xs font-bold rounded-lg disabled:opacity-30 disabled:pointer-events-none">+</button>
+                                    </div>
+                                    <!-- 무게한도 -->
+                                    <div class="flex items-center justify-between bg-black/40 p-2 rounded-xl">
+                                        <div class="text-[11px]">
+                                            <div class="font-bold">소지 무게 한도</div>
+                                            <div class="text-[10px] text-amber-400 font-bold" id="stat-val-weight">현재: 150 kg</div>
+                                        </div>
+                                        <button id="weight-upgrade-btn" onclick="upgradeStat('weight')" class="stat-up-btn px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-xs font-bold rounded-lg disabled:opacity-30 disabled:pointer-events-none">+</button>
+                                    </div>
+                                    <!-- 이동 속도 (질풍 강화 추가) -->
+                                    <div class="flex items-center justify-between bg-black/40 p-2 rounded-xl">
+                                        <div class="text-[11px]">
+                                            <div class="font-bold">이동 속도 (배율)</div>
+                                            <div class="text-[10px] text-cyan-400 font-bold" id="stat-val-speed">현재: 100%</div>
+                                        </div>
+                                        <button onclick="upgradeStat('speed')" class="stat-up-btn px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-xs font-bold rounded-lg disabled:opacity-30 disabled:pointer-events-none">+</button>
+                                    </div>
+                                    <!-- 공격력 -->
+                                    <div class="flex items-center justify-between bg-black/40 p-2 rounded-xl">
+                                        <div class="text-[11px]">
+                                            <div class="font-bold">채집/전투 타격 배율</div>
+                                            <div class="text-[10px] text-gray-400" id="stat-val-damage">현재: 100%</div>
+                                        </div>
+                                        <button onclick="upgradeStat('damage')" class="stat-up-btn px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-xs font-bold rounded-lg disabled:opacity-30 disabled:pointer-events-none">+</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="bg-amber-950/40 p-3 rounded-xl border border-amber-500/20 text-[10px] text-amber-300 leading-relaxed mt-4">
+                                ⭐ <b>무한 무게 및 질풍 스페셜:</b><br>
+                                무게한도를 1회 직접 강화하면 가방 하중이 <span class="font-black text-white bg-amber-600 px-1 rounded">무한(∞)</span>이 되며, 속도 스탯은 1성당 <span class="font-black text-white bg-cyan-600 px-1 rounded">+80%</span> 폭증합니다!
+                            </div>
+                        </div>
+
+                        <!-- 우측 인벤토리 그리드 슬롯 -->
+                        <div class="lg:col-span-2 space-y-4">
+                            <h3 class="text-base font-black text-white">🎒 보관된 생존 자원 및 모듈</h3>
+                            <div class="grid grid-cols-2 sm:grid-cols-3 gap-3" id="inv-grid-container">
+                                <!-- 자원 및 빌드모듈 카드 동적 로드 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 탭 2: 즉시 제작 (Crafting) -->
+                <div id="tab-content-crafting" class="hidden space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="crafting-grid-container">
+                        <!-- 제작 도면 동적 로드 -->
+                    </div>
+                </div>
+
+                <!-- 탭 3: 엔그램 기술 해금 (Engrams) -->
+                <div id="tab-content-engrams" class="hidden space-y-4">
+                    <div class="bg-gray-900/60 p-4 rounded-xl border border-white/5 flex justify-between items-center text-sm mb-4">
+                        <div class="text-gray-300 font-bold">사용 가능한 엔그램 기술 포인트: <span id="engram-points-display" class="text-yellow-400 text-lg font-black font-mono">0</span></div>
+                        <div class="text-xs text-gray-400">레벨 업에 따라 새로운 상급 기술 도면을 영구 개방할 수 있습니다.</div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="engrams-grid-container">
+                        <!-- 엔그램 기술 잠금 해제 카드 동적 로드 -->
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- 푸터 요약 정보 -->
+            <div class="p-5 border-t border-white/10 bg-gray-900/60 flex justify-between items-center text-sm">
+                <div class="flex items-center gap-2">
+                    <span class="text-gray-400 font-bold">총 적재 하중:</span>
+                    <span id="pda-weight-summary" class="font-mono text-amber-400 font-bold">0.0 / 150.0 kg</span>
+                </div>
+                <div class="text-xs text-emerald-400 font-mono">현재 작동 중인 도구: <span id="equipped-tool-detail">맨손 (Fists)</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 플레이어 사망 복귀 오버레이 화면 -->
+    <div id="death-screen" class="hidden absolute inset-0 z-40 flex flex-col justify-center items-center bg-red-950/90 backdrop-blur-md">
+        <div class="text-center p-10 bg-gray-900/90 rounded-3xl border-2 border-red-500 max-w-md shadow-2xl">
+            <span class="text-6xl block mb-4 animate-bounce">💀</span>
+            <h1 class="text-3xl font-black text-red-500 mb-2">사망하셨습니다</h1>
+            <p class="text-gray-400 text-xs mb-6 leading-relaxed">
+                야생 생물의 무자비한 습격으로 인해 신체 상태가 한계에 봉착했습니다.<br>
+                다행히 구조되어 안전지대인 초원으로 강제 후송 조치됩니다. (소지 아이템 유지)
+            </p>
+            <button id="btn-respawn" class="px-8 py-4 bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-extrabold rounded-xl text-lg shadow-lg hover:shadow-red-500/20 transition-all pointer-events-auto w-full">
+                안전 구역에서 부활
+            </button>
+        </div>
+    </div>
+
+    <!-- 마우스 락 안내창 (게임 진입화면) -->
+    <div id="lock-screen" class="absolute inset-0 z-20 flex flex-col justify-center items-center bg-black/85 backdrop-blur-lg transition-opacity duration-300">
+        <div class="text-center p-8 bg-gray-800/90 rounded-3xl border border-white/10 max-w-md shadow-2xl">
+            <h1 class="text-3xl font-black mb-2 text-emerald-400">생존 오픈월드 3D</h1>
+            <h2 class="text-yellow-400 font-bold mb-4">[5단계: 야생 생물 & 리스폰 탑재]</h2>
+            <p class="text-gray-300 text-xs mb-6 leading-relaxed space-y-2 text-left bg-black/40 p-4 rounded-xl">
+                • <b>새로운 생명체 출현</b>: 도도새(초식), 트리케라톱스(중립), 랩터(육식/추격)가 야생 필드에 스폰됩니다.<br>
+                • <b>전투와 포식 AI</b>: 육식 랩터는 선제 사냥을 가하며, 트리케라톱스는 선공을 당할 때 위협적인 돌격으로 보복합니다.<br>
+                • <b>신체 강화와 속도 폭증</b>: `이동 속도`에 직접 수동 분배해 줄 때마다 이동 속도가 무려 <b>+80%씩</b> 극단적으로 강해집니다.
+            </p>
+            <button id="btn-start" class="px-8 py-4 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-white font-extrabold rounded-xl text-lg shadow-lg hover:shadow-emerald-500/20 transition-all pointer-events-auto w-full">
+                생존지 복귀
+            </button>
+            <p class="text-[11px] text-gray-500 mt-4">ESC 또는 V/I로 단말기를 열고 닫을 수 있습니다.</p>
+        </div>
+    </div>
+
+    <!-- MAIN GAME SCRIPT (ES Module) -->
+    <script type="module">
+        
+        // --- 글로벌 게임 상태 정의 ---
+        const CONFIG = {
+            WORLD_SIZE: 1000,      // 전체 맵 크기
+            GRID_SEGMENTS: 120,    // 지형 해상도
+            GRAVITY: -28.0,        // 중력
+            PLAYER_HEIGHT: 1.8,    // 플레이어 눈높이 키
+            BASE_SPEED: 8.0,       // 일반 걷기
+            RUN_SPEED: 14.0,       // 달리기
+            JUMP_FORCE: 11.5,      // 점프 강도
+            HARVEST_RANGE: 6.5,    // 전투 조준 사거리를 위해 소폭 더 확장됨
+            BIOMES: {
+                FOREST: { name: "신비한 숲 (Forest)", color: 0x1f4d22, fog: 0x132a15 },
+                GRASSLAND: { name: "푸른 초원 (Grassland)", color: 0x5a8f35, fog: 0x3d5a25 },
+                DESERT: { name: "불타는 사막 (Desert)", color: 0xd2b48c, fog: 0xe6ccb2 },
+                VOLCANO: { name: "위험한 화산 (Volcano)", color: 0x4a0e0e, fog: 0x1f0505 },
+                SNOWY: { name: "얼어붙은 설산 (Snowy)", color: 0xffffff, fog: 0xd9e5eb }
+            },
+            ITEMS: {
+                wood: { name: "나무 (Wood)", weight: 0.5, icon: "🪵", color: "text-amber-500" },
+                stone: { name: "돌 (Stone)", weight: 1.0, icon: "🪨", color: "text-gray-400" },
+                fiber: { name: "섬유 (Fiber)", weight: 0.1, icon: "🌿", color: "text-emerald-400" },
+                hide: { name: "가죽 (Hide)", weight: 0.4, icon: "🦌", color: "text-amber-700" },
+                meat: { name: "생고기 (Raw Meat)", weight: 0.5, icon: "🥩", color: "text-rose-400" },
+                metal: { name: "철광석 (Metal Ore)", weight: 2.0, icon: "🪙", color: "text-blue-300" },
+                
+                // 장비류 아이템 메타데이터
+                pickaxe: { name: "돌 곡괭이", weight: 3.0, icon: "⛏️", color: "text-cyan-400" },
+                hatchet: { name: "돌 도끼", weight: 3.0, icon: "🪓", color: "text-sky-400" },
+                armor: { name: "섬유 보호복", weight: 5.0, icon: "👕", color: "text-green-300" },
+                foundation: { name: "나무 토대", weight: 10.0, icon: "🧱", color: "text-amber-600" },
+                wall: { name: "나무 벽", weight: 8.0, icon: "🚧", color: "text-amber-700" }
+            },
+            CRAFT_BLUEPRINTS: {
+                pickaxe: { name: "돌 곡괭이", desc: "광석 자원 채집량이 3배 증가합니다.", cost: { wood: 10, stone: 5 }, icon: "⛏️" },
+                hatchet: { name: "돌 도끼", desc: "나무 자원 채집량이 3배 증가합니다.", cost: { wood: 5, fiber: 10 }, icon: "🪓" },
+                armor: { name: "섬유 보호복", desc: "최대 체력이 즉시 50 증가합니다.", cost: { fiber: 20 }, icon: "👕" },
+                foundation: { name: "나무 토대", desc: "건설 모형 스냅용 토대 기둥판입니다.", cost: { wood: 15, stone: 5 }, icon: "🧱" },
+                wall: { name: "나무 벽", desc: "토대에 수평 스냅 조립할 수 있는 안전지대 장벽입니다.", cost: { wood: 10, fiber: 5 }, icon: "🚧" }
+            }
+        };
+
+        const state = {
+            player: {
+                position: new THREE.Vector3(0, 5, 0),
+                velocity: new THREE.Vector3(0, 0, 0),
+                onGround: false,
+                level: 1,
+                exp: 15,
+                maxExp: 100,
+                hp: 100,
+                maxHp: 100,
+                stamina: 100,
+                maxStamina: 100,
+                weight: 0.0,
+                maxWeight: 150.0,
+                damageMultiplier: 1.0, 
+                speedMultiplier: 1.0,  
+                statPoints: 0,         
+                engramPoints: 2,       
+                isRunning: false,
+                cameraMode: '3rd',
+                autoStatAllocation: true, // 자동 스탯 조율 토글 상태
+                isDead: false,
+                
+                // 장착 상태 저장
+                equippedTool: 'fists', 
+                equippedArmor: false
+            },
+            inventory: {
+                wood: 50,   
+                stone: 30,
+                fiber: 30,
+                hide: 10,
+                meat: 0,
+                metal: 0,
+                
+                pickaxe: 0,
+                hatchet: 0,
+                armor: 0,
+                foundation: 4, 
+                wall: 8        
+            },
+            unlockedEngrams: {
+                pickaxe: true,  
+                hatchet: true, 
+                armor: false,
+                foundation: true, 
+                wall: true
+            },
+            input: {
+                forward: false,
+                backward: false,
+                left: false,
+                right: false,
+                jump: false,
+                run: false
+            },
+            camera: {
+                yaw: 0,
+                pitch: 0,
+                fixedDistance: 6.5,
+                fixedHeightOffset: 1.2
+            },
+            system: {
+                lastTime: performance.now(),
+                isLocked: false,
+                isDashboardOpen: false,
+                currentTab: 'inventory',
+                
+                // [건축 모드 변수군]
+                isBuildingMode: false,
+                selectedBuildType: null, 
+                ghostMesh: null,
+                isBuildPosValid: false
+            }
+        };
+
+        // --- Three.js 핵심 객체 ---
+        let scene, camera, renderer, clock;
+        let playerMesh, terrainMesh, portals = [];
+        let directionalLight, ambientLight;
+
+        // --- 자원 노드, 야생생물, 구조물 등 컬렉션 ---
+        let resourceNodes = [];
+        let creatures = []; // 생물 배열
+        let particleGroups = [];
+        let placedStructures = []; 
+        const raycaster = new THREE.Raycaster();
+
+        // UI 엘리먼트 캐싱
+        const ui = {
+            lockScreen: document.getElementById('lock-screen'),
+            btnStart: document.getElementById('btn-start'),
+            biomeDisplay: document.getElementById('biome-display'),
+            coordDisplay: document.getElementById('coord-display'),
+            playerLevel: document.getElementById('player-level'),
+            playerExpBar: document.getElementById('player-exp-bar'),
+            playerExpText: document.getElementById('player-exp-text'),
+            hpBar: document.getElementById('hp-bar'),
+            hpText: document.getElementById('hp-text'),
+            staminaBar: document.getElementById('stamina-bar'),
+            staminaText: document.getElementById('stamina-text'),
+            weightBar: document.getElementById('weight-bar'),
+            weightText: document.getElementById('weight-text'),
+            hudEquippedTool: document.getElementById('hud-equipped-tool'),
+            crosshair: document.getElementById('crosshair'),
+            lootLogContainer: document.getElementById('loot-log-container'),
+            buildHudPanel: document.getElementById('build-hud-panel'),
+            dangerWarningPanel: document.getElementById('danger-warning-panel'),
+            damageFlash: document.getElementById('damage-flash'),
+            deathScreen: document.getElementById('death-screen'),
+            btnRespawn: document.getElementById('btn-respawn'),
+
+            // 통합 대시보드
+            survivalDashboard: document.getElementById('survival-dashboard'),
+            statPointsDisplay: document.getElementById('stat-points-display'),
+            engramPointsDisplay: document.getElementById('engram-points-display'),
+            pdaWeightSummary: document.getElementById('pda-weight-summary'),
+            equippedToolDetail: document.getElementById('equipped-tool-detail'),
+            invGridContainer: document.getElementById('inv-grid-container'),
+            craftingGridContainer: document.getElementById('crafting-grid-container'),
+            engramsGridContainer: document.getElementById('engrams-grid-container')
+        };
+
+        // --- 초기화 함수 ---
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x3d5a25);
+            scene.fog = new THREE.FogExp2(0x3d5a25, 0.008);
+
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1500);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            clock = new THREE.Clock();
+
+            // 광원 설정
+            ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambientLight);
+
+            directionalLight = new THREE.DirectionalLight(0xfff8e7, 1.2);
+            directionalLight.position.set(200, 400, 100);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
+
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.4);
+            hemiLight.position.set(0, 200, 0);
+            scene.add(hemiLight);
+
+            // 지형 및 오브젝트 생성
+            createWorld();
+            createPlayer();
+            createPortals();
+
+            // 자물 노드 배치
+            spawnResourceNodes();
+
+            // 야생 생물 스폰
+            spawnCreatures();
+
+            // PDA 단말기 초기화
+            updateDashboardUI();
+
+            // 입력 제어 리스너
+            setupInput();
+            setupPointerLock();
+            setupMouseClickInteraction();
+
+            // 부활 버튼 액션
+            ui.btnRespawn.addEventListener('click', respawnPlayer);
+
+            window.addEventListener('resize', onWindowResize);
+
+            animate();
+        }
+
+        // --- 지형 생성 ---
+        function createWorld() {
+            const geometry = new THREE.PlaneGeometry(CONFIG.WORLD_SIZE, CONFIG.WORLD_SIZE, CONFIG.GRID_SEGMENTS, CONFIG.GRID_SEGMENTS);
+            geometry.rotateX(-Math.PI / 2);
+
+            const position = geometry.attributes.position;
+            const colors = [];
+
+            const colorForest = new THREE.Color(CONFIG.BIOMES.FOREST.color);
+            const colorGrass = new THREE.Color(CONFIG.BIOMES.GRASSLAND.color);
+            const colorDesert = new THREE.Color(CONFIG.BIOMES.DESERT.color);
+            const colorVolcano = new THREE.Color(CONFIG.BIOMES.VOLCANO.color);
+            const colorSnowy = new THREE.Color(CONFIG.BIOMES.SNOWY.color);
+
+            for (let i = 0; i < position.count; i++) {
+                const x = position.getX(i);
+                const z = position.getZ(i);
+
+                let height = 0;
+                let finalColor = colorGrass.clone();
+
+                const baseNoise = Math.sin(x * 0.02) * Math.cos(z * 0.02) * 6 + 
+                                  Math.sin(x * 0.005) * Math.sin(z * 0.005) * 18 +
+                                  Math.cos(x * 0.08) * Math.sin(z * 0.08) * 1.5;
+
+                if (z < -150 && x > 150) {
+                    const weight = Math.min(1, (-z - 150) / 250);
+                    height = baseNoise * 1.8 + weight * 55;
+                    finalColor.lerp(colorSnowy, weight);
+                } else if (z < -100 && x < -150) {
+                    const weight = Math.min(1, (-z - 100) / 250);
+                    height = baseNoise * 1.5 + weight * 25 + Math.sin(x*0.1)*5;
+                    finalColor.lerp(colorVolcano, weight);
+                } else if (x > 180 && z > 100) {
+                    const weight = Math.min(1, (x - 180) / 200);
+                    height = Math.sin(x*0.04)*3 + Math.cos(z*0.04)*3;
+                    finalColor.lerp(colorDesert, weight);
+                } else if (x < -100 && z > 150) {
+                    const weight = Math.min(1, (z - 150) / 200);
+                    height = baseNoise * 1.1 + weight * 10;
+                    finalColor.lerp(colorForest, weight);
+                } else {
+                    height = baseNoise * 0.8;
+                }
+
+                if (height > 15 && Math.random() > 0.4) {
+                    finalColor.lerp(new THREE.Color(0x666666), 0.4);
+                }
+
+                position.setY(i, height);
+                colors.push(finalColor.r, finalColor.g, finalColor.b);
+            }
+
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            geometry.computeVertexNormals();
+
+            const material = new THREE.MeshStandardMaterial({
+                vertexColors: true,
+                roughness: 0.9,
+                metalness: 0.05,
+                flatShading: true
+            });
+
+            terrainMesh = new THREE.Mesh(geometry, material);
+            terrainMesh.receiveShadow = true;
+            terrainMesh.castShadow = false;
+            scene.add(terrainMesh);
+        }
+
+        // 특정 X, Z 지점 높이 추산기
+        function getTerrainHeight(x, z) {
+            if (!terrainMesh) return 0;
+            const size = CONFIG.WORLD_SIZE;
+            const segs = CONFIG.GRID_SEGMENTS;
+            const gridX = Math.floor(((x + size / 2) / size) * segs);
+            const gridZ = Math.floor(((z + size / 2) / size) * segs);
+            if (gridX < 0 || gridX >= segs || gridZ < 0 || gridZ >= segs) return 0;
+            const idx = gridX + gridZ * (segs + 1);
+            const position = terrainMesh.geometry.attributes.position;
+            if (idx >= 0 && idx < position.count) {
+                return position.getY(idx);
+            }
+            return 0;
+        }
+
+        // --- 플레이어 외관 생성 ---
+        function createPlayer() {
+            const playerGroup = new THREE.Group();
+
+            // 몸통
+            const bodyGeo = new THREE.CylinderGeometry(0.5, 0.5, 1.6, 8);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x228be6, roughness: 0.5 });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 0.8;
+            body.castShadow = true;
+            body.receiveShadow = true;
+            playerGroup.add(body);
+
+            // 머리
+            const headGeo = new THREE.SphereGeometry(0.35, 8, 8);
+            const headMat = new THREE.MeshStandardMaterial({ color: 0xffd43b, roughness: 0.4 });
+            const head = new THREE.Mesh(headGeo, headMat);
+            head.position.set(0, 1.8, 0);
+            head.castShadow = true;
+            playerGroup.add(head);
+
+            // 선글라스
+            const visorGeo = new THREE.BoxGeometry(0.5, 0.15, 0.3);
+            const visorMat = new THREE.MeshBasicMaterial({ color: 0x1a1a1a });
+            const visor = new THREE.Mesh(visorGeo, visorMat);
+            visor.position.set(0, 1.85, 0.25);
+            playerGroup.add(visor);
+
+            // 오른손 주먹 타격 골격
+            const fistGeo = new THREE.SphereGeometry(0.12, 6, 6);
+            const fistMat = new THREE.MeshStandardMaterial({ color: 0xffd43b });
+            const rightFist = new THREE.Mesh(fistGeo, fistMat);
+            rightFist.position.set(0.6, 1.0, 0.4);
+            rightFist.name = "rightFist";
+            playerGroup.add(rightFist);
+
+            // 도구 부모 빈 축
+            const toolGroup = new THREE.Group();
+            toolGroup.name = "heldTool";
+            toolGroup.position.set(0.6, 1.1, 0.6);
+            playerGroup.add(toolGroup);
+
+            playerMesh = playerGroup;
+            scene.add(playerMesh);
+
+            state.player.position.set(0, getTerrainHeight(0, 0) + CONFIG.PLAYER_HEIGHT, 0);
+            playerMesh.position.copy(state.player.position);
+        }
+
+        // 장착 도구 시각화
+        function updateEquippedToolMesh() {
+            const toolGroup = playerMesh.getObjectByName("heldTool");
+            if (!toolGroup) return;
+
+            while(toolGroup.children.length > 0) {
+                toolGroup.remove(toolGroup.children[0]);
+            }
+
+            const tool = state.player.equippedTool;
+            if (tool === 'fists') return;
+
+            const shaftGeo = new THREE.CylinderGeometry(0.05, 0.05, 1.2, 5);
+            const shaftMat = new THREE.MeshStandardMaterial({ color: 0x8b5a2b, roughness: 0.9 });
+            const shaft = new THREE.Mesh(shaftGeo, shaftMat);
+            shaft.rotation.x = Math.PI / 2;
+            toolGroup.add(shaft);
+
+            if (tool === 'pickaxe') {
+                const headGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.8, 4);
+                const headMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.8, roughness: 0.2 });
+                const head = new THREE.Mesh(headGeo, headMat);
+                head.position.set(0, 0, 0.5);
+                head.rotation.y = Math.PI / 2;
+                toolGroup.add(head);
+            } else if (tool === 'hatchet') {
+                const headGeo = new THREE.BoxGeometry(0.3, 0.3, 0.1);
+                const headMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.8, roughness: 0.2 });
+                const head = new THREE.Mesh(headGeo, headMat);
+                head.position.set(0.12, 0, 0.55);
+                toolGroup.add(head);
+            }
+        }
+
+        // 바이옴 게이트 생성
+        function createPortals() {
+            const portalPositions = [
+                { x: -100, z: -100, name: "초원 게이트", color: 0x22c55e },
+                { x: 200, z: -250, name: "설산 입구", color: 0x38bdf8 },
+                { x: -280, z: -180, name: "화산 제단", color: 0xef4444 },
+                { x: 300, z: 200, name: "사막 유적", color: 0xf59e0b },
+                { x: -220, z: 280, name: "숲 고대의 틈새", color: 0x10b981 }
+            ];
+
+            const ringGeo = new THREE.TorusGeometry(3.5, 0.4, 8, 32);
+            const coreGeo = new THREE.CylinderGeometry(3.3, 3.3, 0.2, 16);
+            coreGeo.rotateX(Math.PI / 2);
+
+            portalPositions.forEach((portalInfo) => {
+                const pGroup = new THREE.Group();
+                const terrainY = getTerrainHeight(portalInfo.x, portalInfo.z);
+                pGroup.position.set(portalInfo.x, terrainY + 1.5, portalInfo.z);
+                pGroup.lookAt(0, terrainY + 1.5, 0);
+
+                const ringMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.9, roughness: 0.1 });
+                const ring = new THREE.Mesh(ringGeo, ringMat);
+                ring.castShadow = true;
+                pGroup.add(ring);
+
+                const coreMat = new THREE.MeshBasicMaterial({
+                    color: portalInfo.color,
+                    transparent: true,
+                    opacity: 0.65,
+                    side: THREE.DoubleSide
+                });
+                const core = new THREE.Mesh(coreGeo, coreMat);
+                pGroup.add(core);
+
+                pGroup.userData = {
+                    name: portalInfo.name,
+                    radius: 4.5,
+                    color: portalInfo.color
+                };
+
+                scene.add(pGroup);
+                portals.push(pGroup);
+            });
+        }
+
+        // 자원 무작위 배치
+        function spawnResourceNodes() {
+            const nodeTypes = [
+                { type: 'wood', color: 0x8b5a2b, hitPoints: 4, scaleRange: [1, 1.8], name: 'wood_node' },
+                { type: 'stone', color: 0x777777, hitPoints: 5, scaleRange: [0.8, 1.4], name: 'stone_node' },
+                { type: 'fiber', color: 0x32cd32, hitPoints: 3, scaleRange: [0.5, 1.0], name: 'fiber_node' }
+            ];
+
+            for (let i = 0; i < 200; i++) {
+                const x = (Math.random() - 0.5) * (CONFIG.WORLD_SIZE - 60);
+                const z = (Math.random() - 0.5) * (CONFIG.WORLD_SIZE - 60);
+                const terrainY = getTerrainHeight(x, z);
+
+                let selType = nodeTypes[Math.floor(Math.random() * nodeTypes.length)];
+                
+                if (z < -150 && x > 150) {
+                    selType = nodeTypes[1];
+                } else if (z < -100 && x < -150) {
+                    if (Math.random() > 0.3) selType = nodeTypes[1];
+                }
+
+                const group = new THREE.Group();
+                group.position.set(x, terrainY, z);
+
+                const scale = Math.random() * (selType.scaleRange[1] - selType.scaleRange[0]) + selType.scaleRange[0];
+                group.scale.set(scale, scale, scale);
+
+                let mainMesh;
+                if (selType.type === 'wood') {
+                    const trunkGeo = new THREE.CylinderGeometry(0.3, 0.4, 4, 6);
+                    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.9 });
+                    const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+                    trunk.position.y = 2;
+                    trunk.castShadow = true;
+                    group.add(trunk);
+
+                    const topGeo = new THREE.DodecahedronGeometry(1.6, 1);
+                    const topMat = new THREE.MeshStandardMaterial({ color: 0x2e8b57, roughness: 0.8, flatShading: true });
+                    const top = new THREE.Mesh(topGeo, topMat);
+                    top.position.y = 4.2;
+                    top.castShadow = true;
+                    group.add(top);
+                    
+                    mainMesh = trunk;
+                } else if (selType.type === 'stone') {
+                    const stoneGeo = new THREE.DodecahedronGeometry(1.4, 0);
+                    const stoneMat = new THREE.MeshStandardMaterial({ color: 0x808080, roughness: 0.95, flatShading: true });
+                    const stone = new THREE.Mesh(stoneGeo, stoneMat);
+                    stone.position.y = 0.7;
+                    stone.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+                    stone.castShadow = true;
+                    stone.receiveShadow = true;
+                    group.add(stone);
+                    mainMesh = stone;
+                } else if (selType.type === 'fiber') {
+                    const fiberGeo = new THREE.IcosahedronGeometry(0.8, 1);
+                    const fiberMat = new THREE.MeshStandardMaterial({ color: 0x4f7942, roughness: 0.9, flatShading: true });
+                    const fiber = new THREE.Mesh(fiberGeo, fiberMat);
+                    fiber.position.y = 0.4;
+                    fiber.castShadow = true;
+                    group.add(fiber);
+                    mainMesh = fiber;
+                }
+
+                group.userData = {
+                    id: 'node_' + i,
+                    type: selType.type,
+                    hp: selType.hitPoints,
+                    maxHp: selType.hitPoints,
+                    originalScale: scale
+                };
+
+                scene.add(group);
+                resourceNodes.push(group);
+            }
+        }
+
+        // --- 5단계 신규: 야생 생물 (Dodo, Raptor, Triceratops) 3D 로폴리 복셀 구조체 생성 및 스폰 ---
+        function createCreatureMesh(type) {
+            const group = new THREE.Group();
+            const legs = [];
+
+            if (type === 'dodo') {
+                // 도도새: 둥글둥글한 소형 구체 몸통
+                const bodyGeo = new THREE.SphereGeometry(0.4, 8, 8);
+                const bodyMat = new THREE.MeshStandardMaterial({ color: 0x4dabf7, roughness: 0.8 }); // 밝은 파란빛
+                const body = new THREE.Mesh(bodyGeo, bodyMat);
+                body.position.y = 0.4;
+                body.scale.set(1.0, 1.1, 1.2);
+                body.castShadow = true;
+                group.add(body);
+
+                // 오렌지색 부리
+                const beakGeo = new THREE.BoxGeometry(0.18, 0.15, 0.3);
+                const beakMat = new THREE.MeshStandardMaterial({ color: 0xff922b, roughness: 0.5 });
+                const beak = new THREE.Mesh(beakGeo, beakMat);
+                beak.position.set(0, 0.55, 0.4);
+                group.add(beak);
+
+                // 두 다리
+                const legGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.3);
+                const legMat = new THREE.MeshStandardMaterial({ color: 0xff922b });
+                
+                const legL = new THREE.Mesh(legGeo, legMat);
+                legL.position.set(-0.15, 0.15, 0);
+                legL.castShadow = true;
+                group.add(legL);
+                legs.push(legL);
+
+                const legR = new THREE.Mesh(legGeo, legMat);
+                legR.position.set(0.15, 0.15, 0);
+                legR.castShadow = true;
+                group.add(legR);
+                legs.push(legR);
+
+            } else if (type === 'raptor') {
+                // 랩터: 긴 몸통과 날렵한 형상
+                const bodyGeo = new THREE.BoxGeometry(0.5, 0.6, 1.4);
+                const bodyMat = new THREE.MeshStandardMaterial({ color: 0xfa5252, roughness: 0.6 }); // 공격적 붉은빛
+                const body = new THREE.Mesh(bodyGeo, bodyMat);
+                body.position.y = 0.8;
+                body.castShadow = true;
+                group.add(body);
+
+                // 머리 및 턱 구조물
+                const headGeo = new THREE.BoxGeometry(0.4, 0.4, 0.7);
+                const headMat = new THREE.MeshStandardMaterial({ color: 0xe03131, roughness: 0.5 });
+                const head = new THREE.Mesh(headGeo, headMat);
+                head.position.set(0, 1.2, 0.4);
+                head.castShadow = true;
+                group.add(head);
+
+                // 꼬리
+                const tailGeo = new THREE.BoxGeometry(0.25, 0.2, 1.0);
+                const tail = new THREE.Mesh(tailGeo, bodyMat);
+                tail.position.set(0, 0.9, -1.0);
+                tail.rotation.x = -Math.PI / 8;
+                tail.castShadow = true;
+                group.add(tail);
+
+                // 강력한 두 다리
+                const legGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.6);
+                const legMat = new THREE.MeshStandardMaterial({ color: 0xc92a2a });
+                
+                const legL = new THREE.Mesh(legGeo, legMat);
+                legL.position.set(-0.25, 0.3, 0);
+                legL.castShadow = true;
+                group.add(legL);
+                legs.push(legL);
+
+                const legR = new THREE.Mesh(legGeo, legMat);
+                legR.position.set(0.25, 0.3, 0);
+                legR.castShadow = true;
+                group.add(legR);
+                legs.push(legR);
+
+            } else if (type === 'triceratops') {
+                // 트리케라톱스: 거대하고 묵직한 오렌지/브라운 박스 구조
+                const bodyGeo = new THREE.BoxGeometry(1.4, 1.2, 2.2);
+                const bodyMat = new THREE.MeshStandardMaterial({ color: 0xfcc419, roughness: 0.8 }); // 중립 옐로 브라운
+                const body = new THREE.Mesh(bodyGeo, bodyMat);
+                body.position.y = 0.9;
+                body.castShadow = true;
+                group.add(body);
+
+                // 거대 머리 방패 프릴
+                const frillGeo = new THREE.BoxGeometry(1.8, 1.4, 0.2);
+                const frillMat = new THREE.MeshStandardMaterial({ color: 0xe67700, roughness: 0.8 });
+                const frill = new THREE.Mesh(frillGeo, frillMat);
+                frill.position.set(0, 1.8, 0.8);
+                frill.rotation.x = Math.PI / 6;
+                frill.castShadow = true;
+                group.add(frill);
+
+                // 이마의 흰 세 뿔
+                const hornGeo = new THREE.CylinderGeometry(0, 0.08, 0.7, 4);
+                const hornMat = new THREE.MeshStandardMaterial({ color: 0xf1f3f5, roughness: 0.2 });
+                
+                const hornL = new THREE.Mesh(hornGeo, hornMat);
+                hornL.position.set(-0.4, 1.6, 1.3);
+                hornL.rotation.x = Math.PI / 3;
+                group.add(hornL);
+
+                const hornR = new THREE.Mesh(hornGeo, hornMat);
+                hornR.position.set(0.4, 1.6, 1.3);
+                hornR.rotation.x = Math.PI / 3;
+                group.add(hornR);
+
+                // 4족 보행 다리
+                const legGeo = new THREE.BoxGeometry(0.35, 0.6, 0.35);
+                const legMat = new THREE.MeshStandardMaterial({ color: 0xd9480f });
+
+                const offsets = [
+                    { x: -0.5, z: 0.6 }, { x: 0.5, z: 0.6 },
+                    { x: -0.5, z: -0.6 }, { x: 0.5, z: -0.6 }
+                ];
+
+                offsets.forEach((off) => {
+                    const leg = new THREE.Mesh(legGeo, legMat);
+                    leg.position.set(off.x, 0.3, off.z);
+                    leg.castShadow = true;
+                    group.add(leg);
+                    legs.push(leg);
+                });
+            }
+
+            return { meshGroup: group, legs };
+        }
+
+        // 야생 생물 스폰 메커니즘
+        function spawnCreatures() {
+            const types = ['dodo', 'raptor', 'triceratops'];
+            
+            // 맵에 45마리의 공룡/동물을 골고루 스폰
+            for (let i = 0; i < 45; i++) {
+                const type = types[Math.floor(Math.random() * types.length)];
+                
+                // 스폰 위치 좌표 추출
+                const x = (Math.random() - 0.5) * (CONFIG.WORLD_SIZE - 100);
+                const z = (Math.random() - 0.5) * (CONFIG.WORLD_SIZE - 100);
+                const terrainY = getTerrainHeight(x, z);
+
+                const cData = createCreatureMesh(type);
+                const mesh = cData.meshGroup;
+                mesh.position.set(x, terrainY, z);
+                scene.add(mesh);
+
+                // 생물 개별 성질 인지 데이터 기입
+                const maxHp = type === 'dodo' ? 25 : (type === 'raptor' ? 80 : 250);
+                const speed = type === 'dodo' ? 5.0 : (type === 'raptor' ? 12.0 : 4.0);
+
+                creatures.push({
+                    id: 'creature_' + i + '_' + performance.now(),
+                    type: type,
+                    mesh: mesh,
+                    legs: cData.legs,
+                    hp: maxHp,
+                    maxHp: maxHp,
+                    baseSpeed: speed,
+                    aiState: 'ROAM', // 'ROAM', 'CHASE', 'FLEE'
+                    targetPos: new THREE.Vector3(x, terrainY, z),
+                    aiTimer: Math.random() * 3,
+                    aggroTarget: null, // 어그로 공격 대상
+                    attackCooldown: 0.0,
+                    lastPos: mesh.position.clone()
+                });
+            }
+        }
+
+        // --- PDA 단말기 통합 대시보드 동기화 ---
+        function updateDashboardUI() {
+            let totalWeight = 0;
+            const isInfiniteWeight = state.player.maxWeight >= 9999999;
+            const maxWeightStr = isInfiniteWeight ? "무한 (∞)" : `${state.player.maxWeight.toFixed(1)} kg`;
+
+            // 1. 인벤토리 목록 동적 가공
+            ui.invGridContainer.innerHTML = '';
+            Object.keys(CONFIG.ITEMS).forEach((key) => {
+                const count = state.inventory[key] || 0;
+                const itemMeta = CONFIG.ITEMS[key];
+                totalWeight += count * itemMeta.weight;
+
+                const card = document.createElement('div');
+                card.className = `bg-gray-950/50 p-3 rounded-2xl border flex flex-col justify-between items-center text-center transition-all ${count > 0 ? 'opacity-100 border-white/10 shadow-md' : 'opacity-30 border-white/5'}`;
+                
+                // 가방 내 액션 버튼
+                let actionBtnHTML = '';
+                let discardBtnHTML = '';
+                if (count > 0) {
+                    discardBtnHTML = `
+                        <button onclick="discardItem('${key}')" class="mt-1 w-full py-1 text-[9px] font-bold rounded-lg bg-rose-950 hover:bg-rose-800 text-rose-300 border border-rose-500/20 transition-all">
+                            🗑️ 모두 버리기
+                        </button>
+                    `;
+
+                    if (key === 'pickaxe' || key === 'hatchet') {
+                        const isEquipped = state.player.equippedTool === key;
+                        actionBtnHTML = `
+                            <button onclick="equipToolItem('${key}')" class="mt-2 w-full py-1 text-[10px] font-black rounded-lg ${isEquipped ? 'bg-cyan-500 text-white' : 'bg-gray-700 hover:bg-gray-600'}">
+                                ${isEquipped ? '장착 해제' : '공구 장착'}
+                            </button>
+                        `;
+                    } else if (key === 'foundation' || key === 'wall') {
+                        actionBtnHTML = `
+                            <button onclick="startBuildingMode('${key}')" class="mt-2 w-full py-1 text-[10px] font-black rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow">
+                                🏗️ 건설하기
+                            </button>
+                        `;
+                    }
+                }
+
+                card.innerHTML = `
+                    <div class="text-3xl mb-1">${itemMeta.icon}</div>
+                    <div class="text-[11px] font-bold text-white">${itemMeta.name}</div>
+                    <div class="mt-1 text-sm font-black font-mono ${itemMeta.color}">${count} 개</div>
+                    ${actionBtnHTML}
+                    ${discardBtnHTML}
+                `;
+                ui.invGridContainer.appendChild(card);
+            });
+
+            state.player.weight = totalWeight;
+
+            // HUD 실시간 디스플레이 데이터 주입
+            ui.weightText.textContent = `${totalWeight.toFixed(1)} / ${maxWeightStr}`;
+            
+            // 무한 무게일 때는 하단 가방 게이지를 0%로 고정해 쾌적하게 표현
+            const weightPercent = isInfiniteWeight ? 0 : Math.min(100, (totalWeight / state.player.maxWeight) * 100);
+            ui.weightBar.style.width = `${weightPercent}%`;
+            ui.weightBar.className = weightPercent >= 90 ? "bg-rose-500 h-full rounded-full" : "bg-amber-500 h-full rounded-full";
+
+            ui.pdaWeightSummary.textContent = `${totalWeight.toFixed(1)} / ${maxWeightStr}`;
+            
+            const toolName = state.player.equippedTool === 'pickaxe' ? '⛏️ 돌 곡괭이' : (state.player.equippedTool === 'hatchet' ? '🪓 돌 도끼' : '✊ 맨손');
+            ui.equippedToolDetail.textContent = toolName;
+            ui.hudEquippedTool.textContent = toolName;
+
+            // 2. 스탯 텍스트 동기화
+            ui.statPointsDisplay.textContent = state.player.statPoints;
+            document.getElementById('stat-val-hp').textContent = `현재: ${state.player.maxHp} HP`;
+            document.getElementById('stat-val-stamina').textContent = `현재: ${state.player.maxStamina} ST`;
+            document.getElementById('stat-val-weight').textContent = `현재: ${isInfiniteWeight ? "무한 무게 (∞)" : state.player.maxWeight.toFixed(0) + " kg"}`;
+            document.getElementById('stat-val-damage').textContent = `현재: ${(state.player.damageMultiplier * 100).toFixed(0)}%`;
+            document.getElementById('stat-val-speed').textContent = `현재: ${(state.player.speedMultiplier * 100).toFixed(0)}%`;
+
+            // 스탯 수동 분배 '+' 버튼 조절
+            const upBtns = document.querySelectorAll('.stat-up-btn');
+            upBtns.forEach((btn) => {
+                btn.disabled = (state.player.statPoints <= 0 || state.player.autoStatAllocation);
+            });
+
+            // 이미 무한 무게라면 스탯 강화 버튼 자체를 완전히 비활성화
+            const weightBtn = document.getElementById('weight-upgrade-btn');
+            if (weightBtn) {
+                if (isInfiniteWeight) {
+                    weightBtn.disabled = true;
+                    weightBtn.textContent = "MAX";
+                    weightBtn.className = "px-3 py-1 bg-gray-700 text-xs font-bold rounded-lg text-gray-500 cursor-not-allowed";
+                } else {
+                    weightBtn.textContent = "+";
+                }
+            }
+
+            // 3. 즉시 제작 리스트
+            ui.craftingGridContainer.innerHTML = '';
+            Object.keys(CONFIG.CRAFT_BLUEPRINTS).forEach((key) => {
+                const bp = CONFIG.CRAFT_BLUEPRINTS[key];
+                const isUnlocked = state.unlockedEngrams[key];
+
+                const card = document.createElement('div');
+                card.className = `p-4 rounded-2xl border ${isUnlocked ? 'bg-gray-950/60 border-white/10' : 'bg-gray-950/20 border-white/5 opacity-50'} flex flex-col justify-between`;
+
+                let reqHTML = '';
+                let canCraft = isUnlocked;
+                Object.keys(bp.cost).forEach((res) => {
+                    const needed = bp.cost[res];
+                    const owned = state.inventory[res] || 0;
+                    const hasEnough = owned >= needed;
+                    if (!hasEnough) canCraft = false;
+                    reqHTML += `<span class="${hasEnough ? 'text-emerald-400' : 'text-rose-500'} font-mono">${CONFIG.ITEMS[res].icon} ${owned}/${needed}</span> `;
+                });
+
+                card.innerHTML = `
+                    <div class="flex items-start gap-3">
+                        <div class="text-4xl p-2 bg-gray-900 rounded-xl">${bp.icon}</div>
+                        <div>
+                            <h4 class="font-bold text-white text-sm">${bp.name}</h4>
+                            <p class="text-[10px] text-gray-400 mt-1">${bp.desc}</p>
+                        </div>
+                    </div>
+                    <div class="mt-4 pt-3 border-t border-white/5 flex flex-col gap-2">
+                        <div class="flex flex-wrap gap-2 text-[10px]">${reqHTML}</div>
+                        ${isUnlocked ? 
+                            `<button onclick="craftItem('${key}')" ${canCraft ? '' : 'disabled'} class="w-full py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-20 disabled:pointer-events-none text-xs font-black rounded-lg transition-all text-white">즉시 제작하기</button>` : 
+                            `<div class="text-center py-2 bg-gray-900 text-[10px] text-yellow-400 font-bold">⚠️ 기술 미해금 (엔그램 필요)</div>`
+                        }
+                    </div>
+                `;
+                ui.craftingGridContainer.appendChild(card);
+            });
+
+            // 4. 기술 엔그램 해금 리스트
+            ui.engramPointsDisplay.textContent = state.player.engramPoints;
+            ui.engramsGridContainer.innerHTML = '';
+            Object.keys(CONFIG.CRAFT_BLUEPRINTS).forEach((key) => {
+                const bp = CONFIG.CRAFT_BLUEPRINTS[key];
+                const isUnlocked = state.unlockedEngrams[key];
+
+                const card = document.createElement('div');
+                card.className = `p-4 rounded-2xl border ${isUnlocked ? 'bg-emerald-950/30 border-emerald-500/20' : 'bg-gray-950/60 border-white/5'} flex justify-between items-center`;
+
+                card.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <div class="text-3xl">${bp.icon}</div>
+                        <div>
+                            <div class="text-xs font-bold text-white">${bp.name}</div>
+                            <div class="text-[10px] text-gray-500">요구 해금 비용: 1 포인트</div>
+                        </div>
+                    </div>
+                    <div>
+                        ${isUnlocked ? 
+                            `<span class="text-xs text-emerald-400 font-bold">✓ 해금됨</span>` : 
+                            `<button onclick="unlockEngram('${key}')" ${state.player.engramPoints > 0 ? '' : 'disabled'} class="px-3 py-1.5 bg-yellow-500 hover:bg-yellow-400 disabled:opacity-30 disabled:pointer-events-none text-xs font-bold text-gray-950 rounded-lg transition-all">해금하기</button>`
+                        }
+                    </div>
+                `;
+                ui.engramsGridContainer.appendChild(card);
+            });
+        }
+
+        // --- 글로벌 바인딩 이벤트 액션 스크립트 ---
+        window.switchTab = function(tabName) {
+            state.system.currentTab = tabName;
+            document.getElementById('tab-btn-inventory').className = `px-4 py-2 text-xs font-bold rounded-lg transition-all ${tabName === 'inventory' ? 'text-white bg-emerald-500' : 'text-gray-400 hover:text-white'}`;
+            document.getElementById('tab-btn-crafting').className = `px-4 py-2 text-xs font-bold rounded-lg transition-all ${tabName === 'crafting' ? 'text-white bg-emerald-500' : 'text-gray-400 hover:text-white'}`;
+            document.getElementById('tab-btn-engrams').className = `px-4 py-2 text-xs font-bold rounded-lg transition-all ${tabName === 'engrams' ? 'text-white bg-emerald-500' : 'text-gray-400 hover:text-white'}`;
+
+            document.getElementById('tab-content-inventory').style.display = tabName === 'inventory' ? 'block' : 'none';
+            document.getElementById('tab-content-crafting').style.display = tabName === 'crafting' ? 'block' : 'none';
+            document.getElementById('tab-content-engrams').style.display = tabName === 'engrams' ? 'block' : 'none';
+        };
+
+        // 자동 스탯 조율 토글 제어
+        window.toggleAutoStats = function(checked) {
+            state.player.autoStatAllocation = checked;
+            
+            // 만약 체크 활성화됐을 때 남아도는 스탯 포인트를 황금 비율에 따라 소진 분배 처리
+            if (checked && state.player.statPoints > 0) {
+                applyAutoStatAllocation();
+            }
+            updateDashboardUI();
+        };
+
+        // 스마트 스탯 자동 일률 조배기 (체력 2, 기력 1, 무게 1, 채집배율 1 단위 배정)
+        function applyAutoStatAllocation() {
+            let pts = state.player.statPoints;
+            state.player.statPoints = 0;
+
+            const hpQty = Math.floor(pts * 0.3);
+            const stamQty = Math.floor(pts * 0.15);
+            const isInfiniteWeight = state.player.maxWeight >= 9999999;
+            const weightQty = isInfiniteWeight ? 0 : Math.floor(pts * 0.15);
+            const speedQty = Math.floor(pts * 0.2);
+            const dmgQty = pts - (hpQty + stamQty + weightQty + speedQty);
+
+            if (hpQty > 0) {
+                state.player.maxHp += hpQty * 20;
+                state.player.hp = Math.min(state.player.maxHp, state.player.hp + hpQty * 20);
+            }
+            if (stamQty > 0) {
+                state.player.maxStamina += stamQty * 20;
+                state.player.stamina = Math.min(state.player.maxStamina, state.player.stamina + stamQty * 20);
+            }
+            if (weightQty > 0) {
+                state.player.maxWeight = 9999999;
+            }
+            if (speedQty > 0) {
+                state.player.speedMultiplier += speedQty * 0.4; // 자동 분배 시에는 회당 40%씩 상승
+            }
+            if (dmgQty > 0) {
+                state.player.damageMultiplier += dmgQty * 0.25;
+            }
+
+            // HUD 연계 동기화
+            ui.hpText.textContent = `${state.player.hp} / ${state.player.maxHp}`;
+            ui.hpBar.style.width = `${(state.player.hp / state.player.maxHp)*100}%`;
+            
+            addLootLog("🧬", `단말기가 스탯 자동 강화 완료 (HP +${hpQty*20}, Speed +${(speedQty*40).toFixed(0)}%)`);
+        }
+
+        window.upgradeStat = function(statKey) {
+            if (state.player.statPoints <= 0 || state.player.autoStatAllocation) return;
+            state.player.statPoints--;
+
+            if (statKey === 'hp') {
+                state.player.maxHp += 20;
+                state.player.hp = Math.min(state.player.maxHp, state.player.hp + 20);
+                addLootLog("❤️", `최대 체력 증가: ${state.player.maxHp}`);
+            } else if (statKey === 'stamina') {
+                state.player.maxStamina += 20;
+                state.player.stamina = Math.min(state.player.maxStamina, state.player.stamina + 20);
+                addLootLog("⚡", `최대 기력 증가: ${state.player.maxStamina}`);
+            } else if (statKey === 'weight') {
+                // [요구사항 반영] 1포인트 투자 시 가중치 한도를 실질적인 무한(9999999)으로 확장 처리
+                state.player.maxWeight = 9999999;
+                addLootLog("📦", `무한 무게(Infinite Weight) 모드 활성화 완료!`);
+            } else if (statKey === 'speed') {
+                state.player.speedMultiplier += 0.8; // 1회 수동 투자당 속도가 무려 +80%씩 폭증하여 비약적으로 엄청 빨라짐
+                addLootLog("🏃", `이동 속도 대폭 증가: ${(state.player.speedMultiplier*100).toFixed(0)}%`);
+            } else if (statKey === 'damage') {
+                state.player.damageMultiplier += 0.25;
+                addLootLog("⚔️", `채집/전투 타격력 증가: ${(state.player.damageMultiplier*100).toFixed(0)}%`);
+            }
+
+            ui.hpText.textContent = `${state.player.hp} / ${state.player.maxHp}`;
+            ui.hpBar.style.width = `${(state.player.hp / state.player.maxHp)*100}%`;
+
+            updateDashboardUI();
+        };
+
+        window.unlockEngram = function(key) {
+            if (state.player.engramPoints <= 0 || state.unlockedEngrams[key]) return;
+            state.player.engramPoints--;
+            state.unlockedEngrams[key] = true;
+
+            addLootLog("✨", `새 기술 해금: ${CONFIG.CRAFT_BLUEPRINTS[key].name}`);
+            updateDashboardUI();
+        };
+
+        window.craftItem = function(key) {
+            const bp = CONFIG.CRAFT_BLUEPRINTS[key];
+            if (!bp) return;
+
+            let hasMaterials = true;
+            Object.keys(bp.cost).forEach((res) => {
+                if ((state.inventory[res] || 0) < bp.cost[res]) {
+                    hasMaterials = false;
+                }
+            });
+
+            if (!hasMaterials) return;
+
+            Object.keys(bp.cost).forEach((res) => {
+                state.inventory[res] -= bp.cost[res];
+            });
+
+            state.inventory[key] = (state.inventory[key] || 0) + 1;
+
+            addLootLog("🔨", `제작 완료: ${bp.name}`);
+
+            if (key === 'pickaxe' || key === 'hatchet') {
+                state.player.equippedTool = key;
+                updateEquippedToolMesh();
+            } else if (key === 'armor') {
+                if (!state.player.equippedArmor) {
+                    state.player.equippedArmor = true;
+                    state.player.maxHp += 50;
+                    state.player.hp = Math.min(state.player.maxHp, state.player.hp + 50);
+                    
+                    ui.hpText.textContent = `${state.player.hp} / ${state.player.maxHp}`;
+                    ui.hpBar.style.width = `${(state.player.hp / state.player.maxHp)*100}%`;
+                }
+            }
+
+            updateDashboardUI();
+        };
+
+        window.equipToolItem = function(key) {
+            if (state.inventory[key] <= 0) return;
+            
+            if (state.player.equippedTool === key) {
+                state.player.equippedTool = 'fists';
+            } else {
+                state.player.equippedTool = key;
+            }
+
+            updateEquippedToolMesh();
+            updateDashboardUI();
+        };
+
+        // [요구사항 반영] 자원 및 장비 파괴/버리기 전용 글로벌 함수
+        window.discardItem = function(key) {
+            const count = state.inventory[key] || 0;
+            if (count <= 0) return;
+
+            // 가방 내 해당 자원 수량 0으로 초기화
+            state.inventory[key] = 0;
+
+            // 만약 버린 장비가 현재 손에 쥔 주력 도구라면 안전하게 맨손 상태로 롤백
+            if (state.player.equippedTool === key) {
+                state.player.equippedTool = 'fists';
+                updateEquippedToolMesh();
+            }
+
+            addLootLog("🗑️", `${CONFIG.ITEMS[key].name}을(를) 영구 파기했습니다.`);
+            updateDashboardUI();
+        };
+
+        // --- 모듈형 3D 실시간 건설 모드 구동부 ---
+        window.startBuildingMode = function(type) {
+            if ((state.inventory[type] || 0) <= 0) return;
+
+            // PDA 화면 즉시 종료 처리
+            toggleDashboard('build');
+
+            state.system.isBuildingMode = true;
+            state.system.selectedBuildType = type;
+            ui.buildHudPanel.classList.remove('hidden');
+
+            // 기존 임시 고스트 가이드가 잔존해있으면 파괴
+            if (state.system.ghostMesh) {
+                scene.remove(state.system.ghostMesh);
+            }
+
+            // 고스트 가이드용 기하학 생성
+            let ghostGeo, ghostMat;
+            ghostMat = new THREE.MeshBasicMaterial({
+                color: 0x10b981, 
+                transparent: true,
+                opacity: 0.55,
+                wireframe: false
+            });
+
+            if (type === 'foundation') {
+                ghostGeo = new THREE.BoxGeometry(4.0, 0.5, 4.0);
+            } else if (type === 'wall') {
+                ghostGeo = new THREE.BoxGeometry(4.0, 3.0, 0.2);
+            }
+
+            state.system.ghostMesh = new THREE.Mesh(ghostGeo, ghostMat);
+            scene.add(state.system.ghostMesh);
+
+            addLootLog("🧱", `${CONFIG.ITEMS[type].name} 건축 유도 가이드 활성화`);
+        };
+
+        // 건설 배치 모드 해제
+        function cancelBuildingMode() {
+            if (!state.system.isBuildingMode) return;
+            
+            state.system.isBuildingMode = false;
+            state.system.selectedBuildType = null;
+            ui.buildHudPanel.classList.add('hidden');
+
+            if (state.system.ghostMesh) {
+                scene.remove(state.system.ghostMesh);
+                state.system.ghostMesh = null;
+            }
+        }
+
+        // --- 정밀 건축 스냅 배치 루프 ---
+        function updateBuildingPlacement() {
+            if (!state.system.isBuildingMode || !state.system.ghostMesh) return;
+
+            const rayOrigin = state.player.position.clone();
+            const cosPitch = Math.cos(state.camera.pitch);
+            const sinPitch = Math.sin(state.camera.pitch);
+            const cosYaw = Math.sin(state.camera.yaw);
+            const sinYaw = Math.cos(state.camera.yaw);
+            const rayDirection = new THREE.Vector3(
+                cosPitch * cosYaw,
+                sinPitch,
+                cosPitch * sinYaw
+            ).normalize();
+
+            raycaster.set(rayOrigin, rayDirection);
+
+            const terrainIntersects = raycaster.intersectObject(terrainMesh);
+            let hitTerrainPoint = null;
+
+            if (terrainIntersects.length > 0 && terrainIntersects[0].distance < 15.0) {
+                hitTerrainPoint = terrainIntersects[0].point;
+            }
+
+            if (!hitTerrainPoint) {
+                const defaultDistancePoint = rayOrigin.clone().add(rayDirection.clone().multiplyScalar(8.0));
+                defaultDistancePoint.y = getTerrainHeight(defaultDistancePoint.x, defaultDistancePoint.z);
+                hitTerrainPoint = defaultDistancePoint;
+            }
+
+            let finalPos = hitTerrainPoint.clone();
+            let finalRotY = state.camera.yaw; 
+            let snapFound = false;
+
+            const checkRadius = 7.5;
+            let closestStructure = null;
+            let minDistance = checkRadius;
+
+            placedStructures.forEach((struct) => {
+                const dist = hitTerrainPoint.distanceTo(struct.position);
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    closestStructure = struct;
+                }
+            });
+
+            const buildType = state.system.selectedBuildType;
+
+            if (closestStructure) {
+                const sData = closestStructure.userData;
+                const cPos = closestStructure.position;
+
+                if (buildType === 'foundation') {
+                    if (sData.type === 'foundation') {
+                        snapFound = true;
+                        
+                        const dx = hitTerrainPoint.x - cPos.x;
+                        const dz = hitTerrainPoint.z - cPos.z;
+
+                        if (Math.abs(dx) > Math.abs(dz)) {
+                            finalPos.set(cPos.x + (dx > 0 ? 4.0 : -4.0), cPos.y, cPos.z);
+                        } else {
+                            finalPos.set(cPos.x, cPos.y, cPos.z + (dz > 0 ? 4.0 : -4.0));
+                        }
+                        
+                        finalRotY = closestStructure.rotation.y;
+                    }
+                } else if (buildType === 'wall') {
+                    if (sData.type === 'foundation') {
+                        snapFound = true;
+                        const dx = hitTerrainPoint.x - cPos.x;
+                        const dz = hitTerrainPoint.z - cPos.z;
+
+                        if (Math.abs(dx) > Math.abs(dz)) {
+                            finalPos.set(cPos.x + (dx > 0 ? 2.0 : -2.0), cPos.y + 1.75, cPos.z);
+                            finalRotY = closestStructure.rotation.y + Math.PI / 2;
+                        } else {
+                            finalPos.set(cPos.x, cPos.y + 1.75, cPos.z + (dz > 0 ? 2.0 : -2.0));
+                            finalRotY = closestStructure.rotation.y;
+                        }
+                    } else if (sData.type === 'wall') {
+                        snapFound = true;
+                        finalPos.set(cPos.x, cPos.y + 3.0, cPos.z);
+                        finalRotY = closestStructure.rotation.y;
+                    }
+                }
+            }
+
+            if (!snapFound && buildType === 'foundation') {
+                finalPos.y = getTerrainHeight(finalPos.x, finalPos.z) + 1.0;
+            }
+
+            state.system.ghostMesh.position.copy(finalPos);
+            state.system.ghostMesh.rotation.y = finalRotY;
+
+            const distToPlayer = state.player.position.distanceTo(finalPos);
+            if (distToPlayer > 18.0) {
+                state.system.ghostMesh.material.color.setHex(0xef4444); 
+                state.system.isBuildPosValid = false;
+            } else {
+                state.system.ghostMesh.material.color.setHex(0x10b981); 
+                state.system.isBuildPosValid = true;
+            }
+        }
+
+        // 실 구조물 건설 확정
+        function commitStructurePlacement() {
+            if (!state.system.isBuildingMode || !state.system.isBuildPosValid || !state.system.ghostMesh) return;
+
+            const type = state.system.selectedBuildType;
+            if ((state.inventory[type] || 0) <= 0) return;
+
+            let geo, mat;
+            if (type === 'foundation') {
+                geo = new THREE.BoxGeometry(4.0, 0.5, 4.0);
+                mat = new THREE.MeshStandardMaterial({ color: 0x965a38, roughness: 0.95 });
+            } else if (type === 'wall') {
+                geo = new THREE.BoxGeometry(4.0, 3.0, 0.2);
+                mat = new THREE.MeshStandardMaterial({ color: 0x824e30, roughness: 0.9 });
+            }
+
+            const structMesh = new THREE.Mesh(geo, mat);
+            structMesh.position.copy(state.system.ghostMesh.position);
+            structMesh.rotation.y = state.system.ghostMesh.rotation.y;
+            structMesh.castShadow = true;
+            structMesh.receiveShadow = true;
+
+            structMesh.userData = {
+                type: type,
+                id: 'struct_' + performance.now(),
+                hp: type === 'foundation' ? 500 : 300,
+                maxHp: type === 'foundation' ? 500 : 300
+            };
+
+            scene.add(structMesh);
+            placedStructures.push(structMesh);
+
+            state.inventory[type]--;
+
+            createHitSparks(structMesh.position);
+
+            addLootLog("🚧", `${CONFIG.ITEMS[type].name} 안전하게 건설 완료 (잔여: ${state.inventory[type]}개)`);
+
+            if (state.inventory[type] <= 0) {
+                cancelBuildingMode();
+            } else {
+                updateBuildingPlacement();
+            }
+
+            updateDashboardUI();
+        }
+
+        // --- 마우스 락 갱신 제어 및 PDA 단말기 통합 제어 토글 ---
+        function toggleDashboard(triggerSrc) {
+            if (state.player.isDead) return; // 사망 상태 시 창 제어 전면 금지
+
+            state.system.isDashboardOpen = !state.system.isDashboardOpen;
+
+            if (state.system.isDashboardOpen) {
+                cancelBuildingMode();
+
+                document.exitPointerLock();
+                ui.survivalDashboard.classList.remove('hidden');
+                updateDashboardUI();
+                state.input.forward = state.input.backward = state.input.left = state.input.right = false;
+            } else {
+                ui.survivalDashboard.classList.add('hidden');
+                
+                if (triggerSrc === 'Escape') {
+                    state.system.isLocked = false;
+                    ui.lockScreen.classList.remove('hidden');
+                    ui.lockScreen.style.opacity = 1;
+                } else {
+                    document.body.requestPointerLock();
+                    
+                    setTimeout(() => {
+                        if (document.pointerLockElement !== document.body && !state.system.isDashboardOpen) {
+                            state.system.isLocked = false;
+                            ui.lockScreen.classList.remove('hidden');
+                            ui.lockScreen.style.opacity = 1;
+                        }
+                    }, 150);
+                }
+            }
+        }
+        window.toggleDashboard = toggleDashboard;
+
+        // --- 키보드 및 단축 패널 관리 ---
+        function setupInput() {
+            const onKeyDown = (e) => {
+                if (state.player.isDead) return; // 사망 시 키입력 차단
+
+                if (state.system.isDashboardOpen) {
+                    if (e.code === 'KeyV' || e.code === 'KeyI' || e.code === 'Escape') {
+                        e.preventDefault(); 
+                        toggleDashboard(e.code);
+                    }
+                    return;
+                }
+
+                if (!state.system.isLocked) return;
+
+                switch (e.code) {
+                    case 'KeyW': state.input.forward = true; break;
+                    case 'KeyS': state.input.backward = true; break;
+                    case 'KeyA': state.input.left = true; break;
+                    case 'KeyD': state.input.right = true; break;
+                    case 'Space': state.input.jump = true; break;
+                    case 'ShiftLeft':
+                    case 'ShiftRight': state.input.run = true; break;
+                    case 'KeyV': 
+                        toggleDashboard('KeyV'); 
+                        switchTab('inventory');
+                        break;
+                    case 'KeyI': 
+                        toggleDashboard('KeyI'); 
+                        switchTab('crafting');
+                        break;
+                }
+            };
+
+            const onKeyUp = (e) => {
+                switch (e.code) {
+                    case 'KeyW': state.input.forward = false; break;
+                    case 'KeyS': state.input.backward = false; break;
+                    case 'KeyA': state.input.left = false; break;
+                    case 'KeyD': state.input.right = false; break;
+                    case 'Space': state.input.jump = false; break;
+                    case 'ShiftLeft':
+                    case 'ShiftRight': state.input.run = false; break;
+                }
+            };
+
+            window.addEventListener('keydown', onKeyDown);
+            window.addEventListener('keyup', onKeyUp);
+
+            window.addEventListener('wheel', (e) => {
+                if (!state.system.isLocked || state.system.isDashboardOpen) return;
+
+                if (e.deltaY < 0) {
+                    state.player.cameraMode = '1st';
+                } else {
+                    state.player.cameraMode = '3rd';
+                }
+                updateCameraModeUI();
+            }, { passive: true });
+        }
+
+        // 마우스 잠금 갱신 수신부
+        function setupPointerLock() {
+            const container = document.body;
+
+            ui.btnStart.addEventListener('click', () => {
+                container.requestPointerLock();
+            });
+
+            document.addEventListener('pointerlockchange', () => {
+                if (document.pointerLockElement === container) {
+                    state.system.isLocked = true;
+                    ui.lockScreen.style.opacity = 0;
+                    setTimeout(() => ui.lockScreen.classList.add('hidden'), 300);
+                } else {
+                    state.system.isLocked = false;
+                    if (!state.system.isDashboardOpen && !state.player.isDead) {
+                        ui.lockScreen.classList.remove('hidden');
+                        setTimeout(() => ui.lockScreen.style.opacity = 1, 10);
+                        cancelBuildingMode();
+                    }
+                }
+            });
+
+            document.addEventListener('pointerlockerror', () => {
+                state.system.isLocked = false;
+                if (!state.system.isDashboardOpen && !state.player.isDead) {
+                    ui.lockScreen.classList.remove('hidden');
+                    ui.lockScreen.style.opacity = 1;
+                    cancelBuildingMode();
+                }
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!state.system.isLocked || state.system.isDashboardOpen || state.player.isDead) return;
+
+                const sensitivity = 0.0022;
+                state.camera.yaw -= e.movementX * sensitivity;
+                state.camera.pitch -= e.movementY * sensitivity;
+
+                const limit = Math.PI / 2.05;
+                state.camera.pitch = Math.max(-limit, Math.min(limit, state.camera.pitch));
+            });
+        }
+
+        // --- 클릭 채집 및 생물 타격 전투 핸들러 ---
+        let isAttacking = false;
+        function setupMouseClickInteraction() {
+            window.addEventListener('mousedown', (e) => {
+                if (!state.system.isLocked || state.system.isDashboardOpen || state.player.isDead) return;
+
+                if (e.button === 0) {
+                    if (state.system.isBuildingMode) {
+                        commitStructurePlacement();
+                    } else if (!isAttacking) {
+                        performAttack();
+                    }
+                } else if (e.button === 2) {
+                    if (state.system.isBuildingMode) {
+                        cancelBuildingMode();
+                        addLootLog("❌", "건설 계획 취소됨");
+                    }
+                }
+            });
+        }
+
+        // 3인칭 조준 유도 보정 가격 채집 및 생물 공격 타격판정 통합
+        function performAttack() {
+            isAttacking = true;
+
+            const fist = playerMesh.getObjectByName("rightFist");
+            const tool = playerMesh.getObjectByName("heldTool");
+            
+            if (fist && tool) {
+                const startFistZ = fist.position.z;
+                const startToolRotY = tool.rotation.y;
+
+                fist.position.z = 1.3;
+                tool.rotation.y = Math.PI / 3;
+                
+                setTimeout(() => {
+                    fist.position.z = startFistZ;
+                    tool.rotation.y = startToolRotY;
+                    isAttacking = false;
+                }, 180);
+            } else {
+                isAttacking = false;
+            }
+
+            const rayOrigin = state.player.position.clone();
+            const cosPitch = Math.cos(state.camera.pitch);
+            const sinPitch = Math.sin(state.camera.pitch);
+            const cosYaw = Math.sin(state.camera.yaw);
+            const sinYaw = Math.cos(state.camera.yaw);
+            const rayDirection = new THREE.Vector3(
+                cosPitch * cosYaw,
+                sinPitch,
+                cosPitch * sinYaw
+            ).normalize();
+
+            raycaster.set(rayOrigin, rayDirection);
+
+            // --- 5단계 개정: 타격 대상군에 자원노드 및 야생생물 메쉬도 통합 매칭 ---
+            const targets = [];
+            
+            // 자원 메쉬 축적
+            resourceNodes.forEach((node) => {
+                node.children.forEach((child) => {
+                    targets.push(child);
+                });
+            });
+
+            // 야생 생물 메쉬 축적
+            creatures.forEach((creature) => {
+                creature.mesh.children.forEach((child) => {
+                    // 메쉬 상호 유기적 검색을 위해 부모 생물 식별 데이터 가공
+                    child.userData.parentCreatureId = creature.id;
+                    targets.push(child);
+                });
+            });
+
+            let hitObject = null;
+            let hitPoint = null;
+
+            const intersects = raycaster.intersectObjects(targets);
+
+            if (intersects.length > 0 && intersects[0].distance <= CONFIG.HARVEST_RANGE) {
+                hitObject = intersects[0].object;
+                hitPoint = intersects[0].point;
+            }
+
+            if (hitObject && hitPoint) {
+                if (hitObject.userData.parentCreatureId) {
+                    // 야생 생물을 맞춘 경우
+                    const cId = hitObject.userData.parentCreatureId;
+                    const creature = creatures.find(c => c.id === cId);
+                    if (creature) {
+                        damageCreature(creature, hitPoint);
+                    }
+                } else {
+                    // 일반 자원 노드를 맞춘 경우
+                    const parent = hitObject.parent;
+                    if (parent && parent.userData && parent.userData.id) {
+                        harvestNode(parent, hitPoint);
+                    }
+                }
+            }
+        }
+
+        // 생물 타격 및 데미지 전달식
+        function damageCreature(creature, hitPoint) {
+            // 데미지 량 계산
+            let baseDamage = 10;
+            if (state.player.equippedTool === 'hatchet') baseDamage = 22;
+            if (state.player.equippedTool === 'pickaxe') baseDamage = 18;
+
+            const finalDamage = Math.round(baseDamage * state.player.damageMultiplier);
+            creature.hp -= finalDamage;
+
+            createHitSparks(hitPoint);
+
+            // 피격당한 생물 붉은 플래시 반응 연출
+            creature.mesh.children.forEach((child) => {
+                if (child.material) {
+                    const origColor = child.material.color.getHex();
+                    child.material.color.setHex(0xff0000); // 빨간색
+                    setTimeout(() => {
+                        if (child.material) child.material.color.setHex(origColor);
+                    }, 120);
+                }
+            });
+
+            // 생물 AI 상태 즉시 경계/분노/역습/도주 모드로 강제 상태 전이
+            if (creature.type === 'dodo') {
+                creature.aiState = 'FLEE';
+                addLootLog("🐦", `도도새가 공포에 질려 달아납니다! (체력: ${creature.hp})`);
+            } else if (creature.type === 'triceratops') {
+                creature.aiState = 'CHASE';
+                creature.aggroTarget = state.player;
+                addLootLog("🦕", `트리케라톱스가 뿔을 세우고 돌격합니다!`);
+            } else if (creature.type === 'raptor') {
+                creature.aiState = 'CHASE';
+                creature.aggroTarget = state.player;
+                addLootLog("🦖", `포악한 랩터와 피비린내 나는 전투 개시!`);
+            }
+
+            // 사망 시 전리품 분쇄 드롭 처리
+            if (creature.hp <= 0) {
+                handleCreatureDeath(creature);
+            }
+        }
+
+        // 생물 사망 처리
+        function handleCreatureDeath(creature) {
+            createDestroyBlast(creature.mesh.position, 'meat');
+            scene.remove(creature.mesh);
+            creatures = creatures.filter(c => c.id !== creature.id);
+
+            // 전리품 및 경험치 획득 정산
+            let meatQty = creature.type === 'dodo' ? 2 : (creature.type === 'raptor' ? 5 : 12);
+            let hideQty = creature.type === 'dodo' ? 3 : (creature.type === 'raptor' ? 8 : 20);
+            let expEarned = creature.type === 'dodo' ? 25 : (creature.type === 'raptor' ? 75 : 180);
+
+            state.inventory.meat = (state.inventory.meat || 0) + meatQty;
+            state.inventory.hide = (state.inventory.hide || 0) + hideQty;
+
+            addPlayerExp(expEarned);
+
+            addLootLog("🥩", `사냥 성공: 생고기 +${meatQty}, 가죽 +${hideQty} 획득!`);
+            
+            // 위협 경보 조율 차단 갱신
+            checkDangerStatus();
+            updateDashboardUI();
+        }
+
+        // 채집 가용화 연계
+        function harvestNode(node, hitPoint) {
+            const uData = node.userData;
+            uData.hp--;
+
+            createHitSparks(hitPoint);
+
+            node.scale.multiplyScalar(0.92);
+            setTimeout(() => {
+                if(node.parent) node.scale.set(uData.originalScale, uData.originalScale, uData.originalScale);
+            }, 80);
+
+            let harvestMultiplier = 1.0;
+            if (state.player.equippedTool === 'pickaxe' && uData.type === 'stone') {
+                harvestMultiplier = 3.0; 
+            } else if (state.player.equippedTool === 'hatchet' && uData.type === 'wood') {
+                harvestMultiplier = 3.0; 
+            }
+
+            const finalMultiplier = harvestMultiplier * state.player.damageMultiplier;
+
+            const minQty = uData.type === 'fiber' ? 2 : 1;
+            const maxQty = uData.type === 'fiber' ? 4 : 3;
+            const rawQty = Math.floor(Math.random() * (maxQty - minQty + 1)) + minQty;
+            const harvestedQty = Math.round(rawQty * finalMultiplier);
+
+            state.inventory[uData.type] += harvestedQty;
+
+            // 레벨경험치 지급
+            addPlayerExp(harvestedQty * 5);
+
+            addLootLog(CONFIG.ITEMS[uData.type].icon, `${CONFIG.ITEMS[uData.type].name} +${harvestedQty}`);
+
+            updateDashboardUI();
+
+            if (uData.hp <= 0) {
+                createDestroyBlast(node.position, uData.type);
+                scene.remove(node);
+                resourceNodes = resourceNodes.filter(n => n.userData.id !== uData.id);
+            }
+        }
+
+        // --- 플레이어 레벨업 및 자동 스탯 조율 트리거 ---
+        function addPlayerExp(amount) {
+            state.player.exp += amount;
+            if (state.player.exp >= state.player.maxExp) {
+                state.player.exp -= state.player.maxExp;
+                state.player.level++;
+                state.player.maxExp = Math.floor(state.player.maxExp * 1.5);
+                
+                // 포인트 가산
+                state.player.statPoints += 5;
+                state.player.engramPoints += 3;
+
+                addLootLog("🎉", `레벨 업! LEVEL ${state.player.level} 달성`);
+
+                // 자동 스탯 분배 토글 활성화 시 AI 분배 자동화 가동
+                if (state.player.autoStatAllocation) {
+                    applyAutoStatAllocation();
+                }
+            }
+
+            ui.playerLevel.textContent = state.player.level;
+            const expPercent = (state.player.exp / state.player.maxExp) * 100;
+            ui.playerExpBar.style.width = `${expPercent}%`;
+            ui.playerExpText.textContent = `${state.player.exp} / ${state.player.maxExp} EXP`;
+        }
+
+        // --- 실시간 조준선 록온 감지 하이라이트 ---
+        function updateCrosshairHighlight() {
+            if (state.system.isBuildingMode) {
+                ui.crosshair.classList.remove('crosshair-active');
+                return;
+            }
+
+            const rayOrigin = state.player.position.clone();
+            const cosPitch = Math.cos(state.camera.pitch);
+            const sinPitch = Math.sin(state.camera.pitch);
+            const cosYaw = Math.sin(state.camera.yaw);
+            const sinYaw = Math.cos(state.camera.yaw);
+            const rayDirection = new THREE.Vector3(
+                cosPitch * cosYaw,
+                sinPitch,
+                cosPitch * sinYaw
+            ).normalize();
+
+            raycaster.set(rayOrigin, rayDirection);
+
+            const targets = [];
+            resourceNodes.forEach((node) => {
+                node.children.forEach((child) => {
+                    targets.push(child);
+                });
+            });
+
+            creatures.forEach((creature) => {
+                creature.mesh.children.forEach((child) => {
+                    targets.push(child);
+                });
+            });
+
+            const intersects = raycaster.intersectObjects(targets);
+            let hasValidTarget = false;
+
+            if (intersects.length > 0 && intersects[0].distance <= CONFIG.HARVEST_RANGE) {
+                hasValidTarget = true;
+            }
+
+            if (hasValidTarget) {
+                ui.crosshair.classList.add('crosshair-active');
+            } else {
+                ui.crosshair.classList.remove('crosshair-active');
+            }
+        }
+
+        // 파티클 스파크 생성기
+        function createHitSparks(position) {
+            const pGroup = new THREE.Group();
+            pGroup.position.copy(position);
+
+            const pGeo = new THREE.BoxGeometry(0.12, 0.12, 0.12);
+            const pMat = new THREE.MeshBasicMaterial({ color: 0xffd43b });
+
+            const parts = [];
+            for (let i = 0; i < 8; i++) {
+                const mesh = new THREE.Mesh(pGeo, pMat);
+                pGroup.add(mesh);
+                parts.push({
+                    mesh,
+                    velocity: new THREE.Vector3(
+                        (Math.random() - 0.5) * 6,
+                        (Math.random() - 0.2) * 6 + 3,
+                        (Math.random() - 0.5) * 6
+                    )
+                });
+            }
+
+            scene.add(pGroup);
+            particleGroups.push({ group: pGroup, parts, life: 0.4 });
+        }
+
+        // 파괴 연출
+        function createDestroyBlast(position, type) {
+            const pGroup = new THREE.Group();
+            pGroup.position.copy(position);
+
+            const pGeo = (type === 'wood' || type === 'meat') ? new THREE.CylinderGeometry(0.1, 0.1, 0.6) : new THREE.DodecahedronGeometry(0.3);
+            
+            let color = 0x8b5a2b;
+            if (type === 'stone') color = 0x777777;
+            if (type === 'fiber') color = 0x4f7942;
+            if (type === 'meat') color = 0xfa5252; // 피비린내 파편
+
+            const pMat = new THREE.MeshStandardMaterial({ color, roughness: 0.8 });
+
+            const parts = [];
+            for (let i = 0; i < 15; i++) {
+                const mesh = new THREE.Mesh(pGeo, pMat);
+                mesh.position.set((Math.random() - 0.5)*1.5, Math.random()*2, (Math.random() - 0.5)*1.5);
+                mesh.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, 0);
+                pGroup.add(mesh);
+
+                parts.push({
+                    mesh,
+                    velocity: new THREE.Vector3(
+                        (Math.random() - 0.5) * 8,
+                        Math.random() * 5 + 4,
+                        (Math.random() - 0.5) * 8
+                    )
+                });
+            }
+
+            scene.add(pGroup);
+            particleGroups.push({ group: pGroup, parts, life: 0.8 });
+        }
+
+        // 알림 메시지 팝업
+        function addLootLog(icon, text) {
+            const logBox = document.createElement('div');
+            logBox.className = "flex items-center gap-2 bg-black/75 border border-white/10 px-4 py-2 rounded-xl text-xs font-bold animate-bounce shadow-lg text-white pointer-events-none";
+            logBox.innerHTML = `<span>${icon}</span> <span>${text}</span>`;
+            ui.lootLogContainer.appendChild(logBox);
+
+            setTimeout(() => {
+                logBox.className += " opacity-0 transition-opacity duration-500";
+                setTimeout(() => logBox.remove(), 500);
+            }, 2500);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function updateCameraModeUI() {
+            // HUD 텍스트 가용 간소화
+        }
+
+        // --- 5단계 신규: 야생 생물 개별 AI FSM 물리 업데이트 루프 ---
+        function updateCreatures(dt) {
+            const playerPos = state.player.position;
+
+            creatures.forEach((c) => {
+                c.aiTimer -= dt;
+                c.attackCooldown = Math.max(0, c.attackCooldown - dt);
+
+                const distToPlayer = c.mesh.position.distanceTo(playerPos);
+
+                // 1. 공격적인 랩터 전용: 선제 어그로 범위 체크 (15m 이내 플레이어 감지 시 자동 CHASE)
+                if (c.type === 'raptor' && c.aiState === 'ROAM' && distToPlayer < 15.0 && !state.player.isDead) {
+                    c.aiState = 'CHASE';
+                    c.aggroTarget = state.player;
+                    addLootLog("🦖", "야생 랩터가 습격 지령을 가동했습니다!");
+                }
+
+                // 2. FSM 상태별 가동 계산
+                let currentSpeed = c.baseSpeed;
+                let moveDir = new THREE.Vector3();
+
+                if (c.aiState === 'CHASE' && c.aggroTarget) {
+                    // 추격 모드: 대상을 향해 고속 전진
+                    currentSpeed = c.baseSpeed * 1.5;
+                    moveDir.subVectors(playerPos, c.mesh.position);
+                    moveDir.y = 0; // 수평 전위만
+                    moveDir.normalize();
+
+                    // 플레이어 공격 사거리 판단 (대형 트리케라는 2.8m, 소형 랩터는 2.0m)
+                    const rangeLimit = c.type === 'triceratops' ? 2.8 : 2.0;
+                    if (distToPlayer <= rangeLimit && c.attackCooldown <= 0 && !state.player.isDead) {
+                        performCreatureAttack(c);
+                    }
+                } else if (c.aiState === 'FLEE') {
+                    // 도망 모드: 플레이어 반대 방향 전속 질주
+                    currentSpeed = c.baseSpeed * 1.6;
+                    moveDir.subVectors(c.mesh.position, playerPos);
+                    moveDir.y = 0;
+                    moveDir.normalize();
+
+                    // 플레이어와 거리가 충분히 떨어지면 다시 평화 모드로 전환
+                    if (distToPlayer > 30.0) {
+                        c.aiState = 'ROAM';
+                        c.aiTimer = 2.0;
+                    }
+                } else {
+                    // 배회 모드: 랜덤 방향 주기적 걷기
+                    if (c.aiTimer <= 0) {
+                        c.aiTimer = Math.random() * 5 + 3;
+                        const randAngle = Math.random() * Math.PI * 2;
+                        c.targetPos.set(
+                            c.mesh.position.x + Math.cos(randAngle) * 20,
+                            0,
+                            c.mesh.position.z + Math.sin(randAngle) * 20
+                        );
+                    }
+
+                    moveDir.subVectors(c.targetPos, c.mesh.position);
+                    moveDir.y = 0;
+                    
+                    const distToTarget = moveDir.length();
+                    if (distToTarget > 1.0) {
+                        moveDir.normalize();
+                    } else {
+                        moveDir.set(0, 0, 0); // 제자리 대기
+                    }
+                }
+
+                // 이동량 반영 및 경사면 높이 보간
+                const deltaMove = moveDir.multiplyScalar(currentSpeed * dt);
+                c.mesh.position.add(deltaMove);
+
+                // 지형 경계 탈출 제한
+                const limit = CONFIG.WORLD_SIZE / 2;
+                c.mesh.position.x = Math.max(-limit, Math.min(limit, c.mesh.position.x));
+                c.mesh.position.z = Math.max(-limit, Math.min(limit, c.mesh.position.z));
+
+                const terrainY = getTerrainHeight(c.mesh.position.x, c.mesh.position.z);
+                c.mesh.position.y = terrainY;
+
+                // 걷기 애니메이션 가동 (다리 관절 왕복 스윙 연동)
+                const isMoving = deltaMove.lengthSq() > 0.0001;
+                if (isMoving) {
+                    const wave = Math.sin(performance.now() * 0.01 * currentSpeed);
+                    c.legs.forEach((leg, index) => {
+                        // 다리가 2개인지 4개인지에 따라 교차 대칭 흔들림 부여
+                        const multi = (index % 2 === 0) ? 1 : -1;
+                        leg.rotation.x = wave * 0.45 * multi;
+                    });
+
+                    // 부드럽게 바라보는 회전각 정렬
+                    const angle = Math.atan2(deltaMove.x, deltaMove.z);
+                    c.mesh.rotation.y = angle;
+                } else {
+                    c.legs.forEach(leg => leg.rotation.x = 0);
+                }
+            });
+
+            // 위협 경보 상태 업데이트
+            checkDangerStatus();
+        }
+
+        // 위협 경고 상황 검역기
+        function checkDangerStatus() {
+            const hasChasingRaptor = creatures.some(c => c.type === 'raptor' && c.aiState === 'CHASE');
+            if (hasChasingRaptor && !state.player.isDead) {
+                ui.dangerWarningPanel.classList.remove('hidden');
+            } else {
+                ui.dangerWarningPanel.classList.add('hidden');
+            }
+        }
+
+        // 생물이 플레이어 물어뜯기 공격 가동식
+        function performCreatureAttack(creature) {
+            creature.attackCooldown = 1.3; // 1.3초 공격 주기
+
+            // 공격 모션 시각화 (공룡이 잠깐 앞으로 펄쩍 튀어 오르는 박치기 모션)
+            const origY = creature.mesh.position.y;
+            creature.mesh.position.y += 0.8;
+            setTimeout(() => {
+                creature.mesh.position.y = origY;
+            }, 150);
+
+            // 피해량 책정
+            const damage = creature.type === 'triceratops' ? 25 : 15;
+            state.player.hp = Math.max(0, state.player.hp - damage);
+
+            // 체력 HUD 갱신
+            ui.hpText.textContent = `${state.player.hp} / ${state.player.maxHp}`;
+            ui.hpBar.style.width = `${(state.player.hp / state.player.maxHp) * 100}%`;
+
+            // 피격 플래시 가동
+            ui.damageFlash.style.opacity = "1";
+            setTimeout(() => {
+                ui.damageFlash.style.opacity = "0";
+            }, 120);
+
+            addLootLog("💥", `${creature.type === 'triceratops' ? '트리케라톱스의 뿔박치기' : '랩터의 갈퀴질'} 습격! 체력 -${damage}`);
+
+            // 사망 검증
+            if (state.player.hp <= 0 && !state.player.isDead) {
+                handlePlayerDeath();
+            }
+        }
+
+        // 플레이어 사망 처리
+        function handlePlayerDeath() {
+            state.player.isDead = true;
+            document.exitPointerLock();
+
+            // 대시보드 강제 닫기
+            ui.survivalDashboard.classList.add('hidden');
+            state.system.isDashboardOpen = false;
+
+            // 사망 복귀 화면 활성화
+            ui.deathScreen.classList.remove('hidden');
+
+            addLootLog("💀", "신체 에너지 방전: 생존 본능이 마비되었습니다.");
+        }
+
+        // 플레이어 안전지대 부활 처리
+        function respawnPlayer() {
+            ui.deathScreen.classList.add('hidden');
+            
+            // 전 상태 초기 복원
+            state.player.isDead = false;
+            state.player.hp = state.player.maxHp;
+            state.player.stamina = state.player.maxStamina;
+            state.player.position.set(0, getTerrainHeight(0,0) + CONFIG.PLAYER_HEIGHT, 0);
+
+            ui.hpText.textContent = `${state.player.hp} / ${state.player.maxHp}`;
+            ui.hpBar.style.width = "100%";
+
+            // 주변 어그로 공룡 상태 롤백 배회화
+            creatures.forEach((c) => {
+                c.aiState = 'ROAM';
+                c.aggroTarget = null;
+            });
+
+            // 화면 자물 복구 시작 요청
+            document.body.requestPointerLock();
+            addLootLog("🧬", "초원 안전 셸터 구역에서 무사히 복구 부활되었습니다.");
+        }
+
+        // --- 실시간 물리 엔진 ---
+        let passiveExpTimer = 0.0;
+        function updatePlayerPhysics(dt) {
+            if (dt > 0.15) dt = 0.15;
+
+            const moving = state.input.forward || state.input.backward || state.input.left || state.input.right;
+            state.player.isRunning = state.input.run && moving && state.player.onGround && state.player.stamina > 5;
+
+            if (state.player.isRunning) {
+                state.player.stamina = Math.max(0, state.player.stamina - dt * 25.0);
+            } else {
+                state.player.stamina = Math.min(state.player.maxStamina, state.player.stamina + dt * 15.0);
+            }
+
+            ui.staminaBar.style.width = `${(state.player.stamina / state.player.maxStamina) * 100}%`;
+            ui.staminaText.textContent = `${Math.ceil(state.player.stamina)} / ${state.player.maxStamina}`;
+
+            // 방랑 경험치 (Passive EXP) 메커니즘 수치 대폭 상향 적용
+            passiveExpTimer += dt;
+            if (passiveExpTimer >= 0.25) {
+                passiveExpTimer = 0.0;
+                const addQty = state.player.isRunning ? 30 : (moving ? 20 : 15);
+                addPlayerExp(addQty);
+            }
+
+            const moveDirection = new THREE.Vector3(0, 0, 0);
+            if (state.input.forward) moveDirection.z += 1;
+            if (state.input.backward) moveDirection.z -= 1;
+            
+            // [A/D 좌우 이동 방향 완벽 보정 적용]
+            if (state.input.left) moveDirection.x += 1; 
+            if (state.input.right) moveDirection.x -= 1; 
+
+            moveDirection.normalize();
+
+            const speed = (state.player.isRunning ? CONFIG.RUN_SPEED : CONFIG.BASE_SPEED) * state.player.speedMultiplier;
+            
+            const forwardX = Math.sin(state.camera.yaw);
+            const forwardZ = Math.cos(state.camera.yaw);
+            const rightX = Math.sin(state.camera.yaw + Math.PI / 2);
+            const rightZ = Math.cos(state.camera.yaw + Math.PI / 2);
+
+            const targetVelocityX = (moveDirection.z * forwardX + moveDirection.x * rightX) * speed;
+            const targetVelocityZ = (moveDirection.z * forwardZ + moveDirection.x * rightZ) * speed;
+
+            const accelRate = state.player.onGround ? 12.0 : 3.0;
+            state.player.velocity.x += (targetVelocityX - state.player.velocity.x) * accelRate * dt;
+            state.player.velocity.z += (targetVelocityZ - state.player.velocity.z) * accelRate * dt;
+
+            state.player.velocity.y += CONFIG.GRAVITY * dt;
+
+            if (state.input.jump && state.player.onGround) {
+                state.player.velocity.y = CONFIG.JUMP_FORCE;
+                state.player.onGround = false;
+            }
+
+            const deltaPos = state.player.velocity.clone().multiplyScalar(dt);
+            state.player.position.add(deltaPos);
+
+            const halfMap = CONFIG.WORLD_SIZE / 2;
+            state.player.position.x = Math.max(-halfMap, Math.min(halfMap, state.player.position.x));
+            state.player.position.z = Math.max(-halfMap, Math.min(halfMap, state.player.position.z));
+
+            const currentTerrainHeight = getTerrainHeight(state.player.position.x, state.player.position.z);
+            if (state.player.position.y <= currentTerrainHeight + CONFIG.PLAYER_HEIGHT) {
+                state.player.position.y = currentTerrainHeight + CONFIG.PLAYER_HEIGHT;
+                state.player.velocity.y = 0;
+                state.player.onGround = true;
+            } else {
+                state.player.onGround = false;
+            }
+
+            if (playerMesh) {
+                playerMesh.position.copy(state.player.position);
+                playerMesh.rotation.y = state.camera.yaw;
+            }
+
+            ui.coordDisplay.textContent = `X: ${state.player.position.x.toFixed(1)} | Y: ${state.player.position.y.toFixed(1)} | Z: ${state.player.position.z.toFixed(1)}`;
+            updateBiomeAtmosphere();
+        }
+
+        let currentBiomeKey = "";
+        function updateBiomeAtmosphere() {
+            const px = state.player.position.x;
+            const pz = state.player.position.z;
+
+            let targetBiome = CONFIG.BIOMES.GRASSLAND;
+            let currentKey = "GRASSLAND";
+
+            if (pz < -150 && px > 150) {
+                targetBiome = CONFIG.BIOMES.SNOWY;
+                currentKey = "SNOWY";
+            } else if (pz < -100 && px < -150) {
+                targetBiome = CONFIG.BIOMES.VOLCANO;
+                currentKey = "VOLCANO";
+            } else if (px > 180 && pz > 100) {
+                targetBiome = CONFIG.BIOMES.DESERT;
+                currentKey = "DESERT";
+            } else if (px < -100 && pz > 150) {
+                targetBiome = CONFIG.BIOMES.FOREST;
+                currentKey = "FOREST";
+            }
+
+            if (currentBiomeKey !== currentKey) {
+                currentBiomeKey = currentKey;
+                ui.biomeDisplay.textContent = targetBiome.name;
+                
+                if (currentKey === 'FOREST') ui.biomeDisplay.className = "text-xl font-black text-emerald-400";
+                if (currentKey === 'GRASSLAND') ui.biomeDisplay.className = "text-xl font-black text-lime-400";
+                if (currentKey === 'DESERT') ui.biomeDisplay.className = "text-xl font-black text-amber-300";
+                if (currentKey === 'VOLCANO') ui.biomeDisplay.className = "text-xl font-black text-rose-600";
+                if (currentKey === 'SNOWY') ui.biomeDisplay.className = "text-xl font-black text-blue-100";
+
+                scene.fog.color.setHex(targetBiome.fog);
+                renderer.setClearColor(targetBiome.fog);
+            }
+        }
+
+        // --- 카메라 고정 3인칭 전환 처리 ---
+        function updateCamera() {
+            const cosPitch = Math.cos(state.camera.pitch);
+            const sinPitch = Math.sin(state.camera.pitch);
+            const cosYaw = Math.sin(state.camera.yaw);
+            const sinYaw = Math.cos(state.camera.yaw);
+
+            const forward = new THREE.Vector3(
+                cosPitch * cosYaw,
+                sinPitch,
+                cosPitch * sinYaw
+            );
+
+            if (state.player.cameraMode === '1st') {
+                const eyePos = state.player.position.clone();
+                camera.position.copy(eyePos);
+                camera.lookAt(eyePos.clone().add(forward));
+
+                if (playerMesh) playerMesh.visible = false;
+            } else {
+                if (playerMesh) playerMesh.visible = true;
+
+                const lookTarget = state.player.position.clone().add(new THREE.Vector3(0, state.camera.fixedHeightOffset, 0));
+                const camOffset = forward.clone().multiplyScalar(-state.camera.fixedDistance);
+                const idealCamPos = lookTarget.clone().add(camOffset);
+
+                const terrainLimit = getTerrainHeight(idealCamPos.x, idealCamPos.z) + 0.8;
+                if (idealCamPos.y < terrainLimit) {
+                    idealCamPos.y = terrainLimit;
+                }
+
+                camera.position.copy(idealCamPos);
+                camera.lookAt(lookTarget);
+            }
+        }
+
+        // 파티클 연출 루프
+        function updateParticles(dt) {
+            for (let i = particleGroups.length - 1; i >= 0; i--) {
+                const pg = particleGroups[i];
+                pg.life -= dt;
+
+                pg.parts.forEach((p) => {
+                    p.velocity.y += CONFIG.GRAVITY * 0.4 * dt;
+                    p.mesh.position.add(p.velocity.clone().multiplyScalar(dt));
+                });
+
+                if (pg.life <= 0) {
+                    scene.remove(pg.group);
+                    particleGroups.splice(i, 1);
+                }
+            }
+        }
+
+        // 포탈 회전 애니메이션
+        function updatePortals(dt) {
+            portals.forEach((p) => {
+                p.children[1].rotation.z += dt * 0.8;
+                const pulse = 1.0 + Math.sin(performance.now() * 0.005) * 0.05;
+                p.children[1].scale.set(pulse, pulse, pulse);
+            });
+        }
+
+        // --- 메인 렌더링 애니메이션 프레임 루프 ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const currentTime = performance.now();
+            const dt = (currentTime - state.system.lastTime) / 1000.0;
+            state.system.lastTime = currentTime;
+
+            if (state.system.isLocked && !state.system.isDashboardOpen && !state.player.isDead) {
+                updatePlayerPhysics(dt);
+                updatePortals(dt);
+                updateCreatures(dt); // 5단계 추가: 야생생물 AI 기동
+                
+                if (state.system.isBuildingMode) {
+                    updateBuildingPlacement();
+                } else {
+                    updateCrosshairHighlight();
+                }
+            }
+
+            updateParticles(dt);
+            updateCamera();
+
+            renderer.render(scene, camera);
+        }
+
+        window.onload = () => {
+            init();
+        };
+
+    </script>
+</body>
+</html>

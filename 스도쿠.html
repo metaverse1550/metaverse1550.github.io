@@ -1,0 +1,1462 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SUDOKU - Minimalist & Modern</title>
+    <style>
+        /* CSS reset & base styling */
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            margin: 0;
+            padding: 0;
+        }
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #f4f6f9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #app-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            max-width: 100%;
+            max-height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #f4f6f9;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+            background-color: #ffffff;
+            cursor: default;
+        }
+        /* Hidden input helper for mobile keyboard support */
+        #mobile-input-helper {
+            position: absolute;
+            top: -100px;
+            left: -100px;
+            width: 10px;
+            height: 10px;
+            opacity: 0;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="app-container">
+        <canvas id="gameCanvas"></canvas>
+        <input type="text" id="mobile-input-helper" pattern="[1-9]*" inputmode="numeric" novalidate>
+    </div>
+
+    <script>
+        /**
+         * 현대적이고 몰입감 있는 HTML5 Canvas 스도쿠 게임
+         * OOP 패턴 적용 (Player, Game, SudokuBoard, UI, InputManager)
+         * Web Audio API 사운드 포함, 반응형 레이아웃 탑재
+         */
+
+        // ==========================================
+        // 1. 사운드 시스템 (Sound Synthesizer)
+        // ==========================================
+        class SoundManager {
+            constructor() {
+                this.ctx = null;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+
+            playClick() {
+                this.init();
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(600, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(1000, this.ctx.currentTime + 0.05);
+
+                gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.05);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.05);
+            }
+
+            playSelect() {
+                this.init();
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+                
+                gain.gain.setValueAtTime(0.04, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.03);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.03);
+            }
+
+            playInput() {
+                this.init();
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(523.25, this.ctx.currentTime); // C5
+                osc.frequency.exponentialRampToValueAtTime(659.25, this.ctx.currentTime + 0.08); // E5
+
+                gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.12);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.12);
+            }
+
+            playError() {
+                this.init();
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(180, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(120, this.ctx.currentTime + 0.15);
+
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.18);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.18);
+            }
+
+            playClear() {
+                this.init();
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+                notes.forEach((freq, idx) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(freq, now + idx * 0.1);
+                    
+                    gain.gain.setValueAtTime(0.1, now + idx * 0.1);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.1 + 0.3);
+                    
+                    osc.start(now + idx * 0.1);
+                    osc.stop(now + idx * 0.1 + 0.35);
+                });
+            }
+        }
+
+        const Sound = new SoundManager();
+
+        // ==========================================
+        // 2. 무작위 스도쿠 생성기 (Backtracking Algorithm)
+        // ==========================================
+        function generateRandomSudoku(difficulty) {
+            const solution = Array(9).fill().map(() => Array(9).fill(0));
+
+            function isValid(board, r, c, val) {
+                for (let i = 0; i < 9; i++) {
+                    if (board[r][i] === val) return false;
+                    if (board[i][c] === val) return false;
+                    const boxRow = 3 * Math.floor(r / 3) + Math.floor(i / 3);
+                    const boxCol = 3 * Math.floor(c / 3) + i % 3;
+                    if (board[boxRow][boxCol] === val) return false;
+                }
+                return true;
+            }
+
+            // 완전 정답 판 채우기
+            function fillBoard(board) {
+                for (let r = 0; r < 9; r++) {
+                    for (let c = 0; c < 9; c++) {
+                        if (board[r][c] === 0) {
+                            const numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => Math.random() - 0.5);
+                            for (let val of numbers) {
+                                if (isValid(board, r, c, val)) {
+                                    board[r][c] = val;
+                                    if (fillBoard(board)) return true;
+                                    board[r][c] = 0;
+                                }
+                            }
+                            return false;
+                        }
+                    }
+                }
+                return true;
+            }
+
+            fillBoard(solution);
+
+            const board = solution.map(row => [...row]);
+
+            // 난이도별 빈칸 제거 개수 설정
+            let cellsToRemove = 35; // 쉬움 (힌트 46개 남김)
+            if (difficulty === 'normal') cellsToRemove = 45; // 보통 (힌트 36개 남김)
+            if (difficulty === 'hard') cellsToRemove = 53;   // 어려움 (힌트 28개 남김)
+
+            const cells = [];
+            for (let r = 0; r < 9; r++) {
+                for (let c = 0; c < 9; c++) {
+                    cells.push({ r, c });
+                }
+            }
+            cells.sort(() => Math.random() - 0.5);
+
+            for (let i = 0; i < cellsToRemove; i++) {
+                const { r, c } = cells[i];
+                board[r][c] = 0;
+            }
+
+            return { board, solution };
+        }
+
+        // ==========================================
+        // 3. Player 클래스 (플레이어 상태 관리)
+        // ==========================================
+        class Player {
+            constructor() {
+                this.score = 0;
+                this.currentLevel = 1;
+                this.mistakes = 0;
+                this.timeElapsed = 0;
+            }
+
+            reset() {
+                this.mistakes = 0;
+                this.timeElapsed = 0;
+            }
+        }
+
+        // ==========================================
+        // 4. Tween 클래스 (애니메이션 엔진)
+        // ==========================================
+        class Tween {
+            constructor(startVal, endVal, duration, easing = 'easeOutQuad') {
+                this.startVal = startVal;
+                this.endVal = endVal;
+                this.currentVal = startVal;
+                this.duration = duration;
+                this.elapsed = 0;
+                this.easing = easing;
+                this.completed = false;
+            }
+
+            update(dt) {
+                if (this.completed) return this.endVal;
+                this.elapsed += dt;
+                let progress = Math.min(this.elapsed / this.duration, 1);
+                
+                let t = progress;
+                let ease = t;
+                if (this.easing === 'easeOutQuad') {
+                    ease = t * (2 - t);
+                } else if (this.easing === 'easeOutBack') {
+                    const c1 = 1.70158;
+                    const c3 = c1 + 1;
+                    ease = 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+                } else if (this.easing === 'easeInQuad') {
+                    ease = t * t;
+                } else if (this.easing === 'elastic') {
+                    const c4 = (2 * Math.PI) / 3;
+                    ease = t === 0 ? 0 : t === 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1;
+                }
+
+                this.currentVal = this.startVal + (this.endVal - this.startVal) * ease;
+                if (progress >= 1) {
+                    this.completed = true;
+                    this.currentVal = this.endVal;
+                }
+                return this.currentVal;
+            }
+        }
+
+        // ==========================================
+        // 5. SudokuBoard 클래스 (게임판 로직 및 상태)
+        // ==========================================
+        class SudokuBoard {
+            constructor() {
+                this.game = null; 
+                this.grid = Array(9).fill().map(() => Array(9).fill(0));
+                this.initialGrid = Array(9).fill().map(() => Array(9).fill(0));
+                this.solutionGrid = Array(9).fill().map(() => Array(9).fill(0));
+                this.selectedCell = { r: 4, c: 4 };
+
+                // 후보 숫자(메모) 상태 데이터 구조
+                this.notes = Array(9).fill().map(() => Array(9).fill().map(() => Array(10).fill(false)));
+                this.noteMode = false;
+                
+                // 애니메이션 상태
+                this.cellScales = Array(9).fill().map(() => Array(9).fill(1));
+                this.cellShakes = Array(9).fill().map(() => Array(9).fill(0));
+                this.cellTweens = Array(9).fill().map(() => Array(9).fill(null));
+                this.shakeTweens = Array(9).fill().map(() => Array(9).fill(null));
+
+                // 다중 오류 입력 감지용 배열
+                this.conflicts = Array(9).fill().map(() => Array(9).fill(false));
+            }
+
+            loadPuzzle(difficulty) {
+                const puzzle = generateRandomSudoku(difficulty);
+
+                for (let r = 0; r < 9; r++) {
+                    for (let c = 0; c < 9; c++) {
+                        this.grid[r][c] = puzzle.board[r][c];
+                        this.initialGrid[r][c] = puzzle.board[r][c];
+                        this.solutionGrid[r][c] = puzzle.solution[r][c];
+                        this.notes[r][c].fill(false);
+                    }
+                }
+
+                this.noteMode = false;
+                this.clearAnimations();
+                this.validateBoard();
+            }
+
+            resetCurrentPuzzle() {
+                for (let r = 0; r < 9; r++) {
+                    for (let c = 0; c < 9; c++) {
+                        this.grid[r][c] = this.initialGrid[r][c];
+                        this.notes[r][c].fill(false);
+                    }
+                }
+                this.noteMode = false;
+                this.clearAnimations();
+                this.validateBoard();
+            }
+
+            clearAnimations() {
+                for (let r = 0; r < 9; r++) {
+                    for (let c = 0; c < 9; c++) {
+                        this.cellScales[r][c] = 1;
+                        this.cellShakes[r][c] = 0;
+                        this.cellTweens[r][c] = null;
+                        this.shakeTweens[r][c] = null;
+                    }
+                }
+            }
+
+            // 특정 숫자가 게임판 위에 총 몇 개 채워졌는지 반환하는 메서드
+            getNumberCount(val) {
+                let count = 0;
+                for (let r = 0; r < 9; r++) {
+                    for (let c = 0; c < 9; c++) {
+                        if (this.grid[r][c] === val) {
+                            count++;
+                        }
+                    }
+                }
+                return count;
+            }
+
+            update(dt) {
+                for (let r = 0; r < 9; r++) {
+                    for (let c = 0; c < 9; c++) {
+                        if (this.cellTweens[r][c]) {
+                            this.cellScales[r][c] = this.cellTweens[r][c].update(dt);
+                            if (this.cellTweens[r][c].completed) {
+                                this.cellTweens[r][c] = null;
+                            }
+                        }
+                        if (this.shakeTweens[r][c]) {
+                            this.cellShakes[r][c] = this.shakeTweens[r][c].update(dt);
+                            if (this.shakeTweens[r][c].completed) {
+                                this.shakeTweens[r][c] = null;
+                                this.cellShakes[r][c] = 0;
+                            }
+                        }
+                    }
+                }
+            }
+
+            toggleNoteMode() {
+                this.noteMode = !this.noteMode;
+                Sound.playSelect();
+            }
+
+            setCellValue(r, c, val) {
+                // 고정된 칸(처음부터 배치된 칸)은 수정 불가
+                if (this.isInitial(r, c)) return false;
+
+                // 이미 정답을 올바르게 기입한 칸은 수정 및 삭제가 일체 불가능하도록 잠금 처리
+                if (this.grid[r][c] !== 0 && this.grid[r][c] === this.solutionGrid[r][c]) {
+                    return false;
+                }
+
+                // [메모 모드]
+                if (this.noteMode) {
+                    if (val === 0) {
+                        this.grid[r][c] = 0;
+                        this.notes[r][c].fill(false);
+                        Sound.playClick();
+                    } else {
+                        if (this.grid[r][c] !== 0) {
+                            // 사용자가 직접 기입한 오답이 들어있는 칸에 메모를 적으려고 할 때, 오답을 말끔히 지우고 메모 입력으로 전환
+                            this.grid[r][c] = 0;
+                        }
+                        this.notes[r][c][val] = !this.notes[r][c][val];
+                        Sound.playSelect();
+                    }
+                    this.validateBoard();
+                    return true;
+                }
+
+                // [일반 입력 모드]
+                const prevVal = this.grid[r][c];
+                if (prevVal === val) return false;
+
+                this.grid[r][c] = val;
+                
+                if (val !== 0) {
+                    this.notes[r][c].fill(false);
+
+                    const isCorrect = (this.solutionGrid[r][c] === val);
+                    if (isCorrect) {
+                        Sound.playInput();
+                        this.cellTweens[r][c] = new Tween(1.0, 1.25, 0.25, 'elastic');
+                        setTimeout(() => {
+                            this.cellTweens[r][c] = new Tween(1.25, 1.0, 0.15, 'easeOutQuad');
+                        }, 250);
+                    } else {
+                        Sound.playError();
+                        this.shakeTweens[r][c] = new Tween(0, 10, 0.05, 'easeOutQuad');
+                        setTimeout(() => {
+                            this.shakeTweens[r][c] = new Tween(10, -10, 0.08, 'easeOutQuad');
+                            setTimeout(() => {
+                                this.shakeTweens[r][c] = new Tween(-10, 5, 0.08, 'easeOutQuad');
+                                setTimeout(() => {
+                                    this.shakeTweens[r][c] = new Tween(5, 0, 0.05, 'easeOutQuad');
+                                }, 80);
+                            }, 80);
+                        }, 50);
+
+                        if (this.game) {
+                            this.game.player.mistakes++;
+                            if (this.game.player.mistakes >= 5) {
+                                setTimeout(() => {
+                                    this.game.triggerGameOver();
+                                }, 300);
+                            }
+                        }
+                    }
+                } else {
+                    Sound.playClick();
+                }
+
+                this.validateBoard();
+                return true;
+            }
+
+            isInitial(r, c) {
+                return this.initialGrid[r][c] !== 0;
+            }
+
+            validateBoard() {
+                for (let r = 0; r < 9; r++) {
+                    for (let c = 0; c < 9; c++) {
+                        this.conflicts[r][c] = false;
+                    }
+                }
+
+                for (let r = 0; r < 9; r++) {
+                    const seen = {};
+                    for (let c = 0; c < 9; c++) {
+                        const val = this.grid[r][c];
+                        if (val !== 0) {
+                            if (seen[val] !== undefined) {
+                                this.conflicts[r][c] = true;
+                                this.conflicts[r][seen[val]] = true;
+                            }
+                            seen[val] = c;
+                        }
+                    }
+                }
+
+                for (let c = 0; c < 9; c++) {
+                    const seen = {};
+                    for (let r = 0; r < 9; r++) {
+                        const val = this.grid[r][c];
+                        if (val !== 0) {
+                            if (seen[val] !== undefined) {
+                                this.conflicts[r][c] = true;
+                                this.conflicts[seen[val]][c] = true;
+                            }
+                            seen[val] = r;
+                        }
+                    }
+                }
+
+                for (let b = 0; b < 9; b++) {
+                    const seen = {};
+                    const startRow = Math.floor(b / 3) * 3;
+                    const startCol = (b % 3) * 3;
+                    for (let i = 0; i < 9; i++) {
+                        const r = startRow + Math.floor(i / 3);
+                        const c = startCol + (i % 3);
+                        const val = this.grid[r][c];
+                        if (val !== 0) {
+                            if (seen[val] !== undefined) {
+                                this.conflicts[r][c] = true;
+                                const prevR = startRow + Math.floor(seen[val] / 3);
+                                const prevC = startCol + (seen[val] % 3);
+                                this.conflicts[prevR][prevC] = true;
+                            }
+                            seen[val] = i;
+                        }
+                    }
+                }
+            }
+
+            getEmptyCellCount() {
+                let count = 0;
+                for (let r = 0; r < 9; r++) {
+                    for (let c = 0; c < 9; c++) {
+                        if (this.grid[r][c] === 0) count++;
+                    }
+                }
+                return count;
+            }
+
+            isComplete() {
+                if (this.getEmptyCellCount() > 0) return false;
+
+                for (let r = 0; r < 9; r++) {
+                    for (let c = 0; c < 9; c++) {
+                        if (this.conflicts[r][c]) return false;
+                        if (this.grid[r][c] !== this.solutionGrid[r][c]) return false;
+                    }
+                }
+                return true;
+            }
+
+            moveSelection(dr, dc) {
+                let nr = this.selectedCell.r + dr;
+                let nc = this.selectedCell.c + dc;
+                if (nr >= 0 && nr < 9 && nc >= 0 && nc < 9) {
+                    this.selectedCell.r = nr;
+                    this.selectedCell.c = nc;
+                    Sound.playSelect();
+                }
+            }
+
+            selectCellAt(r, c) {
+                if (r >= 0 && r < 9 && c >= 0 && c < 9) {
+                    if (this.selectedCell.r !== r || this.selectedCell.c !== c) {
+                        this.selectedCell.r = r;
+                        this.selectedCell.c = c;
+                        Sound.playSelect();
+                    }
+                }
+            }
+
+            deselect() {
+                this.selectedCell = null;
+            }
+        }
+
+        // ==========================================
+        // 6. UI 클래스 (미니멀 프리미엄 그래픽 렌더링)
+        // ==========================================
+        class UI {
+            constructor(game) {
+                this.game = game;
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.resizeCanvas();
+                window.addEventListener('resize', () => this.resizeCanvas());
+
+                this.menuButtons = [];
+                this.gameButtons = [];
+                this.clearButtons = [];
+                this.gameOverButtons = [];
+                this.activeScreen = 'main';
+                
+                this.screenAlpha = 1.0;
+                this.screenTween = null;
+
+                this.mousePos = { x: 0, y: 0 };
+            }
+
+            resizeCanvas() {
+                const container = document.getElementById('app-container');
+                const size = Math.min(container.clientWidth, container.clientHeight, 850);
+                this.canvas.width = size;
+                this.canvas.height = size;
+                this.width = size;
+                this.height = size;
+                this.calculateLayout();
+            }
+
+            calculateLayout() {
+                const padding = this.width * 0.08;
+                this.boardSize = Math.min(this.width * 0.76, 520);
+                this.boardX = (this.width - this.boardSize) / 2;
+                this.boardY = (this.height - this.boardSize) / 2 + 10;
+                this.cellSize = this.boardSize / 9;
+            }
+
+            setScreen(screenName) {
+                this.screenAlpha = 0;
+                this.activeScreen = screenName;
+                this.screenTween = new Tween(0, 1, 0.4, 'easeOutQuad');
+            }
+
+            update(dt) {
+                if (this.screenTween) {
+                    this.screenAlpha = this.screenTween.update(dt);
+                    if (this.screenTween.completed) {
+                        this.screenTween = null;
+                    }
+                }
+            }
+
+            draw() {
+                this.ctx.fillStyle = '#f4f6f9';
+                this.ctx.fillRect(0, 0, this.width, this.height);
+
+                this.ctx.save();
+                this.ctx.globalAlpha = this.screenAlpha;
+
+                if (this.activeScreen === 'main') {
+                    this.drawMainMenu();
+                } else if (this.activeScreen === 'difficulty') {
+                    this.drawDifficultyMenu();
+                } else if (this.activeScreen === 'play') {
+                    this.drawPlayScreen();
+                } else if (this.activeScreen === 'clear') {
+                    this.drawClearScreen();
+                } else if (this.activeScreen === 'gameover') {
+                    this.drawGameOverScreen();
+                }
+
+                this.ctx.restore();
+            }
+
+            drawRoundRect(ctx, x, y, width, height, radius, fill, stroke, strokeWidth = 1) {
+                ctx.beginPath();
+                ctx.moveTo(x + radius, y);
+                ctx.lineTo(x + width - radius, y);
+                ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+                ctx.lineTo(x + width, y + height - radius);
+                ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+                ctx.lineTo(x + radius, y + height);
+                ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+                ctx.lineTo(x, y + radius);
+                ctx.quadraticCurveTo(x, y, x + radius, y);
+                ctx.closePath();
+                if (fill) {
+                    ctx.fillStyle = fill;
+                    ctx.fill();
+                }
+                if (stroke) {
+                    ctx.strokeStyle = stroke;
+                    ctx.lineWidth = strokeWidth;
+                    ctx.stroke();
+                }
+            }
+
+            drawButton(text, x, y, w, h, isHovered, callback, style = 'primary') {
+                this.ctx.save();
+                
+                this.ctx.shadowColor = 'rgba(0, 0, 0, 0.08)';
+                this.ctx.shadowBlur = 15;
+                this.ctx.shadowOffsetY = 6;
+
+                let bgColor = '#ffffff';
+                let textColor = '#2a3b5c';
+                let strokeColor = 'rgba(0,0,0,0.05)';
+
+                if (style === 'primary') {
+                    bgColor = isHovered ? '#1e5cc8' : '#357ae8';
+                    textColor = '#ffffff';
+                    strokeColor = null;
+                } else if (style === 'secondary') {
+                    bgColor = isHovered ? '#e8ebf5' : '#f0f3fa';
+                    textColor = '#357ae8';
+                } else if (style === 'danger') {
+                    bgColor = isHovered ? '#d93838' : '#ea4335';
+                    textColor = '#ffffff';
+                }
+
+                const scale = isHovered ? 1.03 : 1.0;
+                this.ctx.translate(x + w/2, y + h/2);
+                this.ctx.scale(scale, scale);
+                
+                this.drawRoundRect(this.ctx, -w/2, -h/2, w, h, 14, bgColor, strokeColor, 1);
+
+                this.ctx.shadowColor = 'transparent';
+                this.ctx.font = 'bold 15px -apple-system, BlinkMacSystemFont, Arial';
+                this.ctx.fillStyle = textColor;
+                this.ctx.textAlign = 'center';
+                this.ctx.textBaseline = 'middle';
+                this.ctx.fillText(text, 0, 1);
+
+                this.ctx.restore();
+            }
+
+            drawMainMenu() {
+                this.menuButtons = [];
+
+                this.ctx.fillStyle = '#e8ecf3';
+                this.ctx.beginPath();
+                this.ctx.arc(0, 0, this.width * 0.45, 0, Math.PI * 2);
+                this.ctx.fill();
+
+                this.ctx.fillStyle = '#ffffff';
+                this.ctx.beginPath();
+                this.ctx.arc(0, 0, this.width * 0.38, 0, Math.PI * 2);
+                this.ctx.fill();
+
+                this.ctx.fillStyle = '#2d3748';
+                this.ctx.font = 'bold 44px -apple-system, BlinkMacSystemFont, Arial';
+                this.ctx.textAlign = 'center';
+                this.ctx.textBaseline = 'middle';
+                this.ctx.fillText('S U D O K U', this.width / 2, this.height * 0.35);
+
+                this.ctx.fillStyle = '#718096';
+                this.ctx.font = '15px -apple-system, BlinkMacSystemFont, Arial';
+                this.ctx.fillText('현대적인 스타일의 미니멀 퍼즐 게임', this.width / 2, this.height * 0.42);
+
+                const btnW = 200;
+                const btnH = 54;
+                const btnX = (this.width - btnW) / 2;
+                const btnY = this.height * 0.58;
+
+                const isHovered = this.isMouseOver(btnX, btnY, btnW, btnH);
+                this.drawButton('게임 시작', btnX, btnY, btnW, btnH, isHovered, () => {
+                    this.game.setDifficultyMenu();
+                }, 'primary');
+
+                this.menuButtons.push({ x: btnX, y: btnY, w: btnW, h: btnH, action: () => this.game.setDifficultyMenu() });
+            }
+
+            drawDifficultyMenu() {
+                this.menuButtons = [];
+
+                this.ctx.fillStyle = '#2d3748';
+                this.ctx.font = 'bold 28px -apple-system, BlinkMacSystemFont, Arial';
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText('난이도 선택', this.width / 2, this.height * 0.28);
+
+                this.ctx.fillStyle = '#718096';
+                this.ctx.font = '14px -apple-system, BlinkMacSystemFont, Arial';
+                this.ctx.fillText('원하는 플레이 난이도를 설정하세요.', this.width / 2, this.height * 0.34);
+
+                const btnW = 220;
+                const btnH = 50;
+                const startY = this.height * 0.43;
+                const gap = 64;
+
+                const diffs = [
+                    { name: '쉬움', key: 'easy', style: 'secondary' },
+                    { name: '보통', key: 'normal', style: 'secondary' },
+                    { name: '어려움', key: 'hard', style: 'secondary' }
+                ];
+
+                diffs.forEach((diff, idx) => {
+                    const x = (this.width - btnW) / 2;
+                    const y = startY + idx * gap;
+                    const isHovered = this.isMouseOver(x, y, btnW, btnH);
+                    
+                    this.drawButton(diff.name, x, y, btnW, btnH, isHovered, () => {
+                        this.game.startNewGame(diff.key);
+                    }, diff.style);
+
+                    this.menuButtons.push({ x, y, w: btnW, h: btnH, action: () => this.game.startNewGame(diff.key) });
+                });
+
+                const backW = 100;
+                const backH = 38;
+                const backX = 25;
+                const backY = 25;
+                const isBackHovered = this.isMouseOver(backX, backY, backW, backH);
+                this.drawButton('← 뒤로', backX, backY, backW, backH, isBackHovered, () => {
+                    this.setScreen('main');
+                }, 'secondary');
+                this.menuButtons.push({ x: backX, y: backY, w: backW, h: backH, action: () => this.setScreen('main') });
+            }
+
+            drawPlayScreen() {
+                this.gameButtons = [];
+
+                this.ctx.fillStyle = '#2d3748';
+                this.ctx.font = 'bold 22px -apple-system, BlinkMacSystemFont, Arial';
+                this.ctx.textAlign = 'left';
+                let korDiff = '쉬움';
+                if (this.game.difficulty === 'normal') korDiff = '보통';
+                if (this.game.difficulty === 'hard') korDiff = '어려움';
+                this.ctx.fillText(`난이도: ${korDiff}`, this.boardX, this.boardY - 35);
+
+                this.ctx.font = '15px -apple-system, BlinkMacSystemFont, Arial';
+                this.ctx.fillStyle = '#718096';
+                const emptyCount = this.game.board.getEmptyCellCount();
+                this.ctx.fillText(`남은 빈칸: ${emptyCount}`, this.boardX, this.boardY - 12);
+
+                const mistakeLabelX = this.boardX + 130;
+                this.ctx.fillStyle = '#718096';
+                this.ctx.fillText(`실수: `, mistakeLabelX, this.boardY - 12);
+
+                const dotStartX = mistakeLabelX + 40;
+                const dotY = this.boardY - 16;
+                const dotRadius = 5;
+                const dotGap = 14;
+
+                for (let i = 0; i < 5; i++) {
+                    this.ctx.beginPath();
+                    this.ctx.arc(dotStartX + i * dotGap, dotY, dotRadius, 0, Math.PI * 2);
+                    if (i < this.game.player.mistakes) {
+                        this.ctx.fillStyle = '#ea4335'; 
+                        this.ctx.fill();
+                    } else {
+                        this.ctx.strokeStyle = '#cbd5e1'; 
+                        this.ctx.lineWidth = 2;
+                        this.ctx.stroke();
+                    }
+                }
+
+                this.ctx.textAlign = 'right';
+                const timeString = this.formatTime(this.game.player.timeElapsed);
+                this.ctx.fillStyle = '#4a5568';
+                this.ctx.font = 'bold 18px Courier New, Courier, monospace';
+                this.ctx.fillText(`시간 ${timeString}`, this.boardX + this.boardSize, this.boardY - 35);
+
+                this.ctx.font = '14px -apple-system, BlinkMacSystemFont, Arial';
+                this.ctx.fillStyle = '#a0aec0';
+                this.ctx.fillText(`레벨 ${this.game.player.currentLevel}`, this.boardX + this.boardSize, this.boardY - 12);
+
+                this.ctx.save();
+                this.ctx.shadowColor = 'rgba(0,0,0,0.06)';
+                this.ctx.shadowBlur = 24;
+                this.ctx.shadowOffsetY = 10;
+                this.drawRoundRect(this.ctx, this.boardX, this.boardY, this.boardSize, this.boardSize, 12, '#ffffff', 'rgba(0,0,0,0.03)', 2);
+                this.ctx.restore();
+
+                const board = this.game.board;
+                for (let r = 0; r < 9; r++) {
+                    for (let c = 0; c < 9; c++) {
+                        this.drawCell(board, r, c);
+                    }
+                }
+
+                this.ctx.strokeStyle = '#2d3748';
+                this.ctx.lineWidth = 3.2;
+                this.ctx.lineCap = 'round';
+                
+                this.ctx.beginPath();
+                this.ctx.roundRect ? this.ctx.roundRect(this.boardX, this.boardY, this.boardSize, this.boardSize, 12) : this.ctx.rect(this.boardX, this.boardY, this.boardSize, this.boardSize);
+                this.ctx.stroke();
+
+                this.ctx.lineWidth = 2.5;
+                for (let i = 1; i < 3; i++) {
+                    const offset = i * this.boardSize / 3;
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(this.boardX, this.boardY + offset);
+                    this.ctx.lineTo(this.boardX + this.boardSize, this.boardY + offset);
+                    this.ctx.stroke();
+
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(this.boardX + offset, this.boardY);
+                    this.ctx.lineTo(this.boardX + offset, this.boardY + this.boardSize);
+                    this.ctx.stroke();
+                }
+
+                const btnW = 95;
+                const btnH = 38;
+                const panelY = this.boardY + this.boardSize + 25;
+
+                // 1. 재시작 버튼
+                const restartX = this.boardX;
+                const isRestartHover = this.isMouseOver(restartX, panelY, btnW, btnH);
+                this.drawButton('재시작', restartX, panelY, btnW, btnH, isRestartHover, () => {
+                    this.game.restartLevel();
+                }, 'secondary');
+                this.gameButtons.push({ x: restartX, y: panelY, w: btnW, h: btnH, action: () => this.game.restartLevel() });
+
+                // 2. 메모(연필) 온오프 스위치 버튼
+                const noteW = 120;
+                const noteX = this.boardX + (this.boardSize - noteW) / 2;
+                const noteText = board.noteMode ? '메모 ✍️ ON' : '메모 ✍️ OFF';
+                const isNoteHover = this.isMouseOver(noteX, panelY, noteW, btnH);
+                this.drawButton(noteText, noteX, panelY, noteW, btnH, isNoteHover, () => {
+                    board.toggleNoteMode();
+                }, board.noteMode ? 'primary' : 'secondary');
+                this.gameButtons.push({ x: noteX, y: panelY, w: noteW, h: btnH, action: () => board.toggleNoteMode() });
+
+                // 3. 메인 메뉴 버튼
+                const menuX = this.boardX + this.boardSize - btnW;
+                const isMenuHover = this.isMouseOver(menuX, panelY, btnW, btnH);
+                this.drawButton('메인으로', menuX, panelY, btnW, btnH, isMenuHover, () => {
+                    this.setScreen('main');
+                }, 'secondary');
+                this.gameButtons.push({ x: menuX, y: panelY, w: btnW, h: btnH, action: () => this.setScreen('main') });
+
+                this.drawMobileNumberPad(panelY + 55);
+            }
+
+            // 가상 숫자 키패드 렌더링 (다 채워진 숫자는 빈 공간 처리)
+            drawMobileNumberPad(startY) {
+                const numBtnSize = Math.min((this.boardSize - 40) / 9, 50);
+                const totalWidth = numBtnSize * 9 + 40;
+                const startX = this.boardX + (this.boardSize - totalWidth) / 2;
+                
+                this.drawRoundRect(this.ctx, startX, startY, totalWidth, numBtnSize + 16, 12, '#eef2f7', 'rgba(0,0,0,0.02)', 1);
+
+                for (let i = 1; i <= 9; i++) {
+                    const x = startX + 10 + (i - 1) * (numBtnSize + 3);
+                    const y = startY + 8;
+
+                    // 해당 숫자가 판 위에 9개 모두 배치되었는지 검사
+                    const numCount = this.game.board.getNumberCount(i);
+                    const isCompleted = numCount >= 9;
+
+                    if (isCompleted) {
+                        // 완전히 다 채워진 숫자는 아래 키패드에서 투명하고 빈 공간(플레이스홀더)으로 그리고 클릭 이벤트를 미등록
+                        this.ctx.save();
+                        this.drawRoundRect(this.ctx, x, y, numBtnSize, numBtnSize, 8, 'rgba(238, 242, 247, 0.4)');
+                        this.ctx.restore();
+                        continue;
+                    }
+
+                    const isHover = this.isMouseOver(x, y, numBtnSize, numBtnSize);
+
+                    this.ctx.save();
+                    if (isHover) {
+                        this.ctx.shadowColor = 'rgba(53, 122, 232, 0.3)';
+                        this.ctx.shadowBlur = 8;
+                    }
+                    this.drawRoundRect(this.ctx, x, y, numBtnSize, numBtnSize, 8, isHover ? '#357ae8' : '#ffffff');
+                    
+                    this.ctx.fillStyle = isHover ? '#ffffff' : '#2d3748';
+                    this.ctx.font = 'bold 16px -apple-system, BlinkMacSystemFont, Arial';
+                    this.ctx.textAlign = 'center';
+                    this.ctx.textBaseline = 'middle';
+                    this.ctx.fillText(i, x + numBtnSize/2, y + numBtnSize/2);
+                    this.ctx.restore();
+
+                    this.gameButtons.push({
+                        x, y, w: numBtnSize, h: numBtnSize, action: () => {
+                            if (this.game.board.selectedCell) {
+                                const { r, c } = this.game.board.selectedCell;
+                                this.game.board.setCellValue(r, c, i);
+                            }
+                        }
+                    });
+                }
+            }
+
+            drawCell(board, r, c) {
+                const cellX = this.boardX + c * this.cellSize;
+                const cellY = this.boardY + r * this.cellSize;
+                
+                const isSelected = board.selectedCell && board.selectedCell.r === r && board.selectedCell.c === c;
+                const value = board.grid[r][c];
+                const isInitial = board.isInitial(r, c);
+                const isConflict = board.conflicts[r][c];
+
+                let isRelated = false;
+                let isSameValue = false;
+
+                if (board.selectedCell) {
+                    const selR = board.selectedCell.r;
+                    const selC = board.selectedCell.c;
+                    const selVal = board.grid[selR][selC];
+
+                    const boxRow = Math.floor(selR / 3) * 3;
+                    const boxCol = Math.floor(selC / 3) * 3;
+                    const curBoxRow = Math.floor(r / 3) * 3;
+                    const curBoxCol = Math.floor(c / 3) * 3;
+
+                    if (selR === r || selC === c || (boxRow === curBoxRow && boxCol === curBoxCol)) {
+                        isRelated = true;
+                    }
+
+                    if (selVal !== 0 && value === selVal && !isSelected) {
+                        isSameValue = true;
+                    }
+                }
+
+                this.ctx.save();
+                
+                const scale = board.cellScales[r][c];
+                const shake = board.cellShakes[r][c];
+                this.ctx.translate(cellX + this.cellSize/2 + shake, cellY + this.cellSize/2);
+                this.ctx.scale(scale, scale);
+
+                let cellColor = '#ffffff';
+                if (isSelected) {
+                    cellColor = '#e3ecfa'; 
+                } else if (isSameValue) {
+                    cellColor = '#cbe0fc'; 
+                } else if (isRelated) {
+                    cellColor = '#f5f7fa'; 
+                }
+
+                this.drawRoundRect(this.ctx, -this.cellSize/2 + 1, -this.cellSize/2 + 1, this.cellSize - 2, this.cellSize - 2, 0, cellColor);
+
+                this.ctx.strokeStyle = '#e2e8f0';
+                this.ctx.lineWidth = 1;
+                this.ctx.strokeRect(-this.cellSize/2, -this.cellSize/2, this.cellSize, this.cellSize);
+
+                if (value !== 0) {
+                    let textColor = '#2a3b5c';
+                    if (!isInitial) {
+                        textColor = '#357ae8'; 
+                    }
+                    if (isConflict) {
+                        textColor = '#ea4335'; 
+                    }
+
+                    this.ctx.fillStyle = textColor;
+                    this.ctx.font = isInitial ? 'bold 22px -apple-system, BlinkMacSystemFont, Arial' : '22px -apple-system, BlinkMacSystemFont, Arial';
+                    this.ctx.textAlign = 'center';
+                    this.ctx.textBaseline = 'middle';
+                    this.ctx.fillText(value, 0, 1);
+                } else {
+                    let hasNotes = false;
+                    for (let n = 1; n <= 9; n++) {
+                        if (board.notes[r][c][n]) {
+                            hasNotes = true;
+                            break;
+                        }
+                    }
+
+                    if (hasNotes) {
+                        const noteFontSize = Math.max(9, Math.floor(this.cellSize * 0.22));
+                        this.ctx.fillStyle = '#718096';
+                        this.ctx.font = `${noteFontSize}px -apple-system, BlinkMacSystemFont, Arial`;
+                        this.ctx.textAlign = 'center';
+                        this.ctx.textBaseline = 'middle';
+
+                        const miniGap = this.cellSize / 3;
+                        for (let n = 1; n <= 9; n++) {
+                            if (board.notes[r][c][n]) {
+                                const miniR = Math.floor((n - 1) / 3);
+                                const miniC = (n - 1) % 3;
+                                const noteX = -this.cellSize/2 + miniC * miniGap + miniGap/2;
+                                const noteY = -this.cellSize/2 + miniR * miniGap + miniGap/2;
+                                this.ctx.fillText(n, noteX, noteY + 1);
+                            }
+                        }
+                    }
+                }
+
+                this.ctx.restore();
+            }
+
+            drawClearScreen() {
+                this.clearButtons = [];
+
+                this.ctx.fillStyle = 'rgba(42, 59, 92, 0.35)';
+                this.ctx.fillRect(0, 0, this.width, this.height);
+
+                const cardW = 380;
+                const cardH = 280;
+                const cardX = (this.width - cardW) / 2;
+                const cardY = (this.height - cardH) / 2;
+
+                this.ctx.save();
+                this.ctx.shadowColor = 'rgba(0,0,0,0.2)';
+                this.ctx.shadowBlur = 30;
+                this.ctx.shadowOffsetY = 15;
+                this.drawRoundRect(this.ctx, cardX, cardY, cardW, cardH, 20, '#ffffff');
+                this.ctx.restore();
+
+                this.ctx.fillStyle = '#f5b041';
+                this.ctx.font = '36px sans-serif';
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText('🏆', this.width / 2, cardY + 55);
+
+                this.ctx.fillStyle = '#2d3748';
+                this.ctx.font = 'bold 24px -apple-system, BlinkMacSystemFont, Arial';
+                this.ctx.fillText('스도쿠 클리어!', this.width / 2, cardY + 105);
+
+                this.ctx.fillStyle = '#718096';
+                this.ctx.font = '14px -apple-system, BlinkMacSystemFont, Arial';
+                const scoreString = this.formatTime(this.game.player.timeElapsed);
+                this.ctx.fillText(`소요 시간 : ${scoreString}`, this.width / 2, cardY + 138);
+
+                const btnW = 135;
+                const btnH = 46;
+                const btnY = cardY + 195;
+
+                const nextX = this.width / 2 + 15;
+                const isNextHover = this.isMouseOver(nextX, btnY, btnW, btnH);
+                this.drawButton('다음 레벨', nextX, btnY, btnW, btnH, isNextHover, () => {
+                    this.game.nextLevel();
+                }, 'primary');
+                this.clearButtons.push({ x: nextX, y: btnY, w: btnW, h: btnH, action: () => this.game.nextLevel() });
+
+                const mainX = this.width / 2 - btnW - 15;
+                const isMainHover = this.isMouseOver(mainX, btnY, btnW, btnH);
+                this.drawButton('메인 메뉴', mainX, btnY, btnW, btnH, isMainHover, () => {
+                    this.setScreen('main');
+                }, 'secondary');
+                this.clearButtons.push({ x: mainX, y: btnY, w: btnW, h: btnH, action: () => this.setScreen('main') });
+            }
+
+            drawGameOverScreen() {
+                this.gameOverButtons = [];
+
+                this.ctx.fillStyle = 'rgba(42, 59, 92, 0.35)';
+                this.ctx.fillRect(0, 0, this.width, this.height);
+
+                const cardW = 380;
+                const cardH = 280;
+                const cardX = (this.width - cardW) / 2;
+                const cardY = (this.height - cardH) / 2;
+
+                this.ctx.save();
+                this.ctx.shadowColor = 'rgba(234, 67, 53, 0.15)';
+                this.ctx.shadowBlur = 30;
+                this.ctx.shadowOffsetY = 15;
+                this.drawRoundRect(this.ctx, cardX, cardY, cardW, cardH, 20, '#ffffff');
+                this.ctx.restore();
+
+                this.ctx.fillStyle = '#ea4335';
+                this.ctx.font = '36px sans-serif';
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText('❌', this.width / 2, cardY + 55);
+
+                this.ctx.fillStyle = '#2d3748';
+                this.ctx.font = 'bold 24px -apple-system, BlinkMacSystemFont, Arial';
+                this.ctx.fillText('게임 오버', this.width / 2, cardY + 105);
+
+                this.ctx.fillStyle = '#718096';
+                this.ctx.font = '14px -apple-system, BlinkMacSystemFont, Arial';
+                this.ctx.fillText('5번의 실수를 하여 퍼즐 도전에 실패했습니다.', this.width / 2, cardY + 138);
+
+                const btnW = 135;
+                const btnH = 46;
+                const btnY = cardY + 195;
+
+                const retryX = this.width / 2 + 15;
+                const isRetryHover = this.isMouseOver(retryX, btnY, btnW, btnH);
+                this.drawButton('다시 도전', retryX, btnY, btnW, btnH, isRetryHover, () => {
+                    this.game.retryLevel();
+                }, 'danger');
+                this.gameOverButtons.push({ x: retryX, y: btnY, w: btnW, h: btnH, action: () => this.game.retryLevel() });
+
+                const mainX = this.width / 2 - btnW - 15;
+                const isMainHover = this.isMouseOver(mainX, btnY, btnW, btnH);
+                this.drawButton('메인 메뉴', mainX, btnY, btnW, btnH, isMainHover, () => {
+                    this.setScreen('main');
+                }, 'secondary');
+                this.gameOverButtons.push({ x: mainX, y: btnY, w: btnW, h: btnH, action: () => this.setScreen('main') });
+            }
+
+            formatTime(seconds) {
+                const mins = Math.floor(seconds / 60);
+                const secs = seconds % 60;
+                return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0 defiance')}`;
+            }
+
+            isMouseOver(x, y, w, h) {
+                return this.mousePos.x >= x && this.mousePos.x <= x + w &&
+                       this.mousePos.y >= y && this.mousePos.y <= y + h;
+            }
+
+            handleMouseClick(mx, my) {
+                Sound.init();
+
+                if (this.activeScreen === 'main') {
+                    for (let btn of this.menuButtons) {
+                        if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
+                            btn.action();
+                            return;
+                        }
+                    }
+                } else if (this.activeScreen === 'difficulty') {
+                    for (let btn of this.menuButtons) {
+                        if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
+                            btn.action();
+                            return;
+                        }
+                    }
+                } else if (this.activeScreen === 'play') {
+                    if (mx >= this.boardX && mx <= this.boardX + this.boardSize &&
+                        my >= this.boardY && my <= this.boardY + this.boardSize) {
+                        const col = Math.floor((mx - this.boardX) / this.cellSize);
+                        const row = Math.floor((my - this.boardY) / this.cellSize);
+                        this.game.board.selectCellAt(row, col);
+
+                        const helper = document.getElementById('mobile-input-helper');
+                        if (helper) {
+                            helper.value = '';
+                            helper.focus();
+                        }
+                        return;
+                    }
+
+                    for (let btn of this.gameButtons) {
+                        if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
+                            btn.action();
+                            return;
+                        }
+                    }
+                } else if (this.activeScreen === 'clear') {
+                    for (let btn of this.clearButtons) {
+                        if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
+                            btn.action();
+                            return;
+                        }
+                    }
+                } else if (this.activeScreen === 'gameover') {
+                    for (let btn of this.gameOverButtons) {
+                        if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
+                            btn.action();
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        // ==========================================
+        // 7. InputManager 클래스 (입력 제어 장치)
+        // ==========================================
+        class InputManager {
+            constructor(game) {
+                this.game = game;
+                this.canvas = document.getElementById('gameCanvas');
+                
+                this.setupKeyboard();
+                this.setupMouseAndTouch();
+            }
+
+            setupKeyboard() {
+                window.addEventListener('keydown', (e) => {
+                    if (this.game.ui.activeScreen !== 'play') return;
+                    const board = this.game.board;
+                    if (!board.selectedCell) return;
+
+                    const { r, c } = board.selectedCell;
+
+                    switch (e.key) {
+                        case 'ArrowUp':
+                            board.moveSelection(-1, 0);
+                            e.preventDefault();
+                            break;
+                        case 'ArrowDown':
+                            board.moveSelection(1, 0);
+                            e.preventDefault();
+                            break;
+                        case 'ArrowLeft':
+                            board.moveSelection(0, -1);
+                            e.preventDefault();
+                            break;
+                        case 'ArrowRight':
+                            board.moveSelection(0, 1);
+                            e.preventDefault();
+                            break;
+                        case 'Backspace':
+                        case 'Delete':
+                            board.setCellValue(r, c, 0);
+                            e.preventDefault();
+                            break;
+                        case 'Escape':
+                            board.deselect();
+                            e.preventDefault();
+                            break;
+                        case 'n':
+                        case 'N':
+                            board.toggleNoteMode();
+                            e.preventDefault();
+                            break;
+                        default:
+                            const num = parseInt(e.key);
+                            if (num >= 1 && num <= 9) {
+                                board.setCellValue(r, c, num);
+                            }
+                            break;
+                    }
+                });
+
+                const helper = document.getElementById('mobile-input-helper');
+                if (helper) {
+                    helper.addEventListener('input', (e) => {
+                        const val = e.target.value;
+                        const num = parseInt(val.charAt(val.length - 1));
+                        if (this.game.ui.activeScreen === 'play' && this.game.board.selectedCell) {
+                            const { r, c } = this.game.board.selectedCell;
+                            if (num >= 1 && num <= 9) {
+                                this.game.board.setCellValue(r, c, num);
+                            }
+                        }
+                        helper.value = '';
+                    });
+                }
+            }
+
+            setupMouseAndTouch() {
+                const getCoords = (e) => {
+                    const rect = this.canvas.getBoundingClientRect();
+                    let clientX, clientY;
+                    if (e.touches && e.touches.length > 0) {
+                        clientX = e.touches[0].clientX;
+                        clientY = e.touches[0].clientY;
+                    } else {
+                        clientX = e.clientX;
+                        clientY = e.clientY;
+                    }
+                    const x = (clientX - rect.left) * (this.canvas.width / rect.width);
+                    const y = (clientY - rect.top) * (this.canvas.height / rect.height);
+                    return { x, y };
+                };
+
+                const onMove = (e) => {
+                    const coords = getCoords(e);
+                    this.game.ui.mousePos = coords;
+                };
+
+                const onPress = (e) => {
+                    const coords = getCoords(e);
+                    this.game.ui.handleMouseClick(coords.x, coords.y);
+                };
+
+                this.canvas.addEventListener('mousemove', onMove);
+                this.canvas.addEventListener('mousedown', onPress);
+
+                this.canvas.addEventListener('touchstart', (e) => {
+                    onMove(e);
+                    onPress(e);
+                    e.preventDefault();
+                }, { passive: false });
+
+                this.canvas.addEventListener('touchmove', (e) => {
+                    onMove(e);
+                    e.preventDefault();
+                }, { passive: false });
+            }
+        }
+
+        // ==========================================
+        // 8. Game 클래스 (메인 코어 및 루프 설계)
+        // ==========================================
+        class Game {
+            constructor() {
+                this.player = new Player();
+                this.board = new SudokuBoard();
+                this.board.game = this; 
+                this.ui = new UI(this);
+                this.input = new InputManager(this);
+
+                this.difficulty = 'easy';
+                this.levelIndex = 0;
+
+                this.lastTime = performance.now();
+                this.timerAccumulator = 0;
+
+                this.ui.setScreen('main');
+                this.loop();
+            }
+
+            setDifficultyMenu() {
+                this.ui.setScreen('difficulty');
+            }
+
+            startNewGame(difficulty) {
+                this.difficulty = difficulty;
+                this.player.reset();
+                this.board.loadPuzzle(difficulty);
+                this.ui.setScreen('play');
+                Sound.playClick();
+            }
+
+            retryLevel() {
+                this.player.reset();
+                this.board.resetCurrentPuzzle();
+                this.ui.setScreen('play');
+                Sound.playClick();
+            }
+
+            restartLevel() {
+                this.player.reset();
+                this.board.resetCurrentPuzzle();
+                Sound.playClick();
+            }
+
+            nextLevel() {
+                this.levelIndex++;
+                this.player.reset();
+                this.player.currentLevel = this.levelIndex + 1;
+                this.board.loadPuzzle(this.difficulty);
+                this.ui.setScreen('play');
+                Sound.playClick();
+            }
+
+            triggerGameOver() {
+                this.ui.setScreen('gameover');
+                Sound.playError();
+            }
+
+            update(dt) {
+                this.ui.update(dt);
+                
+                if (this.ui.activeScreen === 'play') {
+                    this.board.update(dt);
+
+                    this.timerAccumulator += dt;
+                    if (this.timerAccumulator >= 1.0) {
+                        this.player.timeElapsed += 1;
+                        this.timerAccumulator -= 1.0;
+                    }
+
+                    if (this.board.isComplete()) {
+                        this.ui.setScreen('clear');
+                        Sound.playClear();
+                    }
+                }
+            }
+
+            draw() {
+                this.ui.draw();
+            }
+
+            loop() {
+                const now = performance.now();
+                const dt = Math.min((now - this.lastTime) / 1000, 0.1);
+                this.lastTime = now;
+
+                this.update(dt);
+                this.draw();
+
+                requestAnimationFrame(() => this.loop());
+            }
+        }
+
+        window.onload = function() {
+            new Game();
+        };
+    </script>
+</body>
+</html>
