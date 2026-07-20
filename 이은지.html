@@ -1,0 +1,2836 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Silent Asylum: The Escapist</title>
+    <!-- Tailwind CSS for HUD and menus -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome for horror icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts: Inter and Creepster (Horror Theme) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Creepster&family=Inter:wght=300;400;600;800&display=swap" rel="stylesheet">
+    <!-- Three.js for 3D Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #030303;
+            color: #e2e8f0;
+            user-select: none;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+            touch-action: none;
+        }
+        .horror-font {
+            font-family: 'Creepster', cursive;
+        }
+        .vignette {
+            box-shadow: inset 0 0 100px rgba(0,0,0,0.9), inset 0 0 180px rgba(0,0,0,0.85);
+            pointer-events: none;
+        }
+        .scanlines {
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.15) 50%
+            );
+            background-size: 100% 4px;
+            pointer-events: none;
+        }
+        @keyframes heartbeat {
+            0% { transform: scale(1); opacity: 0.5; }
+            14% { transform: scale(1.25); opacity: 1; }
+            28% { transform: scale(1); opacity: 0.5; }
+            42% { transform: scale(1.25); opacity: 1; }
+            70% { transform: scale(1); opacity: 0.5; }
+        }
+        .heartbeat-active {
+            animation: heartbeat 1.0s infinite;
+        }
+        ::-webkit-scrollbar {
+            display: none;
+        }
+    </style>
+</head>
+<body class="relative w-screen h-screen select-none overflow-hidden">
+
+    <div id="audio-activation-overlay" class="absolute inset-0 bg-black z-50 flex flex-col items-center justify-center p-6 text-center">
+        <h1 class="text-red-700 text-6xl md:text-8xl font-bold horror-font tracking-wider mb-6 animate-pulse">SILENT ASYLUM</h1>
+        <p class="text-gray-400 text-base max-w-md mb-8 leading-relaxed">
+            본 게임은 고품질의 합성음 사운드 효과 및 3D 그래픽을 구현하고 있습니다. 헤드폰을 장착하시고 조작 명세를 확인하여 주십시오.<br>
+            <span class="text-yellow-500 font-bold">★ 화면을 한번 클릭하면 시점이 센터에 락(Pointer Lock)되어 자유 회전이 시작됩니다. 무기 공격 및 격발은 마우스 우클릭을 활용해 주십시오.</span>
+        </p>
+        <button id="btn-activate-audio" class="px-8 py-4 bg-red-900 hover:bg-red-800 text-white rounded-lg text-xl font-bold transition-all duration-300 transform hover:scale-105 shadow-lg border border-red-600">
+            <i class="fa-solid fa-volume-high mr-2"></i> 시스템 활성화 및 진입
+        </button>
+    </div>
+
+    <!-- Main Game Viewport -->
+    <div id="canvas-container" class="absolute inset-0 z-0 bg-black cursor-crosshair"></div>
+
+    <!-- Horror Filters Overlay -->
+    <div class="vignette absolute inset-0 z-10"></div>
+    <div class="scanlines absolute inset-0 z-10"></div>
+    <div id="hit-overlay" class="absolute inset-0 z-20 pointer-events-none border-[12px] border-red-950 bg-red-950/20 opacity-0 transition-opacity duration-150"></div>
+
+    <div id="main-menu" class="hidden absolute inset-0 z-30 flex flex-col justify-between p-8 bg-gradient-to-t from-black via-black/85 to-transparent">
+        <div class="flex justify-between items-start mt-4">
+            <div>
+                <h1 class="text-red-700 text-6xl md:text-8xl font-bold horror-font tracking-widest drop-shadow-[0_5px_5px_rgba(0,0,0,1)]">SILENT ASYLUM</h1>
+                <p class="text-gray-500 tracking-widest text-xs md:text-sm uppercase font-semibold mt-2">The Ultimate Horror Action Escape 3D</p>
+            </div>
+            <div class="bg-gray-950 border border-gray-800 rounded-lg p-3 text-right">
+                <span id="save-status-info" class="text-xs text-yellow-500"><i class="fa-solid fa-cloud-arrow-up mr-1"></i> 자동 세이브 활성</span>
+            </div>
+        </div>
+
+        <div class="max-w-md flex flex-col space-y-4 mb-16 self-start">
+            <button id="btn-new-game" class="w-full text-left py-4 px-6 bg-red-950/40 hover:bg-red-900/60 border-l-4 border-red-600 rounded-r-lg font-bold text-xl tracking-wide transition-all hover:translate-x-3 text-gray-100 flex justify-between items-center group">
+                <span><i class="fa-solid fa-skull mr-3 text-red-500 group-hover:animate-bounce"></i> 새 위기 탈출 시작</span>
+                <i class="fa-solid fa-angle-right opacity-0 group-hover:opacity-100 transition-opacity"></i>
+            </button>
+            <button id="btn-continue-game" class="w-full text-left py-4 px-6 bg-gray-950/40 hover:bg-gray-900/60 border-l-4 border-yellow-600 rounded-r-lg font-bold text-xl tracking-wide transition-all hover:translate-x-3 text-gray-300 flex justify-between items-center group disabled:opacity-40">
+                <span><i class="fa-solid fa-clock-rotate-left mr-3 text-yellow-500"></i> 저장 기록에서 이어하기</span>
+                <i class="fa-solid fa-angle-right opacity-0 group-hover:opacity-100 transition-opacity"></i>
+            </button>
+            <button id="btn-how-to-play" class="w-full text-left py-4 px-6 bg-gray-950/40 hover:bg-gray-900/60 border-l-4 border-sky-600 rounded-r-lg font-bold text-xl tracking-wide transition-all hover:translate-x-3 text-gray-300 flex justify-between items-center group">
+                <span><i class="fa-solid fa-gamepad mr-3 text-sky-500"></i> 생존 조작 지침</span>
+                <i class="fa-solid fa-angle-right opacity-0 group-hover:opacity-100 transition-opacity"></i>
+            </button>
+        </div>
+
+        <div class="flex flex-col md:flex-row justify-between items-center border-t border-gray-900 pt-4 text-xs text-gray-600">
+            <p>Made with Three.js (WebGL) & Synthetic Sound Modulator</p>
+            <p class="mt-2 md:mt-0">© 2026 Silent Asylum Game.</p>
+        </div>
+    </div>
+
+    <div id="difficulty-select" class="hidden absolute inset-0 z-40 bg-black/95 flex flex-col items-center justify-center p-6">
+        <h2 class="text-red-500 text-4xl md:text-5xl font-bold horror-font tracking-wide mb-8 text-center">생존 난이도 선정</h2>
+        
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 max-w-6xl w-full">
+            <div id="diff-easy" class="bg-gray-950 hover:bg-emerald-950/10 border border-gray-900 hover:border-emerald-800 rounded-xl p-5 cursor-pointer transition-all duration-300 flex flex-col justify-between transform hover:-translate-y-2">
+                <div>
+                    <h3 class="text-emerald-500 text-2xl font-bold mb-3"><i class="fa-solid fa-shield-halved mr-1"></i> 쉬움 (Easy)</h3>
+                    <ul class="space-y-2 text-xs text-gray-400">
+                        <li>HP 150 제공 및 회복 효과 증가</li>
+                        <li>적들 체력 약화 및 이동 장애</li>
+                        <li>퍼즐 힌트 상시 제공</li>
+                    </ul>
+                </div>
+                <button class="mt-6 w-full py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded font-bold text-sm">진입하기</button>
+            </div>
+
+            <div id="diff-normal" class="bg-gray-950 hover:bg-sky-950/10 border border-gray-900 hover:border-sky-800 rounded-xl p-5 cursor-pointer transition-all duration-300 flex flex-col justify-between transform hover:-translate-y-2">
+                <div>
+                    <h3 class="text-sky-400 text-2xl font-bold mb-3"><i class="fa-solid fa-skull mr-1"></i> 보통 (Normal)</h3>
+                    <ul class="space-y-2 text-xs text-gray-400">
+                        <li>표준 생존 설정값 탑재</li>
+                        <li>아이템 획득 및 적 밸런스 균형</li>
+                        <li>기본 퍼즐 힌트 탑재</li>
+                    </ul>
+                </div>
+                <button class="mt-6 w-full py-2 bg-sky-800 hover:bg-sky-700 text-white rounded font-bold text-sm">진입하기</button>
+            </div>
+
+            <div id="diff-hard" class="bg-gray-950 hover:bg-amber-950/10 border border-gray-900 hover:border-amber-800 rounded-xl p-5 cursor-pointer transition-all duration-300 flex flex-col justify-between transform hover:-translate-y-2">
+                <div>
+                    <h3 class="text-amber-500 text-2xl font-bold mb-3"><i class="fa-solid fa-radiation mr-1"></i> 어려움 (Hard)</h3>
+                    <ul class="space-y-2 text-xs text-gray-400">
+                        <li>플레이어 최대 체력 80% 하강</li>
+                        <li>전력 대시 회복 속도 저하</li>
+                        <li>손전등 배터리 소모 가속화</li>
+                    </ul>
+                </div>
+                <button class="mt-6 w-full py-2 bg-amber-800 hover:bg-amber-700 text-white rounded font-bold text-sm">진입하기</button>
+            </div>
+
+            <div id="diff-master" class="bg-gray-950 hover:bg-red-950/20 border border-gray-900 hover:border-red-800 rounded-xl p-5 cursor-pointer transition-all duration-300 flex flex-col justify-between transform hover:-translate-y-2">
+                <div>
+                    <h3 class="text-red-600 text-2xl font-bold mb-3"><i class="fa-solid fa-biohazard mr-1"></i> 마스터 (Master)</h3>
+                    <ul class="space-y-2 text-xs text-gray-300">
+                        <li>HP 60% 설계, 극한의 청각 AI 반응</li>
+                        <li>단 한 개의 체크포인트만 허용</li>
+                        <li>퍼즐 암호 불일치 시 치명적 가해</li>
+                    </ul>
+                </div>
+                <button class="mt-6 w-full py-2 bg-red-900 hover:bg-red-700 text-white rounded font-bold text-sm">진입하기</button>
+            </div>
+        </div>
+
+        <button id="btn-diff-back" class="mt-12 px-6 py-2 border border-gray-700 hover:border-gray-500 text-gray-400 hover:text-white rounded font-bold text-sm transition-all">
+            <i class="fa-solid fa-arrow-left mr-2"></i> 메인 타이틀 복귀
+        </button>
+    </div>
+
+    <div id="game-hud" class="hidden absolute inset-0 z-20 pointer-events-none flex flex-col justify-between p-4 md:p-6 select-none">
+        <!-- Top HUD Panel -->
+        <div class="flex justify-between items-start w-full pointer-events-auto">
+            <div class="flex flex-col space-y-1">
+                <div class="bg-black/80 border border-gray-900 p-3 rounded-lg backdrop-blur-sm shadow-md flex items-center space-x-3">
+                    <div class="bg-red-950/80 px-2.5 py-1.5 rounded-md border border-red-800">
+                        <span id="hud-floor-text" class="text-red-500 font-extrabold text-sm uppercase tracking-widest">1층</span>
+                    </div>
+                    <div>
+                        <div class="text-gray-400 text-[10px] uppercase font-bold tracking-wider">현재 주파 구역</div>
+                        <div id="hud-room-text" class="text-white text-sm font-bold">복도 통로</div>
+                    </div>
+                </div>
+                <div id="hud-objective-panel" class="bg-black/70 border border-gray-900 px-3 py-2 rounded-lg text-xs flex items-center space-x-2 text-yellow-500 animate-pulse">
+                    <i class="fa-solid fa-bullseye"></i>
+                    <span>지시사항: <span id="hud-objective-text">단서를 수색하여 생존 장비를 확보하십시오.</span></span>
+                </div>
+            </div>
+
+            <!-- Active level display and XP -->
+            <div class="bg-black/80 border border-gray-900 p-3 rounded-lg backdrop-blur-sm shadow-md flex items-center space-x-6">
+                <div class="relative w-12 h-12 rounded-full border-4 border-red-900 flex items-center justify-center bg-red-950/20">
+                    <span id="hud-level-text" class="text-white text-xl font-black">1</span>
+                </div>
+                <div class="flex flex-col justify-center min-w-[100px]">
+                    <div class="flex justify-between text-[10px] uppercase font-bold text-gray-400">
+                        <span>경험지수</span>
+                        <span id="hud-xp-ratio">0 / 100</span>
+                    </div>
+                    <div class="w-full bg-gray-950 h-2 rounded overflow-hidden mt-1 border border-gray-900">
+                        <div id="hud-xp-bar" class="bg-red-600 h-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center Aim/Crosshair & Reticle -->
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
+            <!-- Active Pointer Lock Instructions -->
+            <div id="pointer-lock-prompt" class="bg-black/90 border border-yellow-600/50 text-yellow-400 font-bold text-xs px-6 py-2.5 rounded-lg shadow-xl animate-pulse mb-6 pointer-events-auto cursor-pointer">
+                <i class="fa-solid fa-mouse mr-2"></i> 여기를 클릭하여 마우스 시점 전환을 켜십시오.
+            </div>
+
+            <div id="game-reticle" class="w-3 h-3 rounded-full bg-white/50 border border-black/50 mb-4 mx-auto transition-transform duration-200"></div>
+            
+            <!-- Reload progress indicator -->
+            <div id="hud-reload-panel" class="hidden mb-4 bg-black/90 px-4 py-1.5 rounded-full border border-yellow-600 text-yellow-500 font-extrabold text-xs tracking-wider uppercase animate-pulse">
+                RELOADING... <span id="hud-reload-progress">0%</span>
+            </div>
+
+            <div id="action-prompt" class="hidden bg-black/95 border border-red-900 text-red-100 font-bold py-2.5 px-6 rounded-lg shadow-xl backdrop-blur-md animate-bounce pointer-events-auto">
+                <span class="text-yellow-400 font-black px-1.5 py-0.5 rounded border border-yellow-400 text-xs mr-2 select-none">E</span> <span id="action-prompt-text">수색</span>
+            </div>
+            <div id="central-alert" class="hidden bg-red-950/90 border border-red-700 text-white font-bold px-6 py-3 rounded-lg shadow-lg backdrop-blur text-sm uppercase tracking-widest animate-pulse max-w-sm">
+                경고! 주변 개체가 활성화되었습니다.
+            </div>
+        </div>
+
+        <div class="flex flex-col space-y-4 md:space-y-0 md:flex-row justify-between items-end w-full pointer-events-auto">
+            <!-- HP and Stamina -->
+            <div class="bg-black/80 border border-gray-900 p-4 rounded-xl backdrop-blur shadow-md max-w-xs w-full flex flex-col space-y-3">
+                <div class="flex flex-col">
+                    <div class="flex justify-between text-xs font-bold text-red-500 mb-1">
+                        <span><i class="fa-solid fa-heart-pulse heartbeat-active mr-1"></i> 신체 손상도 (HP)</span>
+                        <span id="hud-hp-text">100 / 100</span>
+                    </div>
+                    <div class="w-full bg-gray-950 h-3.5 rounded border border-gray-800 overflow-hidden">
+                        <div id="hud-hp-bar" class="bg-gradient-to-r from-red-800 to-red-500 h-full transition-all" style="width: 100%"></div>
+                    </div>
+                </div>
+
+                <div class="flex flex-col">
+                    <div class="flex justify-between text-xs font-bold text-emerald-500 mb-1">
+                        <span><i class="fa-solid fa-bolt mr-1"></i> 가용 호흡력 (Stamina)</span>
+                        <span id="hud-stamina-text">100%</span>
+                    </div>
+                    <div class="w-full bg-gray-950 h-2.5 rounded border border-gray-800 overflow-hidden">
+                        <div id="hud-stamina-bar" class="bg-gradient-to-r from-emerald-700 to-emerald-400 h-full" style="width: 100%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Two Weapon Slots System UI -->
+            <div class="bg-black/90 border border-gray-900 p-4 rounded-xl backdrop-blur-md shadow-lg flex flex-col space-y-2 min-w-[280px]">
+                <div class="text-[10px] text-gray-500 uppercase font-black tracking-widest text-center border-b border-gray-900 pb-1.5">장착 슬롯 시스템 (1번 / 2번 전환)</div>
+                <div class="flex space-x-3">
+                    <!-- Slot 1 -->
+                    <div id="hud-slot-0" class="flex-1 p-2 bg-gray-950 border-2 border-red-900 rounded-lg flex flex-col items-center justify-center transition-all cursor-pointer">
+                        <span class="text-[9px] text-gray-500 font-bold block mb-1">SLOT 1 [Key: 1]</span>
+                        <i id="hud-slot-0-icon" class="fa-solid fa-baseball-bat-ball text-xl text-red-500"></i>
+                        <span id="hud-slot-0-name" class="text-[10px] font-bold text-gray-300 mt-1">야구 방망이</span>
+                    </div>
+                    <!-- Slot 2 -->
+                    <div id="hud-slot-1" class="flex-1 p-2 bg-gray-950 border border-gray-900 rounded-lg flex flex-col items-center justify-center transition-all cursor-pointer">
+                        <span class="text-[9px] text-gray-500 font-bold block mb-1">SLOT 2 [Key: 2]</span>
+                        <i id="hud-slot-1-icon" class="fa-solid fa-ban text-xl text-gray-700"></i>
+                        <span id="hud-slot-1-name" class="text-[10px] font-bold text-gray-600 mt-1">비어 있음</span>
+                    </div>
+                </div>
+                <!-- Dynamic Ammunition / Torch battery indicator -->
+                <div class="flex items-center justify-between border-t border-gray-900 pt-2 text-xs">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-gray-500 text-[10px] uppercase font-bold">탄알:</span>
+                        <span id="hud-ammo-val" class="text-white font-extrabold text-base">-- / --</span>
+                    </div>
+                    <div class="flex items-center space-x-1.5">
+                        <i class="fa-solid fa-lightbulb text-[10px] text-yellow-400"></i>
+                        <div class="w-16 bg-gray-950 h-1.5 rounded overflow-hidden border border-gray-900">
+                            <div id="hud-battery-bar" class="bg-yellow-400 h-full" style="width: 100%"></div>
+                        </div>
+                        <span id="hud-battery-text" class="text-[9px] font-bold text-yellow-400">100%</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="mobile-controls" class="hidden absolute inset-0 z-20 pointer-events-none select-none">
+        <!-- Movement Joystick -->
+        <div id="touch-move-zone" class="absolute bottom-8 left-8 w-36 h-36 rounded-full bg-white/5 border border-white/20 backdrop-blur-sm pointer-events-auto flex items-center justify-center">
+            <div id="touch-move-knob" class="w-12 h-12 rounded-full bg-red-600 border border-red-500 shadow-lg pointer-events-none transform transition-transform duration-75"></div>
+        </div>
+
+        <!-- Actions -->
+        <div class="absolute bottom-6 right-6 flex flex-col space-y-3 pointer-events-auto items-end">
+            <div class="flex space-x-3">
+                <button id="btn-mobile-interact" class="w-14 h-14 rounded-full bg-yellow-600/80 active:bg-yellow-500 active:scale-90 border border-yellow-500 text-white flex items-center justify-center text-xl shadow-lg">
+                    <i class="fa-solid fa-hand"></i>
+                </button>
+                <button id="btn-mobile-flashlight" class="w-14 h-14 rounded-full bg-indigo-950/80 active:bg-indigo-800 active:scale-90 border border-indigo-500 text-white flex items-center justify-center text-xl shadow-lg">
+                    <i class="fa-solid fa-lightbulb"></i>
+                </button>
+                <button id="btn-mobile-sprint" class="w-14 h-14 rounded-full bg-emerald-950/80 active:bg-emerald-800 active:scale-90 border border-emerald-500 text-white flex items-center justify-center text-xl shadow-lg">
+                    <i class="fa-solid fa-running"></i>
+                </button>
+            </div>
+            <div class="flex space-x-4 items-center">
+                <button id="btn-mobile-attack" class="w-20 h-20 rounded-full bg-red-800 active:bg-red-600 active:scale-95 border-2 border-red-500 text-white flex items-center justify-center text-3xl shadow-xl">
+                    <i class="fa-solid fa-burst"></i>
+                </button>
+            </div>
+            <div class="flex space-x-2">
+                <button id="btn-mobile-slot-swap" class="px-4 py-2 bg-black/85 border border-red-900 text-xs rounded-lg text-white font-bold flex items-center space-x-1.5 active:bg-red-950">
+                    <i class="fa-solid fa-arrows-rotate"></i>
+                    <span>무기 1/2 교체</span>
+                </button>
+                <button id="btn-mobile-bag" class="px-4 py-2 bg-black/85 border border-gray-800 text-xs rounded-lg text-white font-bold flex items-center space-x-1.5 active:bg-gray-900">
+                    <i class="fa-solid fa-suitcase"></i>
+                    <span>인벤토리</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pause Modal Menu -->
+    <div id="pause-modal" class="hidden absolute inset-0 z-40 bg-black/85 flex flex-col items-center justify-center p-6 text-center">
+        <h2 class="text-red-500 text-5xl font-bold horror-font tracking-wider mb-4">일시 정지</h2>
+        <p class="text-gray-400 text-sm max-w-sm mb-8">안전 구역에서 대기 중입니다. 준비가 완료되면 아래 버튼을 통해 복귀하십시오.</p>
+        <button id="btn-resume-game" class="px-8 py-3 bg-red-950 hover:bg-red-900 border border-red-800 text-white font-bold rounded-lg text-lg mb-4 transition-all w-64">
+            게임 계속하기
+        </button>
+        <button id="btn-pause-quit" class="px-8 py-2 bg-gray-900 hover:bg-gray-850 border border-gray-800 text-gray-400 hover:text-white font-bold rounded-lg text-sm transition-all w-64">
+            메인 타이틀로 복귀
+        </button>
+    </div>
+
+    <!-- Puzzle Modal System -->
+    <div id="puzzle-modal" class="hidden absolute inset-0 z-40 bg-black/90 flex items-center justify-center p-4">
+        <div class="bg-gray-950 border border-red-950 rounded-xl max-w-md w-full p-6 shadow-2xl relative">
+            <button id="btn-puzzle-close" class="absolute top-4 right-4 text-gray-500 hover:text-white text-xl"><i class="fa-solid fa-xmark"></i></button>
+            
+            <h3 class="text-red-500 font-extrabold text-2xl horror-font tracking-wide text-center mb-4"><i class="fa-solid fa-key mr-2"></i> 보안 장치 접근 승인</h3>
+            <p id="puzzle-desc" class="text-gray-400 text-xs text-center leading-relaxed mb-6">스위치 조합 또는 4자리 수 비밀 패스코드를 정확히 입력하십시오.</p>
+
+            <div id="puzzle-keypad-mode" class="flex flex-col items-center">
+                <div class="w-full bg-black border border-gray-900 py-3 text-center rounded-lg mb-6 tracking-widest text-3xl font-black text-emerald-500" id="puzzle-display">----</div>
+                <div class="grid grid-cols-3 gap-3 w-48 mb-4">
+                    <button class="puzzle-key bg-gray-900 hover:bg-gray-850 text-white p-3 rounded font-bold text-lg border border-gray-800">1</button>
+                    <button class="puzzle-key bg-gray-900 hover:bg-gray-850 text-white p-3 rounded font-bold text-lg border border-gray-800">2</button>
+                    <button class="puzzle-key bg-gray-900 hover:bg-gray-850 text-white p-3 rounded font-bold text-lg border border-gray-800">3</button>
+                    <button class="puzzle-key bg-gray-900 hover:bg-gray-850 text-white p-3 rounded font-bold text-lg border border-gray-800">4</button>
+                    <button class="puzzle-key bg-gray-900 hover:bg-gray-850 text-white p-3 rounded font-bold text-lg border border-gray-800">5</button>
+                    <button class="puzzle-key bg-gray-900 hover:bg-gray-850 text-white p-3 rounded font-bold text-lg border border-gray-800">6</button>
+                    <button class="puzzle-key bg-gray-900 hover:bg-gray-850 text-white p-3 rounded font-bold text-lg border border-gray-800">7</button>
+                    <button class="puzzle-key bg-gray-900 hover:bg-gray-850 text-white p-3 rounded font-bold text-lg border border-gray-800">8</button>
+                    <button class="puzzle-key bg-gray-900 hover:bg-gray-850 text-white p-3 rounded font-bold text-lg border border-gray-800">9</button>
+                    <button id="btn-puzzle-clear" class="bg-red-950/80 hover:bg-red-900 text-red-500 p-3 rounded font-bold text-sm border border-red-900">C</button>
+                    <button class="puzzle-key bg-gray-900 hover:bg-gray-850 text-white p-3 rounded font-bold text-lg border border-gray-800">0</button>
+                    <button id="btn-puzzle-enter" class="bg-emerald-950 hover:bg-emerald-900 text-emerald-500 p-3 rounded font-bold text-sm border border-emerald-900">제출</button>
+                </div>
+            </div>
+
+            <div id="puzzle-switches-mode" class="hidden flex flex-col items-center">
+                <div class="flex justify-around items-center w-full mb-6 py-4 bg-black rounded-lg border border-gray-900">
+                    <button class="switch-toggle flex flex-col items-center space-y-2 focus:outline-none" data-switch="1">
+                        <span class="w-4 h-4 rounded-full bg-gray-700 shadow switch-light"></span>
+                        <div class="w-6 h-12 bg-gray-800 rounded border border-gray-700 flex flex-col justify-between p-1">
+                            <div class="w-full h-4 bg-gray-600 rounded switch-knob"></div>
+                        </div>
+                        <span class="text-xs text-gray-500 font-bold">1</span>
+                    </button>
+                    <button class="switch-toggle flex flex-col items-center space-y-2 focus:outline-none" data-switch="2">
+                        <span class="w-4 h-4 rounded-full bg-gray-700 shadow switch-light"></span>
+                        <div class="w-6 h-12 bg-gray-800 rounded border border-gray-700 flex flex-col justify-between p-1">
+                            <div class="w-full h-4 bg-gray-600 rounded switch-knob"></div>
+                        </div>
+                        <span class="text-xs text-gray-500 font-bold">2</span>
+                    </button>
+                    <button class="switch-toggle flex flex-col items-center space-y-2 focus:outline-none" data-switch="3">
+                        <span class="w-4 h-4 rounded-full bg-gray-700 shadow switch-light"></span>
+                        <div class="w-6 h-12 bg-gray-800 rounded border border-gray-700 flex flex-col justify-between p-1">
+                            <div class="w-full h-4 bg-gray-600 rounded switch-knob"></div>
+                        </div>
+                        <span class="text-xs text-gray-500 font-bold">3</span>
+                    </button>
+                    <button class="switch-toggle flex flex-col items-center space-y-2 focus:outline-none" data-switch="4">
+                        <span class="w-4 h-4 rounded-full bg-gray-700 shadow switch-light"></span>
+                        <div class="w-6 h-12 bg-gray-800 rounded border border-gray-700 flex flex-col justify-between p-1">
+                            <div class="w-full h-4 bg-gray-600 rounded switch-knob"></div>
+                        </div>
+                        <span class="text-xs text-gray-500 font-bold">4</span>
+                    </button>
+                </div>
+                <div id="switch-hint-panel" class="w-full p-2.5 bg-yellow-950/20 border border-yellow-900/50 rounded-lg text-center text-yellow-500 text-[11px] mb-4">
+                    동력 회로 순서 힌트: <span id="switch-hint-text">1 → 3 → 2 → 4</span> (쉬움 전용 제공)
+                </div>
+                <button id="btn-switches-reset" class="px-4 py-2 bg-red-950 hover:bg-red-900 border border-red-800 text-red-100 rounded text-xs font-bold">
+                    발전기 퓨즈 가동 리셋
+                </button>
+            </div>
+
+            <div id="puzzle-feedback" class="hidden mt-4 p-2 text-center text-xs rounded-lg font-bold"></div>
+        </div>
+    </div>
+
+    <div id="inventory-modal" class="hidden absolute inset-0 z-30 bg-black/95 flex items-center justify-center p-6">
+        <div class="bg-gray-950 border border-gray-900 rounded-2xl max-w-4xl w-full p-6 flex flex-col md:flex-row gap-6">
+            <!-- Grid View of Backpack -->
+            <div class="flex-grow">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-white text-2xl font-black uppercase tracking-wider"><i class="fa-solid fa-suitcase text-red-500 mr-2"></i> 생존 전술 가방</h2>
+                    <span class="text-xs text-gray-500 font-bold uppercase">가방 점유: <span id="inv-slots-used">0</span> / 12 칸</span>
+                </div>
+                <div id="inventory-grid" class="grid grid-cols-4 gap-3 bg-black/50 border border-gray-900 p-4 rounded-xl h-[320px] overflow-y-auto">
+                    <!-- Javascript populates items here -->
+                </div>
+            </div>
+
+            <!-- Inspect Panel & Equip Choices -->
+            <div class="w-full md:w-80 flex flex-col justify-between">
+                <div>
+                    <div class="border-b border-gray-900 pb-3 mb-4">
+                        <h3 class="text-gray-300 font-bold text-sm tracking-widest uppercase">물품 세부 사항 및 분석</h3>
+                    </div>
+                    <div id="inv-inspect-box" class="bg-black/60 border border-gray-900 rounded-xl p-4 text-center flex flex-col items-center justify-center min-h-[180px] mb-4 text-gray-400">
+                        <i class="fa-solid fa-suitcase-medical text-4xl text-gray-800 mb-3"></i>
+                        <p class="text-xs">전술 가방 내부의 생존 물품을 클릭하여 장치에 할당하십시오.</p>
+                    </div>
+                    <div class="bg-black/40 border border-gray-900 rounded-lg p-3 space-y-2 text-xs">
+                        <div class="flex justify-between">
+                            <span class="text-gray-500">생존 지구 난이도</span>
+                            <span id="stat-difficulty" class="text-yellow-500 font-bold">NORMAL</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-500">생존자 제거수</span>
+                            <span id="stat-kills" class="text-red-500 font-bold">0</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-500">위치 저장 장치</span>
+                            <button id="btn-save-game" class="px-2 py-0.5 bg-yellow-600/30 hover:bg-yellow-600 text-yellow-500 hover:text-black rounded border border-yellow-600/50 text-[10px] font-bold transition-all"><i class="fa-solid fa-cloud"></i> 수동 동기화</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex flex-col space-y-2 mt-4 md:mt-0">
+                    <button id="btn-inv-close" class="w-full py-3 bg-red-900 hover:bg-red-800 text-white rounded-lg font-bold text-sm tracking-wide border border-red-700 shadow-md">
+                        백팩 닫기 (TAB)
+                    </button>
+                    <button id="btn-to-main-menu" class="w-full py-2 bg-gray-950 hover:bg-gray-900 border border-gray-900 text-gray-500 hover:text-white rounded-lg font-bold text-xs">
+                        타이틀 화면으로 이탈
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="game-over" class="hidden absolute inset-0 z-50 bg-black/95 flex flex-col items-center justify-center p-6 text-center">
+        <h1 class="text-red-700 text-7xl md:text-9xl font-bold horror-font tracking-widest mb-4">YOU DIED</h1>
+        <h2 class="text-gray-500 text-xl font-bold uppercase tracking-widest mb-8">병원 내부의 차가운 바닥에서 소멸해 갔습니다.</h2>
+        
+        <div class="max-w-md w-full bg-red-950/20 border border-red-950 p-6 rounded-xl mb-12 text-left text-xs space-y-2">
+            <h3 class="text-white font-semibold text-sm mb-2 text-center uppercase tracking-wide">수색 사후 진술서</h3>
+            <div class="flex justify-between">
+                <span class="text-gray-500">최종 확인 층:</span>
+                <span id="over-stat-floor" class="text-white font-bold">1층</span>
+            </div>
+            <div class="flex justify-between">
+                <span class="text-gray-500">경험 생존력:</span>
+                <span id="over-stat-level" class="text-white font-bold">Lv. 1</span>
+            </div>
+            <div class="flex justify-between">
+                <span class="text-gray-500">괴인 제압 횟수:</span>
+                <span id="over-stat-kills" class="text-red-400 font-bold">0</span>
+            </div>
+        </div>
+
+        <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4 w-full max-w-md">
+            <button id="btn-over-retry" class="flex-grow py-3 bg-red-800 hover:bg-red-700 text-white rounded-lg font-bold text-lg border border-red-600 shadow-lg transform hover:scale-105 transition-all">
+                마지막 저장점에서 부활
+            </button>
+            <button id="btn-over-quit" class="flex-grow py-3 bg-gray-900 hover:bg-gray-850 text-gray-400 hover:text-white rounded-lg font-bold text-lg border border-gray-800">
+                타이틀 메뉴 복귀
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Clear Screen -->
+    <div id="game-clear" class="hidden absolute inset-0 z-50 bg-black/98 flex flex-col items-center justify-center p-6 text-center animate-fade-in">
+        <i class="fa-solid fa-door-open text-emerald-500 text-6xl md:text-8xl mb-4"></i>
+        <h1 class="text-emerald-500 text-5xl md:text-7xl font-bold horror-font tracking-widest mb-2">ESCAPE COMPLETE</h1>
+        <h2 id="ending-title" class="text-white text-2xl md:text-3xl font-bold tracking-wide mb-6">진 엔딩: 가두어둔 악으로부터의 해방</h2>
+        <p id="ending-desc" class="text-gray-400 text-sm max-w-2xl mb-12 leading-relaxed">
+            비밀 실험 통제 장치의 도어를 열고, 서늘하게 차올랐던 폐기소로부터 해방을 맛보았습니다. 가녀린 빛 속으로 탈출해 낸 당신의 정신은 영원히 안전할 것입니다.
+        </p>
+
+        <button id="btn-clear-quit" class="px-8 py-3 bg-emerald-800 hover:bg-emerald-700 text-white font-bold rounded-lg text-lg border border-emerald-600 transition-all transform hover:scale-105">
+            메인으로 안전하게 퇴출
+        </button>
+    </div>
+
+    <!-- How to play Modal -->
+    <div id="how-to-play-modal" class="hidden absolute inset-0 z-40 bg-black/95 flex items-center justify-center p-6 text-gray-300">
+        <div class="bg-gray-950 border border-gray-900 rounded-2xl max-w-2xl w-full p-6 flex flex-col h-[80vh]">
+            <div class="flex justify-between items-center border-b border-gray-900 pb-3 mb-4">
+                <h2 class="text-white text-2xl font-black uppercase tracking-wider"><i class="fa-solid fa-circle-info text-sky-500 mr-2"></i> 병원 탈출 지침 규정</h2>
+                <button id="btn-how-close" class="text-gray-500 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="flex-grow overflow-y-auto space-y-4 text-xs text-gray-400 pr-2">
+                <div>
+                    <h3 class="text-white font-extrabold text-sm mb-2 text-sky-400"><i class="fa-solid fa-keyboard mr-1.5"></i> PC 제어 명세 (핵심 지침)</h3>
+                    <ul class="space-y-1.5 list-disc pl-5">
+                        <li><span class="text-white font-bold">마우스 클릭:</span> 마우스 감도 락(Pointer Lock) 활성화</li>
+                        <li><span class="text-white font-bold">마우스 이동:</span> 시점(3D 카메라) 360° 자유 회전</li>
+                        <li><span class="text-white font-bold">마우스 우클릭 (RMB):</span> 장착된 슬롯 무기로 공격 및 사격</li>
+                        <li><span class="text-white font-bold">W, A, S, D:</span> 캐릭터 전후좌우 이동</li>
+                        <li><span class="text-white font-bold">Space:</span> 수직 점프 기능 실행</li>
+                        <li><span class="text-white font-bold">Shift:</span> 전력 질주 대시 (이동속도 대폭 상승, 스태미나 소모)</li>
+                        <li><span class="text-white font-bold">E / R / F:</span> 상호작용 수색 / 탄포 재장전 / 손전등 전원 점멸</li>
+                        <li><span class="text-yellow-400 font-bold">숫자 1 / 2 단축키:</span> 무기 장착 슬롯 1 / 무기 장착 슬롯 2 간의 즉각 전환</li>
+                        <li><span class="text-white font-bold">Tab:</span> 전술 가방 인벤토리 활성 및 무기 슬롯 배정</li>
+                        <li><span class="text-white font-bold">ESC:</span> 포인터 락 해제 및 일시정지 메뉴 호출</li>
+                    </ul>
+                </div>
+            </div>
+
+            <button id="btn-how-confirm" class="w-full mt-4 py-3 bg-sky-800 hover:bg-sky-700 text-white rounded-lg font-bold text-sm">
+                지침 이해 완료
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const SaveManager = {
+            saveKey: 'silent_asylum_save_v2',
+            save(profile) {
+                try {
+                    localStorage.setItem(this.saveKey, JSON.stringify(profile));
+                } catch (e) {
+                    console.error("Failed to save game state:", e);
+                }
+            },
+            load() {
+                try {
+                    const data = localStorage.getItem(this.saveKey);
+                    return data ? JSON.parse(data) : null;
+                } catch (e) {
+                    console.error("Failed to load game state:", e);
+                    return null;
+                }
+            },
+            hasSave() {
+                try {
+                    return localStorage.getItem(this.saveKey) !== null;
+                } catch (e) {
+                    return false;
+                }
+            }
+        };
+
+        const HorrorAudio = {
+            ctx: null,
+            init() {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (AudioContextClass) {
+                    this.ctx = new AudioContextClass();
+                }
+            },
+            playClick() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(150, this.ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.08);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.08);
+            },
+            playGunshot() {
+                if (!this.ctx) return;
+                const bufferSize = this.ctx.sampleRate * 0.4;
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(1000, this.ctx.currentTime);
+                filter.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 0.3);
+
+                const gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(0.8, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.4);
+
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                noise.start();
+                noise.stop(this.ctx.currentTime + 0.4);
+            },
+            playMeleeHit() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.15);
+                gain.gain.setValueAtTime(0.5, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.15);
+            },
+            playGhostScreamer() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const osc2 = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.connect(gain);
+                osc2.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(200, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(1500, this.ctx.currentTime + 0.6);
+
+                osc2.type = 'square';
+                osc2.frequency.setValueAtTime(210, this.ctx.currentTime);
+                osc2.frequency.linearRampToValueAtTime(1520, this.ctx.currentTime + 0.6);
+
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.7);
+
+                osc.start();
+                osc2.start();
+                osc.stop(this.ctx.currentTime + 0.7);
+                osc2.stop(this.ctx.currentTime + 0.7);
+            },
+            playPlayerHurt() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(60, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(30, this.ctx.currentTime + 0.25);
+                gain.gain.setValueAtTime(0.7, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.25);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.25);
+            },
+            playWhisperSound() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(2000, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 0.8);
+                gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.8);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.8);
+            }
+        };
+
+        const WeaponsData = {
+            bat: { id: "bat", name: "야구 방망이", icon: "fa-baseball-bat-ball", damage: 32, range: 4.2, ammo: null, maxAmmo: null, type: "melee", isOwned: true },
+            pipe: { id: "pipe", name: "녹슨 쇠파이프", icon: "fa-grip-lines", damage: 45, range: 4.5, ammo: null, maxAmmo: null, type: "melee", isOwned: false },
+            axe: { id: "axe", name: "소방 도끼", icon: "fa-axe", damage: 62, range: 5.0, ammo: null, maxAmmo: null, type: "melee", isOwned: false },
+            pistol: { id: "pistol", name: "M1911 권총", icon: "fa-gun", damage: 38, range: 24.0, ammo: 7, maxAmmo: 7, reloadTime: 1.5, type: "ranged", isOwned: false },
+            shotgun: { id: "shotgun", name: "Remington 산탄총", icon: "fa-fire-extinguisher", damage: 110, range: 11.0, ammo: 4, maxAmmo: 4, reloadTime: 2.5, type: "ranged", isOwned: false }
+        };
+
+        const Game = {
+            difficulty: "normal",
+            floor: 1,
+            mouseSensitivity: 0.0018,
+
+            player: {
+                hp: 100,
+                maxHp: 100,
+                stamina: 100,
+                maxStamina: 100,
+                velocityY: 0,
+                isGrounded: true,
+                isSprinting: false,
+                isInvincible: false,
+                level: 1,
+                xp: 0,
+                xpNeeded: 100,
+                
+                weaponSlots: ["bat", null], 
+                activeSlot: 0, 
+                switchProgress: 0, 
+                isSwitching: false,
+                
+                isReloading: false,
+                reloadProgress: 0,
+                reloadDuration: 0,
+                
+                flashlightOn: true,
+                battery: 100,
+                kills: 0,
+                puzzlesSolved: 0,
+                lastHurtTime: 0
+            },
+            inventory: [],
+            isPaused: false,
+            isPlaying: false,
+            cameraBobbing: 0,
+            screenShake: 0,
+            activePuzzle: null,
+            scene: null,
+            camera: null,
+            renderer: null,
+            clock: null,
+            objects: [],
+            monsters: [],
+            flashlight: null,
+            weaponHandMesh: null,
+            movementInput: { w: false, a: false, s: false, d: false },
+            yawObject: new THREE.Object3D(),
+            pitchObject: new THREE.Object3D(),
+            isMobile: false,
+            joystick: { active: false, startX: 0, startY: 0, x: 0, y: 0 },
+            container: null,
+            
+            init() {
+                this.container = document.getElementById('canvas-container');
+                this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+                if (this.isMobile) {
+                    document.getElementById('mobile-controls').classList.remove('hidden');
+                    document.getElementById('pointer-lock-prompt').classList.add('hidden');
+                    this.mouseSensitivity = 0.005;
+                }
+                
+                this.clock = new THREE.Clock();
+                this.setupThree();
+                this.setupListeners();
+                this.setupMenuHandlers();
+                this.updateMenuButtons();
+            },
+
+            setupThree() {
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x0e0e13);
+                
+                this.scene.fog = new THREE.FogExp2(0x0e0e13, 0.04);
+
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+                
+                this.pitchObject.add(this.camera);
+                this.yawObject.add(this.pitchObject);
+                this.yawObject.position.set(0, 1.6, 0);
+                this.scene.add(this.yawObject);
+
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                this.container.appendChild(this.renderer.domElement);
+
+                const ambient = new THREE.AmbientLight(0x22222b);
+                this.scene.add(ambient);
+
+                this.flashlight = new THREE.SpotLight(0xfffce8, 5.5, 45, Math.PI / 4.2, 0.5, 1.1);
+                this.flashlight.position.set(0.18, -0.2, -0.1);
+                this.flashlight.castShadow = true;
+                this.flashlight.shadow.mapSize.width = 512;
+                this.flashlight.shadow.mapSize.height = 512;
+                this.camera.add(this.flashlight);
+
+                const flashlightTarget = new THREE.Object3D();
+                flashlightTarget.position.set(0, 0, -10);
+                this.camera.add(flashlightTarget);
+                this.flashlight.target = flashlightTarget;
+
+                this.rebuildFPSWeaponMesh();
+
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+            },
+
+            generateWallTexture() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 256;
+                canvas.height = 256;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#2d3135';
+                ctx.fillRect(0, 0, 256, 256);
+                
+                ctx.fillStyle = '#1c1e20';
+                for (let i = 0; i < 300; i++) {
+                    const x = Math.random() * 256;
+                    const y = Math.random() * 256;
+                    const size = Math.random() * 2 + 1;
+                    ctx.fillRect(x, y, size, size);
+                }
+
+                ctx.fillStyle = 'rgba(28, 40, 20, 0.4)';
+                for (let i = 0; i < 6; i++) {
+                    ctx.beginPath();
+                    ctx.arc(Math.random() * 256, Math.random() * 256, Math.random() * 35 + 15, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                ctx.fillStyle = 'rgba(120, 10, 10, 0.5)';
+                for (let i = 0; i < 4; i++) {
+                    ctx.beginPath();
+                    ctx.arc(Math.random() * 256, Math.random() * 256, Math.random() * 8 + 4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                return new THREE.CanvasTexture(canvas);
+            },
+
+            generateBloodDecal() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 128;
+                canvas.height = 128;
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, 128, 128);
+                ctx.fillStyle = 'rgba(140, 5, 5, 0.9)';
+                ctx.beginPath();
+                ctx.arc(64, 64, 25, 0, Math.PI * 2);
+                ctx.fill();
+                
+                for (let i = 0; i < 10; i++) {
+                    ctx.beginPath();
+                    const r = Math.random() * 35 + 5;
+                    const a = Math.random() * Math.PI * 2;
+                    ctx.arc(64 + Math.cos(a)*r, 64 + Math.sin(a)*r, Math.random()*7+1.5, 0, Math.PI*2);
+                    ctx.fill();
+                }
+                return new THREE.CanvasTexture(canvas);
+            },
+
+            rebuildFPSWeaponMesh() {
+                if (this.weaponHandMesh) {
+                    this.camera.remove(this.weaponHandMesh);
+                }
+
+                const handGroup = new THREE.Group();
+                const activeWeaponId = this.player.weaponSlots[this.player.activeSlot];
+
+                if (!activeWeaponId) {
+                    this.weaponHandMesh = handGroup;
+                    this.camera.add(this.weaponHandMesh);
+                    return;
+                }
+
+                const activeWeaponData = WeaponsData[activeWeaponId];
+                const skinMat = new THREE.MeshStandardMaterial({ color: 0x909597, roughness: 0.85 });
+                const weaponMat = new THREE.MeshStandardMaterial({ roughness: 0.5 });
+                
+                const armGeom = new THREE.CylinderGeometry(0.038, 0.048, 0.35, 8);
+                const armMesh = new THREE.Mesh(armGeom, skinMat);
+                armMesh.rotation.x = Math.PI / 2.3;
+                armMesh.position.set(0.2, -0.25, -0.35);
+                handGroup.add(armMesh);
+
+                if (activeWeaponData.id === 'bat') {
+                    weaponMat.color.setHex(0xa17751);
+                    const batGeom = new THREE.CylinderGeometry(0.024, 0.014, 0.5, 12);
+                    const batMesh = new THREE.Mesh(batGeom, weaponMat);
+                    batMesh.position.set(0.24, -0.12, -0.48);
+                    batMesh.rotation.set(Math.PI / 3, 0, -Math.PI / 6);
+                    handGroup.add(batMesh);
+                } 
+                else if (activeWeaponData.id === 'pipe') {
+                    weaponMat.color.setHex(0x70797e);
+                    weaponMat.metalness = 0.85;
+                    const pipeGeom = new THREE.CylinderGeometry(0.016, 0.016, 0.52, 8);
+                    const pipeMesh = new THREE.Mesh(pipeGeom, weaponMat);
+                    pipeMesh.position.set(0.24, -0.12, -0.48);
+                    pipeMesh.rotation.set(Math.PI / 3, 0, -Math.PI / 6);
+                    handGroup.add(pipeMesh);
+                } 
+                else if (activeWeaponData.id === 'axe') {
+                    weaponMat.color.setHex(0x4a3430);
+                    const handleGeom = new THREE.CylinderGeometry(0.014, 0.014, 0.55, 8);
+                    const handleMesh = new THREE.Mesh(handleGeom, weaponMat);
+                    handleMesh.position.set(0.24, -0.12, -0.48);
+                    handleMesh.rotation.set(Math.PI / 3, 0, -Math.PI / 6);
+                    handGroup.add(handleMesh);
+
+                    const headMat = new THREE.MeshStandardMaterial({ color: 0xaa1b1b, metalness: 0.65 });
+                    const headGeom = new THREE.BoxGeometry(0.12, 0.04, 0.04);
+                    const headMesh = new THREE.Mesh(headGeom, headMat);
+                    headMesh.position.set(0.24, 0.08, -0.58);
+                    headMesh.rotation.set(Math.PI / 3, 0, -Math.PI / 6);
+                    handGroup.add(headMesh);
+                } 
+                else if (activeWeaponData.id === 'pistol') {
+                    weaponMat.color.setHex(0x222426);
+                    weaponMat.metalness = 0.75;
+                    const barrelGeom = new THREE.BoxGeometry(0.038, 0.048, 0.22);
+                    const barrel = new THREE.Mesh(barrelGeom, weaponMat);
+                    barrel.position.set(0.18, -0.18, -0.45);
+                    
+                    const handleGeom = new THREE.BoxGeometry(0.032, 0.08, 0.038);
+                    const handle = new THREE.Mesh(handleGeom, weaponMat);
+                    handle.position.set(0.18, -0.24, -0.42);
+                    handle.rotation.set(Math.PI / 6, 0, 0);
+                    
+                    handGroup.add(barrel);
+                    handGroup.add(handle);
+                } 
+                else if (activeWeaponData.id === 'shotgun') {
+                    weaponMat.color.setHex(0x382015);
+                    const stockGeom = new THREE.BoxGeometry(0.042, 0.055, 0.25);
+                    const stock = new THREE.Mesh(stockGeom, weaponMat);
+                    stock.position.set(0.18, -0.21, -0.36);
+                    handGroup.add(stock);
+
+                    const barrelMat = new THREE.MeshStandardMaterial({ color: 0x2d2f31, metalness: 0.9, roughness: 0.25 });
+                    const bGeom = new THREE.CylinderGeometry(0.015, 0.015, 0.42, 8);
+                    const barrelLeft = new THREE.Mesh(bGeom, barrelMat);
+                    barrelLeft.rotation.x = Math.PI / 2;
+                    barrelLeft.position.set(0.165, -0.17, -0.48);
+                    
+                    const barrelRight = barrelLeft.clone();
+                    barrelRight.position.x = 0.195;
+                    
+                    handGroup.add(barrelLeft);
+                    handGroup.add(barrelRight);
+                }
+
+                this.weaponHandMesh = handGroup;
+                this.camera.add(this.weaponHandMesh);
+            },
+
+            setupListeners() {
+                const lockPrompt = document.getElementById('pointer-lock-prompt');
+
+                const requestLock = () => {
+                    if (this.isPlaying && !this.isPaused && !this.activePuzzle && !this.isMobile) {
+                        this.container.requestPointerLock();
+                    }
+                };
+
+                this.container.addEventListener('click', requestLock);
+                lockPrompt.addEventListener('click', requestLock);
+
+                document.addEventListener('pointerlockchange', () => {
+                    if (document.pointerLockElement === this.container) {
+                        lockPrompt.classList.add('hidden');
+                    } else {
+                        if (this.isPlaying && !this.activePuzzle && !this.isPaused) {
+                            this.togglePause(true);
+                        }
+                        if (this.isPlaying && !this.isPaused) {
+                            lockPrompt.classList.remove('hidden');
+                        }
+                    }
+                });
+
+                window.addEventListener('mousemove', (e) => {
+                    if (!this.isPlaying || this.isPaused || this.activePuzzle) return;
+
+                    if (document.pointerLockElement === this.container) {
+                        const deltaX = e.movementX || 0;
+                        const deltaY = e.movementY || 0;
+
+                        this.yawObject.rotation.y -= deltaX * this.mouseSensitivity;
+                        this.pitchObject.rotation.x -= deltaY * this.mouseSensitivity;
+
+                        const maxPitch = 85 * Math.PI / 180;
+                        this.pitchObject.rotation.x = Math.max(-maxPitch, Math.min(maxPitch, this.pitchObject.rotation.x));
+                        
+                        if (this.weaponHandMesh) {
+                            this.weaponHandMesh.position.x = 0.2 - (deltaX * 0.0003);
+                            this.weaponHandMesh.position.y = -0.25 - (deltaY * 0.0003);
+                        }
+                    }
+                });
+
+                window.addEventListener('mousedown', (e) => {
+                    if (!this.isPlaying || this.isPaused || this.activePuzzle) return;
+                    
+                    if (e.button === 2) { // Right click -> Attack
+                        e.preventDefault();
+                        this.handleAttack();
+                    }
+                });
+
+                window.addEventListener('keydown', (e) => {
+                    if (!this.isPlaying) return;
+
+                    const key = e.key.toLowerCase();
+
+                    if (e.key === 'Escape') {
+                        e.preventDefault();
+                        this.togglePause();
+                        return;
+                    }
+
+                    if (this.isPaused) return;
+
+                    if (key === 'w') this.movementInput.w = true;
+                    if (key === 'a') this.movementInput.a = true;
+                    if (key === 's') this.movementInput.s = true;
+                    if (key === 'd') this.movementInput.d = true;
+                    
+                    if (e.key === ' ') {
+                        if (this.player.isGrounded) {
+                            this.player.velocityY = 5.2;
+                            this.player.isGrounded = false;
+                        }
+                    }
+
+                    if (key === 'shift') {
+                        if (this.player.stamina > 10) {
+                            this.player.isSprinting = true;
+                        }
+                    }
+
+                    if (key === 'e') this.handleInteraction();
+                    if (key === 'r') this.handleReload();
+                    if (key === 'f') this.toggleFlashlight();
+
+                    if (e.key === '1') this.swapActiveWeaponSlot(0);
+                    if (e.key === '2') this.swapActiveWeaponSlot(1);
+
+                    if (e.key === 'Tab') {
+                        e.preventDefault();
+                        this.toggleInventory();
+                    }
+                });
+
+                window.addEventListener('keyup', (e) => {
+                    const key = e.key.toLowerCase();
+                    if (key === 'w') this.movementInput.w = false;
+                    if (key === 'a') this.movementInput.a = false;
+                    if (key === 's') this.movementInput.s = false;
+                    if (key === 'd') this.movementInput.d = false;
+                    
+                    if (key === 'shift') {
+                        this.player.isSprinting = false;
+                    }
+                });
+
+                window.addEventListener('contextmenu', e => e.preventDefault());
+
+                this.setupMobileControls();
+            },
+
+            setupMobileControls() {
+                const moveZone = document.getElementById('touch-move-zone');
+                const knob = document.getElementById('touch-move-knob');
+                
+                const handleTouchStart = (e) => {
+                    const touch = e.targetTouches[0];
+                    this.joystick.active = true;
+                    const rect = moveZone.getBoundingClientRect();
+                    this.joystick.startX = touch.clientX - rect.left - rect.width / 2;
+                    this.joystick.startY = touch.clientY - rect.top - rect.height / 2;
+                };
+
+                const handleTouchMove = (e) => {
+                    if (!this.joystick.active) return;
+                    e.preventDefault();
+                    const touch = e.targetTouches[0];
+                    const rect = moveZone.getBoundingClientRect();
+                    
+                    let deltaX = touch.clientX - rect.left - rect.width / 2 - this.joystick.startX;
+                    let deltaY = touch.clientY - rect.top - rect.height / 2 - this.joystick.startY;
+                    
+                    const dist = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                    const maxDist = 50;
+                    if (dist > maxDist) {
+                        deltaX = (deltaX / dist) * maxDist;
+                        deltaY = (deltaY / dist) * maxDist;
+                    }
+
+                    knob.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+                    
+                    this.joystick.x = deltaX / maxDist;
+                    this.joystick.y = deltaY / maxDist;
+                };
+
+                const handleTouchEnd = () => {
+                    this.joystick.active = false;
+                    this.joystick.x = 0;
+                    this.joystick.y = 0;
+                    knob.style.transform = `translate(0px, 0px)`;
+                };
+
+                moveZone.addEventListener('touchstart', handleTouchStart, { passive: false });
+                moveZone.addEventListener('touchmove', handleTouchMove, { passive: false });
+                moveZone.addEventListener('touchend', handleTouchEnd);
+
+                let touchLookID = null;
+                let lastLookX = 0, lastLookY = 0;
+
+                window.addEventListener('touchstart', (e) => {
+                    if (!this.isPlaying || this.isPaused) return;
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        const t = e.changedTouches[i];
+                        if (t.clientX > window.innerWidth / 2) {
+                            touchLookID = t.identifier;
+                            lastLookX = t.clientX;
+                            lastLookY = t.clientY;
+                        }
+                    }
+                });
+
+                window.addEventListener('touchmove', (e) => {
+                    if (!this.isPlaying || this.isPaused || touchLookID === null) return;
+                    for (let i = 0; i < e.touches.length; i++) {
+                        const t = e.touches[i];
+                        if (t.identifier === touchLookID) {
+                            const dx = t.clientX - lastLookX;
+                            const dy = t.clientY - lastLookY;
+                            
+                            this.yawObject.rotation.y -= dx * this.mouseSensitivity;
+                            this.pitchObject.rotation.x -= dy * this.mouseSensitivity;
+                            
+                            const maxPitch = 85 * Math.PI / 180;
+                            this.pitchObject.rotation.x = Math.max(-maxPitch, Math.min(maxPitch, this.pitchObject.rotation.x));
+
+                            lastLookX = t.clientX;
+                            lastLookY = t.clientY;
+                        }
+                    }
+                });
+
+                window.addEventListener('touchend', (e) => {
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        if (e.changedTouches[i].identifier === touchLookID) {
+                            touchLookID = null;
+                        }
+                    }
+                });
+
+                document.getElementById('btn-mobile-attack').addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    this.handleAttack();
+                });
+                document.getElementById('btn-mobile-interact').addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    this.handleInteraction();
+                });
+                document.getElementById('btn-mobile-flashlight').addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    this.toggleFlashlight();
+                });
+                document.getElementById('btn-mobile-sprint').addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    if (this.player.stamina > 10) {
+                        this.player.isSprinting = !this.player.isSprinting;
+                    }
+                });
+                document.getElementById('btn-mobile-slot-swap').addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    const next = (this.player.activeSlot === 0) ? 1 : 0;
+                    this.swapActiveWeaponSlot(next);
+                });
+                document.getElementById('btn-mobile-bag').addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    this.toggleInventory();
+                });
+            },
+
+            setupMenuHandlers() {
+                document.getElementById('btn-activate-audio').onclick = () => {
+                    HorrorAudio.init();
+                    document.getElementById('audio-activation-overlay').style.display = 'none';
+                    document.getElementById('main-menu').classList.remove('hidden');
+                };
+
+                document.getElementById('btn-new-game').onclick = () => {
+                    document.getElementById('main-menu').classList.add('hidden');
+                    document.getElementById('difficulty-select').classList.remove('hidden');
+                    HorrorAudio.playClick();
+                };
+
+                document.getElementById('btn-continue-game').onclick = () => {
+                    const saveProfile = SaveManager.load();
+                    if (saveProfile) {
+                        this.loadGameState(saveProfile);
+                        document.getElementById('main-menu').classList.add('hidden');
+                        this.startGameLoop();
+                    }
+                    HorrorAudio.playClick();
+                };
+
+                document.getElementById('btn-how-to-play').onclick = () => {
+                    document.getElementById('how-to-play-modal').classList.remove('hidden');
+                    HorrorAudio.playClick();
+                };
+                
+                document.getElementById('btn-how-close').onclick = () => {
+                    document.getElementById('how-to-play-modal').classList.add('hidden');
+                };
+                document.getElementById('btn-how-confirm').onclick = () => {
+                    document.getElementById('how-to-play-modal').classList.add('hidden');
+                };
+
+                // Restoring dynamic difficulty binds with instant Pointer Lock transition
+                const difficulties = ['easy', 'normal', 'hard', 'master'];
+                difficulties.forEach(diff => {
+                    document.getElementById(`diff-${diff}`).onclick = (e) => {
+                        e.stopPropagation();
+                        this.difficulty = diff;
+                        this.configureDifficultySpecs();
+                        document.getElementById('difficulty-select').classList.add('hidden');
+                        this.startNewGameSetup();
+
+                        // Immediate Pointer Lock request upon selecting any difficulty
+                        if (!this.isMobile) {
+                            this.container.requestPointerLock();
+                        }
+                    };
+                });
+
+                document.getElementById('btn-diff-back').onclick = () => {
+                    document.getElementById('difficulty-select').classList.add('hidden');
+                    document.getElementById('main-menu').classList.remove('hidden');
+                };
+
+                document.getElementById('btn-to-main-menu').onclick = () => {
+                    this.isPaused = false;
+                    this.isPlaying = false;
+                    document.getElementById('inventory-modal').classList.add('hidden');
+                    document.getElementById('game-hud').classList.add('hidden');
+                    document.getElementById('main-menu').classList.remove('hidden');
+                    if (document.pointerLockElement) {
+                        document.exitPointerLock();
+                    }
+                };
+
+                document.getElementById('btn-save-game').onclick = () => {
+                    this.saveGameState();
+                    const btn = document.getElementById('btn-save-game');
+                    btn.innerHTML = '<i class="fa-solid fa-check text-emerald-500"></i> 동기화 완료!';
+                    setTimeout(() => {
+                        btn.innerHTML = '<i class="fa-solid fa-cloud"></i> 수동 동기화';
+                    }, 2000);
+                };
+
+                document.getElementById('btn-over-retry').onclick = () => {
+                    const saveProfile = SaveManager.load();
+                    if (saveProfile) {
+                        this.loadGameState(saveProfile);
+                        document.getElementById('game-over').classList.add('hidden');
+                        this.startGameLoop();
+                    } else {
+                        this.startNewGameSetup();
+                        document.getElementById('game-over').classList.add('hidden');
+                    }
+                };
+
+                document.getElementById('btn-over-quit').onclick = () => {
+                    document.getElementById('game-over').classList.add('hidden');
+                    document.getElementById('main-menu').classList.remove('hidden');
+                };
+
+                document.getElementById('btn-clear-quit').onclick = () => {
+                    document.getElementById('game-clear').classList.add('hidden');
+                    document.getElementById('main-menu').classList.remove('hidden');
+                };
+
+                document.getElementById('btn-inv-close').onclick = () => {
+                    this.toggleInventory();
+                };
+
+                document.getElementById('btn-resume-game').onclick = () => {
+                    this.togglePause(false);
+                };
+                document.getElementById('btn-pause-quit').onclick = () => {
+                    this.isPaused = false;
+                    this.isPlaying = false;
+                    document.getElementById('pause-modal').classList.add('hidden');
+                    document.getElementById('game-hud').classList.add('hidden');
+                    document.getElementById('main-menu').classList.remove('hidden');
+                };
+            },
+
+            updateMenuButtons() {
+                const btn = document.getElementById('btn-continue-game');
+                if (SaveManager && SaveManager.hasSave()) {
+                    btn.disabled = false;
+                    document.getElementById('save-status-info').innerHTML = '<i class="fa-solid fa-cloud-arrow-up text-emerald-500 mr-1"></i> 저장 파일 로드 가능';
+                } else {
+                    btn.disabled = true;
+                    document.getElementById('save-status-info').innerHTML = '<i class="fa-solid fa-cloud-arrow-up text-gray-700 mr-1"></i> 저장 파일 없음';
+                }
+            },
+
+            configureDifficultySpecs() {
+                const p = this.player;
+                if (this.difficulty === "easy") {
+                    p.maxHp = 150;
+                    p.hp = 150;
+                    p.level = 1;
+                    p.xp = 0;
+                    p.stamina = 120;
+                    p.maxStamina = 120;
+                    WeaponsData.bat.damage = 40;
+                    WeaponsData.pipe.damage = 55;
+                    WeaponsData.axe.damage = 80;
+                    WeaponsData.pistol.damage = 50;
+                    WeaponsData.shotgun.damage = 140;
+                } else {
+                    p.maxHp = 100;
+                    p.hp = 100;
+                    p.stamina = 100;
+                    p.maxStamina = 100;
+                    if (this.difficulty === "hard") {
+                        p.maxHp = 80;
+                        p.hp = 80;
+                    } else if (this.difficulty === "master") {
+                        p.maxHp = 60;
+                        p.hp = 60;
+                    }
+                }
+                
+                this.inventory = [
+                    { id: "medkit", name: "휴대용 구급 팩", desc: "체력을 빠르게 50만큼 충전 복원시킵니다.", icon: "fa-suitcase-medical", qty: 2, type: "usable" },
+                    { id: "battery_pack", name: "보조 배터리 셀", desc: "손전등 잔량을 즉시 100% 보충시킵니다.", icon: "fa-car-battery", qty: 1, type: "usable" }
+                ];
+            },
+
+            startNewGameSetup() {
+                this.floor = 1;
+                this.player.kills = 0;
+                this.player.puzzlesSolved = 0;
+                
+                this.player.weaponSlots = ["bat", null];
+                this.player.activeSlot = 0;
+                
+                WeaponsData.bat.isOwned = true;
+                WeaponsData.pipe.isOwned = false;
+                WeaponsData.axe.isOwned = false;
+                WeaponsData.pistol.isOwned = false;
+                WeaponsData.shotgun.isOwned = false;
+                
+                this.yawObject.position.set(0, 1.6, 0);
+                this.yawObject.rotation.set(0, 0, 0);
+                this.pitchObject.rotation.set(0, 0, 0);
+
+                this.buildFloorMap();
+                this.startGameLoop();
+            },
+
+            saveGameState() {
+                const profile = {
+                    difficulty: this.difficulty,
+                    floor: this.floor,
+                    player: this.player,
+                    inventory: this.inventory,
+                    weaponsOwned: {
+                        pipe: WeaponsData.pipe.isOwned,
+                        axe: WeaponsData.axe.isOwned,
+                        pistol: WeaponsData.pistol.isOwned,
+                        shotgun: WeaponsData.shotgun.isOwned
+                    }
+                };
+                SaveManager.save(profile);
+                this.updateMenuButtons();
+            },
+
+            loadGameState(p) {
+                this.difficulty = p.difficulty;
+                this.floor = p.floor;
+                this.player = p.player;
+                this.inventory = p.inventory;
+                
+                WeaponsData.pipe.isOwned = p.weaponsOwned.pipe;
+                WeaponsData.axe.isOwned = p.weaponsOwned.axe;
+                WeaponsData.pistol.isOwned = p.weaponsOwned.pistol;
+                WeaponsData.shotgun.isOwned = p.weaponsOwned.shotgun;
+
+                this.rebuildFPSWeaponMesh();
+                this.buildFloorMap();
+            },
+
+            startGameLoop() {
+                this.isPlaying = true;
+                this.isPaused = false;
+                
+                document.getElementById('game-hud').classList.remove('hidden');
+                
+                if (!this.isMobile) {
+                    document.getElementById('pointer-lock-prompt').classList.remove('hidden');
+                }
+                
+                this.updateHUD();
+                
+                const gameAnimate = () => {
+                    if (!this.isPlaying) return;
+                    requestAnimationFrame(gameAnimate);
+                    if (!this.isPaused) {
+                        this.updateGameLogic();
+                    }
+                    this.renderer.render(this.scene, this.camera);
+                };
+                gameAnimate();
+            },
+
+            buildFloorMap() {
+                this.objects.forEach(obj => this.scene.remove(obj));
+                this.monsters.forEach(m => this.scene.remove(m.mesh));
+                this.objects = [];
+                this.monsters = [];
+
+                const wallMat = new THREE.MeshStandardMaterial({ 
+                    map: this.generateWallTexture(), 
+                    roughness: 0.9 
+                });
+                
+                const floorMat = new THREE.MeshStandardMaterial({ 
+                    color: 0x111114, 
+                    roughness: 0.65 
+                });
+
+                const size = 60;
+                const floorGeom = new THREE.PlaneGeometry(size, size);
+                const floorMesh = new THREE.Mesh(floorGeom, floorMat);
+                floorMesh.rotation.x = -Math.PI / 2;
+                floorMesh.position.set(0, 0, 0);
+                floorMesh.receiveShadow = true;
+                this.scene.add(floorMesh);
+                this.objects.push(floorMesh);
+
+                const ceilMesh = new THREE.Mesh(floorGeom, new THREE.MeshStandardMaterial({ color: 0x0c0c0e, roughness: 1.0 }));
+                ceilMesh.rotation.x = Math.PI / 2;
+                ceilMesh.position.set(0, 3.2, 0);
+                this.scene.add(ceilMesh);
+                this.objects.push(ceilMesh);
+
+                this.spawnWallSegment(-size/2, 0, 1, size, 3.2, wallMat);
+                this.spawnWallSegment(size/2, 0, 1, size, 3.2, wallMat);
+                this.spawnWallSegment(0, -size/2, size, 1, 3.2, wallMat);
+                this.spawnWallSegment(0, size/2, size, 1, 3.2, wallMat);
+                
+                if (this.floor === 1) {
+                    this.spawnWallSegment(0, -5, 45, 1, 3.2, wallMat);
+                    this.spawnWallSegment(-10, 8, 1, 20, 3.2, wallMat);
+                    this.spawnWallSegment(10, 8, 1, 20, 3.2, wallMat);
+
+                    this.spawnInteractDoor(5, -5, "door_pharmacy", "보안 약국 출입문");
+                    this.spawnInteractDoor(-10, 3, "door_ward_1", "의료 임시 대피소");
+
+                    this.spawnInteractLocker(-6, -15, "cabinet_pharmacy", "밀폐 보안 금고 수색");
+                    this.spawnEscapeElevator(0, -22, "elevator_1", "2층 병동 출구 리프트");
+
+                    this.spawnGroundItem(-2, -12, -0.4, "key_f1", "1층 승강장 만능키", "fa-key", "quest");
+                    this.spawnGroundItem(12, 10, -0.4, "ammo_pistol", "피스톨 전술 예비 탄알", "fa-box-open", "ammo", 14);
+                    this.spawnGroundItem(-12, 12, -0.4, "weapon_pipe", "쇠파이프 무기 발견", "fa-grip-lines", "weapon", "pipe");
+
+                    this.spawnZombieEnemy(-14, 11, "좀비 부원", 80, 1.25);
+                    this.spawnZombieEnemy(14, -11, "부유 악귀", 55, 1.7);
+
+                    document.getElementById("hud-objective-text").textContent = "보안 금고(1024) 주변에서 '1층 승강장 만능키'와 전술 장비를 획득해 리프트에 도달하십시오.";
+                } 
+                else if (this.floor === 2) {
+                    this.spawnWallSegment(-8, 0, 20, 1, 3.2, wallMat);
+                    this.spawnWallSegment(8, 0, 20, 1, 3.2, wallMat);
+                    this.spawnWallSegment(0, 10, 30, 1, 3.2, wallMat);
+
+                    this.spawnInteractDoor(-8, -4, "door_surgery_a", "소독 병실");
+                    this.spawnInteractDoor(8, 4, "door_surgery_b", "중환자 격리실");
+
+                    this.spawnInteractLocker(12, -12, "locker_hide_1", "캐비닛 (은신처)");
+                    this.spawnInteractLocker(-15, 6, "cabinet_generator", "예비 전력 발전기 복구장치");
+
+                    this.spawnEscapeElevator(0, 25, "elevator_2", "지하 극비구역 엘리베이터");
+
+                    this.spawnGroundItem(-12, -12, -0.4, "fuse_generator", "예비 동력 발전기 퓨즈", "fa-microchip", "quest");
+                    this.spawnGroundItem(14, 15, -0.4, "weapon_pistol", "M1911 전용 권총", "fa-gun", "weapon", "pistol");
+                    this.spawnGroundItem(-14, 18, -0.4, "ammo_pistol", "9mm 피스톨 탄통", "fa-box-open", "ammo", 21);
+
+                    this.spawnZombieEnemy(-12, -6, "격리실 오염 좀비", 120, 2.1);
+                    this.spawnZombieEnemy(12, 12, "실험 실패 잔존물", 90, 1.6);
+
+                    document.getElementById("hud-objective-text").textContent = "지하용 통제 엘리베이터 재가동을 위해 '발전기 퓨즈'를 획득하고 순서 조합 퍼즐을 해결하십시오.";
+                } 
+                else if (this.floor === 3) {
+                    this.spawnWallSegment(-12, 0, 40, 1, 3.2, wallMat);
+                    this.spawnWallSegment(12, 0, 40, 1, 3.2, wallMat);
+                    this.spawnWallSegment(0, -15, 24, 1, 3.2, wallMat);
+
+                    this.spawnInteractDoor(0, 25, "door_escape_final", "병원 비상 외곽 지상 탈출구");
+
+                    this.spawnInteractLocker(-6, 12, "locker_b_1", "철제 보관함");
+                    this.spawnInteractLocker(0, -22, "boss_lockbox_trigger", "비상 경보 개방 단말 장치");
+
+                    this.spawnGroundItem(14, -8, -0.4, "weapon_shotgun", "Remington 전술 산탄총", "fa-fire-extinguisher", "weapon", "shotgun");
+                    this.spawnGroundItem(-15, 15, -0.4, "ammo_shotgun", "12게이지 샷건 탄통", "fa-grip-lines-vertical", "ammo", 6);
+
+                    this.spawnZombieEnemy(-14, 0, "연구 실험실 좀비", 130, 1.45);
+                    this.spawnBossEnemy(0, -26);
+
+                    document.getElementById("hud-objective-text").textContent = "비상 단말 장치를 작동시켜 탈출 보안 도어를 가동하십시오. 작동 즉시 보스 괴수가 부활합니다!";
+                }
+
+                this.spawnFlickeringLights();
+            },
+
+            spawnWallSegment(x, z, width, depth, height, material) {
+                const wallGeom = new THREE.BoxGeometry(width, height, depth);
+                const wallMesh = new THREE.Mesh(wallGeom, material);
+                wallMesh.position.set(x, height / 2, z);
+                wallMesh.castShadow = true;
+                wallMesh.receiveShadow = true;
+                this.scene.add(wallMesh);
+                this.objects.push(wallMesh);
+            },
+
+            spawnFlickeringLights() {
+                const spots = [
+                    { x: -10, z: -10, color: 0x88ccff },
+                    { x: 10, z: 10, color: 0xffe2cc },
+                    { x: -15, z: 15, color: 0xff4444 },
+                    { x: 15, z: -15, color: 0x88ccff }
+                ];
+
+                spots.forEach(pt => {
+                    const light = new THREE.PointLight(pt.color, 2.2, 20);
+                    light.position.set(pt.x, 3.0, pt.z);
+                    light.castShadow = true;
+                    light.userData = { flickerSpeed: 0.07, baseIntensity: 2.2 };
+                    this.scene.add(light);
+                    this.objects.push(light);
+                });
+            },
+
+            spawnInteractDoor(x, z, id, name) {
+                const frameGeom = new THREE.BoxGeometry(2.4, 3.0, 0.3);
+                const frameMat = new THREE.MeshStandardMaterial({ color: 0x362f2a, roughness: 0.9 });
+                const frameMesh = new THREE.Mesh(frameGeom, frameMat);
+                frameMesh.position.set(x, 1.5, z);
+                
+                const doorGeom = new THREE.BoxGeometry(2.1, 2.8, 0.1);
+                const doorMat = new THREE.MeshStandardMaterial({ color: 0x7a1818, roughness: 0.75 });
+                const doorMesh = new THREE.Mesh(doorGeom, doorMat);
+                doorMesh.position.set(0, 0, 0);
+                frameMesh.add(doorMesh);
+
+                frameMesh.userData = { 
+                    type: "door", 
+                    id: id, 
+                    name: name,
+                    isOpen: false,
+                    targetYRotation: 0,
+                    currentYRotation: 0
+                };
+
+                this.scene.add(frameMesh);
+                this.objects.push(frameMesh);
+            },
+
+            spawnInteractLocker(x, z, id, name) {
+                const geom = new THREE.BoxGeometry(1.2, 2.4, 1.0);
+                const mat = new THREE.MeshStandardMaterial({ color: 0x273549, metalness: 0.6, roughness: 0.45 });
+                const mesh = new THREE.Mesh(geom, mat);
+                mesh.position.set(x, 1.2, z);
+                mesh.castShadow = true;
+                
+                const lineGeom = new THREE.BoxGeometry(0.05, 1.8, 1.02);
+                const lineMat = new THREE.MeshBasicMaterial({ color: 0xd97706 });
+                const line = new THREE.Mesh(lineGeom, lineMat);
+                line.position.set(0.6, 0, 0);
+                mesh.add(line);
+
+                mesh.userData = {
+                    type: "locker",
+                    id: id,
+                    name: name,
+                    searched: false
+                };
+
+                this.scene.add(mesh);
+                this.objects.push(mesh);
+            },
+
+            spawnEscapeElevator(x, z, id, name) {
+                const geom = new THREE.BoxGeometry(3.0, 3.0, 3.0);
+                const mat = new THREE.MeshStandardMaterial({ color: 0x090d16, metalness: 0.9, roughness: 0.15 });
+                const mesh = new THREE.Mesh(geom, mat);
+                mesh.position.set(x, 1.5, z);
+                
+                const buttonGeom = new THREE.BoxGeometry(0.1, 0.4, 0.2);
+                const buttonMat = new THREE.MeshBasicMaterial({ color: 0x16a34a });
+                const button = new THREE.Mesh(buttonGeom, buttonMat);
+                button.position.set(1.52, 0, 0);
+                mesh.add(button);
+
+                mesh.userData = {
+                    type: "elevator",
+                    id: id,
+                    name: name
+                };
+
+                this.scene.add(mesh);
+                this.objects.push(mesh);
+            },
+
+            spawnGroundItem(x, z, y, id, name, icon, itemType, detail = null) {
+                const group = new THREE.Group();
+                group.position.set(x, y + 0.6, z);
+
+                const glowGeom = new THREE.SphereGeometry(0.18, 8, 8);
+                const glowMat = new THREE.MeshBasicMaterial({ color: 0xd97706, wireframe: true });
+                const glowMesh = new THREE.Mesh(glowGeom, glowMat);
+                group.add(glowMesh);
+
+                group.userData = {
+                    type: "item",
+                    id: id,
+                    name: name,
+                    icon: icon,
+                    itemType: itemType,
+                    detail: detail
+                };
+
+                this.scene.add(group);
+                this.objects.push(group);
+            },
+
+            spawnZombieEnemy(x, z, name, hp, speed) {
+                const enemy = new Enemy(x, z, name, hp, speed, 'zombie');
+                this.scene.add(enemy.mesh);
+                this.monsters.push(enemy);
+            },
+
+            spawnBossEnemy(x, z) {
+                const boss = new Enemy(x, z, "비밀 수조 실험 마스터", 450, 2.5, 'boss');
+                this.scene.add(boss.mesh);
+                this.monsters.push(boss);
+            },
+
+            updateGameLogic() {
+                const delta = this.clock.getDelta();
+                
+                if (this.screenShake > 0) {
+                    this.screenShake -= delta * 3.8;
+                    this.camera.position.x = (Math.random() - 0.5) * this.screenShake * 0.16;
+                    this.camera.position.y = (Math.random() - 0.5) * this.screenShake * 0.16;
+                } else {
+                    this.camera.position.set(0, 0, 0);
+                }
+
+                if (this.weaponHandMesh && !this.player.isSwitching) {
+                    this.weaponHandMesh.position.x += (0.2 - this.weaponHandMesh.position.x) * 0.1;
+                    this.weaponHandMesh.position.y += (-0.25 - this.weaponHandMesh.position.y) * 0.1;
+                    this.weaponHandMesh.position.z += (-0.35 - this.weaponHandMesh.position.z) * 0.1;
+                }
+
+                if (this.player.isSwitching) {
+                    this.player.switchProgress += delta * 6.0;
+                    if (this.player.switchProgress < 1.0) {
+                        if (this.weaponHandMesh) {
+                            this.weaponHandMesh.position.y = -0.25 - (this.player.switchProgress * 0.6);
+                        }
+                    } else if (this.player.switchProgress >= 1.0 && this.player.switchProgress < 2.0) {
+                        if (this.player.switchProgress - delta * 6.0 < 1.0) {
+                            this.rebuildFPSWeaponMesh();
+                            this.updateHUD();
+                        }
+                        if (this.weaponHandMesh) {
+                            const raiseRatio = this.player.switchProgress - 1.0;
+                            this.weaponHandMesh.position.y = -0.85 + (raiseRatio * 0.6);
+                        }
+                    } else {
+                        this.player.isSwitching = false;
+                        this.player.switchProgress = 0;
+                        if (this.weaponHandMesh) {
+                            this.weaponHandMesh.position.set(0.2, -0.25, -0.35);
+                        }
+                    }
+                }
+
+                if (this.player.isReloading) {
+                    this.player.reloadProgress += delta;
+                    const reloadPanel = document.getElementById('hud-reload-panel');
+                    const reloadProgressText = document.getElementById('hud-reload-progress');
+                    
+                    reloadPanel.classList.remove('hidden');
+                    const percent = Math.min(100, Math.round((this.player.reloadProgress / this.player.reloadDuration) * 100));
+                    reloadProgressText.textContent = `${percent}%`;
+
+                    if (this.player.reloadProgress >= this.player.reloadDuration) {
+                        this.player.isReloading = false;
+                        reloadPanel.classList.add('hidden');
+                        this.finishReloadTask();
+                    }
+                }
+
+                if (this.player.isInvincible && this.clock.getElapsedTime() - this.player.lastHurtTime > 1.4) {
+                    this.player.isInvincible = false;
+                    document.getElementById('hit-overlay').classList.add('opacity-0');
+                }
+
+                this.objects.forEach(obj => {
+                    if (obj instanceof THREE.PointLight && obj.userData.flickerSpeed) {
+                        if (Math.random() < obj.userData.flickerSpeed) {
+                            obj.intensity = obj.intensity === 0 ? obj.userData.baseIntensity : 0;
+                        }
+                    }
+                });
+
+                this.objects.forEach(obj => {
+                    if (obj.userData && obj.userData.type === "door") {
+                        if (obj.userData.isOpen) {
+                            obj.userData.targetYRotation = Math.PI / 2;
+                        } else {
+                            obj.userData.targetYRotation = 0;
+                        }
+                        obj.userData.currentYRotation += (obj.userData.targetYRotation - obj.userData.currentYRotation) * 0.12;
+                        obj.children[0].rotation.y = obj.userData.currentYRotation;
+                    }
+                });
+
+                this.handlePlayerMovement(delta);
+
+                if (this.player.flashlightOn && this.difficulty !== 'easy') {
+                    const decay = this.difficulty === 'master' ? 1.8 : (this.difficulty === 'hard' ? 1.2 : 0.45);
+                    this.player.battery = Math.max(0, this.player.battery - delta * decay);
+                    if (this.player.battery === 0 && this.flashlight.visible) {
+                        this.flashlight.visible = false;
+                        HorrorAudio.playClick();
+                    }
+                    this.updateHUDBattery();
+                }
+
+                this.monsters.forEach(monster => {
+                    monster.update(delta, this.yawObject.position);
+                });
+            },
+
+            handlePlayerMovement(delta) {
+                let speed = 4.2;
+                const isMoving = this.movementInput.w || this.movementInput.s || this.movementInput.a || this.movementInput.d || (this.isMobile && this.joystick.active);
+                
+                if (this.player.isSprinting && this.player.stamina > 5 && isMoving) {
+                    speed = 6.6;
+                    const decay = this.difficulty === 'master' ? 28 : 18;
+                    this.player.stamina = Math.max(0, this.player.stamina - delta * decay);
+                    if (this.player.stamina === 0) {
+                        this.player.isSprinting = false;
+                    }
+                    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, 88, 0.1);
+                } else {
+                    const recovery = this.difficulty === 'master' ? 7 : 14;
+                    this.player.stamina = Math.min(this.player.maxStamina, this.player.stamina + delta * recovery);
+                    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, 75, 0.1);
+                }
+                this.camera.updateProjectionMatrix();
+                this.updateHUDStamina();
+
+                let forward = 0;
+                let right = 0;
+
+                if (this.movementInput.w) forward = 1;
+                if (this.movementInput.s) forward = -1;
+                if (this.movementInput.a) right = -1;
+                if (this.movementInput.d) right = 1;
+
+                if (this.isMobile && this.joystick.active) {
+                    forward = -this.joystick.y;
+                    right = this.joystick.x;
+                }
+
+                const camDir = new THREE.Vector3();
+                this.camera.getWorldDirection(camDir);
+                camDir.y = 0;
+                camDir.normalize();
+
+                const rightDir = new THREE.Vector3();
+                rightDir.crossVectors(camDir, new THREE.Vector3(0, 1, 0));
+                rightDir.normalize();
+
+                const moveDir = new THREE.Vector3();
+                moveDir.addScaledVector(camDir, forward);
+                moveDir.addScaledVector(rightDir, right);
+                if (moveDir.lengthSq() > 0) {
+                    moveDir.normalize();
+                }
+
+                const nextPos = this.yawObject.position.clone();
+                nextPos.addScaledVector(moveDir, speed * delta);
+
+                if (!this.player.isGrounded) {
+                    this.player.velocityY -= 14.0 * delta;
+                    nextPos.y += this.player.velocityY * delta;
+                    
+                    if (nextPos.y <= 1.6) {
+                        nextPos.y = 1.6;
+                        this.player.velocityY = 0;
+                        this.player.isGrounded = true;
+                    }
+                } else {
+                    nextPos.y = 1.6;
+                }
+
+                let collision = false;
+                const boundsLimit = 28.6;
+                if (Math.abs(nextPos.x) > boundsLimit || Math.abs(nextPos.z) > boundsLimit) {
+                    collision = true;
+                }
+
+                this.objects.forEach(obj => {
+                    if (obj.geometry && obj.geometry.type === "BoxGeometry" && obj.position.y > 0.1) {
+                        const box = new THREE.Box3().setFromObject(obj);
+                        const playerBox = new THREE.Box3(
+                            new THREE.Vector3(nextPos.x - 0.55, 0.1, nextPos.z - 0.55),
+                            new THREE.Vector3(nextPos.x + 0.55, 2.0, nextPos.z + 0.55)
+                        );
+                        if (box.intersectsBox(playerBox)) {
+                            collision = true;
+                        }
+                    }
+                });
+
+                if (!collision) {
+                    this.yawObject.position.copy(nextPos);
+                }
+
+                if (isMoving && this.player.isGrounded) {
+                    const bobSpeed = this.player.isSprinting ? 14 : 9;
+                    this.cameraBobbing += delta * bobSpeed;
+                    
+                    const bobFactor = Math.sin(this.cameraBobbing) * (this.player.isSprinting ? 0.07 : 0.035);
+                    this.camera.position.y = bobFactor;
+                    
+                    if (this.weaponHandMesh) {
+                        this.weaponHandMesh.rotation.z = Math.sin(this.cameraBobbing) * 0.045;
+                    }
+                } else {
+                    this.camera.position.y = 0;
+                    if (this.weaponHandMesh) {
+                        this.weaponHandMesh.rotation.z = 0;
+                    }
+                }
+
+                this.handleInteractiveRaycast();
+            },
+
+            handleInteractiveRaycast() {
+                const raycaster = new THREE.Raycaster();
+                const screenCenter = new THREE.Vector2(0, 0);
+                raycaster.setFromCamera(screenCenter, this.camera);
+
+                const intersects = raycaster.intersectObjects(this.objects, true);
+                let detectedInteractable = null;
+
+                if (intersects.length > 0) {
+                    const firstHit = intersects[0];
+                    if (firstHit.distance < 4.6) {
+                        let currentParent = firstHit.object;
+                        while (currentParent) {
+                            if (currentParent.userData && currentParent.userData.type) {
+                                detectedInteractable = currentParent;
+                                break;
+                            }
+                            currentParent = currentParent.parent;
+                        }
+                    }
+                }
+
+                const prompt = document.getElementById('action-prompt');
+                const textNode = document.getElementById('action-prompt-text');
+
+                if (detectedInteractable) {
+                    this.activeInteractive = detectedInteractable;
+                    prompt.classList.remove('hidden');
+                    textNode.textContent = `${detectedInteractable.userData.name} 조사하기`;
+                    document.getElementById('game-reticle').style.transform = 'scale(1.7)';
+                } else {
+                    this.activeInteractive = null;
+                    prompt.classList.add('hidden');
+                    document.getElementById('game-reticle').style.transform = 'scale(1)';
+                }
+            },
+
+            handleInteraction() {
+                if (!this.activeInteractive) return;
+
+                const data = this.activeInteractive.userData;
+                HorrorAudio.playClick();
+
+                if (data.type === "door") {
+                    if (data.id === "door_escape_final" && !this.inventory.some(item => item.id === "key_escape")) {
+                        this.triggerCentralAlert("보안 차단: 최종 지상 비상 탈출을 위해서는 '지상 탈출 보안 키카드'가 요구됩니다.");
+                        return;
+                    }
+                    if (data.id === "door_pharmacy" && this.floor === 1 && !this.inventory.some(item => item.id === "key_f1")) {
+                        this.triggerCentralAlert("잠김: 해당 약실 구역 도어는 '1층 승강장 만능키'로 개방해야 합니다.");
+                        return;
+                    }
+                    data.isOpen = !data.isOpen;
+                } 
+                else if (data.type === "locker") {
+                    if (data.id === "cabinet_pharmacy") {
+                        this.openPuzzleModal("keypad", "보안 도어 잠금 해제", "1F");
+                    } 
+                    else if (data.id === "cabinet_generator") {
+                        if (this.inventory.some(item => item.id === "fuse_generator")) {
+                            this.openPuzzleModal("switches", "퓨즈 동력 스위치 조율", "2F");
+                        } else {
+                            this.triggerCentralAlert("오류: 가동을 위한 발전기 '예비 퓨즈'를 가방에 소지하고 오십시오.");
+                        }
+                    }
+                    else if (data.id === "boss_lockbox_trigger") {
+                        this.triggerBossAwakening();
+                    }
+                    else {
+                        this.triggerCentralAlert("사물함 내부 은신처로 안전하게 진입하여 숨었습니다.");
+                    }
+                } 
+                else if (data.type === "item") {
+                    this.addInventoryItem(data);
+                    this.scene.remove(this.activeInteractive);
+                    this.objects = this.objects.filter(obj => obj !== this.activeInteractive);
+                    this.activeInteractive = null;
+                    this.triggerCentralAlert("가방 전술 백팩에 해당 물품을 무사히 담았습니다.");
+                }
+                else if (data.type === "elevator") {
+                    this.handleElevatorClimb();
+                }
+            },
+
+            handleElevatorClimb() {
+                if (this.floor === 1) {
+                    if (!this.inventory.some(item => item.id === "key_f1")) {
+                        this.triggerCentralAlert("가동 불가: 엘리베이터 전원 제어를 위해 '1층 승강장 만능키'가 가방에 보관되어 있어야 합니다.");
+                        return;
+                    }
+                    this.floor = 2;
+                    this.triggerCentralAlert("2층 격리 수술 구역에 무사 도착했습니다.");
+                } else if (this.floor === 2) {
+                    if (this.player.puzzlesSolved < 1) {
+                        this.triggerCentralAlert("오류: 2층 동력 발전기 스위치가 안전하게 가동되지 않았습니다.");
+                        return;
+                    }
+                    this.floor = 3;
+                    this.triggerCentralAlert("지하 극비 실험 구역 지하소에 진입합니다.");
+                } else if (this.floor === 3) {
+                    if (!this.inventory.some(item => item.id === "key_escape")) {
+                        this.triggerCentralAlert("대피 불가: 탈출을 위해 보스 격퇴물 '지상 탈출 보안 키카드'가 보전되어야 합니다.");
+                        return;
+                    }
+                    this.triggerGameClear();
+                    return;
+                }
+                this.buildFloorMap();
+                this.saveGameState();
+            },
+
+            triggerBossAwakening() {
+                HorrorAudio.playGhostScreamer();
+                this.triggerCentralAlert("시스템 경보: 통제 단말 복구로 '실험 마스터 괴물'이 격리 수조를 깨고 수색 진화 상태에 접어들었습니다!");
+                
+                this.monsters.forEach(m => {
+                    if (m.type === 'boss') {
+                        m.isAwakened = true;
+                        m.health = 450;
+                    }
+                });
+                this.player.puzzlesSolved++;
+            },
+
+            handleAttack() {
+                if (this.player.isReloading || this.player.isSwitching) return;
+
+                const currentWeaponId = this.player.weaponSlots[this.player.activeSlot];
+                if (!currentWeaponId) {
+                    this.triggerCentralAlert("현재 장착된 슬롯 무기가 존재하지 않습니다.");
+                    return;
+                }
+
+                const weaponSpec = WeaponsData[currentWeaponId];
+
+                if (weaponSpec.type === "ranged") {
+                    if (weaponSpec.ammo <= 0) {
+                        HorrorAudio.playClick();
+                        this.triggerCentralAlert("탄약 부족! (재장전: R 입력 또는 인벤토리에서 급탄)");
+                        return;
+                    }
+                    weaponSpec.ammo--;
+                    this.updateHUD();
+                    HorrorAudio.playGunshot();
+                    this.screenShake = 1.6;
+                } else {
+                    HorrorAudio.playMeleeHit();
+                }
+
+                if (this.weaponHandMesh) {
+                    this.weaponHandMesh.position.z -= 0.16;
+                    setTimeout(() => {
+                        if (this.weaponHandMesh) this.weaponHandMesh.position.z += 0.16;
+                    }, 140);
+                }
+
+                const raycaster = new THREE.Raycaster();
+                const screenCenter = new THREE.Vector2(0, 0);
+                raycaster.setFromCamera(screenCenter, this.camera);
+
+                const monsterTargets = this.monsters.map(m => m.mesh);
+                const intersects = raycaster.intersectObjects(monsterTargets, true);
+
+                if (intersects.length > 0) {
+                    const firstHit = intersects[0];
+                    if (firstHit.distance < weaponSpec.range) {
+                        const hitMesh = firstHit.object;
+                        let enemyInstance = null;
+                        this.monsters.forEach(m => {
+                            if (m.mesh === hitMesh || m.mesh.getObjectById(hitMesh.id) || hitMesh.parent === m.mesh) {
+                                enemyInstance = m;
+                            }
+                        });
+
+                        if (enemyInstance && enemyInstance.health > 0) {
+                            enemyInstance.takeDamage(weaponSpec.damage);
+                        }
+                    }
+                }
+            },
+
+            handleReload() {
+                if (this.player.isReloading) return;
+
+                const currentWeaponId = this.player.weaponSlots[this.player.activeSlot];
+                if (!currentWeaponId) return;
+
+                const spec = WeaponsData[currentWeaponId];
+                if (spec.type !== "ranged") return;
+                
+                if (spec.ammo === spec.maxAmmo) {
+                    return; 
+                }
+
+                const requiredAmmoType = spec.id === 'pistol' ? 'ammo_pistol' : 'ammo_shotgun';
+                const backupItem = this.inventory.find(item => item.id === requiredAmmoType);
+
+                if (!backupItem || backupItem.qty <= 0) {
+                    this.triggerCentralAlert("재장전 불가: 소지 중인 보조 전술 탄알이 존재하지 않습니다.");
+                    return;
+                }
+
+                this.player.isReloading = true;
+                this.player.reloadProgress = 0;
+                this.player.reloadDuration = spec.reloadTime;
+                HorrorAudio.playClick();
+            },
+
+            finishReloadTask() {
+                const currentWeaponId = this.player.weaponSlots[this.player.activeSlot];
+                if (!currentWeaponId) return;
+
+                const spec = WeaponsData[currentWeaponId];
+                const requiredAmmoType = spec.id === 'pistol' ? 'ammo_pistol' : 'ammo_shotgun';
+                const backupItem = this.inventory.find(item => item.id === requiredAmmoType);
+
+                if (backupItem) {
+                    const deficit = spec.maxAmmo - spec.ammo;
+                    const allocated = Math.min(deficit, backupItem.qty);
+                    
+                    spec.ammo += allocated;
+                    backupItem.qty -= allocated;
+
+                    if (backupItem.qty <= 0) {
+                        this.inventory = this.inventory.filter(item => item !== backupItem);
+                    }
+
+                    HorrorAudio.playClick();
+                    this.triggerCentralAlert("무기 탄통 보충 수리가 원활히 이행되었습니다.");
+                    this.updateHUD();
+                }
+            },
+
+            swapActiveWeaponSlot(slotIndex) {
+                if (this.player.activeSlot === slotIndex && this.player.weaponSlots[slotIndex]) return;
+                if (this.player.isSwitching) return;
+
+                this.player.activeSlot = slotIndex;
+                this.player.isSwitching = true;
+                this.player.switchProgress = 0;
+                
+                if (this.player.isReloading) {
+                    this.player.isReloading = false;
+                    document.getElementById('hud-reload-panel').classList.add('hidden');
+                }
+
+                HorrorAudio.playClick();
+                this.triggerCentralAlert(`장착 무기 슬롯 [SLOT ${slotIndex + 1}] 교체 수용중...`);
+            },
+
+            toggleFlashlight() {
+                if (this.player.battery <= 0) {
+                    this.triggerCentralAlert("전력 차단: 손전등 에너지가 충전 고갈 상태에 접어들었습니다.");
+                    return;
+                }
+                this.player.flashlightOn = !this.player.flashlightOn;
+                this.flashlight.visible = this.player.flashlightOn;
+                HorrorAudio.playClick();
+            },
+
+            triggerCentralAlert(text) {
+                const el = document.getElementById('central-alert');
+                el.textContent = text;
+                el.classList.remove('hidden');
+                
+                HorrorAudio.playWhisperSound();
+                
+                setTimeout(() => {
+                    el.classList.add('hidden');
+                }, 3200);
+            },
+
+            takeDamage(amount) {
+                if (this.player.isInvincible || this.player.hp <= 0) return;
+
+                const multiplier = this.difficulty === 'master' ? 1.7 : (this.difficulty === 'hard' ? 1.3 : (this.difficulty === 'easy' ? 0.55 : 1.0));
+                const finalDamage = Math.round(amount * multiplier);
+
+                this.player.hp = Math.max(0, this.player.hp - finalDamage);
+                this.player.isInvincible = true;
+                this.player.lastHurtTime = this.clock.getElapsedTime();
+
+                document.getElementById('hit-overlay').classList.remove('opacity-0');
+                this.screenShake = 3.0;
+
+                HorrorAudio.playPlayerHurt();
+                this.updateHUDHP();
+
+                if (this.player.hp <= 0) {
+                    this.handlePlayerDeath();
+                }
+            },
+
+            addExperience(amount) {
+                const multiplier = this.difficulty === 'easy' ? 1.35 : (this.difficulty === 'hard' ? 0.8 : (this.difficulty === 'master' ? 0.55 : 1.0));
+                const finalXp = Math.round(amount * multiplier);
+
+                this.player.xp += finalXp;
+                if (this.player.xp >= this.player.xpNeeded) {
+                    this.player.xp -= this.player.xpNeeded;
+                    this.player.level++;
+                    this.player.xpNeeded = Math.round(this.player.xpNeeded * 1.5);
+                    this.player.maxHp = Math.round(this.player.maxHp * 1.08);
+                    this.player.hp = this.player.maxHp;
+                    this.triggerCentralAlert(`레벨 업! Lv.${this.player.level} 갱신 완료.`);
+                }
+                this.updateHUD();
+            },
+
+            addInventoryItem(data) {
+                if (data.itemType === "weapon") {
+                    WeaponsData[data.detail].isOwned = true;
+                    
+                    if (!this.player.weaponSlots[0]) {
+                        this.player.weaponSlots[0] = data.detail;
+                    } else if (!this.player.weaponSlots[1]) {
+                        this.player.weaponSlots[1] = data.detail;
+                    } else {
+                        this.triggerCentralAlert(`신규 무기 '${WeaponsData[data.detail].name}'를 획득하여 전술 가방에 무사 배정했습니다. 인벤토리(Tab)에서 원하는 슬롯으로 배정하십시오.`);
+                    }
+                    this.rebuildFPSWeaponMesh();
+                    this.updateHUD();
+                    return;
+                }
+
+                const existing = this.inventory.find(item => item.id === data.id);
+                if (existing) {
+                    existing.qty += (data.detail || 1);
+                } else {
+                    this.inventory.push({
+                        id: data.id,
+                        name: data.name,
+                        icon: data.icon,
+                        qty: (data.detail || 1),
+                        type: data.itemType,
+                        desc: data.name + " 가치 탑재 수색물"
+                    });
+                }
+                this.updateHUD();
+            },
+
+            toggleInventory() {
+                if (!this.isPlaying) return;
+                
+                this.isPaused = !this.isPaused;
+                const modal = document.getElementById('inventory-modal');
+
+                if (this.isPaused) {
+                    modal.classList.remove('hidden');
+                    this.rebuildInventoryGridUI();
+                    
+                    document.getElementById('stat-difficulty').textContent = this.difficulty.toUpperCase();
+                    document.getElementById('stat-kills').textContent = `${this.player.kills} 명`;
+                    if (document.pointerLockElement) {
+                        document.exitPointerLock();
+                    }
+                } else {
+                    modal.classList.add('hidden');
+                }
+                HorrorAudio.playClick();
+            },
+
+            rebuildInventoryGridUI() {
+                const grid = document.getElementById('inventory-grid');
+                grid.innerHTML = "";
+
+                Object.keys(WeaponsData).forEach(key => {
+                    const w = WeaponsData[key];
+                    if (w.isOwned) {
+                        const slot = document.createElement('div');
+                        slot.className = "bg-gray-900 border border-gray-800 hover:border-red-800 rounded-lg p-3 flex flex-col items-center justify-between cursor-pointer transition-all hover:scale-105 relative";
+                        slot.innerHTML = `
+                            <span class="absolute top-1 right-1 bg-red-950/80 px-1.5 py-0.5 rounded text-[8px] text-red-500 font-extrabold">보유중</span>
+                            <i class="fa-solid ${w.icon} text-3xl text-gray-400 mt-2"></i>
+                            <span class="text-[10px] font-bold text-gray-300 text-center mt-2 truncate w-full">${w.name}</span>
+                        `;
+                        
+                        slot.onclick = () => {
+                            this.showInventoryInspectWeapon(w);
+                        };
+                        grid.appendChild(slot);
+                    }
+                });
+
+                this.inventory.forEach((item, idx) => {
+                    const slot = document.createElement('div');
+                    slot.className = "bg-gray-900 border border-gray-800 hover:border-red-800 rounded-lg p-3 flex flex-col items-center justify-between cursor-pointer transition-all hover:scale-105 relative";
+                    slot.innerHTML = `
+                        <span class="absolute top-1 right-1 bg-red-950/80 px-1.5 py-0.5 rounded text-[10px] text-red-500 font-extrabold">x${item.qty}</span>
+                        <i class="fa-solid ${item.icon} text-3xl text-gray-400 mt-2"></i>
+                        <span class="text-[10px] font-bold text-gray-300 text-center mt-2 truncate w-full">${item.name}</span>
+                    `;
+                    
+                    slot.onclick = () => {
+                        this.showInventoryInspectItem(item);
+                    };
+
+                    grid.appendChild(slot);
+                });
+
+                document.getElementById('inv-slots-used').textContent = this.inventory.length;
+            },
+
+            showInventoryInspectItem(item) {
+                const inspect = document.getElementById('inv-inspect-box');
+                inspect.innerHTML = `
+                    <h4 class="text-white font-extrabold text-base mb-1">${item.name}</h4>
+                    <span class="px-2 py-0.5 bg-yellow-950/80 rounded border border-yellow-900 text-[9px] text-yellow-500 font-bold uppercase mb-3">${item.type}</span>
+                    <p class="text-gray-400 text-xs text-center mb-4 leading-relaxed">${item.desc}</p>
+                    <button id="btn-use-item-now" class="px-6 py-2 bg-emerald-800 hover:bg-emerald-700 text-white font-bold rounded text-xs w-full">즉각 수용/사용</button>
+                `;
+
+                document.getElementById('btn-use-item-now').onclick = () => {
+                    this.executeItemUse(item);
+                };
+            },
+
+            showInventoryInspectWeapon(weapon) {
+                const inspect = document.getElementById('inv-inspect-box');
+                inspect.innerHTML = `
+                    <h4 class="text-white font-extrabold text-base mb-1">${weapon.name}</h4>
+                    <span class="px-2 py-0.5 bg-red-950/85 rounded border border-red-900 text-[9px] text-red-400 font-bold uppercase mb-3">${weapon.type} 장비</span>
+                    <p class="text-gray-400 text-xs text-center mb-4 leading-relaxed">데미지: ${weapon.damage} / 사거리: ${weapon.range}</p>
+                    
+                    <div class="flex space-x-2 w-full mt-2">
+                        <button id="btn-equip-slot-0" class="flex-1 py-2 bg-red-950 hover:bg-red-900 text-red-200 font-bold border border-red-800 rounded text-[10px] transition-all">[SLOT 1] 장착</button>
+                        <button id="btn-equip-slot-1" class="flex-1 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 font-bold border border-slate-800 rounded text-[10px] transition-all">[SLOT 2] 장착</button>
+                    </div>
+                `;
+
+                document.getElementById('btn-equip-slot-0').onclick = () => {
+                    this.assignWeaponToSlot(weapon.id, 0);
+                };
+                document.getElementById('btn-equip-slot-1').onclick = () => {
+                    this.assignWeaponToSlot(weapon.id, 1);
+                };
+            },
+
+            assignWeaponToSlot(weaponId, slotIndex) {
+                const opposite = slotIndex === 0 ? 1 : 0;
+                if (this.player.weaponSlots[opposite] === weaponId) {
+                    this.player.weaponSlots[opposite] = null;
+                }
+
+                this.player.weaponSlots[slotIndex] = weaponId;
+                this.rebuildFPSWeaponMesh();
+                this.updateHUD();
+                HorrorAudio.playClick();
+                this.triggerCentralAlert(`슬롯 [SLOT ${slotIndex + 1}]에 '${WeaponsData[weaponId].name}' 장착 완료.`);
+                this.rebuildInventoryGridUI();
+            },
+
+            executeItemUse(item) {
+                HorrorAudio.playClick();
+
+                if (item.id === "medkit") {
+                    this.player.hp = Math.min(this.player.maxHp, this.player.hp + 50);
+                    item.qty--;
+                    this.triggerCentralAlert("치료 팩 약품을 수용해 체력을 수복 충전했습니다.");
+                } 
+                else if (item.id === "battery_pack") {
+                    this.player.battery = 100;
+                    this.player.flashlightOn = true;
+                    this.flashlight.visible = true;
+                    item.qty--;
+                    this.triggerCentralAlert("손전등 코어 충전 셀 전력 복원을 완수했습니다.");
+                } 
+                else {
+                    this.triggerCentralAlert("경고: 임무수행 전용 퀘스트 장비는 임의 사용 불가능합니다.");
+                    return;
+                }
+
+                if (item.qty <= 0) {
+                    this.inventory = this.inventory.filter(el => el !== item);
+                }
+
+                this.rebuildInventoryGridUI();
+                this.updateHUD();
+                document.getElementById('inv-inspect-box').innerHTML = `
+                    <i class="fa-solid fa-check text-4xl text-emerald-500 mb-3"></i>
+                    <p class="text-emerald-400 text-xs font-bold">사용 복원 완료!</p>
+                `;
+            },
+
+            openPuzzleModal(type, title, hintExtra) {
+                this.activePuzzle = { type: type, code: "1024" };
+                const modal = document.getElementById('puzzle-modal');
+                modal.classList.remove('hidden');
+
+                document.getElementById('puzzle-desc').textContent = `수동 제어판 [${hintExtra}]을 맞추기 위한 보안 수수께끼 장치입니다.`;
+                
+                const keypadSec = document.getElementById('puzzle-keypad-mode');
+                const switchSec = document.getElementById('puzzle-switches-mode');
+
+                if (document.pointerLockElement) {
+                    document.exitPointerLock();
+                }
+
+                if (type === "keypad") {
+                    keypadSec.classList.remove('hidden');
+                    switchSec.classList.add('hidden');
+                    document.getElementById('puzzle-display').textContent = "----";
+                    this.setupKeypadPuzzleListeners();
+                } else if (type === "switches") {
+                    keypadSec.classList.add('hidden');
+                    switchSec.classList.remove('hidden');
+                    
+                    const hintPanel = document.getElementById('switch-hint-panel');
+                    if (this.difficulty === "easy") {
+                        hintPanel.classList.remove('hidden');
+                    } else {
+                        hintPanel.classList.add('hidden');
+                    }
+                    this.setupSwitchesPuzzleListeners();
+                }
+            },
+
+            setupKeypadPuzzleListeners() {
+                const display = document.getElementById('puzzle-display');
+                let inputCode = "";
+                
+                const keys = document.querySelectorAll('.puzzle-key');
+                keys.forEach(key => {
+                    key.onclick = (e) => {
+                        HorrorAudio.playClick();
+                        if (inputCode.length < 4) {
+                            inputCode += e.target.textContent;
+                            display.textContent = inputCode;
+                        }
+                    };
+                });
+
+                document.getElementById('btn-puzzle-clear').onclick = () => {
+                    HorrorAudio.playClick();
+                    inputCode = "";
+                    display.textContent = "----";
+                };
+
+                document.getElementById('btn-puzzle-enter').onclick = () => {
+                    if (inputCode === "1024") {
+                        HorrorAudio.playMeleeHit();
+                        this.handlePuzzleSuccess("pharmacy_cabinet_unlock");
+                    } else {
+                        HorrorAudio.playGhostScreamer();
+                        this.handlePuzzleFailure();
+                    }
+                    inputCode = "";
+                    display.textContent = "----";
+                };
+
+                document.getElementById('btn-puzzle-close').onclick = () => {
+                    document.getElementById('puzzle-modal').classList.add('hidden');
+                    this.activePuzzle = null;
+                };
+            },
+
+            setupSwitchesPuzzleListeners() {
+                const sequence = [];
+                const correctSequence = [1, 3, 2, 4];
+                
+                const switchBtns = document.querySelectorAll('.switch-toggle');
+                switchBtns.forEach(btn => {
+                    btn.onclick = () => {
+                        HorrorAudio.playClick();
+                        const swID = parseInt(btn.getAttribute('data-switch'));
+                        
+                        const light = btn.querySelector('.switch-light');
+                        light.classList.toggle('bg-gray-700');
+                        light.classList.toggle('bg-emerald-500');
+
+                        sequence.push(swID);
+
+                        if (sequence.length === 4) {
+                            const isCorrect = sequence.every((val, index) => val === correctSequence[index]);
+                            if (isCorrect) {
+                                this.handlePuzzleSuccess("generator_circuit_repaired");
+                            } else {
+                                HorrorAudio.playGhostScreamer();
+                                this.handlePuzzleFailure();
+                                setTimeout(() => {
+                                    this.resetSwitchesUI();
+                                    sequence.length = 0;
+                                }, 1000);
+                            }
+                        }
+                    };
+                });
+
+                document.getElementById('btn-switches-reset').onclick = () => {
+                    HorrorAudio.playClick();
+                    this.resetSwitchesUI();
+                    sequence.length = 0;
+                };
+            },
+
+            resetSwitchesUI() {
+                const switchBtns = document.querySelectorAll('.switch-toggle');
+                switchBtns.forEach(btn => {
+                    const light = btn.querySelector('.switch-light');
+                    light.classList.remove('bg-emerald-500');
+                    light.classList.add('bg-gray-700');
+                });
+            },
+
+            handlePuzzleSuccess(type) {
+                const fdbk = document.getElementById('puzzle-feedback');
+                fdbk.classList.remove('hidden', 'bg-red-950', 'text-red-500');
+                fdbk.classList.add('bg-emerald-950', 'text-emerald-500');
+                fdbk.textContent = "잠금 장치 동력 해제 완료!";
+                
+                this.player.puzzlesSolved++;
+
+                setTimeout(() => {
+                    document.getElementById('puzzle-modal').classList.add('hidden');
+                    fdbk.classList.add('hidden');
+                    this.activePuzzle = null;
+
+                    if (type === "pharmacy_cabinet_unlock") {
+                        this.triggerCentralAlert("보관함 보안 차단막이 소멸되었습니다. 승강용 만능키를 수색하십시오.");
+                    } else if (type === "generator_circuit_repaired") {
+                        this.triggerCentralAlert("발전기가 다시 소리내며 가동되기 시작했습니다!");
+                    }
+                }, 1600);
+            },
+
+            handlePuzzleFailure() {
+                const fdbk = document.getElementById('puzzle-feedback');
+                fdbk.classList.remove('hidden', 'bg-emerald-950', 'text-emerald-500');
+                fdbk.classList.add('bg-red-950', 'text-red-500');
+                fdbk.textContent = "경고: 보안 경보 촉발! 감염 좀비들이 흥분 상태에 들어섭니다.";
+                
+                this.monsters.forEach(m => {
+                    m.state = 'chase';
+                    m.speed = m.speed * 1.25;
+                });
+            },
+
+            updateHUD() {
+                this.updateHUDHP();
+                this.updateHUDStamina();
+                this.updateHUDBattery();
+
+                document.getElementById('hud-level-text').textContent = this.player.level;
+                document.getElementById('hud-xp-ratio').textContent = `${this.player.xp} / ${this.player.xpNeeded}`;
+                document.getElementById('hud-xp-bar').style.width = `${(this.player.xp / this.player.xpNeeded) * 100}%`;
+
+                const names = { 1: "1층 폐쇄 진료동", 2: "2층 격리 수술동", 3: "지하 특비 통제동" };
+                document.getElementById('hud-floor-text').textContent = `${this.floor}F`;
+                document.getElementById('hud-room-text').textContent = names[this.floor];
+
+                for (let i = 0; i < 2; i++) {
+                    const slotId = this.player.weaponSlots[i];
+                    const slotUI = document.getElementById(`hud-slot-${i}`);
+                    const iconUI = document.getElementById(`hud-slot-${i}-icon`);
+                    const nameUI = document.getElementById(`hud-slot-${i}-name`);
+
+                    if (slotId) {
+                        const data = WeaponsData[slotId];
+                        iconUI.className = `fa-solid ${data.icon} text-xl text-red-500`;
+                        nameUI.textContent = data.name;
+                    } else {
+                        iconUI.className = "fa-solid fa-ban text-xl text-gray-700";
+                        nameUI.textContent = "장착 안됨";
+                    }
+
+                    if (this.player.activeSlot === i) {
+                        slotUI.className = "flex-1 p-2 bg-red-950/20 border-2 border-red-600 rounded-lg flex flex-col items-center justify-center transition-all shadow-[0_0_12px_rgba(220,38,38,0.4)]";
+                    } else {
+                        slotUI.className = "flex-1 p-2 bg-gray-950 border border-gray-900 rounded-lg flex flex-col items-center justify-center transition-all";
+                    }
+                }
+
+                const currentId = this.player.weaponSlots[this.player.activeSlot];
+                if (currentId) {
+                    const currentW = WeaponsData[currentId];
+                    if (currentW.type === "ranged") {
+                        const reserve = this.inventory.find(item => item.id === (currentW.id === 'pistol' ? 'ammo_pistol' : 'ammo_shotgun'));
+                        document.getElementById('hud-ammo-val').textContent = `${currentW.ammo} / ${reserve ? reserve.qty : "0"}`;
+                    } else {
+                        document.getElementById('hud-ammo-val').textContent = "Melee (무제한)";
+                    }
+                } else {
+                    document.getElementById('hud-ammo-val').textContent = "비어 있음";
+                }
+            },
+
+            updateHUDHP() {
+                document.getElementById('hud-hp-text').textContent = `${this.player.hp} / ${this.player.maxHp}`;
+                document.getElementById('hud-hp-bar').style.width = `${(this.player.hp / this.player.maxHp) * 100}%`;
+            },
+
+            updateHUDStamina() {
+                document.getElementById('hud-stamina-text').textContent = `${Math.round(this.player.stamina)}%`;
+                document.getElementById('hud-stamina-bar').style.width = `${(this.player.stamina / this.player.maxStamina) * 100}%`;
+            },
+
+            updateHUDBattery() {
+                document.getElementById('hud-battery-text').textContent = `${Math.round(this.player.battery)}%`;
+                document.getElementById('hud-battery-bar').style.width = `${this.player.battery}%`;
+            },
+
+            togglePause(forceState) {
+                if (forceState !== undefined) {
+                    this.isPaused = forceState;
+                } else {
+                    this.isPaused = !this.isPaused;
+                }
+
+                const pauseModal = document.getElementById('pause-modal');
+                const lockPrompt = document.getElementById('pointer-lock-prompt');
+
+                if (this.isPaused) {
+                    pauseModal.classList.remove('hidden');
+                    lockPrompt.classList.add('hidden');
+                    if (document.pointerLockElement) {
+                        document.exitPointerLock();
+                    }
+                } else {
+                    pauseModal.classList.add('hidden');
+                    if (!this.isMobile) {
+                        this.container.requestPointerLock();
+                    }
+                }
+            },
+
+            handlePlayerDeath() {
+                this.isPlaying = false;
+                
+                this.camera.rotation.z = Math.PI / 2.5;
+                this.camera.position.y = -1.1;
+
+                if (document.pointerLockElement) {
+                    document.exitPointerLock();
+                }
+
+                setTimeout(() => {
+                    document.getElementById('game-hud').classList.add('hidden');
+                    document.getElementById('game-over').classList.remove('hidden');
+                    document.getElementById('over-stat-floor').textContent = `${this.floor}층 아사이럼 병동`;
+                    document.getElementById('over-stat-level').textContent = `Lv.${this.player.level}`;
+                    document.getElementById('over-stat-kills').textContent = `${this.player.kills}마리`;
+                }, 1300);
+            },
+
+            triggerGameClear() {
+                this.isPlaying = false;
+
+                if (document.pointerLockElement) {
+                    document.exitPointerLock();
+                }
+
+                document.getElementById('game-hud').classList.add('hidden');
+                document.getElementById('game-clear').classList.remove('hidden');
+
+                const title = document.getElementById('ending-title');
+                const desc = document.getElementById('ending-desc');
+
+                if (this.difficulty === "master") {
+                    title.textContent = "진 엔딩(True Ending): 병원의 해방 구세주";
+                    desc.textContent = "가장 혹독했던 난이도와 공포 속에서 안전을 회귀한 당신은 이 아사이럼을 둘러싼 실체적 유령 기운을 영구 박멸하고 완벽한 승리를 맞이하였습니다.";
+                } else if (this.difficulty === "easy") {
+                    title.textContent = "탈출 엔딩(Easy Ending): 미완의 진술";
+                    desc.textContent = "살아서 나갔으나 당신의 귓가엔 여전히 폐병동의 슬픈 고음 합성 주파수가 메아리칩니다.";
+                } else {
+                    title.textContent = "보통 엔딩(Normal Ending): 안전한 새벽녘으로";
+                    desc.textContent = "악몽의 병원을 벗어난 새벽, 찬 기류가 머리를 맑히며 생포적 구사일생에 눈물을 흘립니다.";
+                }
+            }
+        };
+    </script>
+
+    <script>
+        class Enemy {
+            constructor(x, z, name, health, speed, type = 'zombie') {
+                this.name = name;
+                this.health = health;
+                this.maxHealth = health;
+                this.speed = speed;
+                this.baseSpeed = speed;
+                this.type = type;
+                
+                this.state = 'patrol';
+                this.patrolWaypoints = [
+                    new THREE.Vector3(x + (Math.random() - 0.5) * 8, 0, z + (Math.random() - 0.5) * 8),
+                    new THREE.Vector3(x + (Math.random() - 0.5) * 8, 0, z + (Math.random() - 0.5) * 8)
+                ];
+                this.currentWaypointIndex = 0;
+                this.searchTimer = 0;
+
+                this.mesh = this.buildProceduralMesh();
+                this.mesh.position.set(x, 0, z);
+            }
+
+            buildProceduralMesh() {
+                const group = new THREE.Group();
+
+                const bodyGeom = new THREE.CylinderGeometry(0.3, 0.4, 1.6, 8);
+                const matColor = this.type === 'boss' ? 0x6b0505 : (this.type === 'ghost' ? 0x8b9bb4 : 0x114324);
+                const mat = new THREE.MeshStandardMaterial({ 
+                    color: matColor, 
+                    roughness: 0.82,
+                    transparent: this.type === 'ghost',
+                    opacity: this.type === 'ghost' ? 0.7 : 1.0
+                });
+
+                const bodyMesh = new THREE.Mesh(bodyGeom, mat);
+                bodyMesh.position.y = 0.8;
+                bodyMesh.castShadow = true;
+                group.add(bodyMesh);
+
+                const eyeGeom = new THREE.SphereGeometry(0.06, 8, 8);
+                const eyeMat = new THREE.MeshBasicMaterial({ color: this.type === 'boss' ? 0xff0000 : 0xeab308 });
+                
+                const eyeL = new THREE.Mesh(eyeGeom, eyeMat);
+                eyeL.position.set(-0.15, 1.4, 0.32);
+                
+                const eyeR = new THREE.Mesh(eyeGeom, eyeMat);
+                eyeR.position.set(0.15, 1.4, 0.32);
+                
+                group.add(eyeL);
+                group.add(eyeR);
+
+                if (this.type === 'boss') {
+                    group.scale.set(1.7, 1.5, 1.7);
+                }
+
+                return group;
+            }
+
+            update(delta, playerPos) {
+                if (this.health <= 0) return;
+
+                const dist = this.mesh.position.distanceTo(playerPos);
+                let range = Game.difficulty === 'master' ? 17.5 : (Game.difficulty === 'easy' ? 7.5 : 11.5);
+
+                if (Game.difficulty === 'master' && Game.player.isSprinting && dist < 22.0) {
+                    if (this.state === 'patrol') {
+                        this.state = 'chase';
+                        Game.triggerCentralAlert("괴수가 전속 질주 발소리를 포착해 돌진하기 시작했습니다!");
+                    }
+                }
+
+                switch(this.state) {
+                    case 'patrol':
+                        this.handlePatrol(delta);
+                        if (dist < range) {
+                            this.state = 'chase';
+                            if (Math.random() < 0.2) {
+                                HorrorAudio.playGhostScreamer();
+                            }
+                        }
+                        break;
+                    case 'chase':
+                        this.handleChase(delta, playerPos);
+                        if (dist > range * 1.4) {
+                            this.state = 'search';
+                            this.searchTimer = 3.0;
+                        }
+                        break;
+                    case 'search':
+                        this.handleSearch(delta);
+                        if (dist < range) {
+                            this.state = 'chase';
+                        }
+                        break;
+                    case 'attack':
+                        this.handleAttackMode(delta, dist);
+                        break;
+                }
+            }
+
+            handlePatrol(delta) {
+                const target = this.patrolWaypoints[this.currentWaypointIndex];
+                const direction = new THREE.Vector3().subVectors(target, this.mesh.position);
+                direction.y = 0;
+
+                if (direction.lengthSq() < 0.1) {
+                    this.currentWaypointIndex = (this.currentWaypointIndex + 1) % this.patrolWaypoints.length;
+                } else {
+                    direction.normalize();
+                    this.mesh.position.addScaledVector(direction, this.speed * 0.5 * delta);
+                    const angle = Math.atan2(direction.x, direction.z);
+                    this.mesh.rotation.y = angle;
+                }
+            }
+
+            handleChase(delta, playerPos) {
+                const direction = new THREE.Vector3().subVectors(playerPos, this.mesh.position);
+                direction.y = 0;
+                
+                const dist = direction.length();
+                direction.normalize();
+
+                this.mesh.position.addScaledVector(direction, this.speed * delta);
+                
+                const angle = Math.atan2(direction.x, direction.z);
+                this.mesh.rotation.y = angle;
+
+                const cap = this.type === 'boss' ? 2.8 : 1.7;
+                if (dist < cap) {
+                    this.state = 'attack';
+                }
+            }
+
+            handleSearch(delta) {
+                this.searchTimer -= delta;
+                if (this.searchTimer <= 0) {
+                    this.state = 'patrol';
+                    this.speed = this.baseSpeed;
+                }
+                this.mesh.rotation.y += delta * 2.2;
+            }
+
+            handleAttackMode(delta, dist) {
+                const cap = this.type === 'boss' ? 3.0 : 1.9;
+                if (dist > cap) {
+                    this.state = 'chase';
+                    return;
+                }
+
+                if (Math.random() < delta * 1.6) {
+                    const power = this.type === 'boss' ? 42 : 18;
+                    Game.takeDamage(power);
+                    
+                    const forceDir = new THREE.Vector3().subVectors(Game.yawObject.position, this.mesh.position);
+                    forceDir.y = 0;
+                    forceDir.normalize();
+                    Game.yawObject.position.addScaledVector(forceDir, 0.7);
+                }
+            }
+
+            takeDamage(amount) {
+                this.health = Math.max(0, this.health - amount);
+                HorrorAudio.playWhisperSound();
+                
+                const knockback = 0.45;
+                const dir = new THREE.Vector3();
+                this.mesh.getWorldDirection(dir);
+                this.mesh.position.addScaledVector(dir, -knockback);
+
+                const decal = new THREE.Mesh(
+                    new THREE.PlaneGeometry(1.1, 1.1),
+                    new THREE.MeshBasicMaterial({ map: Game.generateBloodDecal(), transparent: true, depthWrite: false })
+                );
+                decal.rotation.x = -Math.PI / 2;
+                decal.position.set(this.mesh.position.x, 0.011, this.mesh.position.z);
+                Game.scene.add(decal);
+                Game.objects.push(decal);
+
+                if (this.health <= 0) {
+                    this.handleDeath();
+                }
+            }
+
+            handleDeath() {
+                Game.player.kills++;
+                Game.addExperience(this.type === 'boss' ? 260 : 45);
+                
+                this.mesh.rotation.z = Math.PI / 2;
+                this.mesh.position.y = 0.1;
+
+                Game.scene.remove(this.mesh);
+                Game.monsters = Game.monsters.filter(m => m !== this);
+
+                Game.triggerCentralAlert(`감염원 처치 완료: 경험치 획득!`);
+
+                if (this.type === 'boss') {
+                    Game.spawnGroundItem(this.mesh.position.x, this.mesh.position.z, -0.4, "key_escape", "지상 탈출 보안 키카드", "fa-key", "quest");
+                }
+            }
+        }
+    </script>
+
+    <script>
+        window.onload = function () {
+            Game.init();
+        }
+    </script>
+</body>
+</html>
