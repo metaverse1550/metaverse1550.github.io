@@ -1,0 +1,1911 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Brawl Legends Mobile - Realtime PvP Canvas Engine</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&display=swap');
+        
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+            touch-action: manipulation;
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            background-color: #080c14;
+            color: #ffffff;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #gameCanvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            background: #111827;
+        }
+
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.88);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .brawl-button {
+            transition: all 0.12s ease;
+            box-shadow: 0 5px 0 rgba(0, 0, 0, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.35);
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.7);
+        }
+
+        .brawl-button:active {
+            transform: translateY(3px);
+            box-shadow: 0 2px 0 rgba(0, 0, 0, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.35);
+        }
+
+        .brawl-button-yellow {
+            background: linear-gradient(180deg, #facc15 0%, #ca8a04 100%);
+            border: 2px solid #fef08a;
+            color: #361f00;
+        }
+
+        .brawl-button-blue {
+            background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
+            border: 2px solid #bae6fd;
+            color: #022c43;
+        }
+
+        .brawl-button-purple {
+            background: linear-gradient(180deg, #c084fc 0%, #7e22ce 100%);
+            border: 2px solid #f3e8ff;
+            color: #2e0249;
+        }
+
+        .brawl-button-green {
+            background: linear-gradient(180deg, #4ade80 0%, #15803d 100%);
+            border: 2px solid #dcfce7;
+            color: #022e11;
+        }
+
+        /* Virtual Joystick */
+        .joystick-base {
+            position: absolute;
+            width: 130px;
+            height: 130px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.08);
+            border: 2px solid rgba(255, 255, 255, 0.25);
+            pointer-events: none;
+            display: none;
+            z-index: 40;
+            transform: translate(-50%, -50%);
+        }
+
+        .joystick-thumb {
+            position: absolute;
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(255,255,255,0.95) 0%, rgba(56,189,248,0.85) 100%);
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.7);
+            pointer-events: none;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        @keyframes pulse-super {
+            0%, 100% { box-shadow: 0 0 15px rgba(192, 132, 252, 0.7); transform: scale(1); }
+            50% { box-shadow: 0 0 32px rgba(192, 132, 252, 1); transform: scale(1.05); }
+        }
+
+        .super-ready {
+            animation: pulse-super 1.1s infinite ease-in-out;
+        }
+
+        @keyframes bounce-chest {
+            0%, 100% { transform: translateY(0) scale(1); }
+            50% { transform: translateY(-15px) scale(1.08); }
+        }
+
+        .chest-anim {
+            animation: bounce-chest 1s infinite;
+        }
+
+        /* Custom Scrollbars */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+    </style>
+</head>
+<body class="flex flex-col h-screen w-screen overflow-hidden select-none bg-slate-950">
+
+    <div class="relative w-full h-full">
+        <!-- Main Game Canvas -->
+        <canvas id="gameCanvas"></canvas>
+
+        <!-- Joystick Overlay -->
+        <div id="joystickBase" class="joystick-base">
+            <div id="joystickThumb" class="joystick-thumb"></div>
+        </div>
+
+        <!-- UI OVERLAY CONTAINER -->
+        <div id="uiOverlay" class="absolute inset-0 pointer-events-none z-30">
+            
+            <!-- TOP BAR (Currencies & Account Info) -->
+            <div id="topBar" class="pointer-events-auto absolute top-0 left-0 right-0 p-3 flex justify-between items-center glass-panel border-b border-white/10 z-20">
+                <div class="flex items-center space-x-3">
+                    <div class="relative cursor-pointer" onclick="openProfile()">
+                        <div id="playerAvatar" class="w-11 h-11 rounded-2xl bg-gradient-to-tr from-amber-500 to-yellow-300 flex items-center justify-center font-black text-2xl text-slate-900 border-2 border-white shadow-md">
+                            🤠
+                        </div>
+                        <div class="absolute -bottom-1 -right-1 bg-cyan-600 text-[10px] font-black px-1.5 py-0.5 rounded-full border border-white" id="accountLevel">
+                            LV.1
+                        </div>
+                    </div>
+                    <div>
+                        <div class="font-extrabold text-sm text-white flex items-center gap-2">
+                            <span id="playerName">BrawlerPlayer</span>
+                        </div>
+                        <div class="flex items-center gap-1.5 mt-0.5">
+                            <i class="fa-solid fa-trophy text-amber-400 text-xs"></i>
+                            <span class="text-xs font-black text-amber-300" id="trophyCount">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex items-center space-x-2.5">
+                    <div class="bg-slate-900/90 px-3 py-1.5 rounded-full border border-amber-500/30 flex items-center gap-1.5">
+                        <i class="fa-solid fa-coins text-amber-400 text-xs"></i>
+                        <span id="coinCount" class="text-xs font-black text-amber-200">500</span>
+                    </div>
+                    <div class="bg-slate-900/90 px-3 py-1.5 rounded-full border border-emerald-500/30 flex items-center gap-1.5">
+                        <i class="fa-solid fa-gem text-emerald-400 text-xs"></i>
+                        <span id="gemCount" class="text-xs font-black text-emerald-200">20</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MAIN MENU LOBBY SCREEN -->
+            <div id="mainMenuScreen" class="pointer-events-auto absolute inset-0 pt-20 pb-6 px-4 flex flex-col justify-between z-10 bg-gradient-to-b from-slate-950/50 via-transparent to-slate-950/95">
+                
+                <!-- Brawler Stage Showcase -->
+                <div class="flex-1 flex flex-col items-center justify-center relative">
+                    <div class="absolute w-72 h-72 bg-cyan-500/10 rounded-full blur-3xl -z-10 animate-pulse"></div>
+                    
+                    <div class="text-center mb-2">
+                        <span id="selectedBrawlerRole" class="text-[11px] font-extrabold text-cyan-300 uppercase tracking-widest bg-cyan-950/90 px-3 py-1 rounded-full border border-cyan-500/30">
+                            어설트 산탄총
+                        </span>
+                        <h1 id="selectedBrawlerName" class="text-3xl font-black italic tracking-wider text-white drop-shadow-md mt-1.5">
+                            셰리 (Shelly)
+                        </h1>
+                        <div class="flex items-center justify-center gap-2 mt-1">
+                            <span class="text-xs font-bold text-slate-300 bg-slate-800/80 px-2.5 py-0.5 rounded border border-white/10" id="selectedBrawlerPower">
+                                파워 Lv.1
+                            </span>
+                            <span class="text-xs font-bold text-amber-300 bg-amber-950/80 px-2.5 py-0.5 rounded border border-amber-500/30" id="selectedSkinName">
+                                기본 스킨
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Left / Right Brawler Quick Switch -->
+                    <div class="flex items-center space-x-6 my-3">
+                        <button onclick="switchBrawler(-1)" class="w-12 h-12 rounded-2xl glass-panel flex items-center justify-center text-white text-xl brawl-button">
+                            <i class="fa-solid fa-chevron-left"></i>
+                        </button>
+                        
+                        <div class="relative w-48 h-48 flex items-center justify-center">
+                            <div class="absolute inset-0 bg-gradient-to-t from-cyan-500/20 to-transparent rounded-full blur-xl"></div>
+                            <div id="brawlerAvatarPreview" class="text-9xl drop-shadow-[0_12px_24px_rgba(0,0,0,0.85)] transform hover:scale-105 transition duration-200">
+                                🤠
+                            </div>
+                        </div>
+
+                        <button onclick="switchBrawler(1)" class="w-12 h-12 rounded-2xl glass-panel flex items-center justify-center text-white text-xl brawl-button">
+                            <i class="fa-solid fa-chevron-right"></i>
+                        </button>
+                    </div>
+
+                    <!-- Customization Action Buttons -->
+                    <div class="flex gap-3">
+                        <button onclick="openBrawlerSelect()" class="px-5 py-2.5 rounded-xl brawl-button brawl-button-blue font-black text-xs flex items-center gap-2">
+                            <i class="fa-solid fa-users"></i> 브롤러 변경
+                        </button>
+                        <button onclick="openSkinSelect()" class="px-5 py-2.5 rounded-xl brawl-button brawl-button-purple font-black text-xs flex items-center gap-2">
+                            <i class="fa-solid fa-shirt"></i> 스킨 / 커스텀
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Bottom Mode Selector & Start Button -->
+                <div class="flex flex-col gap-3 max-w-md mx-auto w-full">
+                    <div onclick="openModeSelect()" class="glass-panel p-3.5 rounded-2xl flex items-center justify-between cursor-pointer border border-white/20 hover:border-cyan-400/50 transition">
+                        <div class="flex items-center gap-3">
+                            <div id="modeIcon" class="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-red-600 flex items-center justify-center text-2xl text-white shadow-md">
+                                🏜️
+                            </div>
+                            <div>
+                                <div class="text-[10px] font-black text-amber-400 uppercase tracking-wider" id="modeSubtitle">솔로 서바이벌</div>
+                                <div class="text-base font-black text-white" id="modeTitle">쇼다운 (Showdown)</div>
+                            </div>
+                        </div>
+                        <div class="bg-white/10 px-3 py-1.5 rounded-lg text-xs font-bold text-slate-200 flex items-center gap-1">
+                            변경 <i class="fa-solid fa-chevron-right text-[10px]"></i>
+                        </div>
+                    </div>
+
+                    <button onclick="startBattleMatch()" class="w-full py-4 rounded-2xl brawl-button brawl-button-yellow font-black text-2xl italic tracking-wider flex items-center justify-center gap-3 shadow-2xl">
+                        <i class="fa-solid fa-play text-2xl"></i> 전투 시작
+                    </button>
+
+                    <!-- Bottom Nav -->
+                    <div class="grid grid-cols-4 gap-2 mt-1">
+                        <button onclick="openShop()" class="glass-panel py-2.5 rounded-xl flex flex-col items-center text-slate-300 hover:text-white transition brawl-button">
+                            <i class="fa-solid fa-store text-lg text-amber-400"></i>
+                            <span class="text-[11px] font-bold mt-1">상점</span>
+                        </button>
+                        <button onclick="openTrophyRoad()" class="glass-panel py-2.5 rounded-xl flex flex-col items-center text-slate-300 hover:text-white transition brawl-button">
+                            <i class="fa-solid fa-trophy text-lg text-yellow-400"></i>
+                            <span class="text-[11px] font-bold mt-1">트로피 로드</span>
+                        </button>
+                        <button onclick="openLeaderboard()" class="glass-panel py-2.5 rounded-xl flex flex-col items-center text-slate-300 hover:text-white transition brawl-button">
+                            <i class="fa-solid fa-chart-line text-lg text-cyan-400"></i>
+                            <span class="text-[11px] font-bold mt-1">랭킹</span>
+                        </button>
+                        <button onclick="openSocial()" class="glass-panel py-2.5 rounded-xl flex flex-col items-center text-slate-300 hover:text-white transition brawl-button">
+                            <i class="fa-solid fa-user-group text-lg text-emerald-400"></i>
+                            <span class="text-[11px] font-bold mt-1">소셜</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODAL: BRAWLER SELECT -->
+            <div id="brawlerModal" class="hidden pointer-events-auto absolute inset-0 bg-slate-950/95 z-50 p-4 flex flex-col pt-16">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-black italic text-white flex items-center gap-2">
+                        <i class="fa-solid fa-users text-cyan-400"></i> 브롤러 라인업
+                    </h2>
+                    <button onclick="closeModal('brawlerModal')" class="w-10 h-10 rounded-xl glass-panel text-white font-bold text-xl">✕</button>
+                </div>
+                <div id="brawlerGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 overflow-y-auto flex-1 pb-6"></div>
+            </div>
+
+            <!-- MODAL: SKIN LOCKER -->
+            <div id="skinModal" class="hidden pointer-events-auto absolute inset-0 bg-slate-950/95 z-50 p-4 flex flex-col pt-16">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-black italic text-white flex items-center gap-2">
+                        <i class="fa-solid fa-shirt text-purple-400"></i> 스킨 커스텀
+                    </h2>
+                    <button onclick="closeModal('skinModal')" class="w-10 h-10 rounded-xl glass-panel text-white font-bold text-xl">✕</button>
+                </div>
+                <div id="skinList" class="grid grid-cols-1 sm:grid-cols-3 gap-4 overflow-y-auto flex-1 pb-6"></div>
+            </div>
+
+            <!-- MODAL: GAME MODE SELECTOR -->
+            <div id="modeModal" class="hidden pointer-events-auto absolute inset-0 bg-slate-950/95 z-50 p-4 flex flex-col pt-16">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-black italic text-white flex items-center gap-2">
+                        <i class="fa-solid fa-gamepad text-amber-400"></i> 게임 모드 & 전장
+                    </h2>
+                    <button onclick="closeModal('modeModal')" class="w-10 h-10 rounded-xl glass-panel text-white font-bold text-xl">✕</button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 overflow-y-auto flex-1 pb-6">
+                    <!-- Showdown -->
+                    <div onclick="selectGameMode('SHOWDOWN')" class="glass-panel p-5 rounded-2xl border-2 border-amber-500/60 cursor-pointer hover:bg-white/5 transition flex flex-col justify-between">
+                        <div>
+                            <div class="text-4xl mb-2">🏜️</div>
+                            <span class="text-xs font-bold text-amber-400 uppercase tracking-wider">배틀로얄</span>
+                            <h3 class="text-xl font-black text-white mt-1">쇼다운 (Showdown)</h3>
+                            <p class="text-xs text-slate-300 mt-2">8인 서바이벌! 독가스 영역이 수축하며 상자를 파괴하여 파워큐브를 모으세요.</p>
+                        </div>
+                        <div class="mt-4 pt-3 border-t border-white/10 flex justify-between items-center text-xs font-bold">
+                            <span class="text-slate-400">전장: 사막 협곡</span>
+                            <span class="text-amber-400">선택</span>
+                        </div>
+                    </div>
+
+                    <!-- TDM -->
+                    <div onclick="selectGameMode('TEAM_DEATHMATCH')" class="glass-panel p-5 rounded-2xl border border-white/10 cursor-pointer hover:bg-white/5 transition flex flex-col justify-between">
+                        <div>
+                            <div class="text-4xl mb-2">🏙️</div>
+                            <span class="text-xs font-bold text-blue-400 uppercase tracking-wider">3v3 팀 데스매치</span>
+                            <h3 class="text-xl font-black text-white mt-1">팀 데스매치</h3>
+                            <p class="text-xs text-slate-300 mt-2">3대3 실시간 팀 대결! 먼저 10 처치를 달성하는 팀이 최종 승리합니다.</p>
+                        </div>
+                        <div class="mt-4 pt-3 border-t border-white/10 flex justify-between items-center text-xs font-bold">
+                            <span class="text-slate-400">전장: 네온 시티</span>
+                            <span class="text-blue-400">선택</span>
+                        </div>
+                    </div>
+
+                    <!-- Control Zone -->
+                    <div onclick="selectGameMode('CONTROL_ZONE')" class="glass-panel p-5 rounded-2xl border border-white/10 cursor-pointer hover:bg-white/5 transition flex flex-col justify-between">
+                        <div>
+                            <div class="text-4xl mb-2">💎</div>
+                            <span class="text-xs font-bold text-purple-400 uppercase tracking-wider">3v3 점령전</span>
+                            <h3 class="text-xl font-black text-white mt-1">점령전 (Zone Control)</h3>
+                            <p class="text-xs text-slate-300 mt-2">중앙 점령 구역에 머물러 게이지를 100%까지 올려 승리하세요!</p>
+                        </div>
+                        <div class="mt-4 pt-3 border-t border-white/10 flex justify-between items-center text-xs font-bold">
+                            <span class="text-slate-400">전장: 신비의 숲</span>
+                            <span class="text-purple-400">선택</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODAL: SHOP & BRAWL BOX -->
+            <div id="shopModal" class="hidden pointer-events-auto absolute inset-0 bg-slate-950/95 z-50 p-4 flex flex-col pt-16">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-black italic text-white flex items-center gap-2">
+                        <i class="fa-solid fa-store text-amber-400"></i> 브롤 상점
+                    </h2>
+                    <button onclick="closeModal('shopModal')" class="w-10 h-10 rounded-xl glass-panel text-white font-bold text-xl">✕</button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 overflow-y-auto flex-1 pb-6">
+                    <div class="glass-panel p-5 rounded-2xl border border-amber-500/40 flex flex-col justify-between items-center text-center">
+                        <div>
+                            <div class="text-7xl my-3 chest-anim">🎁</div>
+                            <h3 class="text-xl font-black text-amber-300">브롤 상자</h3>
+                            <p class="text-xs text-slate-300 mt-2">골드, 보석, 그리고 랜덤 브롤러 파워를 획득하세요!</p>
+                        </div>
+                        <button onclick="openBrawlBox()" class="w-full mt-4 py-3 rounded-xl brawl-button brawl-button-yellow font-black text-sm flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-coins"></i> 100 골드로 뽑기
+                        </button>
+                    </div>
+
+                    <div class="glass-panel p-5 rounded-2xl border border-emerald-500/40 flex flex-col justify-between items-center text-center">
+                        <div>
+                            <div class="text-7xl my-3">💰</div>
+                            <h3 class="text-xl font-black text-emerald-300">골드 주머니</h3>
+                            <p class="text-xs text-slate-300 mt-2">보석을 사용하여 골드를 충전하세요.</p>
+                        </div>
+                        <button onclick="buyCoinsWithGems()" class="w-full mt-4 py-3 rounded-xl brawl-button brawl-button-green font-black text-sm flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-gem"></i> 10 보석 -> 300 골드
+                        </button>
+                    </div>
+
+                    <div class="glass-panel p-5 rounded-2xl border border-cyan-500/40 flex flex-col justify-between items-center text-center">
+                        <div>
+                            <div class="text-7xl my-3">⚡</div>
+                            <h3 class="text-xl font-black text-cyan-300">브롤러 레벨 업</h3>
+                            <p class="text-xs text-slate-300 mt-2">선택한 브롤러의 체력과 데미지를 10% 강화합니다.</p>
+                        </div>
+                        <button onclick="upgradeBrawlerLevel()" class="w-full mt-4 py-3 rounded-xl brawl-button brawl-button-blue font-black text-sm flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-angles-up"></i> <span id="upgradeCostText">200 골드 강화</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODAL: LEADERBOARD -->
+            <div id="leaderboardModal" class="hidden pointer-events-auto absolute inset-0 bg-slate-950/95 z-50 p-4 flex flex-col pt-16">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-black italic text-white flex items-center gap-2">
+                        <i class="fa-solid fa-chart-line text-cyan-400"></i> 트로피 랭킹
+                    </h2>
+                    <button onclick="closeModal('leaderboardModal')" class="w-10 h-10 rounded-xl glass-panel text-white font-bold text-xl">✕</button>
+                </div>
+                <div class="glass-panel rounded-2xl overflow-hidden flex-1 overflow-y-auto">
+                    <div id="leaderboardList" class="divide-y divide-white/10"></div>
+                </div>
+            </div>
+
+            <!-- MODAL: SOCIAL & CLAN -->
+            <div id="socialModal" class="hidden pointer-events-auto absolute inset-0 bg-slate-950/95 z-50 p-4 flex flex-col pt-16">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-2xl font-black italic text-white flex items-center gap-2">
+                        <i class="fa-solid fa-user-group text-emerald-400"></i> 소셜 & 클랜
+                    </h2>
+                    <button onclick="closeModal('socialModal')" class="w-10 h-10 rounded-xl glass-panel text-white font-bold text-xl">✕</button>
+                </div>
+                <div class="flex-1 flex flex-col gap-4 overflow-y-auto">
+                    <div class="glass-panel p-4 rounded-2xl border border-emerald-500/30 flex justify-between items-center">
+                        <div>
+                            <div class="font-bold text-sm text-emerald-400">파티 생성</div>
+                            <div class="text-xs text-slate-300">친구와 초대 링크를 공유하세요.</div>
+                        </div>
+                        <button onclick="showCustomMessage('파티 초대 링크가 복사되었습니다!')" class="px-4 py-2 rounded-xl brawl-button brawl-button-green font-bold text-xs">
+                            초대 링크 복사
+                        </button>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="glass-panel p-4 rounded-2xl">
+                            <h3 class="font-bold text-white mb-3 text-sm flex items-center gap-2">
+                                <i class="fa-solid fa-user text-xs text-cyan-400"></i> 친구 목록
+                            </h3>
+                            <div class="space-y-2 text-xs">
+                                <div class="flex justify-between items-center bg-slate-900/80 p-2.5 rounded-xl">
+                                    <span class="font-bold text-slate-200">🤖 ProGamer_KR</span>
+                                    <span class="text-emerald-400 font-bold">온라인</span>
+                                </div>
+                                <div class="flex justify-between items-center bg-slate-900/80 p-2.5 rounded-xl">
+                                    <span class="font-bold text-slate-200">🔥 StarBrawler</span>
+                                    <span class="text-slate-500">오프라인</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="glass-panel p-4 rounded-2xl">
+                            <h3 class="font-bold text-white mb-3 text-sm flex items-center gap-2">
+                                <i class="fa-solid fa-shield text-xs text-amber-400"></i> 소속 클랜
+                            </h3>
+                            <div class="bg-slate-900/80 p-3 rounded-xl">
+                                <div class="font-black text-amber-300 text-sm">🛡️ [KOR] 전설의 브롤러들</div>
+                                <div class="text-xs text-slate-400 mt-1">클랜원: 28/30 | 총 트로피: 45,200</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- IN-GAME HUD OVERLAY -->
+            <div id="gameHud" class="hidden absolute inset-0 pointer-events-none flex flex-col justify-between p-3 z-30">
+                
+                <!-- HUD Top Match Status Bar -->
+                <div class="flex justify-between items-start">
+                    <div class="glass-panel px-4 py-2 rounded-2xl border border-white/20 flex items-center gap-4">
+                        <div id="hudMatchInfo" class="text-center">
+                            <div class="text-[10px] font-black text-amber-400 tracking-wider uppercase" id="hudModeLabel">SHOWDOWN</div>
+                            <div class="text-base font-black text-white" id="hudMainScore">생존: 8 / 8</div>
+                        </div>
+                        <div id="hudTimer" class="text-lg font-black text-cyan-300 border-l border-white/10 pl-4">
+                            02:00
+                        </div>
+                    </div>
+
+                    <!-- Right Status Badges -->
+                    <div class="flex flex-col items-end gap-2">
+                        <div id="hudPowerCubes" class="hidden glass-panel px-3 py-1 rounded-xl border border-amber-500/40 text-xs font-black text-amber-300 flex items-center gap-1.5">
+                            ⚡ 파워큐브: <span id="powerCubeCount">0</span>
+                        </div>
+                        <div id="hudZoneProgress" class="hidden glass-panel px-3 py-1 rounded-xl border border-purple-500/40 text-xs font-black text-purple-300 flex items-center gap-2">
+                            <span>블루: <b id="blueZonePct">0%</b></span>
+                            <span>|</span>
+                            <span>레드: <b id="redZonePct">0%</b></span>
+                        </div>
+                        <button onclick="surrenderMatch()" class="pointer-events-auto glass-panel px-3 py-1 rounded-xl text-xs font-bold text-red-400 hover:bg-red-950/40 border border-red-500/30">
+                            나가기
+                        </button>
+                    </div>
+                </div>
+
+                <!-- HUD Bottom Control Action Buttons -->
+                <div class="flex justify-between items-end pb-2">
+                    <div class="text-[11px] text-slate-400/90 font-bold bg-slate-950/60 px-3 py-1.5 rounded-xl border border-white/5">
+                        🕹️ 좌측 드래그/WASD: 이동 | 우측 버튼/스페이스: 공격
+                    </div>
+
+                    <div class="pointer-events-auto flex items-end gap-2.5 pr-1 pb-1">
+                        <!-- Skill Button -->
+                        <div class="relative">
+                            <button id="btnSkill" onclick="triggerBrawlerSkill()" class="w-16 h-16 rounded-full brawl-button brawl-button-blue font-black text-xl flex flex-col items-center justify-center relative">
+                                <span>💨</span>
+                                <span class="text-[8px] font-black mt-0.5">스킬</span>
+                                <div id="skillCdOverlay" class="hidden absolute inset-0 bg-slate-950/80 rounded-full flex items-center justify-center text-xs font-bold text-white">
+                                    3.0s
+                                </div>
+                            </button>
+                        </div>
+
+                        <!-- Super Button -->
+                        <div class="relative">
+                            <button id="btnSuper" onclick="triggerBrawlerSuper()" class="w-20 h-20 rounded-full brawl-button brawl-button-purple font-black text-2xl flex flex-col items-center justify-center relative">
+                                <span>⭐</span>
+                                <span class="text-[9px] font-black">궁극기</span>
+                                <div id="superDisabledOverlay" class="absolute inset-0 bg-slate-950/75 rounded-full flex items-center justify-center text-xs font-bold text-purple-300">
+                                    <span id="superPercentText">0%</span>
+                                </div>
+                            </button>
+                        </div>
+
+                        <!-- Basic Attack Button -->
+                        <button id="btnAttack" onclick="triggerBrawlerAttack()" class="w-20 h-20 rounded-full brawl-button brawl-button-yellow font-black text-2xl flex flex-col items-center justify-center shadow-2xl">
+                            <span>🎯</span>
+                            <span class="text-[9px] font-black">공격</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODAL: MATCH RESULT -->
+            <div id="resultModal" class="hidden pointer-events-auto absolute inset-0 bg-slate-950/95 z-50 p-6 flex flex-col items-center justify-center text-center">
+                <div class="relative mb-6">
+                    <div id="resultGlow" class="absolute w-64 h-64 bg-amber-500/20 rounded-full blur-3xl -z-10"></div>
+                    <div id="resultEmoji" class="text-8xl animate-bounce">🏆</div>
+                </div>
+
+                <h1 id="resultTitle" class="text-4xl font-black italic tracking-wide text-amber-300 drop-shadow-lg">
+                    승 리 !
+                </h1>
+                <p id="resultSubtitle" class="text-sm font-bold text-slate-300 mt-1 mb-6">
+                    1위 달성! 전장을 지배했습니다.
+                </p>
+
+                <div class="glass-panel p-5 rounded-2xl w-full max-w-sm border border-white/10 space-y-3 mb-6">
+                    <div class="flex justify-between items-center text-sm font-bold">
+                        <span class="text-slate-400 flex items-center gap-1.5"><i class="fa-solid fa-trophy text-amber-400"></i> 트로피</span>
+                        <span id="resTrophies" class="text-amber-300">+10</span>
+                    </div>
+                    <div class="flex justify-between items-center text-sm font-bold">
+                        <span class="text-slate-400 flex items-center gap-1.5"><i class="fa-solid fa-coins text-yellow-400"></i> 골드 보상</span>
+                        <span id="resCoins" class="text-yellow-300">+60</span>
+                    </div>
+                    <div class="flex justify-between items-center text-sm font-bold">
+                        <span class="text-slate-400 flex items-center gap-1.5"><i class="fa-solid fa-star text-cyan-400"></i> 경험치</span>
+                        <span id="resExp" class="text-cyan-300">+120 EXP</span>
+                    </div>
+                </div>
+
+                <button onclick="returnToMainMenu()" class="w-full max-w-sm py-4 rounded-2xl brawl-button brawl-button-yellow font-black text-xl italic tracking-wider">
+                    확 인
+                </button>
+            </div>
+
+            <!-- Toast Alert Box -->
+            <div id="toastBox" class="hidden pointer-events-none fixed bottom-12 left-1/2 transform -translate-x-1/2 bg-slate-900/90 text-white border border-cyan-500/40 px-6 py-3 rounded-2xl text-xs font-black shadow-2xl z-50">
+                알림 메시지
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        /* Web Audio Sound Synthesizer */
+        class AudioFxEngine {
+            constructor() {
+                this.ctx = null;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+
+            playTone(freq, type, duration, vol = 0.1) {
+                if (!this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                    gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + duration);
+                } catch (e) {}
+            }
+
+            shoot() { this.playTone(380, 'square', 0.08, 0.08); }
+            hit() { this.playTone(140, 'sawtooth', 0.1, 0.1); }
+            super() {
+                this.playTone(550, 'sine', 0.15, 0.12);
+                setTimeout(() => this.playTone(850, 'triangle', 0.25, 0.12), 80);
+            }
+            powerup() {
+                this.playTone(520, 'sine', 0.08, 0.1);
+                setTimeout(() => this.playTone(660, 'sine', 0.08, 0.1), 60);
+                setTimeout(() => this.playTone(780, 'sine', 0.15, 0.1), 120);
+            }
+            explode() { this.playTone(70, 'sawtooth', 0.35, 0.2); }
+        }
+
+        const audio = new AudioFxEngine();
+
+        function showCustomMessage(msg) {
+            const t = document.getElementById('toastBox');
+            t.innerText = msg;
+            t.classList.remove('hidden');
+            setTimeout(() => t.classList.add('hidden'), 2000);
+        }
+
+        /* Detailed Brawler Catalog */
+        const BRAWLER_CATALOG = [
+            {
+                id: 'shelly',
+                name: '셰리 (Shelly)',
+                role: '어설트 산탄총',
+                emoji: '🤠',
+                baseHp: 3800,
+                speed: 3.3,
+                attackDamage: 320,
+                attackRange: 220,
+                skillName: '전방 대시',
+                superName: '슈퍼 쉘 (넉백 탄)',
+                color: '#eab308',
+                skins: [
+                    { id: 'default', name: '기본 스킨', color: '#eab308', price: 0 },
+                    { id: 'golden', name: '골든 셰리', color: '#facc15', price: 300 },
+                    { id: 'cyber', name: '네온 사이버', color: '#06b6d4', price: 500 }
+                ]
+            },
+            {
+                id: 'colt',
+                name: '콜트 (Colt)',
+                role: '원거리 저격수',
+                emoji: '🤖',
+                baseHp: 2800,
+                speed: 3.6,
+                attackDamage: 420,
+                attackRange: 340,
+                skillName: '이동 속도 버프',
+                superName: '불렛 스톰 (연사 관통탄)',
+                color: '#3b82f6',
+                skins: [
+                    { id: 'default', name: '기본 스킨', color: '#3b82f6', price: 0 },
+                    { id: 'agent', name: '다크 에이전트', color: '#1e293b', price: 350 }
+                ]
+            },
+            {
+                id: 'el_primo',
+                name: '프리모 (El Primo)',
+                role: '헤비급 탱커',
+                emoji: '🐯',
+                baseHp: 6200,
+                speed: 3.4,
+                attackDamage: 550,
+                attackRange: 100,
+                skillName: '포효 보호막',
+                superName: '플라잉 점프 스매시',
+                color: '#ef4444',
+                skins: [
+                    { id: 'default', name: '기본 스킨', color: '#ef4444', price: 0 },
+                    { id: 'champion', name: '챔피언 골드', color: '#f59e0b', price: 400 }
+                ]
+            },
+            {
+                id: 'spike',
+                name: '스파이크 (Spike)',
+                role: '마법사 광역 제어',
+                emoji: '🌵',
+                baseHp: 2500,
+                speed: 3.1,
+                attackDamage: 380,
+                attackRange: 260,
+                skillName: '순간 이동',
+                superName: '가시 선인장 장판',
+                color: '#10b981',
+                skins: [
+                    { id: 'default', name: '기본 스킨', color: '#10b981', price: 0 },
+                    { id: 'pink', name: '사쿠라 핑크', color: '#ec4899', price: 450 }
+                ]
+            },
+            {
+                id: 'mecha_8bit',
+                name: '메카 8-BIT',
+                role: '로봇 중갑 중화기',
+                emoji: '👾',
+                baseHp: 4800,
+                speed: 2.7,
+                attackDamage: 480,
+                attackRange: 320,
+                skillName: '화력 강화 터렛',
+                superName: '메가 레이저 포',
+                color: '#8b5cf6',
+                skins: [
+                    { id: 'default', name: '기본 스킨', color: '#8b5cf6', price: 0 },
+                    { id: 'retro', name: '레트로 레드', color: '#dc2626', price: 500 }
+                ]
+            },
+            {
+                id: 'crow',
+                name: '크로우 (Crow)',
+                role: '암살자 독 단검',
+                emoji: '🦅',
+                baseHp: 2600,
+                speed: 4.0,
+                attackDamage: 340,
+                attackRange: 280,
+                skillName: '그림자 도약',
+                superName: '독 단검 폭풍 회전',
+                color: '#64748b',
+                skins: [
+                    { id: 'default', name: '기본 스킨', color: '#64748b', price: 0 },
+                    { id: 'mecha_crow', name: '메카 크로우', color: '#0ea5e9', price: 600 }
+                ]
+            }
+        ];
+
+        /* Game Persistent State */
+        const state = {
+            trophies: parseInt(localStorage.getItem('bl_trophies') || '0'),
+            coins: parseInt(localStorage.getItem('bl_coins') || '500'),
+            gems: parseInt(localStorage.getItem('bl_gems') || '20'),
+            brawlerLevels: JSON.parse(localStorage.getItem('bl_levels') || '{"shelly":1,"colt":1,"el_primo":1,"spike":1,"mecha_8bit":1,"crow":1}'),
+            selectedBrawlerIdx: 0,
+            selectedSkinIdx: 0,
+            selectedMode: 'SHOWDOWN', // SHOWDOWN, TEAM_DEATHMATCH, CONTROL_ZONE
+            inMatch: false,
+            matchTime: 120,
+            screenShake: 0
+        };
+
+        function saveProgress() {
+            localStorage.setItem('bl_trophies', state.trophies);
+            localStorage.setItem('bl_coins', state.coins);
+            localStorage.setItem('bl_gems', state.gems);
+            localStorage.setItem('bl_levels', JSON.stringify(state.brawlerLevels));
+            updateTopBarUI();
+        }
+
+        function updateTopBarUI() {
+            document.getElementById('trophyCount').innerText = state.trophies;
+            document.getElementById('coinCount').innerText = state.coins;
+            document.getElementById('gemCount').innerText = state.gems;
+        }
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        /* Virtual Joystick Logic */
+        const joystick = {
+            active: false,
+            touchId: null,
+            startX: 0, startY: 0,
+            currX: 0, currY: 0,
+            dx: 0, dy: 0,
+            maxDist: 50
+        };
+
+        const keys = {};
+        window.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+            if (e.key === ' ') triggerBrawlerAttack();
+            if (e.key.toLowerCase() === 'e') triggerBrawlerSkill();
+            if (e.key.toLowerCase() === 'q') triggerBrawlerSuper();
+        });
+        window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+
+        const jBase = document.getElementById('joystickBase');
+        const jThumb = document.getElementById('joystickThumb');
+
+        window.addEventListener('touchstart', (e) => {
+            audio.init();
+            if (!state.inMatch) return;
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                if (touch.clientX < window.innerWidth / 2 && !joystick.active) {
+                    joystick.active = true;
+                    joystick.touchId = touch.identifier;
+                    joystick.startX = touch.clientX;
+                    joystick.startY = touch.clientY;
+                    joystick.dx = 0; joystick.dy = 0;
+
+                    jBase.style.display = 'block';
+                    jBase.style.left = `${touch.clientX}px`;
+                    jBase.style.top = `${touch.clientY}px`;
+                    jThumb.style.transform = `translate(-50%, -50%)`;
+                }
+            }
+        });
+
+        window.addEventListener('touchmove', (e) => {
+            if (!joystick.active) return;
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                if (touch.identifier === joystick.touchId) {
+                    let diffX = touch.clientX - joystick.startX;
+                    let diffY = touch.clientY - joystick.startY;
+                    let dist = Math.hypot(diffX, diffY);
+
+                    if (dist > joystick.maxDist) {
+                        diffX = (diffX / dist) * joystick.maxDist;
+                        diffY = (diffY / dist) * joystick.maxDist;
+                    }
+
+                    joystick.dx = diffX / joystick.maxDist;
+                    joystick.dy = diffY / joystick.maxDist;
+
+                    jThumb.style.transform = `translate(calc(-50% + ${diffX}px), calc(-50% + ${diffY}px))`;
+                }
+            }
+        });
+
+        const resetJoystick = (e) => {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                if (e.changedTouches[i].identifier === joystick.touchId) {
+                    joystick.active = false;
+                    joystick.touchId = null;
+                    joystick.dx = 0; joystick.dy = 0;
+                    jBase.style.display = 'none';
+                }
+            }
+        };
+        window.addEventListener('touchend', resetJoystick);
+        window.addEventListener('touchcancel', resetJoystick);
+
+        /* Base Entity Hierarchy */
+        class Entity {
+            constructor(x, y, radius) {
+                this.x = x; this.y = y;
+                this.radius = radius;
+                this.vx = 0; this.vy = 0;
+                this.markedForDeletion = false;
+            }
+        }
+
+        class BrawlerCharacter extends Entity {
+            constructor(x, y, brawlerData, skinColor, level = 1, isAI = false, team = 'red') {
+                super(x, y, 22);
+                this.data = brawlerData;
+                this.level = level;
+                this.isAI = isAI;
+                this.team = team;
+                
+                let lvlMult = 1 + (level - 1) * 0.1;
+                this.maxHp = Math.round(brawlerData.baseHp * lvlMult);
+                this.hp = this.maxHp;
+                this.speed = brawlerData.speed;
+                this.color = skinColor || brawlerData.color;
+                this.facingAngle = 0;
+                
+                this.ammo = 3;
+                this.maxAmmo = 3;
+                this.reloadTimer = 0;
+                this.superGauge = 0;
+                this.skillCd = 0;
+                this.powerCubes = 0;
+                
+                this.inBush = false;
+                this.knockbackVx = 0;
+                this.knockbackVy = 0;
+                this.respawnTimer = 0;
+            }
+
+            update(mapWidth, mapHeight, obstacles) {
+                if (this.hp <= 0) {
+                    if (state.selectedMode !== 'SHOWDOWN' && this.respawnTimer > 0) {
+                        this.respawnTimer -= 1 / 60;
+                        if (this.respawnTimer <= 0) {
+                            // Respawn
+                            this.hp = this.maxHp;
+                            this.x = this.team === 'blue' ? 200 : mapWidth - 200;
+                            this.y = mapHeight / 2 + (Math.random() - 0.5) * 200;
+                            this.markedForDeletion = false;
+                            addFloatingText(this.x, this.y - 30, '부활!', '#38bdf8');
+                        }
+                    }
+                    return;
+                }
+
+                // Ammo Reload
+                if (this.ammo < this.maxAmmo) {
+                    this.reloadTimer += 1 / 60;
+                    if (this.reloadTimer >= 1.3) {
+                        this.ammo++;
+                        this.reloadTimer = 0;
+                    }
+                }
+
+                if (this.skillCd > 0) this.skillCd -= 1 / 60;
+
+                // Friction / Knockback
+                this.x += this.knockbackVx;
+                this.y += this.knockbackVy;
+                this.knockbackVx *= 0.85;
+                this.knockbackVy *= 0.85;
+
+                let nextX = this.x + this.vx;
+                let nextY = this.y + this.vy;
+
+                // Wall & Box & Water Collision
+                for (let obs of obstacles) {
+                    if (obs.type === 'wall' || obs.type === 'water' || (obs.type === 'box' && obs.hp > 0)) {
+                        let closestX = Math.max(obs.x, Math.min(nextX, obs.x + obs.w));
+                        let closestY = Math.max(obs.y, Math.min(nextY, obs.y + obs.h));
+                        let dX = nextX - closestX;
+                        let dY = nextY - closestY;
+                        let dist = Math.hypot(dX, dY);
+                        if (dist < this.radius) {
+                            if (dist > 0) {
+                                nextX = closestX + (dX / dist) * this.radius;
+                                nextY = closestY + (dY / dist) * this.radius;
+                            }
+                        }
+                    } else if (obs.type === 'spike') {
+                        // Spike hazard damage
+                        if (nextX >= obs.x && nextX <= obs.x + obs.w && nextY >= obs.y && nextY <= obs.y + obs.h) {
+                            this.takeDamage(1, null, false);
+                        }
+                    }
+                }
+
+                // Map Boundaries
+                this.x = Math.max(this.radius, Math.min(mapWidth - this.radius, nextX));
+                this.y = Math.max(this.radius, Math.min(mapHeight - this.radius, nextY));
+
+                // Stealth Bush Check
+                this.inBush = false;
+                for (let obs of obstacles) {
+                    if (obs.type === 'bush') {
+                        if (this.x >= obs.x && this.x <= obs.x + obs.w && this.y >= obs.y && this.y <= obs.y + obs.h) {
+                            this.inBush = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            takeDamage(dmg, attacker, playSfx = true) {
+                if (this.hp <= 0) return;
+                this.hp -= dmg;
+                if (playSfx) audio.hit();
+                addFloatingText(this.x, this.y - 30, `-${Math.round(dmg)}`, '#ef4444');
+
+                if (attacker && attacker.superGauge !== undefined) {
+                    attacker.superGauge = Math.min(100, attacker.superGauge + 18);
+                }
+
+                if (this.hp <= 0) {
+                    this.hp = 0;
+                    createExplosionParticles(this.x, this.y, this.color);
+
+                    if (state.selectedMode === 'TEAM_DEATHMATCH') {
+                        this.respawnTimer = 3.0; // 3 sec respawn
+                        if (attacker) {
+                            if (attacker.team === 'blue') matchScores.blue++;
+                            else matchScores.red++;
+                        }
+                    } else if (state.selectedMode === 'SHOWDOWN') {
+                        this.markedForDeletion = true;
+                        spawnPowerCube(this.x, this.y);
+                    } else {
+                        this.respawnTimer = 3.0;
+                    }
+                }
+            }
+        }
+
+        class Projectile extends Entity {
+            constructor(x, y, targetX, targetY, speed, damage, owner, color = '#facc15', size = 6, isSuper = false) {
+                super(x, y, size);
+                let angle = Math.atan2(targetY - y, targetX - x);
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+                this.damage = damage;
+                this.owner = owner;
+                this.color = color;
+                this.isSuper = isSuper;
+                this.rangeTimer = 0;
+                this.maxLife = 0.85;
+            }
+
+            update(obstacles, entities) {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.rangeTimer += 1 / 60;
+
+                if (this.rangeTimer >= this.maxLife) {
+                    this.markedForDeletion = true;
+                    return;
+                }
+
+                // Obstacle Hit
+                for (let obs of obstacles) {
+                    if (obs.type === 'wall' || (obs.type === 'box' && obs.hp > 0)) {
+                        if (this.x >= obs.x && this.x <= obs.x + obs.w && this.y >= obs.y && this.y <= obs.y + obs.h) {
+                            if (obs.type === 'box') obs.takeDamage(this.damage);
+                            this.markedForDeletion = true;
+                            createSparks(this.x, this.y, this.color);
+                            return;
+                        }
+                    }
+                }
+
+                // Entity Hit
+                for (let ent of entities) {
+                    if (ent === this.owner || ent.hp <= 0) continue;
+                    if (state.selectedMode !== 'SHOWDOWN' && ent.team === this.owner.team) continue;
+
+                    let dist = Math.hypot(this.x - ent.x, this.y - ent.y);
+                    if (dist < this.radius + ent.radius) {
+                        ent.takeDamage(this.damage, this.owner);
+                        if (this.isSuper) {
+                            ent.knockbackVx = this.vx * 0.6;
+                            ent.knockbackVy = this.vy * 0.6;
+                        }
+                        this.markedForDeletion = true;
+                        createSparks(this.x, this.y, this.color);
+                        break;
+                    }
+                }
+            }
+
+            draw(camera) {
+                ctx.save();
+                ctx.fillStyle = this.color;
+                ctx.shadowColor = this.color;
+                ctx.shadowBlur = 10;
+                ctx.beginPath();
+                ctx.arc(this.x - camera.x, this.y - camera.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        class PowerBox {
+            constructor(x, y) {
+                this.x = x; this.y = y;
+                this.w = 46; this.h = 46;
+                this.type = 'box';
+                this.hp = 1400; this.maxHp = 1400;
+            }
+
+            takeDamage(dmg) {
+                this.hp -= dmg;
+                addFloatingText(this.x + 23, this.y, `-${Math.round(dmg)}`, '#facc15');
+                if (this.hp <= 0) {
+                    spawnPowerCube(this.x + 23, this.y + 23);
+                }
+            }
+
+            draw(camera) {
+                if (this.hp <= 0) return;
+                let rx = this.x - camera.x;
+                let ry = this.y - camera.y;
+                ctx.save();
+                ctx.fillStyle = '#78350f';
+                ctx.strokeStyle = '#fef08a';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.roundRect(rx, ry, this.w, this.h, 8);
+                ctx.fill(); ctx.stroke();
+
+                ctx.font = '22px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('📦', rx + 23, ry + 23);
+
+                ctx.fillStyle = '#000';
+                ctx.fillRect(rx, ry - 7, this.w, 4);
+                ctx.fillStyle = '#22c55e';
+                ctx.fillRect(rx, ry - 7, (this.hp / this.maxHp) * this.w, 4);
+                ctx.restore();
+            }
+        }
+
+        /* Particles & Floating Texts */
+        let particles = [];
+        let floatingTexts = [];
+        let powerCubesOnMap = [];
+
+        function createSparks(x, y, color) {
+            for (let i = 0; i < 5; i++) {
+                particles.push({
+                    x, y,
+                    vx: (Math.random() - 0.5) * 7,
+                    vy: (Math.random() - 0.5) * 7,
+                    color, life: 0.25
+                });
+            }
+        }
+
+        function createExplosionParticles(x, y, color) {
+            state.screenShake = 12;
+            audio.explode();
+            for (let i = 0; i < 22; i++) {
+                particles.push({
+                    x, y,
+                    vx: (Math.random() - 0.5) * 14,
+                    vy: (Math.random() - 0.5) * 14,
+                    color, life: 0.55
+                });
+            }
+        }
+
+        function addFloatingText(x, y, text, color) {
+            floatingTexts.push({ x, y, text, color, life: 0.8, vy: -1.6 });
+        }
+
+        function spawnPowerCube(x, y) {
+            powerCubesOnMap.push({ x, y, radius: 14 });
+        }
+
+        /* Match Manager Variables */
+        let player = null;
+        let brawlersInMatch = [];
+        let projectiles = [];
+        let mapObstacles = [];
+        let camera = { x: 0, y: 0 };
+        const MAP_SIZE = { width: 1600, height: 1600 };
+        let poisonZoneRadius = 900;
+        let matchTimerInterval = null;
+        let matchScores = { blue: 0, red: 0 };
+        let controlZoneScore = { blue: 0, red: 0 };
+
+        function initMap() {
+            mapObstacles = [];
+            powerCubesOnMap = [];
+            projectiles = [];
+            particles = [];
+            floatingTexts = [];
+            poisonZoneRadius = 900;
+
+            // Generate Walls, Water, Spikes, Bushes
+            for (let i = 0; i < 22; i++) {
+                mapObstacles.push({
+                    x: Math.random() * (MAP_SIZE.width - 300) + 150,
+                    y: Math.random() * (MAP_SIZE.height - 300) + 150,
+                    w: 80, h: 80, type: 'wall'
+                });
+            }
+
+            for (let i = 0; i < 6; i++) {
+                mapObstacles.push({
+                    x: Math.random() * (MAP_SIZE.width - 400) + 200,
+                    y: Math.random() * (MAP_SIZE.height - 400) + 200,
+                    w: 120, h: 80, type: 'water'
+                });
+            }
+
+            for (let i = 0; i < 8; i++) {
+                mapObstacles.push({
+                    x: Math.random() * (MAP_SIZE.width - 300) + 150,
+                    y: Math.random() * (MAP_SIZE.height - 300) + 150,
+                    w: 60, h: 60, type: 'spike'
+                });
+            }
+
+            for (let i = 0; i < 18; i++) {
+                mapObstacles.push({
+                    x: Math.random() * (MAP_SIZE.width - 300) + 150,
+                    y: Math.random() * (MAP_SIZE.height - 300) + 150,
+                    w: 130, h: 130, type: 'bush'
+                });
+            }
+
+            if (state.selectedMode === 'SHOWDOWN') {
+                for (let i = 0; i < 12; i++) {
+                    mapObstacles.push(new PowerBox(
+                        Math.random() * (MAP_SIZE.width - 400) + 200,
+                        Math.random() * (MAP_SIZE.height - 400) + 200
+                    ));
+                }
+            }
+        }
+
+        function startBattleMatch() {
+            audio.init();
+            initMap();
+
+            const bData = BRAWLER_CATALOG[state.selectedBrawlerIdx];
+            const skin = bData.skins[state.selectedSkinIdx];
+            const pLvl = state.brawlerLevels[bData.id] || 1;
+
+            // Player Setup
+            player = new BrawlerCharacter(MAP_SIZE.width / 2, MAP_SIZE.height / 2 + 200, bData, skin.color, pLvl, false, 'blue');
+            brawlersInMatch = [player];
+
+            // AI Match Setup
+            const totalBots = state.selectedMode === 'SHOWDOWN' ? 7 : 5;
+            for (let i = 0; i < totalBots; i++) {
+                let rBrawler = BRAWLER_CATALOG[Math.floor(Math.random() * BRAWLER_CATALOG.length)];
+                let angle = (i / totalBots) * Math.PI * 2;
+                let botX = MAP_SIZE.width / 2 + Math.cos(angle) * 550;
+                let botY = MAP_SIZE.height / 2 + Math.sin(angle) * 550;
+                let team = (i % 2 === 0) ? 'red' : 'blue';
+                if (state.selectedMode === 'SHOWDOWN') team = 'red';
+
+                let bot = new BrawlerCharacter(botX, botY, rBrawler, rBrawler.color, 1, true, team);
+                brawlersInMatch.push(bot);
+            }
+
+            state.inMatch = true;
+            state.matchTime = 120;
+            matchScores = { blue: 0, red: 0 };
+            controlZoneScore = { blue: 0, red: 0 };
+
+            document.getElementById('mainMenuScreen').classList.add('hidden');
+            document.getElementById('gameHud').classList.remove('hidden');
+
+            const modeLabels = {
+                SHOWDOWN: '솔로 쇼다운',
+                TEAM_DEATHMATCH: '팀 데스매치 (3v3)',
+                CONTROL_ZONE: '점령전 (3v3)'
+            };
+            document.getElementById('hudModeLabel').innerText = modeLabels[state.selectedMode];
+
+            if (matchTimerInterval) clearInterval(matchTimerInterval);
+            matchTimerInterval = setInterval(() => {
+                if (!state.inMatch) return;
+                state.matchTime--;
+                let m = Math.floor(state.matchTime / 60).toString().padStart(2, '0');
+                let s = (state.matchTime % 60).toString().padStart(2, '0');
+                document.getElementById('hudTimer').innerText = `${m}:${s}`;
+
+                // Showdown Shrinking Fog
+                if (state.selectedMode === 'SHOWDOWN') {
+                    poisonZoneRadius = Math.max(140, poisonZoneRadius - 3.8);
+                }
+
+                // Control Zone Occupation Logic
+                if (state.selectedMode === 'CONTROL_ZONE') {
+                    let zoneCenter = { x: MAP_SIZE.width / 2, y: MAP_SIZE.height / 2, r: 160 };
+                    let blueInZone = 0, redInZone = 0;
+                    brawlersInMatch.forEach(b => {
+                        if (b.hp > 0 && Math.hypot(b.x - zoneCenter.x, b.y - zoneCenter.y) < zoneCenter.r) {
+                            if (b.team === 'blue') blueInZone++;
+                            else redInZone++;
+                        }
+                    });
+
+                    if (blueInZone > redInZone) controlZoneScore.blue = Math.min(100, controlZoneScore.blue + 1);
+                    else if (redInZone > blueInZone) controlZoneScore.red = Math.min(100, controlZoneScore.red + 1);
+
+                    if (controlZoneScore.blue >= 100) endMatch(true, '블루팀 거점 100% 점령 승리!');
+                    if (controlZoneScore.red >= 100) endMatch(false, '레드팀 거점 100% 점령 패배!');
+                }
+
+                // Match End by Time
+                if (state.matchTime <= 0) {
+                    if (state.selectedMode === 'TEAM_DEATHMATCH') {
+                        let win = matchScores.blue >= matchScores.red;
+                        endMatch(win, win ? '팀 데스매치 최고 점수 승리!' : '팀 데스매치 패배');
+                    } else if (state.selectedMode === 'CONTROL_ZONE') {
+                        let win = controlZoneScore.blue >= controlZoneScore.red;
+                        endMatch(win, win ? '점령전 우세 승리!' : '점령전 패배');
+                    } else {
+                        endMatch(false, '타임 아웃 패배');
+                    }
+                }
+            }, 1000);
+        }
+
+        function getClosestTarget(attacker) {
+            let closest = null, minDist = Infinity;
+            for (let b of brawlersInMatch) {
+                if (b === attacker || b.hp <= 0) continue;
+                if (state.selectedMode !== 'SHOWDOWN' && b.team === attacker.team) continue;
+                let dist = Math.hypot(b.x - attacker.x, b.y - attacker.y);
+                if (dist < minDist) {
+                    minDist = dist;
+                    closest = b;
+                }
+            }
+            return closest;
+        }
+
+        function triggerBrawlerAttack(character = player) {
+            if (!character || character.hp <= 0 || character.ammo < 1) return;
+            character.ammo--;
+            audio.shoot();
+
+            let target = getClosestTarget(character);
+            let tx = character.x + Math.cos(character.facingAngle) * 200;
+            let ty = character.y + Math.sin(character.facingAngle) * 200;
+
+            if (target) {
+                tx = target.x; ty = target.y;
+                character.facingAngle = Math.atan2(ty - character.y, tx - character.x);
+            }
+
+            let mult = 1 + (character.powerCubes * 0.1);
+            let dmg = character.data.attackDamage * mult;
+
+            if (character.data.id === 'shelly') {
+                for (let i = -2; i <= 2; i++) {
+                    let a = character.facingAngle + (i * 0.12);
+                    projectiles.push(new Projectile(character.x, character.y, character.x + Math.cos(a) * character.data.attackRange, character.y + Math.sin(a) * character.data.attackRange, 11, dmg * 0.55, character, character.color, 5));
+                }
+            } else if (character.data.id === 'colt') {
+                for (let i = 0; i < 3; i++) {
+                    setTimeout(() => {
+                        if (character.hp > 0) projectiles.push(new Projectile(character.x, character.y, tx, ty, 15, dmg, character, '#60a5fa', 6));
+                    }, i * 65);
+                }
+            } else if (character.data.id === 'el_primo') {
+                projectiles.push(new Projectile(character.x, character.y, tx, ty, 8.5, dmg * 1.5, character, '#f87171', 20));
+            } else if (character.data.id === 'spike') {
+                for (let i = 0; i < 6; i++) {
+                    let a = (i / 6) * Math.PI * 2;
+                    projectiles.push(new Projectile(character.x, character.y, character.x + Math.cos(a) * 160, character.y + Math.sin(a) * 160, 9, dmg * 0.65, character, '#34d399', 6));
+                }
+            } else if (character.data.id === 'mecha_8bit') {
+                projectiles.push(new Projectile(character.x, character.y, tx, ty, 16, dmg * 1.2, character, '#c084fc', 8));
+            } else { // Crow
+                for (let i = -1; i <= 1; i++) {
+                    let a = character.facingAngle + (i * 0.15);
+                    projectiles.push(new Projectile(character.x, character.y, character.x + Math.cos(a) * 260, character.y + Math.sin(a) * 260, 13, dmg * 0.7, character, '#94a3b8', 6));
+                }
+            }
+        }
+
+        function triggerBrawlerSkill(character = player) {
+            if (!character || character.skillCd > 0) return;
+            character.skillCd = 4.0;
+            audio.powerup();
+
+            character.knockbackVx = Math.cos(character.facingAngle) * 16;
+            character.knockbackVy = Math.sin(character.facingAngle) * 16;
+            addFloatingText(character.x, character.y - 30, '스킬 발동!', '#38bdf8');
+        }
+
+        function triggerBrawlerSuper(character = player) {
+            if (!character || character.superGauge < 100) return;
+            character.superGauge = 0;
+            audio.super();
+            state.screenShake = 10;
+
+            let target = getClosestTarget(character);
+            let tx = target ? target.x : character.x + Math.cos(character.facingAngle) * 300;
+            let ty = target ? target.y : character.y + Math.sin(character.facingAngle) * 300;
+
+            for (let i = -3; i <= 3; i++) {
+                let a = character.facingAngle + (i * 0.14);
+                projectiles.push(new Projectile(character.x, character.y, character.x + Math.cos(a) * 380, character.y + Math.sin(a) * 380, 16, character.data.attackDamage * 2.2, character, '#e879f9', 11, true));
+            }
+            addFloatingText(character.x, character.y - 40, 'SUPER!!', '#a855f7');
+        }
+
+        function updateAIBots() {
+            for (let b of brawlersInMatch) {
+                if (!b.isAI || b.hp <= 0) continue;
+
+                let target = getClosestTarget(b);
+                if (target) {
+                    let dist = Math.hypot(target.x - b.x, target.y - b.y);
+                    let angle = Math.atan2(target.y - b.y, target.x - b.x);
+                    b.facingAngle = angle;
+
+                    if (dist > 140) {
+                        b.vx = Math.cos(angle) * b.speed * 0.8;
+                        b.vy = Math.sin(angle) * b.speed * 0.8;
+                    } else {
+                        b.vx = 0; b.vy = 0;
+                    }
+
+                    if (dist < b.data.attackRange && Math.random() < 0.03) triggerBrawlerAttack(b);
+                    if (b.superGauge >= 100 && dist < 260) triggerBrawlerSuper(b);
+                }
+            }
+        }
+
+        function update() {
+            if (!state.inMatch) return;
+
+            if (state.screenShake > 0) state.screenShake *= 0.88;
+
+            // Player Inputs
+            player.vx = 0; player.vy = 0;
+            if (joystick.active) {
+                player.vx = joystick.dx * player.speed;
+                player.vy = joystick.dy * player.speed;
+                player.facingAngle = Math.atan2(joystick.dy, joystick.dx);
+            } else {
+                if (keys['w'] || keys['arrowup']) player.vy = -player.speed;
+                if (keys['s'] || keys['arrowdown']) player.vy = player.speed;
+                if (keys['a'] || keys['arrowleft']) player.vx = -player.speed;
+                if (keys['d'] || keys['arrowright']) player.vx = player.speed;
+                if (player.vx !== 0 || player.vy !== 0) {
+                    player.facingAngle = Math.atan2(player.vy, player.vx);
+                }
+            }
+
+            camera.x = player.x - canvas.width / 2;
+            camera.y = player.y - canvas.height / 2;
+
+            brawlersInMatch.forEach(b => b.update(MAP_SIZE.width, MAP_SIZE.height, mapObstacles));
+            updateAIBots();
+
+            projectiles.forEach(p => p.update(mapObstacles, brawlersInMatch));
+            projectiles = projectiles.filter(p => !p.markedForDeletion);
+
+            // Poison Gas Damage (Showdown)
+            if (state.selectedMode === 'SHOWDOWN') {
+                let cx = MAP_SIZE.width / 2, cy = MAP_SIZE.height / 2;
+                for (let b of brawlersInMatch) {
+                    if (b.hp > 0 && Math.hypot(b.x - cx, b.y - cy) > poisonZoneRadius) {
+                        b.takeDamage(12, null, false);
+                        addFloatingText(b.x, b.y - 20, '독가스!', '#a855f7');
+                    }
+                }
+            }
+
+            // Power Cubes Pickup
+            for (let i = powerCubesOnMap.length - 1; i >= 0; i--) {
+                let cube = powerCubesOnMap[i];
+                for (let b of brawlersInMatch) {
+                    if (b.hp > 0 && Math.hypot(b.x - cube.x, b.y - cube.y) < b.radius + cube.radius) {
+                        b.powerCubes++;
+                        b.maxHp += 200;
+                        b.hp += 200;
+                        audio.powerup();
+                        addFloatingText(b.x, b.y - 30, '+1 파워큐브!', '#facc15');
+                        powerCubesOnMap.splice(i, 1);
+                        break;
+                    }
+                }
+            }
+
+            // Showdown Win/Lose
+            if (state.selectedMode === 'SHOWDOWN') {
+                let alive = brawlersInMatch.filter(b => b.hp > 0);
+                if (player.hp <= 0) {
+                    endMatch(false, '전사 하셨습니다!');
+                } else if (alive.length === 1 && alive[0] === player) {
+                    endMatch(true, '1위 최종 승리!');
+                }
+            }
+
+            // HUD UI Sync
+            if (player) {
+                document.getElementById('superPercentText').innerText = `${Math.round(player.superGauge)}%`;
+                const sOverlay = document.getElementById('superDisabledOverlay');
+                const btnSuper = document.getElementById('btnSuper');
+                if (player.superGauge >= 100) {
+                    sOverlay.classList.add('hidden');
+                    btnSuper.classList.add('super-ready');
+                } else {
+                    sOverlay.classList.remove('hidden');
+                    btnSuper.classList.remove('super-ready');
+                }
+
+                const skOverlay = document.getElementById('skillCdOverlay');
+                if (player.skillCd > 0) {
+                    skOverlay.classList.remove('hidden');
+                    skOverlay.innerText = player.skillCd.toFixed(1) + 's';
+                } else {
+                    skOverlay.classList.add('hidden');
+                }
+
+                document.getElementById('hudPowerCubes').classList.toggle('hidden', state.selectedMode !== 'SHOWDOWN');
+                document.getElementById('powerCubeCount').innerText = player.powerCubes;
+
+                document.getElementById('hudZoneProgress').classList.toggle('hidden', state.selectedMode !== 'CONTROL_ZONE');
+                document.getElementById('blueZonePct').innerText = `${controlZoneScore.blue}%`;
+                document.getElementById('redZonePct').innerText = `${controlZoneScore.red}%`;
+
+                if (state.selectedMode === 'SHOWDOWN') {
+                    let aliveCount = brawlersInMatch.filter(b => b.hp > 0).length;
+                    document.getElementById('hudMainScore').innerText = `생존: ${aliveCount} / 8`;
+                } else if (state.selectedMode === 'TEAM_DEATHMATCH') {
+                    document.getElementById('hudMainScore').innerText = `블루 ${matchScores.blue} : ${matchScores.red} 레드`;
+                } else {
+                    document.getElementById('hudMainScore').innerText = `거점 점령전`;
+                }
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.save();
+
+            if (state.screenShake > 0) {
+                ctx.translate((Math.random() - 0.5) * state.screenShake, (Math.random() - 0.5) * state.screenShake);
+            }
+
+            // Floor Grid
+            ctx.strokeStyle = 'rgba(255,255,255,0.035)';
+            ctx.lineWidth = 1;
+            let gridSize = 100;
+            let startX = -camera.x % gridSize;
+            let startY = -camera.y % gridSize;
+            for (let x = startX; x < canvas.width; x += gridSize) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+            }
+            for (let y = startY; y < canvas.height; y += gridSize) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+            }
+
+            if (!state.inMatch) {
+                ctx.restore();
+                return;
+            }
+
+            // Draw Control Zone Area
+            if (state.selectedMode === 'CONTROL_ZONE') {
+                let zx = MAP_SIZE.width / 2 - camera.x;
+                let zy = MAP_SIZE.height / 2 - camera.y;
+                ctx.save();
+                ctx.fillStyle = 'rgba(168, 85, 247, 0.15)';
+                ctx.strokeStyle = '#c084fc';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.arc(zx, zy, 160, 0, Math.PI * 2);
+                ctx.fill(); ctx.stroke();
+                ctx.restore();
+            }
+
+            // Draw Poison Ring
+            if (state.selectedMode === 'SHOWDOWN') {
+                ctx.save();
+                ctx.strokeStyle = 'rgba(168, 85, 247, 0.65)';
+                ctx.lineWidth = 12;
+                ctx.beginPath();
+                ctx.arc(MAP_SIZE.width / 2 - camera.x, MAP_SIZE.height / 2 - camera.y, poisonZoneRadius, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            // Draw Obstacles (Walls, Bushes, Boxes, Water, Spikes)
+            mapObstacles.forEach(obs => {
+                let rx = obs.x - camera.x;
+                let ry = obs.y - camera.y;
+
+                if (obs.type === 'wall') {
+                    ctx.fillStyle = '#334155';
+                    ctx.strokeStyle = '#64748b';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.roundRect(rx, ry, obs.w, obs.h, 10);
+                    ctx.fill(); ctx.stroke();
+                } else if (obs.type === 'water') {
+                    ctx.fillStyle = 'rgba(2, 132, 199, 0.7)';
+                    ctx.beginPath();
+                    ctx.roundRect(rx, ry, obs.w, obs.h, 12);
+                    ctx.fill();
+                } else if (obs.type === 'spike') {
+                    ctx.fillStyle = '#ef4444';
+                    ctx.beginPath();
+                    ctx.roundRect(rx, ry, obs.w, obs.h, 6);
+                    ctx.fill();
+                } else if (obs.type === 'bush') {
+                    ctx.fillStyle = 'rgba(22, 101, 52, 0.72)';
+                    ctx.beginPath();
+                    ctx.roundRect(rx, ry, obs.w, obs.h, 18);
+                    ctx.fill();
+                } else if (obs.type === 'box') {
+                    obs.draw(camera);
+                }
+            });
+
+            // Draw Power Cubes
+            powerCubesOnMap.forEach(cube => {
+                ctx.save();
+                ctx.fillStyle = '#facc15';
+                ctx.shadowColor = '#facc15';
+                ctx.shadowBlur = 10;
+                ctx.beginPath();
+                ctx.arc(cube.x - camera.x, cube.y - camera.y, cube.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            });
+
+            // Draw Brawlers
+            brawlersInMatch.forEach(b => {
+                if (b.hp <= 0) return;
+                let rx = b.x - camera.x;
+                let ry = b.y - camera.y;
+
+                if (b.inBush && b !== player) return;
+
+                ctx.save();
+                if (b.inBush) ctx.globalAlpha = 0.55;
+
+                // Aiming Arrow Pointer
+                ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(rx, ry);
+                ctx.lineTo(rx + Math.cos(b.facingAngle) * 36, ry + Math.sin(b.facingAngle) * 36);
+                ctx.stroke();
+
+                // Body Circle
+                ctx.fillStyle = b.color;
+                ctx.shadowColor = b.color;
+                ctx.shadowBlur = 12;
+                ctx.beginPath();
+                ctx.arc(rx, ry, b.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2.5;
+                ctx.stroke();
+
+                // Character Emoji
+                ctx.font = '18px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(b.data.emoji, rx, ry);
+
+                // HP Bar
+                ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                ctx.fillRect(rx - 25, ry - 38, 50, 6);
+                ctx.fillStyle = b.team === 'blue' ? '#38bdf8' : '#f87171';
+                ctx.fillRect(rx - 25, ry - 38, (b.hp / b.maxHp) * 50, 6);
+
+                // Player Ammo Slots
+                if (b === player) {
+                    for (let i = 0; i < b.maxAmmo; i++) {
+                        ctx.fillStyle = i < b.ammo ? '#facc15' : '#475569';
+                        ctx.fillRect(rx - 20 + (i * 14), ry - 28, 12, 3);
+                    }
+                }
+
+                ctx.restore();
+            });
+
+            // Draw Projectiles
+            projectiles.forEach(p => p.draw(camera));
+
+            // Floating Damage Text
+            for (let i = floatingTexts.length - 1; i >= 0; i--) {
+                let ft = floatingTexts[i];
+                ft.y += ft.vy; ft.life -= 1 / 60;
+                ctx.fillStyle = ft.color;
+                ctx.font = '900 16px Outfit, sans-serif';
+                ctx.fillText(ft.text, ft.x - camera.x, ft.y - camera.y);
+                if (ft.life <= 0) floatingTexts.splice(i, 1);
+            }
+
+            // Particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let pt = particles[i];
+                pt.x += pt.vx; pt.y += pt.vy; pt.life -= 1 / 60;
+                ctx.fillStyle = pt.color;
+                ctx.beginPath();
+                ctx.arc(pt.x - camera.x, pt.y - camera.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+                if (pt.life <= 0) particles.splice(i, 1);
+            }
+
+            ctx.restore();
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+        requestAnimationFrame(gameLoop);
+
+        /* Match End & Rewards */
+        function endMatch(isVictory, message) {
+            state.inMatch = false;
+            if (matchTimerInterval) clearInterval(matchTimerInterval);
+
+            const resModal = document.getElementById('resultModal');
+            const resTitle = document.getElementById('resultTitle');
+            const resSub = document.getElementById('resultSubtitle');
+            const resEmoji = document.getElementById('resultEmoji');
+
+            if (isVictory) {
+                resTitle.innerText = "승 리 !";
+                resTitle.className = "text-4xl font-black italic tracking-wide text-amber-300 drop-shadow-lg";
+                resSub.innerText = message || "1위 달성! 전장을 지배했습니다.";
+                resEmoji.innerText = "🏆";
+                
+                let trophyGain = 12;
+                let coinGain = 70;
+                state.trophies += trophyGain;
+                state.coins += coinGain;
+                document.getElementById('resTrophies').innerText = `+${trophyGain}`;
+                document.getElementById('resCoins').innerText = `+${coinGain}`;
+            } else {
+                resTitle.innerText = "패 배";
+                resTitle.className = "text-4xl font-black italic tracking-wide text-red-500 drop-shadow-lg";
+                resSub.innerText = message || "다음 기회에 다시 도전하세요!";
+                resEmoji.innerText = "💀";
+
+                let trophyLoss = Math.min(state.trophies, 4);
+                state.trophies -= trophyLoss;
+                document.getElementById('resTrophies').innerText = `-${trophyLoss}`;
+                document.getElementById('resCoins').innerText = `+15`;
+                state.coins += 15;
+            }
+
+            saveProgress();
+            resModal.classList.remove('hidden');
+        }
+
+        function surrenderMatch() { endMatch(false, '경기 기권'); }
+
+        function returnToMainMenu() {
+            document.getElementById('resultModal').classList.add('hidden');
+            document.getElementById('gameHud').classList.add('hidden');
+            document.getElementById('mainMenuScreen').classList.remove('hidden');
+        }
+
+        /* Menu Navigation & Customization */
+        function updateBrawlerMenuDisplay() {
+            const brawler = BRAWLER_CATALOG[state.selectedBrawlerIdx];
+            const skin = brawler.skins[state.selectedSkinIdx] || brawler.skins[0];
+            const lvl = state.brawlerLevels[brawler.id] || 1;
+
+            document.getElementById('selectedBrawlerName').innerText = brawler.name;
+            document.getElementById('selectedBrawlerRole').innerText = brawler.role;
+            document.getElementById('selectedBrawlerPower').innerText = `파워 Lv.${lvl}`;
+            document.getElementById('selectedSkinName').innerText = skin.name;
+            document.getElementById('brawlerAvatarPreview').innerText = brawler.emoji;
+        }
+
+        function switchBrawler(dir) {
+            state.selectedBrawlerIdx = (state.selectedBrawlerIdx + dir + BRAWLER_CATALOG.length) % BRAWLER_CATALOG.length;
+            state.selectedSkinIdx = 0;
+            updateBrawlerMenuDisplay();
+        }
+
+        function openBrawlerSelect() {
+            const grid = document.getElementById('brawlerGrid');
+            grid.innerHTML = '';
+
+            BRAWLER_CATALOG.forEach((b, idx) => {
+                const card = document.createElement('div');
+                card.className = `glass-panel p-4 rounded-2xl flex flex-col items-center justify-between border-2 cursor-pointer transition ${idx === state.selectedBrawlerIdx ? 'border-amber-400 bg-amber-500/10' : 'border-white/10 hover:border-white/30'}`;
+                card.onclick = () => {
+                    state.selectedBrawlerIdx = idx;
+                    state.selectedSkinIdx = 0;
+                    updateBrawlerMenuDisplay();
+                    closeModal('brawlerModal');
+                };
+
+                card.innerHTML = `
+                    <div class="text-5xl my-2">${b.emoji}</div>
+                    <div class="text-center">
+                        <div class="font-black text-sm text-white">${b.name}</div>
+                        <div class="text-[10px] text-slate-400 font-bold mt-0.5">${b.role}</div>
+                    </div>
+                    <div class="mt-3 text-xs font-bold px-3 py-1 rounded-full ${idx === state.selectedBrawlerIdx ? 'bg-amber-400 text-slate-900' : 'bg-slate-800 text-slate-300'}">
+                        ${idx === state.selectedBrawlerIdx ? '선택됨' : '선택'}
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+
+            document.getElementById('brawlerModal').classList.remove('hidden');
+        }
+
+        function openSkinSelect() {
+            const brawler = BRAWLER_CATALOG[state.selectedBrawlerIdx];
+            const list = document.getElementById('skinList');
+            list.innerHTML = '';
+
+            brawler.skins.forEach((s, idx) => {
+                const item = document.createElement('div');
+                item.className = `glass-panel p-4 rounded-2xl flex items-center justify-between border-2 cursor-pointer ${idx === state.selectedSkinIdx ? 'border-purple-400 bg-purple-500/10' : 'border-white/10'}`;
+                item.onclick = () => {
+                    state.selectedSkinIdx = idx;
+                    updateBrawlerMenuDisplay();
+                    closeModal('skinModal');
+                };
+
+                item.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl flex items-center justify-center text-xl" style="background: ${s.color}">
+                            ${brawler.emoji}
+                        </div>
+                        <div>
+                            <div class="font-bold text-sm text-white">${s.name}</div>
+                            <div class="text-xs text-purple-300 font-bold">${s.price === 0 ? '기본 제공' : s.price + ' 골드'}</div>
+                        </div>
+                    </div>
+                    <span class="text-xs font-bold px-3 py-1 rounded-full ${idx === state.selectedSkinIdx ? 'bg-purple-500 text-white' : 'bg-slate-800 text-slate-400'}">
+                        ${idx === state.selectedSkinIdx ? '착용 중' : '착용'}
+                    </span>
+                `;
+                list.appendChild(item);
+            });
+
+            document.getElementById('skinModal').classList.remove('hidden');
+        }
+
+        function openModeSelect() { document.getElementById('modeModal').classList.remove('hidden'); }
+
+        function selectGameMode(modeKey) {
+            state.selectedMode = modeKey;
+            const modeTitles = {
+                SHOWDOWN: { title: '쇼다운 (Showdown)', sub: '솔로 서바이벌', icon: '🏜️' },
+                TEAM_DEATHMATCH: { title: '팀 데스매치 (3v3)', sub: '3v3 팀전', icon: '🏙️' },
+                CONTROL_ZONE: { title: '점령전 (Zone Control)', sub: '거점 점령전', icon: '💎' }
+            };
+            const m = modeTitles[modeKey];
+            document.getElementById('modeTitle').innerText = m.title;
+            document.getElementById('modeSubtitle').innerText = m.sub;
+            document.getElementById('modeIcon').innerText = m.icon;
+            closeModal('modeModal');
+        }
+
+        function openShop() { document.getElementById('shopModal').classList.remove('hidden'); }
+
+        function openBrawlBox() {
+            if (state.coins < 100) {
+                showCustomMessage('골드가 부족합니다! (100 골드 필요)');
+                return;
+            }
+            state.coins -= 100;
+            let rGems = Math.floor(Math.random() * 5) + 2;
+            let rCoins = Math.floor(Math.random() * 90) + 60;
+            state.gems += rGems;
+            state.coins += rCoins;
+            saveProgress();
+            audio.powerup();
+            showCustomMessage(`🎁 상자 개봉: +${rCoins} 골드, +${rGems} 보석 획득!`);
+        }
+
+        function buyCoinsWithGems() {
+            if (state.gems < 10) {
+                showCustomMessage('보석이 부족합니다!');
+                return;
+            }
+            state.gems -= 10;
+            state.coins += 300;
+            saveProgress();
+            audio.powerup();
+            showCustomMessage('💰 300 골드가 충전되었습니다!');
+        }
+
+        function upgradeBrawlerLevel() {
+            if (state.coins < 200) {
+                showCustomMessage('골드가 부족합니다! (200 골드 필요)');
+                return;
+            }
+            state.coins -= 200;
+            const brawler = BRAWLER_CATALOG[state.selectedBrawlerIdx];
+            state.brawlerLevels[brawler.id] = (state.brawlerLevels[brawler.id] || 1) + 1;
+            saveProgress();
+            updateBrawlerMenuDisplay();
+            audio.super();
+            showCustomMessage(`⚡ ${brawler.name} 파워 Level ${state.brawlerLevels[brawler.id]} 업그레이드!`);
+        }
+
+        function openLeaderboard() {
+            const list = document.getElementById('leaderboardList');
+            list.innerHTML = '';
+
+            const dummyRanks = [
+                { rank: 1, name: '👑 BrawlKing_KR', trophies: 12800 },
+                { rank: 2, name: '🥇 ApexNinja', trophies: 9950 },
+                { rank: 3, name: '🥈 LegendMaster', trophies: 8700 },
+                { rank: 4, name: '나 (Player)', trophies: state.trophies, isMe: true }
+            ];
+
+            dummyRanks.sort((a, b) => b.trophies - a.trophies);
+
+            dummyRanks.forEach((r, idx) => {
+                const row = document.createElement('div');
+                row.className = `p-3.5 flex justify-between items-center ${r.isMe ? 'bg-amber-500/20 font-bold' : ''}`;
+                row.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <span class="w-6 font-black ${idx < 3 ? 'text-amber-400 text-base' : 'text-slate-400 text-xs'}">#${idx + 1}</span>
+                        <span class="text-sm text-white font-bold">${r.name}</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 text-amber-300 font-bold text-xs">
+                        <i class="fa-solid fa-trophy"></i> ${r.trophies}
+                    </div>
+                `;
+                list.appendChild(row);
+            });
+
+            document.getElementById('leaderboardModal').classList.remove('hidden');
+        }
+
+        function openSocial() { document.getElementById('socialModal').classList.remove('hidden'); }
+
+        function openTrophyRoad() {
+            showCustomMessage(`🏆 현재 트로피: ${state.trophies} / 다음 목표 보상: 500 트로피 (전설 상자)`);
+        }
+
+        function openProfile() {
+            showCustomMessage(`👤 닉네임: BrawlerPlayer | 최고 트로피: ${state.trophies}`);
+        }
+
+        function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+        // Initialize UI Display
+        updateTopBarUI();
+        updateBrawlerMenuDisplay();
+    </script>
+</body>
+</html>

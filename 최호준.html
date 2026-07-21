@@ -1,0 +1,2194 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>학교 탈출 3D: 5층 생존 FPS - Real School Zombie 3D</title>
+    <!-- Tailwind CSS for sleek overlay UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Noto+Sans+KR:wght@300;500;700;900&display=swap');
+
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #050508;
+            font-family: 'Noto Sans KR', 'Orbitron', sans-serif;
+            color: #e2e8f0;
+        }
+
+        #gameCanvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        .font-orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        /* Glassmorphism panel styling */
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.7);
+        }
+
+        .blood-text {
+            color: #ef4444;
+            text-shadow: 0 0 10px rgba(220, 38, 38, 0.8), 0 0 20px rgba(185, 28, 28, 0.5);
+        }
+
+        /* Glowing effects */
+        .glow-red {
+            box-shadow: 0 0 15px rgba(239, 68, 68, 0.5);
+        }
+
+        .glow-blue {
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+        }
+
+        .glow-green {
+            box-shadow: 0 0 15px rgba(34, 197, 94, 0.5);
+        }
+
+        /* Ambient scanline and vignette overlay */
+        .scanline {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: 10;
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.35) 50%
+            );
+            background-size: 100% 4px;
+            opacity: 0.5;
+        }
+
+        .vignette {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: 9;
+            box-shadow: inset 0 0 150px rgba(0,0,0,0.98);
+        }
+
+        /* Tactical Crosshair */
+        .crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 18px;
+            height: 18px;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 15;
+        }
+        .crosshair::before, .crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(34, 211, 238, 0.9);
+            box-shadow: 0 0 4px rgba(34, 211, 238, 0.8);
+        }
+        .crosshair::before {
+            top: 8px; left: 0; width: 18px; height: 2px;
+        }
+        .crosshair::after {
+            top: 0; left: 8px; width: 2px; height: 18px;
+        }
+        .crosshair-dot {
+            position: absolute;
+            top: 7px; left: 7px; width: 4px; height: 4px;
+            background: #ef4444;
+            border-radius: 50%;
+        }
+
+        /* Objective Portal Banner */
+        .portal-alert {
+            animation: pulseBanner 1.5s infinite alternate;
+        }
+        @keyframes pulseBanner {
+            0% { border-color: rgba(34, 197, 94, 0.4); box-shadow: 0 0 10px rgba(34, 197, 94, 0.2); }
+            100% { border-color: rgba(34, 197, 94, 1); box-shadow: 0 0 25px rgba(34, 197, 94, 0.7); }
+        }
+    </style>
+</head>
+<body class="bg-black text-slate-100 overflow-hidden select-none">
+
+    <!-- Game Rendering Canvas -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- Visual Atmospheric Filters -->
+    <div class="scanline"></div>
+    <div class="vignette"></div>
+    <div id="crosshairDisplay" class="crosshair hidden"><div class="crosshair-dot"></div></div>
+
+    <!-- HUD Overlay Layer -->
+    <div id="hud" class="absolute inset-0 pointer-events-none z-20 hidden flex flex-col justify-between p-4 sm:p-6">
+        
+        <!-- TOP ROW: Player Status, Minimap & Stage Details -->
+        <div class="flex justify-between items-start w-full">
+            <!-- Health & Experience Bars -->
+            <div class="glass-panel p-4 rounded-xl max-w-sm w-full space-y-3 pointer-events-auto">
+                <div class="flex items-center justify-between">
+                    <span class="font-bold text-xs uppercase tracking-wider text-rose-400 flex items-center gap-2">
+                        <i class="fa-solid fa-heart-pulse text-base animate-pulse"></i> 체력 (HP)
+                    </span>
+                    <span id="hpText" class="font-orbitron font-bold text-sm text-slate-200">100 / 100</span>
+                </div>
+                <!-- HP Bar -->
+                <div class="w-full bg-slate-800/80 rounded-full h-3.5 p-0.5 overflow-hidden border border-slate-700">
+                    <div id="hpBar" class="bg-gradient-to-r from-rose-600 to-red-500 h-full rounded-full transition-all duration-200" style="width: 100%;"></div>
+                </div>
+
+                <!-- XP Bar -->
+                <div class="space-y-1 pt-1">
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="font-bold text-emerald-400 flex items-center gap-1">
+                            <i class="fa-solid fa-bolt text-xs"></i> LEVEL <span id="playerLevel" class="font-orbitron text-sm text-white">1</span>
+                        </span>
+                        <span id="xpText" class="font-orbitron text-[10px] text-slate-400">0 / 100 XP</span>
+                    </div>
+                    <div class="w-full bg-slate-800/80 rounded-full h-2 p-0.5 overflow-hidden border border-slate-700">
+                        <div id="xpBar" class="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-all duration-150" style="width: 0%;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stage & Objective Status Panel -->
+            <div id="stagePanel" class="glass-panel px-6 py-3 rounded-xl flex flex-col items-center border-amber-500/30">
+                <span id="stageTitle" class="text-xs font-bold text-amber-400 uppercase tracking-widest">학교 1층</span>
+                <span id="stageName" class="text-sm font-extrabold text-slate-100 font-orbitron mt-0.5">중앙 로비 및 교무실</span>
+                <div class="flex items-center gap-2 mt-2 text-xs text-slate-300">
+                    <i id="objectiveIcon" class="fa-solid fa-skull text-red-500"></i>
+                    <span id="objectiveText">남은 감염자: <strong id="remainingEnemies" class="text-white font-orbitron">0</strong></span>
+                </div>
+            </div>
+
+            <!-- Minimap Container -->
+            <div class="glass-panel p-2 rounded-xl flex flex-col items-center gap-1 border-slate-700/60 pointer-events-auto">
+                <span class="text-[10px] font-bold text-slate-400 font-orbitron">MINIMAP</span>
+                <canvas id="minimapCanvas" width="120" height="120" class="rounded bg-black border border-slate-800"></canvas>
+            </div>
+        </div>
+
+        <!-- BOSS HEALTH BAR -->
+        <div id="bossBarContainer" class="hidden absolute top-28 left-1/2 -translate-x-1/2 w-11/12 max-w-xl glass-panel p-3 rounded-xl border-red-600/50 glow-red">
+            <div class="flex justify-between items-center mb-1">
+                <span id="bossName" class="font-bold text-xs text-red-400 uppercase tracking-widest flex items-center gap-2">
+                    <i class="fa-solid fa-biohazard text-red-500 animate-spin"></i> 5층 옥상 변종 보스
+                </span>
+                <span id="bossHpText" class="font-orbitron font-bold text-xs text-slate-300">1800 / 1800</span>
+            </div>
+            <div class="w-full bg-slate-900 rounded-full h-3 overflow-hidden border border-red-900">
+                <div id="bossHpBar" class="bg-gradient-to-r from-red-700 via-rose-600 to-amber-500 h-full rounded-full transition-all duration-100" style="width: 100%;"></div>
+            </div>
+        </div>
+
+        <!-- BOTTOM ROW: Weapon Switcher, Instructions & Ammo Details -->
+        <div class="flex justify-between items-end w-full">
+            <!-- Weapon Slots Display -->
+            <div id="weaponSlots" class="flex gap-2 pointer-events-auto">
+                <!-- Dynamically populated -->
+            </div>
+
+            <!-- Quick Controls Hint -->
+            <div class="glass-panel px-4 py-2.5 rounded-xl hidden md:flex flex-col gap-0.5 text-[10px] text-slate-400 pointer-events-auto">
+                <div><span class="px-1.5 py-0.5 bg-slate-700/80 rounded text-white font-semibold">WASD</span> 이동 | <span class="px-1.5 py-0.5 bg-slate-700/80 rounded text-white font-semibold">마우스</span> 시점 자유 조정 (올리면 위/내리면 아래)</div>
+                <div><span class="px-1.5 py-0.5 bg-slate-700/80 rounded text-white font-semibold">클릭</span> 사격 | <span class="px-1.5 py-0.5 bg-slate-700/80 rounded text-white font-semibold">R</span> 탄창 재장전 | <span class="px-1.5 py-0.5 bg-slate-700/80 rounded text-white font-semibold">1-5 / 휠</span> 무기 교체</div>
+                <div><span class="px-1.5 py-0.5 bg-slate-700/80 rounded text-white font-semibold">목표</span> 모든 좀비 처치 ➔ 계단으로 다음 층 올라가기 (총 5층)</div>
+            </div>
+
+            <!-- Ammunition Tracker -->
+            <div class="glass-panel p-4 rounded-xl flex items-center gap-4 border-cyan-500/30">
+                <div class="text-right">
+                    <div id="weaponName" class="text-xs font-bold text-cyan-400 uppercase tracking-wide">권총</div>
+                    <div id="reloadText" class="text-xs text-amber-400 font-bold hidden animate-pulse">RELOADING...</div>
+                    <div class="flex items-baseline gap-1 mt-0.5">
+                        <span id="currentAmmo" class="font-orbitron font-black text-3xl text-white">12</span>
+                        <span class="text-slate-500 text-lg">/</span>
+                        <span id="maxAmmo" class="font-orbitron text-sm text-slate-400">∞</span>
+                    </div>
+                </div>
+                <div class="w-12 h-12 rounded-lg bg-slate-800/80 border border-slate-700 flex items-center justify-center text-cyan-400 text-xl">
+                    <i id="weaponIcon" class="fa-solid fa-gun"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- GAME MAIN MENU SCREEN -->
+    <div id="mainMenu" class="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/95 backdrop-blur-md">
+        <div class="max-w-xl w-full p-8 glass-panel rounded-2xl border-slate-800 text-center space-y-6 relative overflow-hidden">
+            <div class="absolute -top-20 -left-20 w-40 h-40 bg-red-600/10 rounded-full blur-3xl"></div>
+            <div class="absolute -bottom-20 -right-20 w-40 h-40 bg-cyan-600/10 rounded-full blur-3xl"></div>
+
+            <div class="space-y-2">
+                <span class="text-xs font-semibold uppercase tracking-widest text-red-500 border border-red-500/30 px-3 py-1 rounded-full">Real Korean School 5-Story Zombie Survival FPS</span>
+                <h1 class="text-4xl sm:text-5xl font-black tracking-tight text-slate-100 font-orbitron blood-text">학교 탈출 3D: 1~5층 탈출</h1>
+                <p class="text-slate-400 text-xs sm:text-sm">교실, 화장실, 복도를 탐험하며 좀비를 격퇴하고, 비상 계단을 통해 5층 옥상으로 탈출하세요!</p>
+            </div>
+
+            <!-- Difficulty Levels -->
+            <div class="space-y-2">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider block">난이도 설정</label>
+                <div class="grid grid-cols-3 gap-3">
+                    <button onclick="setDifficulty('easy')" id="diff-easy" class="diff-btn p-3 rounded-xl border border-slate-700 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 transition text-xs font-bold flex flex-col items-center gap-1">
+                        <i class="fa-solid fa-shield text-emerald-400 text-lg"></i>
+                        <span>쉬움</span>
+                    </button>
+                    <button onclick="setDifficulty('normal')" id="diff-normal" class="diff-btn p-3 rounded-xl border-2 border-cyan-500 bg-cyan-950/30 text-cyan-300 transition text-xs font-bold flex flex-col items-center gap-1">
+                        <i class="fa-solid fa-crosshair text-cyan-400 text-lg"></i>
+                        <span>보통</span>
+                    </button>
+                    <button onclick="setDifficulty('hard')" id="diff-hard" class="diff-btn p-3 rounded-xl border border-slate-700 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 transition text-xs font-bold flex flex-col items-center gap-1">
+                        <i class="fa-solid fa-skull text-rose-500 text-lg"></i>
+                        <span>어려움</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Action Trigger -->
+            <div class="pt-2">
+                <button id="btnStart" onclick="startGame()" class="w-full py-4 rounded-xl bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white font-black text-lg tracking-wider uppercase shadow-lg shadow-red-900/40 transition-all transform hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-stairs"></i> 학교 1층 진입하기
+                </button>
+            </div>
+
+            <!-- Controls Quick Info -->
+            <div class="grid grid-cols-2 gap-2 text-[11px] text-slate-400 border-t border-slate-800 pt-4">
+                <div class="text-left bg-slate-900/50 p-2 rounded border border-slate-800">
+                    <strong class="text-slate-200">조작:</strong> W,A,S,D 이동, 마우스 상하좌우 자유 시점
+                </div>
+                <div class="text-left bg-slate-900/50 p-2 rounded border border-slate-800">
+                    <strong class="text-slate-200">기타:</strong> R 재장전, 마우스 좌클릭 사격
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- UPGRADES CHOOSE PANEL -->
+    <div id="levelUpModal" class="absolute inset-0 z-40 hidden flex items-center justify-center bg-slate-950/85 backdrop-blur-md">
+        <div class="max-w-lg w-full p-6 glass-panel rounded-2xl border-amber-500/40 text-center space-y-6 glow-blue">
+            <div>
+                <span class="text-xs font-bold text-emerald-400 uppercase tracking-widest">LEVEL UP!</span>
+                <h2 class="text-3xl font-black text-slate-100 font-orbitron mt-1">강화 특성 선택</h2>
+                <p class="text-slate-400 text-xs mt-1">생존율을 높이기 위해 능력을 즉시 개량합니다.</p>
+            </div>
+            <div id="upgradeOptionsContainer" class="grid grid-cols-1 gap-3">
+                <!-- Upgrades are inserted dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- INTERMISSION PAUSED SYSTEM -->
+    <div id="pauseMenu" class="absolute inset-0 z-30 hidden flex items-center justify-center bg-slate-950/80 backdrop-blur-md">
+        <div class="max-w-md w-full p-6 glass-panel rounded-2xl border-slate-700 text-center space-y-5">
+            <h2 class="text-2xl font-black text-slate-100 font-orbitron">생존의 틈새 (일시정지)</h2>
+            <p class="text-xs text-slate-400">마우스를 회수하려면 ESC키를 두 번 누르십시오.</p>
+            <div class="space-y-3">
+                <button onclick="togglePause()" class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-bold border border-slate-600 transition">
+                    다시 진입하기
+                </button>
+                <button onclick="returnToMainMenu()" class="w-full py-3 bg-rose-900/50 hover:bg-rose-800/50 text-rose-200 rounded-xl text-sm font-bold border border-rose-700 transition">
+                    메인 화면으로 이탈
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- GAME OVER / FAILURE SCREEN -->
+    <div id="gameOverMenu" class="absolute inset-0 z-30 hidden flex items-center justify-center bg-black/95 backdrop-blur-md">
+        <div class="max-w-md w-full p-8 glass-panel rounded-2xl border-red-900/60 text-center space-y-6 glow-red">
+            <div class="space-y-1">
+                <i class="fa-solid fa-skull-crossbones text-5xl text-red-600 animate-bounce mb-2"></i>
+                <h2 class="text-4xl font-black text-red-600 font-orbitron blood-text">임무 실패</h2>
+                <p class="text-slate-400 text-xs">학교 건물의 차가운 어둠에 잠겼습니다...</p>
+            </div>
+
+            <div class="bg-slate-900/80 p-4 rounded-xl border border-slate-800 space-y-2 text-xs">
+                <div class="flex justify-between">
+                    <span class="text-slate-400">사망 위치</span>
+                    <span id="finalStage" class="font-bold font-orbitron text-white">학교 1층</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-slate-400">격퇴한 감염자</span>
+                    <span id="finalKills" class="font-bold font-orbitron text-red-400">0</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-slate-400">버틴 시간</span>
+                    <span id="finalTime" class="font-bold font-orbitron text-cyan-400">00:00</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-slate-400">누적 점수</span>
+                    <span id="finalScore" class="font-bold font-orbitron text-amber-400">0</span>
+                </div>
+            </div>
+
+            <button onclick="restartGame()" class="w-full py-4 rounded-xl bg-gradient-to-r from-red-700 to-rose-800 hover:from-red-600 hover:to-rose-700 text-white font-bold text-sm tracking-wider uppercase shadow-lg shadow-red-950/50 transition">
+                <i class="fa-solid fa-rotate-right mr-2"></i> 다시 탈출 시도
+            </button>
+        </div>
+    </div>
+
+    <!-- CLEARED CONGRATS SCREEN -->
+    <div id="gameClearMenu" class="absolute inset-0 z-30 hidden flex items-center justify-center bg-slate-950/95 backdrop-blur-md">
+        <div class="max-w-md w-full p-8 glass-panel rounded-2xl border-emerald-500/50 text-center space-y-6 glow-green">
+            <div class="space-y-1">
+                <i class="fa-solid fa-stairs text-5xl text-emerald-400 mb-2 animate-bounce"></i>
+                <h2 id="clearTitle" class="text-3xl font-black text-emerald-400 font-orbitron">다음 층 올라가기 완료!</h2>
+                <p id="clearSub" class="text-slate-300 text-xs">비상계단을 이용하여 상위 층으로 이동했습니다.</p>
+            </div>
+
+            <button id="btnClearAction" onclick="proceedToNextStage()" class="w-full py-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-bold text-sm tracking-wider uppercase transition">
+                다음 층 올라가기 <i class="fa-solid fa-arrow-up ml-2"></i>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Audio Synthesizer Engine (synthesized natively using Web Audio API)
+        class SoundEngine {
+            constructor() {
+                this.ctx = null;
+                this.isMuted = false;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContext();
+                }
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            playShoot(type) {
+                if (!this.ctx || this.isMuted) return;
+                const now = this.ctx.currentTime;
+
+                const bufferSize = this.ctx.sampleRate * 0.15;
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const output = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    output[i] = Math.random() * 2 - 1;
+                }
+
+                const whiteNoise = this.ctx.createBufferSource();
+                whiteNoise.buffer = buffer;
+
+                const noiseFilter = this.ctx.createBiquadFilter();
+                noiseFilter.type = 'lowpass';
+
+                const noiseGain = this.ctx.createGain();
+
+                const osc = this.ctx.createOscillator();
+                const oscGain = this.ctx.createGain();
+
+                switch(type) {
+                    case 'pistol':
+                        noiseFilter.frequency.setValueAtTime(1000, now);
+                        noiseGain.gain.setValueAtTime(0.4, now);
+                        noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+
+                        osc.type = 'triangle';
+                        osc.frequency.setValueAtTime(170, now);
+                        osc.frequency.exponentialRampToValueAtTime(30, now + 0.08);
+                        oscGain.gain.setValueAtTime(0.3, now);
+                        oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+                        break;
+                    case 'shotgun':
+                        noiseFilter.frequency.setValueAtTime(550, now);
+                        noiseGain.gain.setValueAtTime(0.8, now);
+                        noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.28);
+
+                        osc.type = 'sawtooth';
+                        osc.frequency.setValueAtTime(110, now);
+                        osc.frequency.exponentialRampToValueAtTime(20, now + 0.2);
+                        oscGain.gain.setValueAtTime(0.6, now);
+                        oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+                        break;
+                    case 'rifle':
+                        noiseFilter.frequency.setValueAtTime(1300, now);
+                        noiseGain.gain.setValueAtTime(0.5, now);
+                        noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.09);
+
+                        osc.type = 'square';
+                        osc.frequency.setValueAtTime(200, now);
+                        osc.frequency.exponentialRampToValueAtTime(40, now + 0.07);
+                        oscGain.gain.setValueAtTime(0.4, now);
+                        oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.07);
+                        break;
+                    case 'smg':
+                        noiseFilter.frequency.setValueAtTime(1500, now);
+                        noiseGain.gain.setValueAtTime(0.35, now);
+                        noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.06);
+
+                        osc.type = 'triangle';
+                        osc.frequency.setValueAtTime(230, now);
+                        osc.frequency.exponentialRampToValueAtTime(50, now + 0.05);
+                        oscGain.gain.setValueAtTime(0.2, now);
+                        oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+                        break;
+                    case 'sniper':
+                        noiseFilter.frequency.setValueAtTime(750, now);
+                        noiseGain.gain.setValueAtTime(1.0, now);
+                        noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
+
+                        osc.type = 'sawtooth';
+                        osc.frequency.setValueAtTime(280, now);
+                        osc.frequency.exponentialRampToValueAtTime(20, now + 0.35);
+                        oscGain.gain.setValueAtTime(0.8, now);
+                        oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+                        break;
+                }
+
+                whiteNoise.connect(noiseFilter);
+                noiseFilter.connect(noiseGain);
+                noiseGain.connect(this.ctx.destination);
+
+                osc.connect(oscGain);
+                oscGain.connect(this.ctx.destination);
+
+                whiteNoise.start(now);
+                osc.start(now);
+                whiteNoise.stop(now + 0.5);
+                osc.stop(now + 0.5);
+            }
+
+            playReload() {
+                if (!this.ctx || this.isMuted) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(500, now);
+                osc.frequency.linearRampToValueAtTime(800, now + 0.12);
+                gain.gain.setValueAtTime(0.18, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.2);
+            }
+
+            playHit() {
+                if (!this.ctx || this.isMuted) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(130, now);
+                osc.frequency.exponentialRampToValueAtTime(30, now + 0.2);
+                gain.gain.setValueAtTime(0.45, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.22);
+            }
+
+            playZombieGroan() {
+                if (!this.ctx || this.isMuted) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(70 + Math.random() * 30, now);
+                osc.frequency.linearRampToValueAtTime(50 + Math.random() * 15, now + 0.4);
+                gain.gain.setValueAtTime(0.12, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.45);
+            }
+
+            playItemPickup() {
+                if (!this.ctx || this.isMuted) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(350, now);
+                osc.frequency.exponentialRampToValueAtTime(750, now + 0.18);
+                gain.gain.setValueAtTime(0.25, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.22);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.25);
+            }
+
+            playLevelUp() {
+                if (!this.ctx || this.isMuted) return;
+                const now = this.ctx.currentTime;
+                [260, 390, 520, 780].forEach((freq, idx) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(freq, now + idx * 0.09);
+                    gain.gain.setValueAtTime(0.22, now + idx * 0.09);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + idx * 0.09 + 0.25);
+
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(now + idx * 0.09);
+                    osc.stop(now + idx * 0.09 + 0.25);
+                });
+            }
+        }
+
+        const sound = new SoundEngine();
+
+        // Armory configuration
+        const WEAPONS = {
+            pistol: {
+                id: 'pistol',
+                name: '권총 (Pistol)',
+                type: 'pistol',
+                damage: 28,
+                fireRate: 280, 
+                range: 8,
+                magSize: 12,
+                reloadTime: 1200, 
+                recoil: 4,
+                spread: 0.04,
+                icon: 'fa-gun',
+                color: '#38bdf8'
+            },
+            shotgun: {
+                id: 'shotgun',
+                name: '산탄총 (Shotgun)',
+                type: 'shotgun',
+                damage: 16, 
+                pellets: 6,
+                fireRate: 850,
+                range: 5,
+                magSize: 6,
+                reloadTime: 2000,
+                recoil: 15,
+                spread: 0.18,
+                icon: 'fa-burst',
+                color: '#f97316'
+            },
+            rifle: {
+                id: 'rifle',
+                name: '돌격소총 (Assault Rifle)',
+                type: 'rifle',
+                damage: 32,
+                fireRate: 120,
+                range: 12,
+                magSize: 30,
+                reloadTime: 1800,
+                recoil: 6,
+                spread: 0.06,
+                icon: 'fa-crosshair',
+                color: '#ef4444'
+            },
+            smg: {
+                id: 'smg',
+                name: '기관단총 (SMG)',
+                type: 'smg',
+                damage: 20,
+                fireRate: 80,
+                range: 8,
+                magSize: 35,
+                reloadTime: 1400,
+                recoil: 5,
+                spread: 0.12,
+                icon: 'fa-bolt',
+                color: '#a855f7'
+            },
+            sniper: {
+                id: 'sniper',
+                name: '저격총 (Sniper Rifle)',
+                type: 'sniper',
+                damage: 140,
+                fireRate: 1200,
+                range: 20,
+                magSize: 5,
+                reloadTime: 2400,
+                recoil: 20,
+                spread: 0.01,
+                piercing: true,
+                icon: 'fa-bullseye',
+                color: '#eab308'
+            }
+        };
+
+        // Real School Building Layout: 1 = Wall, 0 = Corridor/Space, 2 = Classroom Wall/Chalkboard, 3 = Desks, 4 = Glass Windows, 5 = Stairs, 6 = Restroom Doors
+        const GRID_SIZE = 16;
+        const STAGES = [
+            {
+                id: 1,
+                title: '학교 1층',
+                name: '중앙 로비 및 교무실',
+                topWallColor: '#fef08a', // Cream yellow school paint
+                botWallColor: '#166534', // School green paint
+                totalZombies: 12,
+                boss: false,
+                spawnRate: 2000,
+                map: [
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                    [1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1],
+                    [1,0,1,1,1,1,0,1,0,3,3,3,3,1,0,1],
+                    [1,0,1,0,0,1,0,1,0,3,3,3,3,1,0,1],
+                    [1,0,1,0,0,1,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,1,1,2,1,0,1,1,1,2,1,1,1,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,4,4,4,4,4,0,1,1,0,6,6,6,1,0,1],
+                    [1,0,0,0,0,0,0,1,1,0,0,0,0,1,0,1],
+                    [1,0,1,1,1,1,0,1,1,1,1,1,0,1,0,1],
+                    [1,0,1,3,3,1,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,1,3,3,1,0,1,1,1,1,1,1,1,0,1],
+                    [1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1],
+                    [1,0,1,1,1,1,1,1,0,1,1,1,1,1,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+                ]
+            },
+            {
+                id: 2,
+                title: '학교 2층',
+                name: '1-1반, 1-2반 교실 및 학생 화장실',
+                topWallColor: '#e2e8f0',
+                botWallColor: '#1e3a8a', // Blue lower paint
+                totalZombies: 18,
+                boss: false,
+                spawnRate: 1600,
+                map: [
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,2,2,2,2,0,1,1,0,2,2,2,2,0,1],
+                    [1,0,2,3,3,2,0,1,1,0,2,3,3,2,0,1],
+                    [1,0,2,3,3,2,0,0,0,0,2,3,3,2,0,1],
+                    [1,0,1,1,1,1,0,1,1,0,1,1,1,1,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,4,4,4,4,4,0,6,6,0,4,4,4,4,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,1,1,1,1,0,1,1,0,1,1,1,1,0,1],
+                    [1,0,2,3,3,2,0,0,0,0,2,3,3,2,0,1],
+                    [1,0,2,3,3,2,0,1,1,0,2,3,3,2,0,1],
+                    [1,0,2,2,2,2,0,1,1,0,2,2,2,2,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+                ]
+            },
+            {
+                id: 3,
+                title: '학교 3층',
+                name: '과학 실습실 및 특별실',
+                topWallColor: '#fef08a',
+                botWallColor: '#854d0e', // Brown paint
+                totalZombies: 24,
+                boss: false,
+                spawnRate: 1300,
+                map: [
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,2,3,3,2,0,3,3,0,2,3,3,2,0,1],
+                    [1,0,2,3,3,2,0,3,3,0,2,3,3,2,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,1,1,1,1,0,1,1,0,1,1,1,1,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,4,4,4,4,4,0,6,6,0,4,4,4,4,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,1,1,1,1,0,1,1,0,1,1,1,1,0,1],
+                    [1,0,2,3,3,2,0,0,0,0,2,3,3,2,0,1],
+                    [1,0,2,3,3,2,0,1,1,0,2,3,3,2,0,1],
+                    [1,0,2,2,2,2,0,1,1,0,2,2,2,2,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+                ]
+            },
+            {
+                id: 4,
+                title: '학교 4층',
+                name: '컴퓨터실 및 체육 기구실',
+                topWallColor: '#f1f5f9',
+                botWallColor: '#991b1b', // Red gym paint
+                totalZombies: 30,
+                boss: false,
+                spawnRate: 1100,
+                map: [
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,1,0,0,0,0,0,0,0,0,0,0,1,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,0,2,2,0,0,2,2,0,0,0,0,1],
+                    [1,0,0,0,0,2,2,0,0,2,2,0,0,0,0,1],
+                    [1,4,4,0,0,0,0,6,6,0,0,0,0,4,4,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,0,2,2,0,0,2,2,0,0,0,0,1],
+                    [1,0,0,0,0,2,2,0,0,2,2,0,0,0,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,1,0,0,0,0,0,0,0,0,0,0,1,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+                ]
+            },
+            {
+                id: 5,
+                title: '학교 5층 (최종층)',
+                name: '옥상 대피 구역 및 최후의 보스',
+                topWallColor: '#334155',
+                botWallColor: '#0f172a',
+                totalZombies: 15,
+                boss: true,
+                spawnRate: 1400,
+                map: [
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,1,1,1,0,0,1,1,1,0,0,0,1],
+                    [1,0,0,0,1,0,0,0,0,0,0,1,0,0,0,1],
+                    [1,0,0,0,1,0,0,0,0,0,0,1,0,0,0,1],
+                    [1,4,4,0,0,0,0,0,0,0,0,0,0,4,4,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,1,0,0,0,0,0,0,1,0,0,0,1],
+                    [1,0,0,0,1,0,0,0,0,0,0,1,0,0,0,1],
+                    [1,0,0,0,1,1,1,0,0,1,1,1,0,0,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+                ]
+            }
+        ];
+
+        // Canvas Setup
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const minimapCanvas = document.getElementById('minimapCanvas');
+        const minimapCtx = minimapCanvas.getContext('2d');
+
+        // Game State Core Variables
+        let gameState = 'MENU'; // MENU, PLAYING, LEVEL_UP, PAUSED, GAME_OVER, CLEAR
+        let currentStageIdx = 0;
+        let score = 0;
+        let kills = 0;
+        let gameTime = 0;
+        let gameTimerInterval = null;
+        let lastTime = 0;
+        let screenShake = 0;
+        let flashOpacity = 0;
+
+        // Difficulty multipliers
+        let difficulty = 'normal';
+        let diffMultipliers = {
+            easy: { hp: 0.7, speed: 0.8, dmg: 0.7, count: 0.8 },
+            normal: { hp: 1.0, speed: 1.0, dmg: 1.0, count: 1.0 },
+            hard: { hp: 1.5, speed: 1.25, dmg: 1.5, count: 1.3 }
+        };
+
+        // Keyboard tracking
+        const keys = {};
+
+        // Entity references
+        let player;
+        let enemies = [];
+        let items = [];
+        let bloodDecals = [];
+        let damageFlash = 0;
+        let boss = null;
+        let exitTriggered = false;
+
+        // Resize callback
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Pointer Lock control for true 3D FPS experience
+        canvas.addEventListener('click', () => {
+            if (gameState === 'PLAYING') {
+                canvas.requestPointerLock();
+            }
+        });
+
+        document.addEventListener('pointerlockchange', () => {
+            if (document.pointerLockElement !== canvas && gameState === 'PLAYING') {
+                togglePause();
+            }
+        });
+
+        // Mouse look and fire control with pitch (상하) and yaw (좌우)
+        window.addEventListener('mousemove', (e) => {
+            if (gameState === 'PLAYING' && player && document.pointerLockElement === canvas) {
+                const sensitivity = 0.0025;
+                player.angle += e.movementX * sensitivity;
+                player.angle = (player.angle + Math.PI * 2) % (Math.PI * 2);
+
+                // Pitch control (vertical look): Mouse UP decreases movementY, so subtracting looks UP
+                player.pitch -= e.movementY * 1.2;
+                const maxPitch = canvas.height * 0.45;
+                player.pitch = Math.max(-maxPitch, Math.min(maxPitch, player.pitch));
+            }
+        });
+
+        window.addEventListener('mousedown', (e) => {
+            if (e.button === 0 && gameState === 'PLAYING' && player) {
+                if (document.pointerLockElement !== canvas) {
+                    canvas.requestPointerLock();
+                    return;
+                }
+                player.tryShoot();
+            }
+        });
+
+        // Keyboard inputs
+        window.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+
+            if (gameState === 'PLAYING') {
+                if (e.key === 'r' || e.key === 'R' || e.key === 'ㄱ') {
+                    if (player) player.reload();
+                }
+                if (e.key === '1') player?.switchWeapon('pistol');
+                if (e.key === '2') player?.switchWeapon('shotgun');
+                if (e.key === '3') player?.switchWeapon('rifle');
+                if (e.key === '4') player?.switchWeapon('smg');
+                if (e.key === '5') player?.switchWeapon('sniper');
+                if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
+                    togglePause();
+                }
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+
+        window.addEventListener('wheel', (e) => {
+            if (gameState === 'PLAYING' && player) {
+                const available = player.unlockedWeapons;
+                let currentIdx = available.indexOf(player.currentWeapon.id);
+                if (e.deltaY > 0) {
+                    currentIdx = (currentIdx + 1) % available.length;
+                } else {
+                    currentIdx = (currentIdx - 1 + available.length) % available.length;
+                }
+                player.switchWeapon(available[currentIdx]);
+            }
+        });
+
+        // 1인칭 플레이어 클래스
+        class Player {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.radius = 0.35;
+                this.angle = 0;
+                this.pitch = 0; // Vertically look offset pixels
+                this.fov = Math.PI / 3; // 60 deg FOV
+                this.speed = 4.2;
+                this.rotationSpeed = 2.4;
+                
+                this.maxHp = 100;
+                this.hp = 100;
+                this.level = 1;
+                this.xp = 0;
+                this.maxXp = 100;
+
+                this.bonusDamage = 1.0;
+                this.bonusFireRate = 1.0;
+                this.bonusSpeed = 1.0;
+                this.critChance = 0.05;
+
+                this.unlockedWeapons = ['pistol', 'shotgun', 'rifle', 'smg', 'sniper'];
+                this.ammoState = {
+                    pistol: { current: 12, reserve: Infinity },
+                    shotgun: { current: 6, reserve: 36 },
+                    rifle: { current: 30, reserve: 150 },
+                    smg: { current: 35, reserve: 210 },
+                    sniper: { current: 5, reserve: 20 }
+                };
+                this.currentWeapon = WEAPONS.pistol;
+                this.lastShotTime = 0;
+                this.isReloading = false;
+                this.reloadStartTime = 0;
+                this.weaponBob = 0;
+
+                this.invulnerable = false;
+                this.invulnerableTimer = 0;
+            }
+
+            update(dt) {
+                const moveSpeed = this.speed * this.bonusSpeed * dt;
+                const rotSpeed = this.rotationSpeed * dt;
+
+                if (keys['arrowleft'] || keys['q']) {
+                    this.angle = (this.angle - rotSpeed + Math.PI * 2) % (Math.PI * 2);
+                }
+                if (keys['arrowright'] || keys['e']) {
+                    this.angle = (this.angle + rotSpeed) % (Math.PI * 2);
+                }
+
+                let dx = 0;
+                let dy = 0;
+
+                if (keys['w'] || keys['arrowup'] || keys['ㅈ']) {
+                    dx += Math.cos(this.angle);
+                    dy += Math.sin(this.angle);
+                }
+                if (keys['s'] || keys['arrowdown'] || keys['ㄴ']) {
+                    dx -= Math.cos(this.angle);
+                    dy -= Math.sin(this.angle);
+                }
+                if (keys['a'] || keys['ㅁ']) {
+                    dx += Math.sin(this.angle);
+                    dy -= Math.cos(this.angle);
+                }
+                if (keys['d'] || keys['ㅇ']) {
+                    dx -= Math.sin(this.angle);
+                    dy += Math.cos(this.angle);
+                }
+
+                if (dx !== 0 && dy !== 0) {
+                    const len = Math.hypot(dx, dy);
+                    dx /= len;
+                    dy /= len;
+                }
+
+                const moveStepX = dx * moveSpeed;
+                const moveStepY = dy * moveSpeed;
+
+                if (dx !== 0 || dy !== 0) {
+                    this.weaponBob += dt * 10;
+                }
+
+                const stage = STAGES[currentStageIdx];
+                const nextX = this.x + moveStepX;
+                const nextY = this.y + moveStepY;
+
+                if (!this.isWallAt(nextX, this.y, stage.map)) {
+                    this.x = nextX;
+                }
+                if (!this.isWallAt(this.x, nextY, stage.map)) {
+                    this.y = nextY;
+                }
+
+                if (this.isReloading) {
+                    if (Date.now() - this.reloadStartTime >= this.currentWeapon.reloadTime) {
+                        this.completeReload();
+                    }
+                }
+
+                if (this.invulnerable) {
+                    this.invulnerableTimer -= dt;
+                    if (this.invulnerableTimer <= 0) {
+                        this.invulnerable = false;
+                    }
+                }
+
+                // Item pickups
+                for (let i = items.length - 1; i >= 0; i--) {
+                    const item = items[i];
+                    const dist = Math.hypot(this.x - item.x, this.y - item.y);
+                    if (dist < this.radius + 0.3) {
+                        item.applyEffect(this);
+                        sound.playItemPickup();
+                        items.splice(i, 1);
+                    }
+                }
+
+                // Stair Door Exit trigger check
+                if (exitTriggered) {
+                    const portalX = GRID_SIZE - 1.5;
+                    const portalY = GRID_SIZE - 1.5;
+                    const distToPortal = Math.hypot(this.x - portalX, this.y - portalY);
+                    if (distToPortal < 0.8) {
+                        triggerStageClear();
+                    }
+                }
+            }
+
+            isWallAt(x, y, map) {
+                if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) return true;
+                const gridX = Math.floor(x);
+                const gridY = Math.floor(y);
+                const cell = map[gridY][gridX];
+                return cell === 1 || cell === 2 || cell === 3 || cell === 4 || cell === 6;
+            }
+
+            tryShoot() {
+                const now = Date.now();
+                const effectiveFireRate = this.currentWeapon.fireRate / this.bonusFireRate;
+
+                if (now - this.lastShotTime < effectiveFireRate) return;
+
+                const ammo = this.ammoState[this.currentWeapon.id];
+                if (ammo.current <= 0) {
+                    this.reload();
+                    return;
+                }
+
+                this.lastShotTime = now;
+                ammo.current--;
+                updateHUD();
+
+                sound.playShoot(this.currentWeapon.type);
+                screenShake = this.currentWeapon.recoil;
+                flashOpacity = 0.45;
+
+                const pelletCount = this.currentWeapon.pellets || 1;
+                for (let i = 0; i < pelletCount; i++) {
+                    const spreadAngle = (Math.random() - 0.5) * this.currentWeapon.spread;
+                    const shootAngle = this.angle + spreadAngle;
+
+                    const isCrit = Math.random() < this.critChance;
+                    const damage = this.currentWeapon.damage * this.bonusDamage * (isCrit ? 2.0 : 1.0);
+
+                    this.shootRay(shootAngle, damage, isCrit);
+                }
+            }
+
+            shootRay(rayAngle, damage, isCrit) {
+                const stage = STAGES[currentStageIdx];
+                let rayX = this.x;
+                let rayY = this.y;
+                const step = 0.05;
+                const maxRange = this.currentWeapon.range;
+                let distance = 0;
+
+                let hitRegistered = false;
+
+                while (distance < maxRange) {
+                    rayX += Math.cos(rayAngle) * step;
+                    rayY += Math.sin(rayAngle) * step;
+                    distance += step;
+
+                    if (this.isWallAt(rayX, rayY, stage.map)) {
+                        break;
+                    }
+
+                    for (let enemy of enemies) {
+                        const distToRay = Math.hypot(enemy.x - rayX, enemy.y - rayY);
+                        if (distToRay < enemy.radius) {
+                            enemy.takeDamage(damage, isCrit);
+                            hitRegistered = true;
+                            if (!this.currentWeapon.piercing) {
+                                return;
+                            }
+                        }
+                    }
+                    if (hitRegistered && !this.currentWeapon.piercing) break;
+                }
+            }
+
+            reload() {
+                const ammo = this.ammoState[this.currentWeapon.id];
+                if (this.isReloading || ammo.current === this.currentWeapon.magSize || ammo.reserve === 0) return;
+
+                this.isReloading = true;
+                this.reloadStartTime = Date.now();
+                sound.playReload();
+                document.getElementById('reloadText').classList.remove('hidden');
+            }
+
+            completeReload() {
+                const ammo = this.ammoState[this.currentWeapon.id];
+                const needed = this.currentWeapon.magSize - ammo.current;
+                
+                if (ammo.reserve === Infinity) {
+                    ammo.current = this.currentWeapon.magSize;
+                } else {
+                    const reloadAmount = Math.min(needed, ammo.reserve);
+                    ammo.current += reloadAmount;
+                    ammo.reserve -= reloadAmount;
+                }
+
+                this.isReloading = false;
+                document.getElementById('reloadText').classList.add('hidden');
+                updateHUD();
+            }
+
+            switchWeapon(weaponId) {
+                if (this.currentWeapon.id === weaponId) return;
+                this.currentWeapon = WEAPONS[weaponId];
+                this.isReloading = false;
+                document.getElementById('reloadText').classList.add('hidden');
+                updateHUD();
+                renderWeaponSlots();
+            }
+
+            takeDamage(amount) {
+                if (this.invulnerable || this.hp <= 0) return;
+
+                this.hp = Math.max(0, this.hp - amount);
+                sound.playHit();
+                screenShake = 12;
+                damageFlash = 0.6;
+
+                this.invulnerable = true;
+                this.invulnerableTimer = 0.5;
+
+                updateHUD();
+
+                if (this.hp <= 0) {
+                    triggerGameOver();
+                }
+            }
+
+            gainXp(amount) {
+                this.xp += amount;
+                score += amount * 10;
+                if (this.xp >= this.maxXp) {
+                    this.xp -= this.maxXp;
+                    this.level++;
+                    this.maxXp = Math.floor(this.maxXp * 1.35);
+                    sound.playLevelUp();
+                    triggerLevelUpModal();
+                }
+                updateHUD();
+            }
+        }
+
+        // Enemy and Zombie AI Class
+        class Enemy {
+            constructor(x, y, type = 'normal') {
+                this.x = x;
+                this.y = y;
+                this.type = type;
+                this.radius = 0.38;
+
+                const mult = diffMultipliers[difficulty];
+
+                if (type === 'fast') {
+                    this.speed = 1.8 * mult.speed;
+                    this.maxHp = 45 * mult.hp;
+                    this.damage = 10 * mult.dmg;
+                    this.xpValue = 25;
+                    this.shirtColor = '#10b981'; // Green student uniform
+                    this.skinColor = '#86efac';
+                    this.heightMult = 0.95;
+                } else if (type === 'tank') {
+                    this.speed = 0.9 * mult.speed;
+                    this.maxHp = 220 * mult.hp;
+                    this.damage = 25 * mult.dmg;
+                    this.xpValue = 60;
+                    this.shirtColor = '#1e3a8a'; // Dark blue gym shirt
+                    this.skinColor = '#475569';
+                    this.heightMult = 1.35;
+                } else { // 'normal'
+                    this.speed = 1.35 * mult.speed;
+                    this.maxHp = 90 * mult.hp;
+                    this.damage = 15 * mult.dmg;
+                    this.xpValue = 30;
+                    this.shirtColor = '#b91c1c'; // Bloodied school shirt
+                    this.skinColor = '#84cc16';
+                    this.heightMult = 1.1;
+                }
+
+                this.hp = this.maxHp;
+                this.hitTimer = 0;
+                this.animFrame = Math.random() * 10;
+            }
+
+            update(dt) {
+                if (!player) return;
+
+                this.animFrame += dt * 8; // Spasmic running walking motion
+
+                const angleToPlayer = Math.atan2(player.y - this.y, player.x - this.x);
+                let vx = Math.cos(angleToPlayer) * this.speed * dt;
+                let vy = Math.sin(angleToPlayer) * this.speed * dt;
+
+                const nextX = this.x + vx;
+                const nextY = this.y + vy;
+
+                const stage = STAGES[currentStageIdx];
+                if (!player.isWallAt(nextX, this.y, stage.map)) {
+                    this.x = nextX;
+                }
+                if (!player.isWallAt(this.x, nextY, stage.map)) {
+                    this.y = nextY;
+                }
+
+                if (this.hitTimer > 0) this.hitTimer -= dt;
+
+                const distToPlayer = Math.hypot(player.x - this.x, player.y - this.y);
+                if (distToPlayer < this.radius + player.radius) {
+                    player.takeDamage(this.damage);
+                }
+            }
+
+            takeDamage(amount, isCrit) {
+                this.hp -= amount;
+                this.hitTimer = 0.18;
+
+                if (Math.random() < 0.2) {
+                    sound.playZombieGroan();
+                }
+
+                if (this.hp <= 0) {
+                    this.die();
+                }
+            }
+
+            die() {
+                kills++;
+                player.gainXp(this.xpValue);
+
+                if (Math.random() < 0.35) {
+                    spawnRandomItem(this.x, this.y);
+                }
+            }
+        }
+
+        class BossZombie extends Enemy {
+            constructor(x, y) {
+                super(x, y, 'boss');
+                const mult = diffMultipliers[difficulty];
+                this.radius = 0.65;
+                this.speed = 1.1 * mult.speed;
+                this.maxHp = 1800 * mult.hp;
+                this.hp = this.maxHp;
+                this.damage = 35 * mult.dmg;
+                this.xpValue = 500;
+                this.shirtColor = '#450a0a';
+                this.skinColor = '#15803d';
+                this.heightMult = 1.7;
+                this.specialAttackTimer = 0;
+            }
+
+            update(dt) {
+                super.update(dt);
+                this.specialAttackTimer += dt;
+
+                if (this.specialAttackTimer >= 5.0) {
+                    this.specialAttackTimer = 0;
+                    this.slamGround();
+                }
+
+                updateBossHUD(this.hp, this.maxHp);
+            }
+
+            slamGround() {
+                sound.playZombieGroan();
+                screenShake = 15;
+                for (let i = 0; i < 2; i++) {
+                    const rx = this.x + (Math.random() - 0.5) * 1.5;
+                    const ry = this.y + (Math.random() - 0.5) * 1.5;
+                    if (!player.isWallAt(rx, ry, STAGES[currentStageIdx].map)) {
+                        enemies.push(new Enemy(rx, ry, 'fast'));
+                    }
+                }
+            }
+
+            die() {
+                super.die();
+                document.getElementById('bossBarContainer').classList.add('hidden');
+                items.push(new Item(this.x - 0.3, this.y, 'medkit'));
+                items.push(new Item(this.x + 0.3, this.y, 'weapon_drop'));
+            }
+        }
+
+        // Collectibles Map Drop class
+        class Item {
+            constructor(x, y, type) {
+                this.x = x;
+                this.y = y;
+                this.type = type;
+                
+                if (type === 'ammo') {
+                    this.color = '#38bdf8';
+                } else if (type === 'medkit') {
+                    this.color = '#4ade80';
+                } else if (type === 'weapon_drop') {
+                    this.color = '#f59e0b';
+                }
+            }
+
+            applyEffect(player) {
+                if (this.type === 'ammo') {
+                    const ammo = player.ammoState[player.currentWeapon.id];
+                    if (ammo.reserve !== Infinity) {
+                        ammo.reserve += player.currentWeapon.magSize * 2;
+                    }
+                } else if (this.type === 'medkit') {
+                    player.hp = Math.min(player.maxHp, player.hp + 40);
+                } else if (this.type === 'weapon_drop') {
+                    for (let key in player.ammoState) {
+                        if (player.ammoState[key].reserve !== Infinity) {
+                            player.ammoState[key].reserve += WEAPONS[key].magSize * 3;
+                        }
+                    }
+                }
+                updateHUD();
+            }
+        }
+
+        function spawnRandomItem(x, y) {
+            const rand = Math.random();
+            let type = 'ammo';
+            if (rand < 0.45) type = 'ammo';
+            else if (rand < 0.85) type = 'medkit';
+            else type = 'weapon_drop';
+
+            items.push(new Item(x, y, type));
+        }
+
+        // Raycasting and Pseudo-3D Engine Renderer
+        function render3DView() {
+            if (!player) return;
+
+            const stage = STAGES[currentStageIdx];
+            const fov = player.fov;
+            const startAngle = player.angle - fov / 2;
+
+            const screenWidth = canvas.width;
+            const screenHeight = canvas.height;
+            // Apply mouse pitch look offset vertically
+            const halfHeight = screenHeight / 2 + (player ? player.pitch : 0);
+
+            // 1. Ceiling & Floor Dark Gradients with School Tile Patterns
+            const floorGrad = ctx.createLinearGradient(0, halfHeight, 0, screenHeight);
+            floorGrad.addColorStop(0, '#020305');
+            floorGrad.addColorStop(0.5, '#0d131d');
+            floorGrad.addColorStop(1, '#05070a');
+            ctx.fillStyle = floorGrad;
+            ctx.fillRect(0, halfHeight, screenWidth, screenHeight - halfHeight);
+
+            const ceilGrad = ctx.createLinearGradient(0, 0, 0, halfHeight);
+            ceilGrad.addColorStop(0, '#010203');
+            ceilGrad.addColorStop(1, '#0b0f19');
+            ctx.fillStyle = ceilGrad;
+            ctx.fillRect(0, 0, screenWidth, halfHeight);
+
+            // Buffer to store wall distances for depth buffer
+            const zBuffer = new Array(screenWidth);
+
+            // 2. Raycast Columns for School Walls
+            const stepAngle = fov / screenWidth;
+
+            for (let x = 0; x < screenWidth; x++) {
+                const rayAngle = startAngle + x * stepAngle;
+                
+                let distance = 0;
+                const maxDepth = 20;
+                let wallHit = 0;
+
+                const cos = Math.cos(rayAngle);
+                const sin = Math.sin(rayAngle);
+
+                let rayX = player.x;
+                let rayY = player.y;
+
+                while (distance < maxDepth) {
+                    rayX += cos * 0.04;
+                    rayY += sin * 0.04;
+                    distance += 0.04;
+
+                    const gridX = Math.floor(rayX);
+                    const gridY = Math.floor(rayY);
+
+                    if (gridX < 0 || gridX >= GRID_SIZE || gridY < 0 || gridY >= GRID_SIZE) {
+                        distance = maxDepth;
+                        break;
+                    }
+
+                    const cell = stage.map[gridY][gridX];
+                    if (cell === 1 || cell === 2 || cell === 3 || cell === 4 || cell === 6) {
+                        wallHit = cell;
+                        break;
+                    }
+                }
+
+                // Fish-eye correction
+                const correctedDistance = distance * Math.cos(rayAngle - player.angle);
+                zBuffer[x] = correctedDistance;
+
+                const sliceHeight = Math.min(screenHeight * 2, (screenHeight / correctedDistance));
+
+                // Ambient Fog Dimming
+                let brightness = 1.0 - Math.min(1.0, correctedDistance / 11.0);
+
+                const wallTopY = halfHeight - sliceHeight / 2;
+
+                if (wallHit === 1) {
+                    // Detailed School Corridor Wall (Cream upper, Painted lower, Center stripe)
+                    const splitY = wallTopY + sliceHeight * 0.45;
+                    
+                    ctx.fillStyle = adjustColorBrightness(stage.topWallColor, brightness);
+                    ctx.fillRect(x, wallTopY, 1, sliceHeight * 0.45);
+
+                    ctx.fillStyle = adjustColorBrightness('#0f172a', brightness);
+                    ctx.fillRect(x, splitY, 1, Math.max(1, sliceHeight * 0.03));
+
+                    ctx.fillStyle = adjustColorBrightness(stage.botWallColor, brightness);
+                    ctx.fillRect(x, splitY + sliceHeight * 0.03, 1, sliceHeight * 0.52);
+                } else if (wallHit === 2) {
+                    // Classroom Wall with Chalkboard (Green board) & Notice Board
+                    ctx.fillStyle = adjustColorBrightness('#14532d', brightness);
+                    ctx.fillRect(x, wallTopY + sliceHeight * 0.15, 1, sliceHeight * 0.4);
+
+                    ctx.fillStyle = adjustColorBrightness(stage.botWallColor, brightness);
+                    ctx.fillRect(x, wallTopY + sliceHeight * 0.55, 1, sliceHeight * 0.45);
+                } else if (wallHit === 3) {
+                    // Wooden School Desk & Steel Legs
+                    ctx.fillStyle = adjustColorBrightness('#b45309', brightness);
+                    ctx.fillRect(x, wallTopY + sliceHeight * 0.25, 1, sliceHeight * 0.4);
+
+                    ctx.fillStyle = adjustColorBrightness('#334155', brightness);
+                    ctx.fillRect(x, wallTopY + sliceHeight * 0.65, 1, sliceHeight * 0.35);
+                } else if (wallHit === 4) {
+                    // School Glass Windows
+                    ctx.fillStyle = adjustColorBrightness('#1e293b', brightness);
+                    ctx.fillRect(x, wallTopY, 1, sliceHeight);
+
+                    if (x % 12 < 5) {
+                        ctx.fillStyle = adjustColorBrightness('#38bdf8', brightness * 0.8);
+                        ctx.fillRect(x, wallTopY + sliceHeight * 0.15, 1, sliceHeight * 0.35);
+                    }
+                } else if (wallHit === 6) {
+                    // Restroom Stall Doors
+                    ctx.fillStyle = adjustColorBrightness('#475569', brightness);
+                    ctx.fillRect(x, wallTopY, 1, sliceHeight);
+
+                    // Door handle & sign
+                    if (x % 14 < 3) {
+                        ctx.fillStyle = adjustColorBrightness('#f59e0b', brightness);
+                        ctx.fillRect(x, wallTopY + sliceHeight * 0.45, 1, sliceHeight * 0.08);
+                    }
+                }
+            }
+
+            // 3. Render Sprites (Zombies, Exit Stairs Door, Items) with realistic depth sorting
+            const sprites = [];
+            
+            // Add Enemies to sprite queue
+            for (let enemy of enemies) {
+                sprites.push({
+                    x: enemy.x,
+                    y: enemy.y,
+                    type: 'enemy',
+                    ref: enemy
+                });
+            }
+
+            // Add Exit Stairs Door to sprite queue if unlocked
+            if (exitTriggered) {
+                sprites.push({
+                    x: GRID_SIZE - 1.5,
+                    y: GRID_SIZE - 1.5,
+                    type: 'stairs'
+                });
+            }
+
+            // Add Items to sprite queue
+            for (let item of items) {
+                sprites.push({
+                    x: item.x,
+                    y: item.y,
+                    type: 'item',
+                    ref: item
+                });
+            }
+
+            for (let s of sprites) {
+                s.dist = Math.hypot(s.x - player.x, s.y - player.y);
+            }
+
+            sprites.sort((a, b) => b.dist - a.dist);
+
+            // Draw sorted 3D Sprites
+            for (let s of sprites) {
+                const spriteX = s.x - player.x;
+                const spriteY = s.y - player.y;
+
+                let spriteAngle = Math.atan2(spriteY, spriteX) - player.angle;
+                
+                while (spriteAngle < -Math.PI) spriteAngle += Math.PI * 2;
+                while (spriteAngle > Math.PI) spriteAngle -= Math.PI * 2;
+
+                if (Math.abs(spriteAngle) < fov * 1.2) {
+                    const screenX = Math.tan(spriteAngle) * (screenWidth / 2) + (screenWidth / 2);
+                    const size = Math.min(screenHeight * 1.5, (screenHeight / s.dist));
+
+                    if (s.type === 'enemy') {
+                        drawZombieSprite(ctx, s.ref, screenX, halfHeight, size, s.dist, zBuffer, screenWidth);
+                    } else if (s.type === 'stairs') {
+                        drawStairsDoorSprite(ctx, screenX, halfHeight, size, s.dist, zBuffer, screenWidth);
+                    } else if (s.type === 'item') {
+                        drawItemSprite(ctx, s.ref, screenX, halfHeight, size, s.dist, zBuffer, screenWidth);
+                    }
+                }
+            }
+
+            // 4. Render 1인칭 디테일한 무기 그래픽 (High Quality First-Person Gun View)
+            renderFirstPersonWeapon(screenWidth, screenHeight, halfHeight);
+
+            // 5. Flashlight & Muzzle Overlay
+            if (flashOpacity > 0) {
+                ctx.fillStyle = `rgba(253, 224, 71, ${flashOpacity})`;
+                ctx.fillRect(0, 0, screenWidth, screenHeight);
+                flashOpacity -= 0.05;
+            }
+
+            // 6. Pain Overlay
+            if (damageFlash > 0) {
+                ctx.fillStyle = `rgba(239, 68, 68, ${damageFlash})`;
+                ctx.fillRect(0, 0, screenWidth, screenHeight);
+                damageFlash -= 0.04;
+            }
+        }
+
+        // Procedural 'Train to Busan' Style Horrifying Zombie Sprite Renderer
+        function drawZombieSprite(c, enemy, screenX, halfHeight, size, dist, zBuffer, screenWidth) {
+            const heightMult = enemy.heightMult;
+            const spriteHeight = size * heightMult;
+            const spriteWidth = size * 0.6;
+
+            const drawXStart = Math.floor(screenX - spriteWidth / 2);
+            const drawYStart = Math.floor(halfHeight - spriteHeight / 2);
+
+            const brightness = 1.0 - Math.min(1.0, dist / 11.0);
+
+            // Terrifying erratic twitching movement
+            const twitchX = (Math.random() - 0.5) * (size * 0.04);
+            const twitchY = Math.sin(enemy.animFrame) * (size * 0.06);
+
+            for (let col = 0; col < spriteWidth; col++) {
+                const colX = Math.floor(drawXStart + col + twitchX);
+                if (colX >= 0 && colX < screenWidth) {
+                    if (dist < zBuffer[colX]) {
+                        const relX = col / spriteWidth; // 0.0 ~ 1.0 horizontal ratio
+
+                        // White hit flash
+                        if (enemy.hitTimer > 0) {
+                            c.fillStyle = '#ffffff';
+                            c.fillRect(colX, drawYStart + twitchY, 1, spriteHeight);
+                            continue;
+                        }
+
+                        // Head & Twisted Neck (top 26% of sprite)
+                        if (relX > 0.28 && relX < 0.72) {
+                            c.fillStyle = adjustColorBrightness(enemy.skinColor, brightness);
+                            c.fillRect(colX, drawYStart + twitchY, 1, spriteHeight * 0.26);
+
+                            // Bloodied Creepy Open Mouth (center bottom of head)
+                            if (relX > 0.42 && relX < 0.58) {
+                                c.fillStyle = '#450a0a';
+                                c.fillRect(colX, drawYStart + spriteHeight * 0.16 + twitchY, 1, spriteHeight * 0.08);
+                            }
+
+                            // Glowing Bleeding Red Eyes
+                            if ((relX > 0.36 && relX < 0.45) || (relX > 0.55 && relX < 0.64)) {
+                                c.fillStyle = '#ef4444';
+                                c.fillRect(colX, drawYStart + spriteHeight * 0.08 + twitchY, 1, Math.max(2, spriteHeight * 0.04));
+                            }
+                        }
+
+                        // Torso & Blood Splattered Student Uniform (middle 44%)
+                        if (relX > 0.16 && relX < 0.84) {
+                            c.fillStyle = adjustColorBrightness(enemy.shirtColor, brightness);
+                            c.fillRect(colX, drawYStart + spriteHeight * 0.26 + twitchY, 1, spriteHeight * 0.44);
+
+                            // Blood Stains on Chest
+                            if (relX > 0.35 && relX < 0.65) {
+                                c.fillStyle = adjustColorBrightness('#7f1d1d', brightness);
+                                c.fillRect(colX, drawYStart + spriteHeight * 0.35 + twitchY, 1, spriteHeight * 0.2);
+                            }
+                        }
+
+                        // Twisted Outstretched Arms & Clawed Hands (reaching for player)
+                        if (relX < 0.22 || relX > 0.78) {
+                            c.fillStyle = adjustColorBrightness(enemy.skinColor, brightness);
+                            c.fillRect(colX, drawYStart + spriteHeight * 0.22 + twitchY, 1, spriteHeight * 0.32);
+
+                            // Bloodied Fingers
+                            c.fillStyle = '#7f1d1d';
+                            c.fillRect(colX, drawYStart + spriteHeight * 0.50 + twitchY, 1, spriteHeight * 0.06);
+                        }
+
+                        // Dark School Trousers & Legs (bottom 30%)
+                        if (relX > 0.24 && relX < 0.76) {
+                            c.fillStyle = adjustColorBrightness('#0f172a', brightness);
+                            c.fillRect(colX, drawYStart + spriteHeight * 0.7 + twitchY, 1, spriteHeight * 0.3);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Illuminated School Exit Stairs Door Sprite Renderer
+        function drawStairsDoorSprite(c, screenX, halfHeight, size, dist, zBuffer, screenWidth) {
+            const doorHeight = size * 1.4;
+            const doorWidth = size * 0.85;
+
+            const drawXStart = Math.floor(screenX - doorWidth / 2);
+            const drawYStart = Math.floor(halfHeight - doorHeight / 2);
+
+            for (let col = 0; col < doorWidth; col++) {
+                const colX = drawXStart + col;
+                if (colX >= 0 && colX < screenWidth) {
+                    if (dist < zBuffer[colX]) {
+                        const relX = col / doorWidth;
+
+                        // Glowing Green Exit Frame
+                        if (relX < 0.1 || relX > 0.9) {
+                            c.fillStyle = '#22c55e';
+                            c.fillRect(colX, drawYStart, 1, doorHeight);
+                        } else {
+                            // Metal Fire Staircase Door
+                            c.fillStyle = '#334155';
+                            c.fillRect(colX, drawYStart, 1, doorHeight);
+
+                            // Stairs Icon / Emergency Exit Light
+                            if (relX > 0.25 && relX < 0.75) {
+                                c.fillStyle = '#10b981';
+                                c.fillRect(colX, drawYStart + doorHeight * 0.12, 1, doorHeight * 0.18);
+                            }
+
+                            // Door Handle Bar
+                            if (relX > 0.15 && relX < 0.85) {
+                                c.fillStyle = '#f59e0b';
+                                c.fillRect(colX, drawYStart + doorHeight * 0.5, 1, Math.max(2, doorHeight * 0.04));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Collectibles Dropped Item Sprite Renderer
+        function drawItemSprite(c, item, screenX, halfHeight, size, dist, zBuffer, screenWidth) {
+            const itemHeight = size * 0.35;
+            const itemWidth = size * 0.35;
+
+            const drawXStart = Math.floor(screenX - itemWidth / 2);
+            const drawYStart = Math.floor(halfHeight + size * 0.2);
+
+            for (let col = 0; col < itemWidth; col++) {
+                const colX = drawXStart + col;
+                if (colX >= 0 && colX < screenWidth) {
+                    if (dist < zBuffer[colX]) {
+                        c.fillStyle = item.color;
+                        c.fillRect(colX, drawYStart, 1, itemHeight);
+                    }
+                }
+            }
+        }
+
+        // High Quality First Person Weapon View (Realistic 3D Gun View)
+        function renderFirstPersonWeapon(w, h, halfHeight) {
+            const bobY = Math.sin(player.weaponBob) * 10;
+            const bobX = Math.cos(player.weaponBob) * 5;
+
+            ctx.save();
+            ctx.translate(w * 0.58 + bobX, h + bobY + 20);
+
+            const recoilAmt = screenShake * 3.5;
+            ctx.translate(-recoilAmt * 0.5, recoilAmt);
+
+            if (flashOpacity > 0.2) {
+                ctx.fillStyle = '#fef08a';
+                ctx.beginPath();
+                ctx.arc(-20, -280, 45, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#ef4444';
+                ctx.beginPath();
+                ctx.arc(-20, -280, 25, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            ctx.fillStyle = '#0f172a';
+            ctx.strokeStyle = '#334155';
+            ctx.lineWidth = 3;
+
+            if (player.currentWeapon.id === 'pistol') {
+                ctx.fillRect(-35, -160, 40, 180);
+                ctx.strokeRect(-35, -160, 40, 180);
+
+                ctx.fillStyle = '#334155';
+                ctx.fillRect(-38, -165, 46, 100);
+
+                ctx.fillStyle = '#ef4444';
+                ctx.fillRect(-18, -170, 8, 12);
+            } else if (player.currentWeapon.id === 'shotgun') {
+                ctx.fillRect(-50, -220, 30, 240);
+                ctx.fillRect(-15, -220, 30, 240);
+                ctx.strokeRect(-50, -220, 30, 240);
+                ctx.strokeRect(-15, -220, 30, 240);
+
+                ctx.fillStyle = '#78350f';
+                ctx.fillRect(-55, -120, 75, 70);
+            } else if (player.currentWeapon.id === 'rifle') {
+                ctx.fillRect(-30, -260, 35, 280);
+                ctx.strokeRect(-30, -260, 35, 280);
+
+                ctx.fillStyle = '#1e293b';
+                ctx.fillRect(-40, -180, 55, 140);
+                ctx.fillStyle = '#f59e0b';
+                ctx.fillRect(-45, -90, 15, 90);
+
+                ctx.fillStyle = 'rgba(34, 211, 238, 0.7)';
+                ctx.fillRect(-22, -200, 20, 25);
+            } else if (player.currentWeapon.id === 'smg') {
+                ctx.fillRect(-28, -170, 32, 180);
+                ctx.strokeRect(-28, -170, 32, 180);
+
+                ctx.fillStyle = '#475569';
+                ctx.fillRect(-32, -120, 40, 80);
+
+                ctx.fillStyle = '#0284c7';
+                ctx.fillRect(-12, -40, 16, 100);
+            } else if (player.currentWeapon.id === 'sniper') {
+                ctx.fillRect(-20, -320, 24, 340);
+                ctx.strokeRect(-20, -320, 24, 340);
+
+                ctx.fillStyle = '#020617';
+                ctx.fillRect(-38, -200, 60, 50);
+                ctx.fillStyle = '#22d3ee';
+                ctx.fillRect(-32, -195, 48, 40);
+            }
+
+            ctx.restore();
+        }
+
+        function adjustColorBrightness(hexColor, fraction) {
+            let hex = hexColor.replace('#', '');
+            if (hex.length === 3) {
+                hex = hex.split('').map(c => c + c).join('');
+            }
+            let r = parseInt(hex.substring(0, 2), 16);
+            let g = parseInt(hex.substring(2, 4), 16);
+            let b = parseInt(hex.substring(4, 6), 16);
+
+            r = Math.floor(r * fraction);
+            g = Math.floor(g * fraction);
+            b = Math.floor(b * fraction);
+
+            return `rgb(${r}, ${g}, ${b})`;
+        }
+
+        // 2D Minimap Renderer
+        function drawMinimap() {
+            minimapCtx.fillStyle = '#020305';
+            minimapCtx.fillRect(0, 0, minimapCanvas.width, minimapCanvas.height);
+
+            const map = STAGES[currentStageIdx].map;
+            const blockW = minimapCanvas.width / GRID_SIZE;
+            const blockH = minimapCanvas.height / GRID_SIZE;
+
+            for (let y = 0; y < GRID_SIZE; y++) {
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    const block = map[y][x];
+                    if (block === 1) {
+                        minimapCtx.fillStyle = '#475569';
+                        minimapCtx.fillRect(x * blockW, y * blockH, blockW - 1, blockH - 1);
+                    } else if (block === 2) {
+                        minimapCtx.fillStyle = '#166534'; // Classroom
+                        minimapCtx.fillRect(x * blockW, y * blockH, blockW - 1, blockH - 1);
+                    } else if (block === 3 || block === 4 || block === 6) {
+                        minimapCtx.fillStyle = '#334155';
+                        minimapCtx.fillRect(x * blockW, y * blockH, blockW - 1, blockH - 1);
+                    }
+                }
+            }
+
+            // Draw Exit Stairs Door on minimap when unlocked
+            if (exitTriggered) {
+                minimapCtx.fillStyle = '#22c55e';
+                minimapCtx.beginPath();
+                minimapCtx.arc((GRID_SIZE - 1.5) * blockW, (GRID_SIZE - 1.5) * blockH, blockW / 1.5, 0, Math.PI * 2);
+                minimapCtx.fill();
+            }
+
+            for (let item of items) {
+                minimapCtx.fillStyle = item.color;
+                minimapCtx.fillRect(item.x * blockW - 2, item.y * blockH - 2, 4, 4);
+            }
+
+            for (let enemy of enemies) {
+                minimapCtx.fillStyle = enemy.shirtColor;
+                minimapCtx.fillRect(enemy.x * blockW - 2, enemy.y * blockH - 2, 4, 4);
+            }
+
+            if (player) {
+                const px = player.x * blockW;
+                const py = player.y * blockH;
+
+                minimapCtx.fillStyle = '#38bdf8';
+                minimapCtx.beginPath();
+                minimapCtx.arc(px, py, 4, 0, Math.PI * 2);
+                minimapCtx.fill();
+
+                minimapCtx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+                minimapCtx.lineWidth = 1;
+                minimapCtx.beginPath();
+                minimapCtx.moveTo(px, py);
+                minimapCtx.lineTo(
+                    px + Math.cos(player.angle - player.fov / 2) * 18,
+                    py + Math.sin(player.angle - player.fov / 2) * 18
+                );
+                minimapCtx.moveTo(px, py);
+                minimapCtx.lineTo(
+                    px + Math.cos(player.angle + player.fov / 2) * 18,
+                    py + Math.sin(player.angle + player.fov / 2) * 18
+                );
+                minimapCtx.stroke();
+            }
+        }
+
+        // Main Loop
+        function gameLoop(timestamp) {
+            if (!lastTime) lastTime = timestamp;
+            const dt = Math.min((timestamp - lastTime) / 1000, 0.1);
+            lastTime = timestamp;
+
+            if (gameState === 'PLAYING') {
+                update(dt);
+            }
+
+            render3DView();
+            drawMinimap();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        let enemiesSpawnedInStage = 0;
+        let lastEnemySpawnTime = 0;
+
+        function update(dt) {
+            if (screenShake > 0) screenShake *= 0.88;
+
+            if (player) player.update(dt);
+
+            updateStageProgress();
+
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                const enemy = enemies[i];
+                enemy.update(dt);
+                if (enemy.hp <= 0) {
+                    enemies.splice(i, 1);
+                    if (enemy === boss) boss = null;
+                }
+            }
+        }
+
+        function updateStageProgress() {
+            const stage = STAGES[currentStageIdx];
+            const now = Date.now();
+
+            if (enemiesSpawnedInStage < stage.totalZombies && now - lastEnemySpawnTime > stage.spawnRate) {
+                lastEnemySpawnTime = now;
+                enemiesSpawnedInStage++;
+                spawnEnemyInStage();
+            }
+
+            if (stage.boss && !boss && enemiesSpawnedInStage >= stage.totalZombies && enemies.length === 0) {
+                spawnBoss();
+            }
+
+            const totalRemaining = (stage.totalZombies - enemiesSpawnedInStage) + enemies.length + (boss ? 1 : 0);
+            
+            const stagePanel = document.getElementById('stagePanel');
+            const objIcon = document.getElementById('objectiveIcon');
+            const objText = document.getElementById('objectiveText');
+
+            if (totalRemaining > 0) {
+                objIcon.className = 'fa-solid fa-skull text-red-500';
+                objText.innerHTML = `남은 적: <strong class="text-white font-orbitron">${totalRemaining}</strong>`;
+                stagePanel.classList.remove('portal-alert');
+            } else {
+                objIcon.className = 'fa-solid fa-stairs text-emerald-400 animate-bounce';
+                objText.innerHTML = `<strong class="text-emerald-400 font-bold">계단 문 열림! 계단으로 올라가세요</strong>`;
+                stagePanel.classList.add('portal-alert');
+
+                if (!exitTriggered) {
+                    exitTriggered = true;
+                }
+            }
+        }
+
+        function spawnEnemyInStage() {
+            let spawnX, spawnY;
+            const stage = STAGES[currentStageIdx];
+
+            do {
+                spawnX = Math.random() * (GRID_SIZE - 2) + 1;
+                spawnY = Math.random() * (GRID_SIZE - 2) + 1;
+            } while (
+                Math.hypot(spawnX - player.x, spawnY - player.y) < 3.0 ||
+                player.isWallAt(spawnX, spawnY, stage.map)
+            );
+
+            const rand = Math.random();
+            let type = 'normal';
+            if (rand < 0.25) type = 'fast';
+            else if (rand < 0.45) type = 'tank';
+
+            enemies.push(new Enemy(spawnX, spawnY, type));
+        }
+
+        function spawnBoss() {
+            boss = new BossZombie(GRID_SIZE / 2, GRID_SIZE / 2);
+            enemies.push(boss);
+            document.getElementById('bossBarContainer').classList.remove('hidden');
+        }
+
+        function loadStage(stageIndex) {
+            currentStageIdx = stageIndex;
+            const stage = STAGES[currentStageIdx];
+
+            enemies = [];
+            items = [];
+            bloodDecals = [];
+            boss = null;
+            exitTriggered = false;
+            enemiesSpawnedInStage = 0;
+            lastEnemySpawnTime = Date.now();
+
+            player.x = 1.5;
+            player.y = 1.5;
+            player.angle = 0;
+            player.pitch = 0;
+
+            document.getElementById('stageTitle').innerText = stage.title;
+            document.getElementById('stageName').innerText = stage.name;
+            document.getElementById('bossBarContainer').classList.add('hidden');
+
+            updateHUD();
+        }
+
+        function updateHUD() {
+            if (!player) return;
+
+            const hpPercent = Math.max(0, (player.hp / player.maxHp) * 100);
+            document.getElementById('hpBar').style.width = `${hpPercent}%`;
+            document.getElementById('hpText').innerText = `${Math.ceil(player.hp)} / ${player.maxHp}`;
+
+            const xpPercent = Math.min(100, (player.xp / player.maxXp) * 100);
+            document.getElementById('xpBar').style.width = `${xpPercent}%`;
+            document.getElementById('xpText').innerText = `${player.xp} / ${player.maxXp} XP`;
+            document.getElementById('playerLevel').innerText = player.level;
+
+            document.getElementById('weaponName').innerText = player.currentWeapon.name;
+            document.getElementById('weaponIcon').className = `fa-solid ${player.currentWeapon.icon}`;
+
+            const ammo = player.ammoState[player.currentWeapon.id];
+            document.getElementById('currentAmmo').innerText = ammo.current;
+            document.getElementById('maxAmmo').innerText = ammo.reserve === Infinity ? '∞' : ammo.reserve;
+        }
+
+        function updateBossHUD(current, max) {
+            const percent = Math.max(0, (current / max) * 100);
+            document.getElementById('bossHpBar').style.width = `${percent}%`;
+            document.getElementById('bossHpText').innerText = `${Math.ceil(current)} / ${max}`;
+        }
+
+        function renderWeaponSlots() {
+            const container = document.getElementById('weaponSlots');
+            container.innerHTML = '';
+
+            player.unlockedWeapons.forEach((wId, idx) => {
+                const w = WEAPONS[wId];
+                const isActive = player.currentWeapon.id === wId;
+                const slot = document.createElement('div');
+                slot.className = `p-2.5 rounded-xl flex items-center gap-2 border transition cursor-pointer ${
+                    isActive ? 'bg-cyan-950/80 border-cyan-400 text-white glow-blue' : 'bg-slate-900/60 border-slate-700 text-slate-400 hover:border-slate-500'
+                }`;
+                slot.onclick = () => player.switchWeapon(wId);
+                slot.innerHTML = `
+                    <span class="font-orbitron font-bold text-xs text-slate-500">${idx + 1}</span>
+                    <i class="fa-solid ${w.icon} text-sm"></i>
+                `;
+                container.appendChild(slot);
+            });
+        }
+
+        function setDifficulty(diff) {
+            difficulty = diff;
+            document.querySelectorAll('.diff-btn').forEach(btn => {
+                btn.classList.remove('border-cyan-500', 'bg-cyan-950/30', 'text-cyan-300');
+                btn.classList.add('border-slate-700', 'bg-slate-800/50', 'text-slate-300');
+            });
+
+            const selected = document.getElementById(`diff-${diff}`);
+            selected.classList.remove('border-slate-700', 'bg-slate-800/50', 'text-slate-300');
+            selected.classList.add('border-cyan-500', 'bg-cyan-950/30', 'text-cyan-300');
+        }
+
+        const UPGRADES_POOL = [
+            { id: 'dmg', name: '공격력 증강 (+20%)', icon: 'fa-hand-fist', color: 'text-red-400', apply: () => player.bonusDamage += 0.20 },
+            { id: 'hp', name: '최대 체력 증강 (+30 HP / 완전 회복)', icon: 'fa-heart', color: 'text-rose-400', apply: () => { player.maxHp += 30; player.hp = player.maxHp; } },
+            { id: 'speed', name: '이동 민첩성 증가 (+15%)', icon: 'fa-person-running', color: 'text-amber-400', apply: () => player.bonusSpeed += 0.15 },
+            { id: 'fireRate', name: '무기 발사속도 연사 강화 (+20%)', icon: 'fa-gauge-high', color: 'text-cyan-400', apply: () => player.bonusFireRate += 0.20 },
+            { id: 'crit', name: '약점 치명타 공격력 확률 강화 (+10%)', icon: 'fa-crosshair', color: 'text-emerald-400', apply: () => player.critChance += 0.10 }
+        ];
+
+        function triggerLevelUpModal() {
+            gameState = 'LEVEL_UP';
+            document.exitPointerLock();
+
+            const modal = document.getElementById('levelUpModal');
+            const container = document.getElementById('upgradeOptionsContainer');
+            container.innerHTML = '';
+
+            const shuffled = [...UPGRADES_POOL].sort(() => 0.5 - Math.random()).slice(0, 3);
+
+            shuffled.forEach(upg => {
+                const card = document.createElement('div');
+                card.className = 'p-4 rounded-xl bg-slate-900/80 border border-slate-700 hover:border-amber-400 cursor-pointer transition flex items-center justify-between group';
+                card.onclick = () => {
+                    upg.apply();
+                    modal.classList.add('hidden');
+                    gameState = 'PLAYING';
+                    canvas.requestPointerLock();
+                    updateHUD();
+                };
+                card.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center ${upg.color} text-lg">
+                            <i class="fa-solid ${upg.icon}"></i>
+                        </div>
+                        <div class="text-left">
+                            <div class="font-bold text-sm text-slate-100 group-hover:text-amber-300 transition">${upg.name}</div>
+                            <div class="text-xs text-slate-400">능력치를 영구적으로 강화시킵니다.</div>
+                        </div>
+                    </div>
+                    <i class="fa-solid fa-chevron-right text-slate-500 group-hover:text-amber-400 transition"></i>
+                `;
+                container.appendChild(card);
+            });
+
+            modal.classList.remove('hidden');
+        }
+
+        function startGame() {
+            sound.init();
+            document.getElementById('mainMenu').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+            document.getElementById('crosshairDisplay').classList.remove('hidden');
+
+            player = new Player(1.5, 1.5);
+            score = 0;
+            kills = 0;
+            gameTime = 0;
+
+            if (gameTimerInterval) clearInterval(gameTimerInterval);
+            gameTimerInterval = setInterval(() => {
+                if (gameState === 'PLAYING') gameTime++;
+            }, 1000);
+
+            loadStage(0);
+            renderWeaponSlots();
+            gameState = 'PLAYING';
+            canvas.requestPointerLock();
+        }
+
+        function togglePause() {
+            if (gameState === 'PLAYING') {
+                gameState = 'PAUSED';
+                document.exitPointerLock();
+                document.getElementById('pauseMenu').classList.remove('hidden');
+            } else if (gameState === 'PAUSED') {
+                gameState = 'PLAYING';
+                document.getElementById('pauseMenu').classList.add('hidden');
+                canvas.requestPointerLock();
+            }
+        }
+
+        function triggerStageClear() {
+            gameState = 'CLEAR';
+            document.exitPointerLock();
+
+            const clearModal = document.getElementById('gameClearMenu');
+            const clearTitle = document.getElementById('clearTitle');
+            const clearSub = document.getElementById('clearSub');
+            const btnAction = document.getElementById('btnClearAction');
+
+            if (currentStageIdx < STAGES.length - 1) {
+                clearTitle.innerText = `${STAGES[currentStageIdx].title} 이동 성공!`;
+                clearSub.innerText = '해당 층의 좀비를 구출하고 계단을 통해 다음 층으로 이동했습니다.';
+                btnAction.innerHTML = '다음 층 올라가기 <i class="fa-solid fa-arrow-up ml-2"></i>';
+                btnAction.onclick = proceedToNextStage;
+            } else {
+                clearTitle.innerText = '학교 5층 옥상 탈출 대성공!';
+                clearSub.innerText = '모든 층의 좀비를 격퇴하고 5층 옥상 계단을 통해 탈출 헬기에 성공적으로 탑승했습니다!';
+                btnAction.innerHTML = '메인 화면 복귀 <i class="fa-solid fa-house ml-2"></i>';
+                btnAction.onclick = returnToMainMenu;
+            }
+
+            clearModal.classList.remove('hidden');
+        }
+
+        function proceedToNextStage() {
+            document.getElementById('gameClearMenu').classList.add('hidden');
+            loadStage(currentStageIdx + 1);
+            gameState = 'PLAYING';
+            canvas.requestPointerLock();
+        }
+
+        function triggerGameOver() {
+            gameState = 'GAME_OVER';
+            document.exitPointerLock();
+            if (gameTimerInterval) clearInterval(gameTimerInterval);
+
+            const minutes = Math.floor(gameTime / 60).toString().padStart(2, '0');
+            const seconds = (gameTime % 60).toString().padStart(2, '0');
+
+            document.getElementById('finalStage').innerText = STAGES[currentStageIdx].title;
+            document.getElementById('finalKills').innerText = kills;
+            document.getElementById('finalTime').innerText = `${minutes}:${seconds}`;
+            document.getElementById('finalScore').innerText = score;
+
+            document.getElementById('gameOverMenu').classList.remove('hidden');
+        }
+
+        function restartGame() {
+            document.getElementById('gameOverMenu').classList.add('hidden');
+            document.getElementById('gameClearMenu').classList.add('hidden');
+            startGame();
+        }
+
+        function returnToMainMenu() {
+            document.getElementById('pauseMenu').classList.add('hidden');
+            document.getElementById('gameOverMenu').classList.add('hidden');
+            document.getElementById('gameClearMenu').classList.add('hidden');
+            document.getElementById('crosshairDisplay').classList.add('hidden');
+            document.getElementById('hud').classList.add('hidden');
+            document.getElementById('mainMenu').classList.remove('hidden');
+            gameState = 'MENU';
+        }
+
+        // Trigger loop on boot
+        window.onload = function() {
+            requestAnimationFrame(gameLoop);
+        };
+    </script>
+</body>
+</html>
