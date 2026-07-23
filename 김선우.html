@@ -1,0 +1,1758 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>폐공장 탈출 3D: 그래픽 강화판</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js 3D Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
+    
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #010103;
+            font-family: 'Share Tech Mono', 'Noto Sans KR', monospace;
+            color: #efefef;
+        }
+
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #000;
+        }
+
+        #canvas3d {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+
+        /* Retro VHS CRT Scanlines & Overlay */
+        .vhs-scanlines {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.4) 50%
+            ), linear-gradient(
+                90deg,
+                rgba(255, 0, 0, 0.03),
+                rgba(0, 255, 0, 0.01),
+                rgba(0, 0, 255, 0.03)
+            );
+            background-size: 100% 4px, 6px 100%;
+            z-index: 10;
+        }
+
+        .vhs-vignette {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            box-shadow: inset 0 0 120px rgba(0, 0, 0, 0.95), inset 0 0 60px rgba(0, 0, 0, 0.85);
+            z-index: 11;
+        }
+
+        .cam-text {
+            font-family: 'VT323', 'Share Tech Mono', monospace;
+            text-shadow: 2px 2px 0px #000, -1px -1px 0px #000, 0 0 8px rgba(255, 0, 0, 0.6);
+        }
+
+        /* Virtual Touch Joystick */
+        .joystick-zone {
+            position: absolute;
+            bottom: 25px;
+            left: 25px;
+            width: 130px;
+            height: 130px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 2px solid rgba(255, 255, 255, 0.25);
+            border-radius: 50%;
+            touch-action: none;
+            display: none;
+            z-index: 30;
+        }
+
+        .joystick-knob {
+            position: absolute;
+            top: 35px;
+            left: 35px;
+            width: 60px;
+            height: 60px;
+            background: rgba(239, 68, 68, 0.6);
+            border: 2px solid #ef4444;
+            border-radius: 50%;
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.6);
+            pointer-events: none;
+        }
+
+        /* Center Crosshair & Interactive Prompt */
+        .crosshair-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 15;
+            display: flex;
+            flex-col;
+            align-items: center;
+        }
+
+        .crosshair {
+            width: 12px;
+            height: 12px;
+            background: rgba(255, 255, 255, 0.85);
+            border: 2px solid rgba(0, 0, 0, 0.9);
+            border-radius: 50%;
+            transition: all 0.15s ease;
+        }
+
+        .crosshair.active {
+            background: #facc15;
+            transform: scale(1.6);
+            box-shadow: 0 0 12px #facc15;
+            border-color: #fff;
+        }
+
+        #interactionPrompt {
+            margin-top: 18px;
+            padding: 4px 12px;
+            background: rgba(0, 0, 0, 0.85);
+            border: 1px solid #facc15;
+            color: #facc15;
+            font-size: 13px;
+            font-weight: bold;
+            border-radius: 4px;
+            box-shadow: 0 0 10px rgba(250, 204, 21, 0.4);
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        @keyframes recPulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.2; transform: scale(0.85); }
+        }
+        .rec-dot {
+            animation: recPulse 1.2s infinite ease-in-out;
+        }
+
+        @keyframes glitchText {
+            0% { transform: translate(0); }
+            20% { transform: translate(-2px, 2px); }
+            40% { transform: translate(-2px, -2px); }
+            60% { transform: translate(2px, 2px); }
+            80% { transform: translate(2px, -2px); }
+            100% { transform: translate(0); }
+        }
+        .glitch-active {
+            animation: glitchText 0.15s infinite;
+            color: #ff3333 !important;
+        }
+    </style>
+</head>
+<body class="bg-black select-none overflow-hidden">
+
+    <div id="gameContainer">
+        <!-- 3D Canvas -->
+        <canvas id="canvas3d"></canvas>
+
+        <!-- VHS Overlays -->
+        <div class="vhs-scanlines"></div>
+        <div class="vhs-vignette"></div>
+        
+        <!-- FPS Center Crosshair and Interactive Context Popup -->
+        <div class="crosshair-container">
+            <div id="crosshair" class="crosshair"></div>
+            <div id="interactionPrompt">[E] 상호작용</div>
+        </div>
+
+        <!-- Camcorder HUD Overlay -->
+        <div id="hudOverlay" class="absolute inset-0 pointer-events-none p-4 md:p-8 flex flex-col justify-between z-20">
+            <!-- Top HUD Bar -->
+            <div class="flex justify-between items-start text-sm md:text-xl font-bold tracking-widest cam-text">
+                <div class="flex items-center gap-3 bg-black/80 px-3 py-1.5 rounded border border-red-900/80 backdrop-blur-sm">
+                    <span class="w-4 h-4 rounded-full bg-red-600 inline-block rec-dot"></span>
+                    <span class="text-red-500 font-extrabold tracking-wider">REC 3D HD</span>
+                    <span id="recTimer" class="text-gray-200">00:00:00</span>
+                    <span class="text-xs px-2 py-0.5 bg-red-950 text-red-300 rounded border border-red-800 hidden md:inline">FACTORY CAM 01</span>
+                </div>
+
+                <div class="flex flex-col items-end gap-1 bg-black/80 px-3 py-1.5 rounded border border-gray-800 backdrop-blur-sm">
+                    <div class="flex items-center gap-2 text-emerald-400">
+                        <span class="text-xs text-gray-400">배터리:</span>
+                        <span id="batteryText">100%</span>
+                        <div class="w-8 h-4 border border-emerald-400 p-0.5 rounded-sm flex">
+                            <div id="batteryBar" class="h-full bg-emerald-400 w-full transition-all"></div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span id="flashlightHudText" class="text-xs px-2 py-0.5 rounded bg-yellow-950 text-yellow-300 border border-yellow-600 font-bold">🔦 손전등: ON [F]</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Alert Popups -->
+            <div id="alertMessage" class="self-center text-center bg-black/90 border-2 border-yellow-500 px-6 py-3 rounded-lg text-yellow-400 font-bold text-base md:text-2xl cam-text shadow-2xl transition-all opacity-0 transform translate-y-4 backdrop-blur-md max-w-xl">
+                3D 폐공장에 진입했습니다.
+            </div>
+
+            <!-- Bottom HUD Bar -->
+            <div class="flex flex-col md:flex-row justify-between items-end md:items-end gap-4">
+                <!-- Objective Status Box -->
+                <div class="bg-black/85 p-3 md:p-4 rounded-lg border border-red-900/80 max-w-md w-full backdrop-blur-md shadow-lg">
+                    <div class="text-xs text-red-400 font-bold mb-1 tracking-widest flex justify-between">
+                        <span>[ 탈출 현황 ]</span>
+                        <span id="monsterDistanceText" class="text-gray-400">괴물 상태: 감지 안됨</span>
+                    </div>
+                    <div id="objectiveText" class="text-sm md:text-base text-gray-200 font-bold mb-2">
+                        빛나는 <span class="text-yellow-400 font-extrabold">고전압 퓨즈 3개</span>를 찾아 제어실 <span class="text-amber-400 font-extrabold">⚡ 배전반</span>에 설치하세요!
+                    </div>
+
+                    <!-- Items Grid -->
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs text-gray-400 mr-2">보유 퓨즈:</span>
+                        <div id="fuse1Slot" class="w-8 h-8 rounded border border-gray-700 bg-gray-900 flex items-center justify-center text-xs text-gray-500 font-bold">1</div>
+                        <div id="fuse2Slot" class="w-8 h-8 rounded border border-gray-700 bg-gray-900 flex items-center justify-center text-xs text-gray-500 font-bold">2</div>
+                        <div id="fuse3Slot" class="w-8 h-8 rounded border border-gray-700 bg-gray-900 flex items-center justify-center text-xs text-gray-500 font-bold">3</div>
+                        <span id="gateStatusBadge" class="ml-auto text-xs px-2.5 py-1 rounded bg-red-950 text-red-400 border border-red-800 font-bold">🚨 출구 문 잠김</span>
+                    </div>
+                </div>
+
+                <!-- Control Hint -->
+                <div class="bg-black/80 p-3 rounded-lg border border-gray-800 text-xs text-gray-300 hidden md:block">
+                    <div>🎮 <strong>조작법:</strong> WASD (이동), 마우스 드래그 (시점), F (손전등), E (상호작용)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile Controls -->
+        <div id="joystickZone" class="joystick-zone">
+            <div id="joystickKnob" class="joystick-knob"></div>
+        </div>
+
+        <div id="mobileActionButtons" class="absolute bottom-6 right-6 flex flex-col gap-3 pointer-events-auto z-30 hidden">
+            <button id="btnFlashlight" class="w-16 h-16 rounded-full bg-yellow-600/80 active:bg-yellow-500 border-2 border-yellow-300 text-white font-bold text-xs flex items-center justify-center shadow-xl active:scale-95">
+                🔦 손전등
+            </button>
+            <button id="btnInteract" class="w-16 h-16 rounded-full bg-red-700/80 active:bg-red-600 border-2 border-red-300 text-white font-bold text-sm flex items-center justify-center shadow-xl active:scale-95">
+                ✋ 상호작용
+            </button>
+        </div>
+
+        <!-- START MODAL -->
+        <div id="startModal" class="absolute inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
+            <div class="max-w-xl w-full bg-neutral-950 border-2 border-red-700 rounded-xl p-6 md:p-8 shadow-2xl shadow-red-950/80 text-center relative overflow-hidden">
+                <h1 class="text-3xl md:text-5xl font-black text-red-600 tracking-wider cam-text mb-2">3D 심야 폐공장 탈출</h1>
+                <p class="text-xs text-red-400 tracking-widest font-bold mb-6">GRAPHICS UPGRADED EDITION</p>
+                
+                <div class="text-left text-sm md:text-base text-gray-300 space-y-3 bg-black/80 p-4 rounded-lg border border-neutral-800 mb-6 leading-relaxed">
+                    <p>🏭 <strong class="text-white">시각적 탐색 가이드</strong></p>
+                    <p>• <span class="text-yellow-400 font-bold">🟡 고전압 퓨즈:</span> 노란 빛 기둥과 회전하는 에너지가 나오는 3개의 퓨즈를 찾으세요.</p>
+                    <p>• <span class="text-amber-400 font-bold">⚡ 제어실 배전반:</span> 벽면에 대형 경고 마크와 '배전반' 표지판이 있는 장치에 퓨즈를 장착하세요.</p>
+                    <p>• <span class="text-red-400 font-bold">🚪 하역장 비상 출구:</span> 대형 노란/검정 빗금문과 상부 'EXIT' 표지판이 비상 전력이 복구되면 초록색으로 밝아집니다.</p>
+                    <p>• <span class="text-red-500 font-bold">👹 어둠의 괴물:</span> 붉은 안광과 붉은 그림자 빛을 뿜는 심연의 괴물로부터 도망치세요.</p>
+                </div>
+
+                <button id="btnStartGame" class="w-full py-4 bg-red-700 hover:bg-red-600 active:bg-red-800 text-white font-black text-xl rounded-lg tracking-widest shadow-lg shadow-red-900/50 transition-all transform hover:scale-[1.02]">
+                    [ 3D 공장 탐색 시작 ]
+                </button>
+            </div>
+        </div>
+
+        <!-- GAME OVER MODAL -->
+        <div id="gameOverModal" class="absolute inset-0 bg-red-950/90 z-50 flex items-center justify-center p-4 hidden">
+            <div class="max-w-lg w-full bg-black border-2 border-red-600 rounded-xl p-8 text-center shadow-2xl shadow-red-600/50 relative">
+                <div class="text-5xl md:text-6xl mb-2 glitch-active">⚠️ SIGNAL LOST</div>
+                <h2 class="text-4xl font-black text-red-500 tracking-wider cam-text mb-2">탈출 실패</h2>
+                <p class="text-gray-400 text-sm mb-6">붉은 눈의 괴물에게 붙잡혔습니다...</p>
+
+                <div class="bg-red-950/40 border border-red-800 p-4 rounded-lg text-left text-xs text-red-200 mb-6 space-y-1">
+                    <div>⏱️ 생존 시간: <span id="survivalTimeText" class="text-white font-bold">00:00</span></div>
+                    <div>📦 수집한 퓨즈: <span id="collectedFusesText" class="text-yellow-400 font-bold">0 / 3</span></div>
+                </div>
+
+                <button id="btnRestartGame" class="w-full py-4 bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-bold text-lg rounded-lg shadow-lg shadow-red-900/80 transition-all">
+                    🔄 다시 시도하기
+                </button>
+            </div>
+        </div>
+
+        <!-- ESCAPE CLEAR MODAL -->
+        <div id="gameClearModal" class="absolute inset-0 bg-black/95 z-50 flex items-center justify-center p-4 hidden">
+            <div class="max-w-lg w-full bg-neutral-900 border-2 border-emerald-500 rounded-xl p-8 text-center shadow-2xl shadow-emerald-950/80">
+                <div class="text-6xl mb-2">🏆</div>
+                <h2 class="text-4xl font-black text-emerald-400 tracking-wider cam-text mb-2">3D 탈출 성공!</h2>
+                <p class="text-gray-300 text-sm mb-6">배전반을 복구하고 비상문으로 무사히 탈출했습니다!</p>
+
+                <div class="bg-black/80 border border-emerald-900 p-4 rounded-lg text-left text-xs space-y-2 mb-6">
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">총 탈출 기록:</span>
+                        <span id="clearTimeText" class="text-white font-bold">00:00</span>
+                    </div>
+                </div>
+
+                <button id="btnPlayAgain" class="w-full py-4 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold text-lg rounded-lg shadow-lg shadow-emerald-900/50 transition-all">
+                    🎮 처음부터 다시 하기
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class SoundEngine {
+            constructor() {
+                this.ctx = null;
+                this.isInitialized = false;
+            }
+
+            init() {
+                if (this.isInitialized) return;
+                try {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContext();
+                    this.isInitialized = true;
+                    this.startAmbientDrone();
+                } catch(e) {}
+            }
+
+            startAmbientDrone() {
+                if (!this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const filter = this.ctx.createBiquadFilter();
+                    const gain = this.ctx.createGain();
+
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(36, this.ctx.currentTime);
+
+                    filter.type = 'lowpass';
+                    filter.frequency.setValueAtTime(110, this.ctx.currentTime);
+
+                    gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+
+                    osc.connect(filter);
+                    filter.connect(gain);
+                    gain.connect(this.ctx.destination);
+
+                    osc.start();
+                } catch(e) {}
+            }
+
+            playPickupSound() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(440, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(880, this.ctx.currentTime + 0.22);
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.24);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.24);
+            }
+
+            playFootstep() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(85, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(25, this.ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.09, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.09);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.09);
+            }
+
+            playMonsterRoar() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(110, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(30, this.ctx.currentTime + 0.6);
+                gain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.65);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.65);
+            }
+
+            playGateOpenSound() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(420, this.ctx.currentTime + 0.5);
+                gain.gain.setValueAtTime(0.28, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.55);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.55);
+            }
+        }
+
+        class TextureGenerator {
+            // Factory Wall Texture (Dirty Dark Concrete Panels with Metal Rims & Bolts)
+            static createWallTexture() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 512;
+                canvas.height = 512;
+                const ctx = canvas.getContext('2d');
+
+                // Base Concrete
+                ctx.fillStyle = '#1c1f26';
+                ctx.fillRect(0, 0, 512, 512);
+
+                // Noise Grime
+                for (let i = 0; i < 15000; i++) {
+                    const x = Math.random() * 512;
+                    const y = Math.random() * 512;
+                    const val = Math.random() * 30;
+                    ctx.fillStyle = `rgba(${val},${val + 5},${val + 10},0.12)`;
+                    ctx.fillRect(x, y, 2, 2);
+                }
+
+                // Metal Panel Dividers
+                ctx.strokeStyle = '#0f1117';
+                ctx.lineWidth = 12;
+                ctx.strokeRect(6, 6, 500, 500);
+
+                ctx.strokeStyle = '#2d3342';
+                ctx.lineWidth = 4;
+                ctx.strokeRect(8, 8, 496, 496);
+
+                // Horizontal Seam
+                ctx.beginPath();
+                ctx.moveTo(0, 256);
+                ctx.lineTo(512, 256);
+                ctx.lineWidth = 6;
+                ctx.strokeStyle = '#0f1117';
+                ctx.stroke();
+
+                // Metallic Rivets / Bolts
+                ctx.fillStyle = '#475569';
+                const bolts = [[24, 24], [488, 24], [24, 488], [488, 488], [24, 256], [488, 256]];
+                bolts.forEach(([bx, by]) => {
+                    ctx.beginPath();
+                    ctx.arc(bx, by, 8, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#111';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                });
+
+                const texture = new THREE.CanvasTexture(canvas);
+                texture.wrapS = THREE.RepeatWrapping;
+                texture.wrapT = THREE.RepeatWrapping;
+                return texture;
+            }
+
+            // Concrete Floor Texture
+            static createFloorTexture() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 512;
+                canvas.height = 512;
+                const ctx = canvas.getContext('2d');
+
+                ctx.fillStyle = '#111318';
+                ctx.fillRect(0, 0, 512, 512);
+
+                // Grid Tiles
+                ctx.strokeStyle = '#1e2330';
+                ctx.lineWidth = 4;
+                for (let i = 0; i <= 512; i += 128) {
+                    ctx.beginPath();
+                    ctx.moveTo(i, 0); ctx.lineTo(i, 512);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(0, i); ctx.lineTo(512, i);
+                    ctx.stroke();
+                }
+
+                // Dirt Spots
+                for (let i = 0; i < 20000; i++) {
+                    const x = Math.random() * 512;
+                    const y = Math.random() * 512;
+                    const brightness = Math.floor(Math.random() * 25);
+                    ctx.fillStyle = `rgba(${brightness},${brightness},${brightness},0.15)`;
+                    ctx.fillRect(x, y, 3, 3);
+                }
+
+                const texture = new THREE.CanvasTexture(canvas);
+                texture.wrapS = THREE.RepeatWrapping;
+                texture.wrapT = THREE.RepeatWrapping;
+                return texture;
+            }
+
+            // Caution Yellow/Black Stripes Texture
+            static createCautionTexture() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 256;
+                canvas.height = 256;
+                const ctx = canvas.getContext('2d');
+
+                ctx.fillStyle = '#eab308';
+                ctx.fillRect(0, 0, 256, 256);
+
+                ctx.fillStyle = '#111827';
+                ctx.lineWidth = 32;
+                for (let i = -256; i < 512; i += 64) {
+                    ctx.beginPath();
+                    ctx.moveTo(i, 0);
+                    ctx.lineTo(i + 128, 256);
+                    ctx.lineTo(i + 160, 256);
+                    ctx.lineTo(i + 32, 0);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+
+                const texture = new THREE.CanvasTexture(canvas);
+                return texture;
+            }
+
+            // Text Label Sign Texture
+            static createSignTexture(text, bgColor = '#0f172a', textColor = '#facc15', borderColor = '#eab308') {
+                const canvas = document.createElement('canvas');
+                canvas.width = 512;
+                canvas.height = 256;
+                const ctx = canvas.getContext('2d');
+
+                ctx.fillStyle = bgColor;
+                ctx.fillRect(0, 0, 512, 256);
+
+                ctx.strokeStyle = borderColor;
+                ctx.lineWidth = 16;
+                ctx.strokeRect(8, 8, 496, 240);
+
+                ctx.fillStyle = textColor;
+                ctx.font = 'bold 54px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(text, 256, 128);
+
+                return new THREE.CanvasTexture(canvas);
+            }
+
+            // Single Large Crimson Bloodshot Eye Texture for Monster
+            static createBloodshotEyeTexture() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 512;
+                canvas.height = 512;
+                const ctx = canvas.getContext('2d');
+
+                // Eyeball Sclera Base (Bloodshot reddish gradient tint matching reference image)
+                const scleraGrad = ctx.createRadialGradient(256, 256, 20, 256, 256, 250);
+                scleraGrad.addColorStop(0, '#fecaca');
+                scleraGrad.addColorStop(0.35, '#f87171');
+                scleraGrad.addColorStop(0.75, '#dc2626');
+                scleraGrad.addColorStop(1, '#991b1b');
+                ctx.fillStyle = scleraGrad;
+                ctx.fillRect(0, 0, 512, 512);
+
+                // Dense Branching Bloodshot Veins
+                ctx.strokeStyle = '#7f1d1d';
+                for (let i = 0; i < 48; i++) {
+                    const angle = (i / 48) * Math.PI * 2 + (Math.random() * 0.1);
+                    ctx.lineWidth = Math.random() * 3 + 1.2;
+                    ctx.beginPath();
+                    ctx.moveTo(256 + Math.cos(angle) * 240, 256 + Math.sin(angle) * 240);
+                    
+                    const cx = 256 + Math.cos(angle) * 140 + (Math.random() - 0.5) * 45;
+                    const cy = 256 + Math.sin(angle) * 140 + (Math.random() - 0.5) * 45;
+                    const ex = 256 + Math.cos(angle) * 80;
+                    const ey = 256 + Math.sin(angle) * 80;
+
+                    ctx.quadraticCurveTo(cx, cy, ex, ey);
+                    ctx.stroke();
+                }
+
+                // Dark Slate/Navy Iris (Matching reference image)
+                const irisGrad = ctx.createRadialGradient(256, 256, 10, 256, 256, 95);
+                irisGrad.addColorStop(0, '#475569');
+                irisGrad.addColorStop(0.35, '#334155');
+                irisGrad.addColorStop(0.75, '#1e293b');
+                irisGrad.addColorStop(1, '#0f172a');
+                
+                ctx.fillStyle = irisGrad;
+                ctx.beginPath();
+                ctx.arc(256, 256, 95, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Iris Fiber Lines
+                ctx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
+                for (let a = 0; a < Math.PI * 2; a += 0.05) {
+                    ctx.beginPath();
+                    ctx.moveTo(256 + Math.cos(a) * 35, 256 + Math.sin(a) * 35);
+                    ctx.lineTo(256 + Math.cos(a) * 90, 256 + Math.sin(a) * 90);
+                    ctx.stroke();
+                }
+
+                // Dark Round Pupil
+                ctx.fillStyle = '#020617';
+                ctx.beginPath();
+                ctx.arc(256, 256, 38, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Specular Highlights (Matching reference image)
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+                ctx.fillRect(205, 220, 18, 22);
+                ctx.fillRect(285, 245, 14, 12);
+
+                return new THREE.CanvasTexture(canvas);
+            }
+        }
+
+        const UNIT = 4; // 3D Cell size
+        
+        // Factory Floor Map Grid:
+        // 0: Open Factory Floor
+        // 1: Concrete Exterior / Partition Wall
+        // 2: Stacked Cargo Crates
+        // 3: Heavy Steel Support Column
+        // 4: Conveyor Belt & Assembly Equipment
+        // 5: Industrial Boiler / Generator Tank
+        const MAP_GRID = [
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,0,0,0,0,1,0,0,0,0,0,0,4,4,4,4,0,1],
+            [1,0,0,0,0,0,0,3,0,0,3,0,0,0,0,0,0,1],
+            [1,0,0,0,2,1,0,0,0,0,0,0,4,4,4,4,0,1],
+            [1,0,2,0,0,0,0,3,0,0,3,0,0,0,0,0,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,5,5,0,0,3,0,0,0,0,3,0,0,2,0,0,1],
+            [1,0,5,5,0,0,0,0,0,0,0,0,0,0,0,2,0,1],
+            [1,0,0,0,0,0,3,0,0,0,0,3,0,0,0,0,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,1],
+            [1,0,3,0,0,0,0,1,0,0,0,1,0,0,0,0,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,3,0,0,0,0,1,0,0,0,1,0,0,0,0,0,1],
+            [1,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+        ];
+
+        function checkCollision(x, z, radius = 0.4) {
+            const minCol = Math.max(0, Math.floor((x - radius - UNIT / 2) / UNIT));
+            const maxCol = Math.min(MAP_GRID[0].length - 1, Math.floor((x + radius + UNIT / 2) / UNIT));
+            const minRow = Math.max(0, Math.floor((z - radius - UNIT / 2) / UNIT));
+            const maxRow = Math.min(MAP_GRID.length - 1, Math.floor((z + radius + UNIT / 2) / UNIT));
+
+            for (let r = minRow; r <= maxRow; r++) {
+                for (let c = minCol; c <= maxCol; c++) {
+                    const tile = MAP_GRID[r][c];
+                    if (tile === 0) continue;
+
+                    const cx = c * UNIT;
+                    const cz = r * UNIT;
+
+                    let halfW = UNIT / 2;
+                    let halfH = UNIT / 2;
+
+                    if (tile === 2) { // Stacked Crates
+                        halfW = (UNIT * 0.85) / 2;
+                        halfH = (UNIT * 0.85) / 2;
+                    } else if (tile === 3) { // Support Columns (Match visual 1.0 size + small buffer)
+                        halfW = 0.6;
+                        halfH = 0.6;
+                    } else if (tile === 4) { // Conveyors
+                        halfW = UNIT / 2;
+                        halfH = (UNIT * 0.7) / 2;
+                    } else if (tile === 5) { // Industrial Boilers
+                        halfW = 1.2;
+                        halfH = 1.2;
+                    }
+
+                    // AABB vs Circle Collision
+                    const minX = cx - halfW;
+                    const maxX = cx + halfW;
+                    const minZ = cz - halfH;
+                    const maxZ = cz + halfH;
+
+                    const clampedX = Math.max(minX, Math.min(x, maxX));
+                    const clampedZ = Math.max(minZ, Math.min(z, maxZ));
+
+                    const dx = x - clampedX;
+                    const dz = z - clampedZ;
+
+                    if ((dx * dx + dz * dz) < (radius * radius)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        function isWall3D(x, z, radius = 0.4) {
+            return checkCollision(x, z, radius);
+        }
+
+        class Game3D {
+            constructor() {
+                this.container = document.getElementById('gameContainer');
+                this.canvas = document.getElementById('canvas3d');
+
+                this.scene = new THREE.Scene();
+                this.scene.fog = new THREE.FogExp2(0x06070a, 0.042);
+
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+                
+                this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+                this.sound = new SoundEngine();
+
+                // Player Initial Spawn in Storage Room
+                this.playerPos = new THREE.Vector3(2.0 * UNIT, 1.6, 2.0 * UNIT);
+                this.cameraRotation = { yaw: 0, pitch: 0 };
+                this.moveSpeed = 0.095;
+                this.flashlightOn = true;
+                this.fusesCollected = 0;
+                this.fusesFitted = 0;
+
+                // Inputs
+                this.keys = {};
+                this.mouseDragging = false;
+                this.previousMousePosition = { x: 0, y: 0 };
+                this.joystick = { active: false, dx: 0, dy: 0 };
+                this.interactPressed = false;
+
+                // Game State
+                this.gameState = 'START';
+                this.gameTime = 0;
+                this.footstepTimer = 0;
+                this.roomLights = [];
+
+                // Raycaster for Crosshair Targeting Prompts
+                this.raycaster = new THREE.Raycaster();
+
+                this.initTextures();
+                this.initLights();
+                this.initEnvironment();
+                this.initEntities();
+                this.initListeners();
+
+                this.updateCameraTransform();
+
+                window.addEventListener('resize', () => this.onWindowResize());
+            }
+
+            initTextures() {
+                this.wallTexture = TextureGenerator.createWallTexture();
+                this.wallTexture.repeat.set(1, 1);
+
+                this.floorTexture = TextureGenerator.createFloorTexture();
+                this.floorTexture.repeat.set(MAP_GRID[0].length, MAP_GRID.length);
+
+                this.cautionTexture = TextureGenerator.createCautionTexture();
+                this.cautionTexture.wrapS = THREE.RepeatWrapping;
+                this.cautionTexture.wrapT = THREE.RepeatWrapping;
+                this.cautionTexture.repeat.set(4, 1);
+            }
+
+            initLights() {
+                const ambientLight = new THREE.AmbientLight(0x1e222d, 0.55);
+                this.scene.add(ambientLight);
+
+                // Flashlight SpotLight
+                this.flashlight = new THREE.SpotLight(0xfffaee, 4.5);
+                this.flashlight.angle = Math.PI / 4.5;
+                this.flashlight.penumbra = 0.35;
+                this.flashlight.decay = 1.6;
+                this.flashlight.distance = 32;
+                
+                this.flashlightTarget = new THREE.Object3D();
+                this.scene.add(this.flashlightTarget);
+                this.flashlight.target = this.flashlightTarget;
+
+                this.scene.add(this.flashlight);
+            }
+
+            initEnvironment() {
+                const mapW = MAP_GRID[0].length * UNIT;
+                const mapH = MAP_GRID.length * UNIT;
+
+                // Concrete Floor
+                const floorGeo = new THREE.PlaneGeometry(mapW, mapH);
+                const floorMat = new THREE.MeshStandardMaterial({ 
+                    map: this.floorTexture, 
+                    roughness: 0.8, 
+                    metalness: 0.2 
+                });
+                const floor = new THREE.Mesh(floorGeo, floorMat);
+                floor.rotation.x = -Math.PI / 2;
+                floor.position.set(mapW / 2 - UNIT / 2, 0, mapH / 2 - UNIT / 2);
+                this.scene.add(floor);
+
+                // High Factory Ceiling
+                const ceilingMat = new THREE.MeshStandardMaterial({ color: 0x090a0d, roughness: 0.95 });
+                const ceiling = new THREE.Mesh(floorGeo, ceilingMat);
+                ceiling.rotation.x = Math.PI / 2;
+                ceiling.position.set(floor.position.x, 4.0, floor.position.z);
+                this.scene.add(ceiling);
+
+                // Materials
+                const wallMat = new THREE.MeshStandardMaterial({ 
+                    map: this.wallTexture, 
+                    roughness: 0.75, 
+                    metalness: 0.3 
+                });
+                const columnMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.5, metalness: 0.6 });
+                const crateMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.9, metalness: 0.1 });
+                const metalMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.3, metalness: 0.8 });
+                const boilerMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.25, metalness: 0.85 });
+
+                const wallGeo = new THREE.BoxGeometry(UNIT, 4.0, UNIT);
+                const crateGeo = new THREE.BoxGeometry(UNIT * 0.85, 2.2, UNIT * 0.85);
+                const columnGeo = new THREE.BoxGeometry(1.0, 4.0, 1.0);
+                const conveyorGeo = new THREE.BoxGeometry(UNIT, 0.9, UNIT * 0.7);
+                const boilerGeo = new THREE.CylinderGeometry(1.2, 1.2, 3.4, 16);
+
+                for (let r = 0; r < MAP_GRID.length; r++) {
+                    for (let c = 0; c < MAP_GRID[r].length; c++) {
+                        const tile = MAP_GRID[r][c];
+                        const posX = c * UNIT;
+                        const posZ = r * UNIT;
+
+                        if (tile === 1) { // Walls
+                            const wall = new THREE.Mesh(wallGeo, wallMat);
+                            wall.position.set(posX, 2.0, posZ);
+                            this.scene.add(wall);
+                        } else if (tile === 2) { // Crates
+                            const crate = new THREE.Mesh(crateGeo, crateMat);
+                            crate.position.set(posX, 1.1, posZ);
+                            this.scene.add(crate);
+                        } else if (tile === 3) { // Columns
+                            const col = new THREE.Mesh(columnGeo, columnMat);
+                            col.position.set(posX, 2.0, posZ);
+                            this.scene.add(col);
+                        } else if (tile === 4) { // Conveyors
+                            const conv = new THREE.Mesh(conveyorGeo, metalMat);
+                            conv.position.set(posX, 0.45, posZ);
+                            this.scene.add(conv);
+                        } else if (tile === 5) { // Boilers
+                            const boiler = new THREE.Mesh(boilerGeo, boilerMat);
+                            boiler.position.set(posX, 1.7, posZ);
+                            this.scene.add(boiler);
+                        }
+                    }
+                }
+
+                // Industrial Overhead Pipes
+                for (let z = 2 * UNIT; z < mapH - 2 * UNIT; z += 4 * UNIT) {
+                    const pipeGeo = new THREE.CylinderGeometry(0.14, 0.14, mapW, 12);
+                    const pipeMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.3, metalness: 0.7 });
+                    const pipe = new THREE.Mesh(pipeGeo, pipeMat);
+                    pipe.rotation.z = Math.PI / 2;
+                    pipe.position.set(mapW / 2 - UNIT / 2, 3.5, z);
+                    this.scene.add(pipe);
+                }
+
+                // Area Overhead Lights
+                const lightPositions = [
+                    { x: 3 * UNIT, z: 3 * UNIT, color: 0xffb703 },
+                    { x: 14 * UNIT, z: 3 * UNIT, color: 0x3a86ff },
+                    { x: 3 * UNIT, z: 8 * UNIT, color: 0xe63946 },
+                    { x: 14 * UNIT, z: 8 * UNIT, color: 0x2a9d8f },
+                    { x: 3 * UNIT, z: 14 * UNIT, color: 0xf4a261 },
+                    { x: 14 * UNIT, z: 14 * UNIT, color: 0x38bdf8 }
+                ];
+
+                lightPositions.forEach(p => {
+                    const pl = new THREE.PointLight(p.color, 1.4, 13);
+                    pl.position.set(p.x, 3.4, p.z);
+                    this.scene.add(pl);
+                    this.roomLights.push({ light: pl, baseIntensity: 1.4 });
+                });
+            }
+
+            initEntities() {
+                // Candidate Spawn Locations across different factory zones
+                this.fuseCandidateLocations = [
+                    { x: 5 * UNIT, z: 2 * UNIT, name: "원자재 창고 퓨즈" },
+                    { x: 16 * UNIT, z: 3 * UNIT, name: "컨베이어 하부 퓨즈" },
+                    { x: 1 * UNIT, z: 5 * UNIT, name: "서쪽 정비소 퓨즈" },
+                    { x: 1 * UNIT, z: 8 * UNIT, name: "보일러 통로 퓨즈" },
+                    { x: 6 * UNIT, z: 8 * UNIT, name: "중앙 복도 퓨즈" },
+                    { x: 14 * UNIT, z: 8 * UNIT, name: "동쪽 작업장 퓨즈" },
+                    { x: 4 * UNIT, z: 11 * UNIT, name: "제어실 앞 통로 퓨즈" },
+                    { x: 14 * UNIT, z: 11 * UNIT, name: "남동쪽 하역장 퓨즈" },
+                    { x: 2 * UNIT, z: 14 * UNIT, name: "전력실 입구 퓨즈" },
+                    { x: 10 * UNIT, z: 14 * UNIT, name: "남쪽 통로 퓨즈" },
+                    { x: 15 * UNIT, z: 5 * UNIT, name: "조립 라인 퓨즈" }
+                ];
+
+                this.fusePositions = [
+                    { x: 5 * UNIT, z: 2 * UNIT, collected: false, name: "원자재 창고 퓨즈" },
+                    { x: 16 * UNIT, z: 3 * UNIT, collected: false, name: "컨베이어 라인 퓨즈" },
+                    { x: 1 * UNIT, z: 8 * UNIT, collected: false, name: "보일러실 퓨즈" }
+                ];
+
+                this.fuseGroups = [];
+                this.fusePositions.forEach((pos) => {
+                    const group = new THREE.Group();
+
+                    // Fuse Glass Core
+                    const coreGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.55, 16);
+                    const coreMat = new THREE.MeshStandardMaterial({ 
+                        color: 0xfacc15, 
+                        emissive: 0xeab308, 
+                        emissiveIntensity: 0.9,
+                        roughness: 0.1 
+                    });
+                    const core = new THREE.Mesh(coreGeo, coreMat);
+                    group.add(core);
+
+                    // Metallic Caps
+                    const capGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.12, 16);
+                    const capMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.95, roughness: 0.2 });
+                    const topCap = new THREE.Mesh(capGeo, capMat);
+                    topCap.position.y = 0.3;
+                    const botCap = new THREE.Mesh(capGeo, capMat);
+                    botCap.position.y = -0.3;
+                    group.add(topCap);
+                    group.add(botCap);
+
+                    // Vertical Light Pillar (Beacons)
+                    const beamGeo = new THREE.CylinderGeometry(0.1, 0.4, 4.0, 16, 1, true);
+                    const beamMat = new THREE.MeshBasicMaterial({ 
+                        color: 0xfacc15, 
+                        transparent: true, 
+                        opacity: 0.35,
+                        side: THREE.DoubleSide
+                    });
+                    const beam = new THREE.Mesh(beamGeo, beamMat);
+                    beam.position.y = 1.8;
+                    group.add(beam);
+
+                    // Point Light
+                    const light = new THREE.PointLight(0xfacc15, 2.5, 6);
+                    light.position.set(0, 0.2, 0);
+                    group.add(light);
+
+                    group.position.set(pos.x, 0.9, pos.z);
+                    group.userData = { type: 'FUSE', posRef: pos };
+
+                    this.scene.add(group);
+                    this.fuseGroups.push(group);
+                });
+
+                // Control Room Fuse Power Terminal (배전반)
+                this.terminalGroup = new THREE.Group();
+                this.terminalPos = new THREE.Vector3(3 * UNIT, 1.5, 14.2 * UNIT);
+
+                // Panel Box Body
+                const panelGeo = new THREE.BoxGeometry(1.3, 1.8, 0.4);
+                const panelMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.8, roughness: 0.3 });
+                const panelMesh = new THREE.Mesh(panelGeo, panelMat);
+                this.terminalGroup.add(panelMesh);
+
+                // Caution Stripe Plate
+                const cautionGeo = new THREE.PlaneGeometry(1.2, 0.3);
+                const cautionMat = new THREE.MeshBasicMaterial({ map: this.cautionTexture });
+                const cautionMesh = new THREE.Mesh(cautionGeo, cautionMat);
+                cautionMesh.position.set(0, 0.65, 0.21);
+                this.terminalGroup.add(cautionMesh);
+
+                // Hovering Title Sign "⚡ 배전반"
+                const signTex = TextureGenerator.createSignTexture('⚡ 배전반 (FUSE PANEL)', '#020617', '#facc15', '#eab308');
+                const signGeo = new THREE.PlaneGeometry(1.6, 0.5);
+                const signMat = new THREE.MeshBasicMaterial({ map: signTex, side: THREE.DoubleSide });
+                const signMesh = new THREE.Mesh(signGeo, signMat);
+                signMesh.position.set(0, 1.4, 0.25);
+                this.terminalGroup.add(signMesh);
+
+                // 3 Fuse Slot Bays
+                this.slotLEDs = [];
+                for (let i = -1; i <= 1; i++) {
+                    const slotGeo = new THREE.BoxGeometry(0.28, 0.5, 0.15);
+                    const slotMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.9 });
+                    const slot = new THREE.Mesh(slotGeo, slotMat);
+                    slot.position.set(i * 0.38, -0.1, 0.2);
+                    this.terminalGroup.add(slot);
+
+                    // LED Light Indicator Above Slot
+                    const ledGeo = new THREE.SphereGeometry(0.06, 12, 12);
+                    const ledMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+                    const led = new THREE.Mesh(ledGeo, ledMat);
+                    led.position.set(i * 0.38, 0.25, 0.22);
+                    this.terminalGroup.add(led);
+                    this.slotLEDs.push(ledMat);
+                }
+
+                this.terminalGroup.position.copy(this.terminalPos);
+                this.terminalGroup.userData = { type: 'TERMINAL' };
+                this.scene.add(this.terminalGroup);
+
+                this.terminalLight = new THREE.PointLight(0xef4444, 2.0, 7);
+                this.terminalLight.position.set(3 * UNIT, 2.0, 14 * UNIT);
+                this.scene.add(this.terminalLight);
+
+                // Loading Dock Exit Gate (비상 출구)
+                this.exitGroup = new THREE.Group();
+                this.exitGatePos = new THREE.Vector3(14 * UNIT, 1.6, 15.2 * UNIT);
+
+                // Large Industrial Steel Doors
+                const doorFrameGeo = new THREE.BoxGeometry(2.6, 3.2, 0.3);
+                const doorFrameMat = new THREE.MeshStandardMaterial({ color: 0x1f2937, metalness: 0.85, roughness: 0.3 });
+                const doorFrame = new THREE.Mesh(doorFrameGeo, doorFrameMat);
+                this.exitGroup.add(doorFrame);
+
+                // Door Hazard Stripe Overlay
+                const doorCautionGeo = new THREE.PlaneGeometry(2.4, 2.8);
+                const doorCautionMat = new THREE.MeshBasicMaterial({ map: this.cautionTexture });
+                const doorCaution = new THREE.Mesh(doorCautionGeo, doorCautionMat);
+                doorCaution.position.z = 0.16;
+                this.exitGroup.add(doorCaution);
+
+                // Illuminated "EXIT / 비상구" Box Sign Above
+                const exitSignTex = TextureGenerator.createSignTexture('EXIT 비상구', '#7f1d1d', '#f87171', '#ef4444');
+                const exitSignGeo = new THREE.BoxGeometry(1.8, 0.6, 0.25);
+                this.exitSignMat = new THREE.MeshBasicMaterial({ map: exitSignTex });
+                const exitSignMesh = new THREE.Mesh(exitSignGeo, this.exitSignMat);
+                exitSignMesh.position.set(0, 2.0, 0.2);
+                this.exitGroup.add(exitSignMesh);
+
+                this.exitGroup.position.copy(this.exitGatePos);
+                this.exitGroup.userData = { type: 'EXIT' };
+                this.scene.add(this.exitGroup);
+
+                this.exitLight = new THREE.PointLight(0xef4444, 2.5, 8);
+                this.exitLight.position.set(14 * UNIT, 2.6, 15 * UNIT);
+                this.scene.add(this.exitLight);
+
+                // Monster Entity (Nightmare Organic Horror Creature)
+                this.monsterGroup = new THREE.Group();
+                this.monsterPos = new THREE.Vector3(10 * UNIT, 1.3, 8 * UNIT);
+
+                // Monster Dark Metallic Organic Chitin Material
+                const mChitinMat = new THREE.MeshStandardMaterial({ 
+                    color: 0x0a0406, 
+                    roughness: 0.25, 
+                    metalness: 0.7, 
+                    emissive: 0x1a0005 
+                });
+
+                // 1. Twisted Torso & Glowing Ribcage
+                const mBodyGeo = new THREE.CylinderGeometry(0.7, 0.35, 2.8, 16);
+                const mBody = new THREE.Mesh(mBodyGeo, mChitinMat);
+                mBody.position.y = 1.4;
+                this.monsterGroup.add(mBody);
+
+                // Inner Glowing Core (Ribcage Heart)
+                const coreGeo = new THREE.SphereGeometry(0.35, 12, 12);
+                const coreMat = new THREE.MeshBasicMaterial({ color: 0xff0033 });
+                const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+                coreMesh.position.set(0, 1.6, 0.1);
+                this.monsterGroup.add(coreMesh);
+
+                // Ribcage Bones over core
+                for (let r = 0; r < 4; r++) {
+                    const ribGeo = new THREE.TorusGeometry(0.48 - r * 0.04, 0.04, 8, 16, Math.PI * 1.2);
+                    const ribMesh = new THREE.Mesh(ribGeo, mChitinMat);
+                    ribMesh.rotation.x = Math.PI / 2 + 0.2;
+                    ribMesh.rotation.z = -Math.PI * 0.6;
+                    ribMesh.position.set(0, 1.8 - r * 0.22, 0.15);
+                    this.monsterGroup.add(ribMesh);
+                }
+
+                // 2. Head & Horn Spikes
+                const mHeadGeo = new THREE.SphereGeometry(0.5, 16, 16);
+                const mHeadMesh = new THREE.Mesh(mHeadGeo, mChitinMat);
+                mHeadMesh.position.y = 2.6;
+                this.monsterGroup.add(mHeadMesh);
+
+                // Horn Spikes protruding from back of skull
+                for (let h = -2; h <= 2; h++) {
+                    const hornGeo = new THREE.ConeGeometry(0.08, 0.6, 8);
+                    const hornMesh = new THREE.Mesh(hornGeo, mChitinMat);
+                    hornMesh.position.set(h * 0.18, 2.9, -0.3);
+                    hornMesh.rotation.x = -0.6;
+                    hornMesh.rotation.z = h * 0.2;
+                    this.monsterGroup.add(hornMesh);
+                }
+
+                // 3. Nightmare Mouth with Needle Teeth
+                const mouthGeo = new THREE.RingGeometry(0.1, 0.32, 16);
+                const mouthMat = new THREE.MeshBasicMaterial({ color: 0x440000, side: THREE.DoubleSide });
+                const mouthMesh = new THREE.Mesh(mouthGeo, mouthMat);
+                mouthMesh.position.set(0, 2.15, 0.45);
+                this.monsterGroup.add(mouthMesh);
+
+                // Needle Teeth Around Mouth
+                for (let t = 0; t < 12; t++) {
+                    const toothGeo = new THREE.ConeGeometry(0.025, 0.12, 6);
+                    const toothMat = new THREE.MeshBasicMaterial({ color: 0xfffbeb });
+                    const toothMesh = new THREE.Mesh(toothGeo, toothMat);
+                    const angle = (t / 12) * Math.PI * 2;
+                    toothMesh.position.set(Math.cos(angle) * 0.24, 2.15 + Math.sin(angle) * 0.24, 0.47);
+                    toothMesh.rotation.z = angle + Math.PI / 2;
+                    this.monsterGroup.add(toothMesh);
+                }
+
+                // 4. ONE GIANT Glowing Bloodshot Eye (Moved forward on head)
+                const eyeTex = TextureGenerator.createBloodshotEyeTexture();
+                const giantEyeGeo = new THREE.SphereGeometry(0.42, 32, 32);
+                giantEyeGeo.rotateY(Math.PI);
+                
+                const giantEyeMat = new THREE.MeshStandardMaterial({
+                    map: eyeTex,
+                    roughness: 0.1,
+                    metalness: 0.1,
+                    emissive: 0xaa1111,
+                    emissiveMap: eyeTex,
+                    emissiveIntensity: 1.5
+                });
+                this.giantEyeMesh = new THREE.Mesh(giantEyeGeo, giantEyeMat);
+                this.giantEyeMesh.position.set(0, 2.65, 0.38);
+                this.monsterGroup.add(this.giantEyeMesh);
+
+                // 5. Small Auxiliary Twitching Eyeballs on sides of head
+                this.auxEyes = [];
+                const auxEyePositions = [
+                    { x: -0.38, y: 2.8, z: 0.3 },
+                    { x: 0.38, y: 2.8, z: 0.3 },
+                    { x: -0.35, y: 2.45, z: 0.35 },
+                    { x: 0.35, y: 2.45, z: 0.35 }
+                ];
+                auxEyePositions.forEach(p => {
+                    const auxGeo = new THREE.SphereGeometry(0.12, 12, 12);
+                    const auxMat = new THREE.MeshBasicMaterial({ color: 0xff1111 });
+                    const auxEye = new THREE.Mesh(auxGeo, auxMat);
+                    auxEye.position.set(p.x, p.y, p.z);
+                    this.monsterGroup.add(auxEye);
+                    this.auxEyes.push(auxEye);
+                });
+
+                // 6. Creepy Jointed Arms & Razor Claws
+                const armMat = new THREE.MeshStandardMaterial({ color: 0x050203, roughness: 0.4 });
+                
+                // Left & Right Arm Groups
+                this.leftArm = new THREE.Group();
+                this.rightArm = new THREE.Group();
+
+                [-1, 1].forEach(side => {
+                    const armGroup = side === -1 ? this.leftArm : this.rightArm;
+                    armGroup.position.set(side * 0.65, 2.1, 0);
+
+                    // Upper Arm
+                    const upperGeo = new THREE.CylinderGeometry(0.09, 0.07, 1.1);
+                    const upperMesh = new THREE.Mesh(upperGeo, armMat);
+                    upperMesh.position.y = -0.55;
+                    armGroup.add(upperMesh);
+
+                    // Lower Arm
+                    const lowerGeo = new THREE.CylinderGeometry(0.07, 0.05, 1.2);
+                    const lowerMesh = new THREE.Mesh(lowerGeo, armMat);
+                    lowerMesh.position.set(0, -1.5, 0.3);
+                    lowerMesh.rotation.x = -0.5;
+                    armGroup.add(lowerMesh);
+
+                    // Razor Claws
+                    for (let c = -1; c <= 1; c++) {
+                        const clawGeo = new THREE.ConeGeometry(0.025, 0.35, 6);
+                        const clawMat = new THREE.MeshBasicMaterial({ color: 0xd1d5db });
+                        const clawMesh = new THREE.Mesh(clawGeo, clawMat);
+                        clawMesh.position.set(c * 0.06, -2.1, 0.6);
+                        clawMesh.rotation.x = 0.8;
+                        armGroup.add(clawMesh);
+                    }
+
+                    this.monsterGroup.add(armGroup);
+                });
+
+                // 7. Writhing Back Tentacles
+                this.tentacles = [];
+                for (let t = 0; t < 6; t++) {
+                    const curve = new THREE.CatmullRomCurve3([
+                        new THREE.Vector3(0, 0, 0),
+                        new THREE.Vector3((t % 2 === 0 ? 0.4 : -0.4), 0.6, -0.5),
+                        new THREE.Vector3((t % 2 === 0 ? 0.8 : -0.8), 1.2, -1.0)
+                    ]);
+                    const tentacleGeo = new THREE.TubeGeometry(curve, 12, 0.06, 8, false);
+                    const tentacleMesh = new THREE.Mesh(tentacleGeo, mChitinMat);
+                    tentacleMesh.position.set((t % 2 === 0 ? 0.3 : -0.3), 1.5 + (t * 0.15), -0.2);
+                    this.monsterGroup.add(tentacleMesh);
+                    this.tentacles.push(tentacleMesh);
+                }
+
+                // 8. Orbiting Dark Aura Particles
+                this.monsterParticles = [];
+                for (let p = 0; p < 12; p++) {
+                    const pGeo = new THREE.SphereGeometry(0.08, 8, 8);
+                    const pMat = new THREE.MeshBasicMaterial({ color: 0xff0033, transparent: true, opacity: 0.7 });
+                    const particle = new THREE.Mesh(pGeo, pMat);
+                    this.monsterGroup.add(particle);
+                    this.monsterParticles.push(particle);
+                }
+
+                // Ominous Red Eye Spotlight Beam
+                const eyeBeam = new THREE.SpotLight(0xff0000, 6.0);
+                eyeBeam.angle = Math.PI / 4.5;
+                eyeBeam.penumbra = 0.4;
+                eyeBeam.distance = 20;
+                eyeBeam.position.set(0, 2.65, -0.2);
+                
+                const eyeBeamTarget = new THREE.Object3D();
+                eyeBeamTarget.position.set(0, 2.65, -12);
+                this.monsterGroup.add(eyeBeamTarget);
+                eyeBeam.target = eyeBeamTarget;
+                this.monsterGroup.add(eyeBeam);
+
+                // Ambient Red Proximity Glow Light
+                this.monsterLight = new THREE.PointLight(0xff0000, 4.0, 12);
+                this.monsterLight.position.set(0, 1.8, 0);
+                this.monsterGroup.add(this.monsterLight);
+
+                this.monsterGroup.position.copy(this.monsterPos);
+                this.scene.add(this.monsterGroup);
+            }
+
+            initListeners() {
+                // Key Events
+                window.addEventListener('keydown', (e) => {
+                    this.keys[e.code] = true;
+                    if (e.code === 'KeyF') this.toggleFlashlight();
+                    if (e.code === 'KeyE') this.interactPressed = true;
+                });
+
+                window.addEventListener('keyup', (e) => {
+                    this.keys[e.code] = false;
+                });
+
+                // Mouse Camera Look
+                this.canvas.addEventListener('mousedown', (e) => {
+                    this.mouseDragging = true;
+                    this.previousMousePosition = { x: e.clientX, y: e.clientY };
+                });
+
+                window.addEventListener('mouseup', () => {
+                    this.mouseDragging = false;
+                });
+
+                window.addEventListener('mousemove', (e) => {
+                    if (!this.mouseDragging) return;
+                    const deltaX = e.clientX - this.previousMousePosition.x;
+                    const deltaY = e.clientY - this.previousMousePosition.y;
+
+                    this.cameraRotation.yaw -= deltaX * 0.003;
+                    this.cameraRotation.pitch -= deltaY * 0.003;
+                    this.cameraRotation.pitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.cameraRotation.pitch));
+
+                    this.previousMousePosition = { x: e.clientX, y: e.clientY };
+                    this.updateCameraTransform();
+                });
+
+                // Mobile Touch Controls
+                const touchZone = document.getElementById('joystickZone');
+                const touchKnob = document.getElementById('joystickKnob');
+
+                if ('ontouchstart' in window) {
+                    touchZone.style.display = 'block';
+                    document.getElementById('mobileActionButtons').classList.remove('hidden');
+                }
+
+                touchZone.addEventListener('touchstart', (e) => {
+                    this.joystick.active = true;
+                    this.updateJoystick(e.touches[0], touchZone, touchKnob);
+                });
+
+                touchZone.addEventListener('touchmove', (e) => {
+                    if (this.joystick.active) {
+                        this.updateJoystick(e.touches[0], touchZone, touchKnob);
+                    }
+                });
+
+                const resetJoystick = () => {
+                    this.joystick.active = false;
+                    this.joystick.dx = 0;
+                    this.joystick.dy = 0;
+                    touchKnob.style.top = '35px';
+                    touchKnob.style.left = '35px';
+                };
+
+                touchZone.addEventListener('touchend', resetJoystick);
+                touchZone.addEventListener('touchcancel', resetJoystick);
+
+                // Modal Button Handlers
+                document.getElementById('btnStartGame').onclick = () => {
+                    this.sound.init();
+                    document.getElementById('startModal').classList.add('hidden');
+                    this.initGame();
+                };
+
+                document.getElementById('btnRestartGame').onclick = () => {
+                    document.getElementById('gameOverModal').classList.add('hidden');
+                    this.initGame();
+                };
+
+                document.getElementById('btnPlayAgain').onclick = () => {
+                    document.getElementById('gameClearModal').classList.add('hidden');
+                    this.initGame();
+                };
+
+                document.getElementById('btnFlashlight').onclick = () => this.toggleFlashlight();
+                document.getElementById('btnInteract').onclick = () => { this.interactPressed = true; };
+            }
+
+            updateJoystick(touch, zone, knob) {
+                const rect = zone.getBoundingClientRect();
+                const centerX = rect.left + rect.width / 2;
+                const centerY = rect.top + rect.height / 2;
+
+                let dx = touch.clientX - centerX;
+                let dy = touch.clientY - centerY;
+                const dist = Math.hypot(dx, dy);
+                const maxDist = 40;
+
+                if (dist > maxDist) {
+                    dx = (dx / dist) * maxDist;
+                    dy = (dy / dist) * maxDist;
+                }
+
+                knob.style.left = `${35 + dx}px`;
+                knob.style.top = `${35 + dy}px`;
+
+                this.joystick.dx = dx / maxDist;
+                this.joystick.dy = dy / maxDist;
+            }
+
+            toggleFlashlight() {
+                this.flashlightOn = !this.flashlightOn;
+                this.flashlight.visible = this.flashlightOn;
+                document.getElementById('flashlightHudText').innerText = this.flashlightOn ? '🔦 손전등: ON [F]' : '🔦 손전등: OFF [F]';
+            }
+
+            showAlert(text) {
+                const el = document.getElementById('alertMessage');
+                el.innerText = text;
+                el.style.opacity = '1';
+                el.style.transform = 'translateY(0)';
+                if (this.alertTimeout) clearTimeout(this.alertTimeout);
+                this.alertTimeout = setTimeout(() => {
+                    el.style.opacity = '0';
+                    el.style.transform = 'translateY(16px)';
+                }, 3500);
+            }
+
+            randomizeFuseLocations() {
+                // Shuffle candidate locations
+                const shuffled = [...this.fuseCandidateLocations].sort(() => Math.random() - 0.5);
+                const selected = shuffled.slice(0, 3);
+
+                selected.forEach((cand, idx) => {
+                    this.fusePositions[idx].x = cand.x;
+                    this.fusePositions[idx].z = cand.z;
+                    this.fusePositions[idx].name = cand.name;
+                    this.fusePositions[idx].collected = false;
+
+                    // Update 3D entity group position
+                    if (this.fuseGroups[idx]) {
+                        this.fuseGroups[idx].position.set(cand.x, 0.9, cand.z);
+                        this.fuseGroups[idx].visible = true;
+                    }
+                });
+            }
+
+            initGame() {
+                this.playerPos.set(2.0 * UNIT, 1.6, 2.0 * UNIT);
+                this.cameraRotation = { yaw: 0, pitch: 0 };
+                this.monsterPos.set(10 * UNIT, 1.3, 8 * UNIT);
+                this.monsterGroup.position.copy(this.monsterPos);
+                this.fusesCollected = 0;
+                this.fusesFitted = 0;
+                this.gameTime = 0;
+
+                // Randomize Fuse positions on every play
+                this.randomizeFuseLocations();
+
+                this.slotLEDs.forEach(led => led.color.setHex(0xef4444));
+                this.terminalLight.color.setHex(0xef4444);
+                this.exitLight.color.setHex(0xef4444);
+
+                this.gameState = 'PLAYING';
+                this.showAlert("폐공장에 진입했습니다. 노란 빛 기둥이 있는 퓨즈 3개를 찾아내세요!");
+                this.updateCameraTransform();
+                this.updateUI();
+            }
+
+            updateCameraTransform() {
+                const euler = new THREE.Euler(this.cameraRotation.pitch, this.cameraRotation.yaw, 0, 'YXZ');
+                this.camera.quaternion.setFromEuler(euler);
+                this.camera.position.copy(this.playerPos);
+
+                this.flashlight.position.copy(this.playerPos);
+                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+                this.flashlightTarget.position.copy(this.playerPos).add(forward.multiplyScalar(10));
+            }
+
+            updatePlayer() {
+                let moveX = 0;
+                let moveZ = 0;
+
+                if (this.keys['KeyW'] || this.keys['ArrowUp']) moveZ -= 1;
+                if (this.keys['KeyS'] || this.keys['ArrowDown']) moveZ += 1;
+                if (this.keys['KeyA'] || this.keys['ArrowLeft']) moveX -= 1;
+                if (this.keys['KeyD'] || this.keys['ArrowRight']) moveX += 1;
+
+                if (this.joystick.active) {
+                    moveX += this.joystick.dx;
+                    moveZ += this.joystick.dy;
+                }
+
+                if (moveX !== 0 || moveZ !== 0) {
+                    const len = Math.hypot(moveX, moveZ);
+                    const normX = (moveX / len) * this.moveSpeed;
+                    const normZ = (moveZ / len) * this.moveSpeed;
+
+                    const sinY = Math.sin(this.cameraRotation.yaw);
+                    const cosY = Math.cos(this.cameraRotation.yaw);
+
+                    const dx = normX * cosY + normZ * sinY;
+                    const dz = -normX * sinY + normZ * cosY;
+
+                    const newX = this.playerPos.x + dx;
+                    const newZ = this.playerPos.z + dz;
+
+                    const pRadius = 0.45;
+                    if (!checkCollision(newX, this.playerPos.z, pRadius)) this.playerPos.x = newX;
+                    if (!checkCollision(this.playerPos.x, newZ, pRadius)) this.playerPos.z = newZ;
+
+                    this.footstepTimer++;
+                    if (this.footstepTimer > 20) {
+                        this.sound.playFootstep();
+                        this.footstepTimer = 0;
+                    }
+
+                    this.updateCameraTransform();
+                }
+            }
+
+            updateMonster() {
+                const monsterSpeed = 0.023;
+                const mRadius = 0.55;
+                const dir = new THREE.Vector3().subVectors(this.playerPos, this.monsterPos);
+                dir.y = 0;
+                const dist = dir.length();
+
+                if (dist > 0.5) {
+                    dir.normalize();
+                    const nextX = this.monsterPos.x + dir.x * monsterSpeed;
+                    const nextZ = this.monsterPos.z + dir.z * monsterSpeed;
+
+                    // Direct movement check
+                    if (!checkCollision(nextX, nextZ, mRadius)) {
+                        this.monsterPos.x = nextX;
+                        this.monsterPos.z = nextZ;
+                    } else {
+                        // Axis sliding along obstacles
+                        let moved = false;
+                        if (!checkCollision(nextX, this.monsterPos.z, mRadius)) {
+                            this.monsterPos.x = nextX;
+                            moved = true;
+                        }
+                        if (!checkCollision(this.monsterPos.x, nextZ, mRadius)) {
+                            this.monsterPos.z = nextZ;
+                            moved = true;
+                        }
+
+                        // Perpendicular evasion if blocked by column edges
+                        if (!moved) {
+                            const perpX = -dir.z * monsterSpeed;
+                            const perpZ = dir.x * monsterSpeed;
+
+                            if (!checkCollision(this.monsterPos.x + perpX, this.monsterPos.z + perpZ, mRadius)) {
+                                this.monsterPos.x += perpX;
+                                this.monsterPos.z += perpZ;
+                            } else if (!checkCollision(this.monsterPos.x - perpX, this.monsterPos.z - perpZ, mRadius)) {
+                                this.monsterPos.x -= perpX;
+                                this.monsterPos.z -= perpZ;
+                            }
+                        }
+                    }
+
+                    this.monsterGroup.position.copy(this.monsterPos);
+                    this.monsterGroup.lookAt(this.playerPos.x, 1.3, this.playerPos.z);
+                }
+
+                // Procedural Creature Animations
+                const time = this.gameTime * 0.08;
+                
+                // 1. Writhing Back Tentacle Wave Motion
+                if (this.tentacles) {
+                    this.tentacles.forEach((t, i) => {
+                        t.rotation.z = Math.sin(time * 1.2 + i * 1.1) * 0.35;
+                        t.rotation.x = Math.cos(time * 0.9 + i) * 0.25;
+                    });
+                }
+
+                // 2. Creeping Arm Reach Animation
+                if (this.leftArm && this.rightArm) {
+                    this.leftArm.rotation.x = Math.sin(time * 0.8) * 0.35 + 0.2;
+                    this.rightArm.rotation.x = -Math.sin(time * 0.8) * 0.35 + 0.2;
+                    this.leftArm.rotation.z = Math.cos(time * 0.6) * 0.15 - 0.2;
+                    this.rightArm.rotation.z = -Math.cos(time * 0.6) * 0.15 + 0.2;
+                }
+
+                // 3. Giant Eye Pulsating Scale & Emission Expansion
+                if (this.giantEyeMesh) {
+                    const pulse = 1.0 + Math.sin(time * 0.6) * 0.08;
+                    this.giantEyeMesh.scale.set(pulse, pulse, pulse);
+                }
+
+                // 4. Small Auxiliary Eyes Random Twitching
+                if (this.auxEyes) {
+                    this.auxEyes.forEach((e, i) => {
+                        const twitch = Math.sin(time * 2.5 + i * 2) > 0.7 ? 0.01 : 0.1;
+                        e.scale.set(1, twitch, 1);
+                    });
+                }
+
+                // 5. Dark Aura Particles Orbiting Body
+                if (this.monsterParticles) {
+                    this.monsterParticles.forEach((p, i) => {
+                        const pAngle = time * 0.6 + (i * Math.PI / 6);
+                        p.position.x = Math.cos(pAngle) * (1.2 + Math.sin(time + i) * 0.3);
+                        p.position.z = Math.sin(pAngle) * (1.2 + Math.cos(time + i) * 0.3);
+                        p.position.y = 0.6 + Math.sin(time * 1.8 + i) * 0.7;
+                    });
+                }
+
+                const distText = document.getElementById('monsterDistanceText');
+                if (dist < 6) {
+                    distText.innerText = "괴물 상태: ⚠️ 바로 옆에 있음!";
+                    distText.style.color = "#ef4444";
+                } else if (dist < 14) {
+                    distText.innerText = "괴물 상태: ⚡ 기척이 느껴짐";
+                    distText.style.color = "#f59e0b";
+                } else {
+                    distText.innerText = "괴물 상태: 감지 안됨";
+                    distText.style.color = "#9ca3af";
+                }
+            }
+
+            updateCrosshairTargeting() {
+                this.raycaster.setFromCamera({ x: 0, y: 0 }, this.camera);
+                const intersects = this.raycaster.intersectObjects(this.scene.children, true);
+
+                const crosshair = document.getElementById('crosshair');
+                const prompt = document.getElementById('interactionPrompt');
+
+                let targetType = null;
+                let targetName = "";
+
+                if (intersects.length > 0 && intersects[0].distance < 3.8) {
+                    let obj = intersects[0].object;
+                    while (obj && !obj.userData?.type && obj.parent) {
+                        obj = obj.parent;
+                    }
+
+                    if (obj && obj.userData?.type) {
+                        targetType = obj.userData.type;
+                        if (targetType === 'FUSE' && !obj.userData.posRef.collected) {
+                            targetName = `[E] ${obj.userData.posRef.name} 획득`;
+                        } else if (targetType === 'TERMINAL') {
+                            targetName = `[E] 배전반 퓨즈 장착 (${this.fusesFitted}/3)`;
+                        } else if (targetType === 'EXIT') {
+                            targetName = this.fusesFitted === 3 ? `[E] 비상 출구 탈출` : `🚨 문 잠김 (배전반 복구 필요)`;
+                        }
+                    }
+                }
+
+                if (targetName) {
+                    crosshair.classList.add('active');
+                    prompt.innerText = targetName;
+                    prompt.style.opacity = '1';
+                } else {
+                    crosshair.classList.remove('active');
+                    prompt.style.opacity = '0';
+                }
+            }
+
+            updateUI() {
+                const totalSeconds = Math.floor(this.gameTime / 60);
+                const mins = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+                const secs = String(totalSeconds % 60).padStart(2, '0');
+                const frames = String(this.gameTime % 60).padStart(2, '0');
+                document.getElementById('recTimer').innerText = `${mins}:${secs}:${frames}`;
+
+                for (let i = 1; i <= 3; i++) {
+                    const slot = document.getElementById(`fuse${i}Slot`);
+                    if (i <= this.fusesCollected) {
+                        slot.classList.remove('bg-gray-900', 'text-gray-500', 'border-gray-700');
+                        slot.classList.add('bg-yellow-500', 'text-black', 'border-yellow-300');
+                    } else {
+                        slot.classList.remove('bg-yellow-500', 'text-black', 'border-yellow-300');
+                        slot.classList.add('bg-gray-900', 'text-gray-500', 'border-gray-700');
+                    }
+                }
+
+                const gateBadge = document.getElementById('gateStatusBadge');
+                if (this.fusesFitted === 3) {
+                    gateBadge.innerText = "🟢 비상문 개방!";
+                    gateBadge.className = "ml-auto text-xs px-2.5 py-1 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold";
+                }
+            }
+
+            update() {
+                if (this.gameState !== 'PLAYING') return;
+
+                this.gameTime++;
+
+                this.updatePlayer();
+                this.updateMonster();
+                this.updateCrosshairTargeting();
+
+                // Rotate & Bob Fuse Pickup Entities
+                this.fuseGroups.forEach((group, idx) => {
+                    if (group.visible) {
+                        group.rotation.y += 0.025;
+                        group.position.y = 0.9 + Math.sin(this.gameTime * 0.06 + idx) * 0.08;
+                    }
+                });
+
+                // Ambient Light Flickering Effect
+                this.roomLights.forEach(item => {
+                    if (Math.random() > 0.94) {
+                        item.light.intensity = item.baseIntensity * (0.35 + Math.random() * 0.65);
+                    } else {
+                        item.light.intensity = item.baseIntensity;
+                    }
+                });
+
+                // Fuse Pickup Interaction
+                this.fusePositions.forEach((pos, idx) => {
+                    if (!pos.collected) {
+                        const dist = this.playerPos.distanceTo(new THREE.Vector3(pos.x, 1.6, pos.z));
+                        if (dist < 2.2) {
+                            pos.collected = true;
+                            this.fuseGroups[idx].visible = false;
+                            this.fusesCollected++;
+                            this.sound.playPickupSound();
+                            this.showAlert(`고전압 퓨즈 (#${this.fusesCollected}) 획득! [제어실 배전반으로 이동하세요]`);
+                        }
+                    }
+                });
+
+                // Fuse Power Terminal Interaction
+                const distToTerminal = this.playerPos.distanceTo(new THREE.Vector3(this.terminalPos.x, 1.6, this.terminalPos.z));
+                if (distToTerminal < 3.4 && this.interactPressed) {
+                    if (this.fusesCollected > this.fusesFitted) {
+                        for (let i = this.fusesFitted; i < this.fusesCollected; i++) {
+                            if (this.slotLEDs[i]) this.slotLEDs[i].color.setHex(0x10b981);
+                        }
+                        this.fusesFitted = this.fusesCollected;
+                        this.sound.playPickupSound();
+
+                        if (this.fusesFitted === 3) {
+                            this.terminalLight.color.setHex(0x10b981);
+                            this.exitLight.color.setHex(0x10b981);
+                            
+                            // Exit Sign visual upgrade to Green Unlocked
+                            const greenSignTex = TextureGenerator.createSignTexture('EXIT UNLOCKED', '#064e3b', '#34d399', '#059669');
+                            this.exitSignMat.map = greenSignTex;
+                            this.exitSignMat.needsUpdate = true;
+
+                            this.sound.playGateOpenSound();
+                            this.showAlert("⚡ 비상 전력 100% 복구 완료! 하역장 비상문이 열렸습니다!");
+                        } else {
+                            this.showAlert(`배전반 퓨즈 장착 (${this.fusesFitted}/3)`);
+                        }
+                    } else if (this.fusesFitted < 3) {
+                        this.showAlert("퓨즈가 부족합니다. 공장 각 구역의 노란 빛 기둥을 찾으세요!");
+                    }
+                    this.interactPressed = false;
+                }
+
+                // Exit Gate Interaction
+                const distToGate = this.playerPos.distanceTo(new THREE.Vector3(this.exitGatePos.x, 1.6, this.exitGatePos.z));
+                if (distToGate < 3.2) {
+                    if (this.fusesFitted === 3) {
+                        this.gameState = 'CLEAR';
+                        document.getElementById('clearTimeText').innerText = document.getElementById('recTimer').innerText;
+                        document.getElementById('gameClearModal').classList.remove('hidden');
+                        return;
+                    } else if (this.interactPressed) {
+                        this.showAlert("🚨 출구가 잠겨 있습니다! 제어실 ⚡배전반에 퓨즈 3개를 끼우세요.");
+                        this.interactPressed = false;
+                    }
+                }
+
+                // Monster Collision Check
+                if (this.monsterPos.distanceTo(this.playerPos) < 1.35) {
+                    this.gameState = 'GAMEOVER';
+                    this.sound.playMonsterRoar();
+                    document.getElementById('survivalTimeText').innerText = document.getElementById('recTimer').innerText;
+                    document.getElementById('collectedFusesText').innerText = `${this.fusesCollected} / 3`;
+                    document.getElementById('gameOverModal').classList.remove('hidden');
+                    return;
+                }
+
+                this.interactPressed = false;
+                this.updateUI();
+            }
+
+            render() {
+                this.renderer.render(this.scene, this.camera);
+            }
+
+            onWindowResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+
+            run() {
+                const loop = () => {
+                    this.update();
+                    this.render();
+                    requestAnimationFrame(loop);
+                };
+                requestAnimationFrame(loop);
+            }
+        }
+
+        window.onload = () => {
+            const game = new Game3D();
+            game.run();
+        };
+    </script>
+</body>
+</html>
