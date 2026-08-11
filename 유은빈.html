@@ -1,0 +1,1182 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OPERATION: APEX - 3v3 Tactical FPS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            user-select: none;
+            background-color: #090a0f;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+        .hud-glass {
+            background: rgba(13, 17, 23, 0.75);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body class="text-white select-none">
+
+    <!-- Game Canvas Container -->
+    <div id="canvas-container" class="w-full h-screen"></div>
+
+    <!-- Aim Crosshair -->
+    <div id="crosshair" class="z-20 flex items-center justify-center">
+        <div class="w-1.5 h-1.5 bg-green-400 rounded-full"></div>
+        <div class="absolute w-3.5 h-0.5 bg-green-400 -left-4"></div>
+        <div class="absolute w-3.5 h-0.5 bg-green-400 -right-4"></div>
+        <div class="absolute h-3.5 w-0.5 bg-green-400 -top-4"></div>
+        <div class="absolute h-3.5 w-0.5 bg-green-400 -bottom-4"></div>
+    </div>
+
+    <!-- HUD Overlay -->
+    <div id="ui-layer" class="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 z-10">
+        
+        <!-- Top Info Scoreboard -->
+        <div class="flex justify-between items-start w-full max-w-4xl mx-auto">
+            <!-- Attack Team Score -->
+            <div class="hud-glass px-6 py-2 rounded-lg flex items-center gap-4 border-l-4 border-red-500">
+                <span class="text-xs uppercase tracking-wider text-gray-400" id="team-a-label">공격팀</span>
+                <span class="text-3xl font-black text-red-400" id="score-attack">0</span>
+            </div>
+
+            <!-- Timer & Phase Banner -->
+            <div class="hud-glass px-8 py-2 rounded-b-xl text-center border-t-2 border-cyan-400">
+                <div class="text-xs text-cyan-300 font-bold uppercase tracking-widest" id="round-phase">준비 단계</div>
+                <div class="text-3xl font-extrabold tracking-tight" id="timer">0:15</div>
+                <div class="text-[10px] text-gray-400 mt-0.5" id="round-number">ROUND 1 / 9</div>
+            </div>
+
+            <!-- Defense Team Score -->
+            <div class="hud-glass px-6 py-2 rounded-lg flex items-center gap-4 border-r-4 border-blue-500">
+                <span class="text-3xl font-black text-blue-400" id="score-defend">0</span>
+                <span class="text-xs uppercase tracking-wider text-gray-400" id="team-b-label">수비팀</span>
+            </div>
+        </div>
+
+        <!-- Kill Feed Display -->
+        <div class="absolute top-20 right-6 w-72 flex flex-col gap-1 text-xs font-mono" id="kill-feed"></div>
+
+        <!-- Center Alert Notifications -->
+        <div class="absolute top-1/3 left-1/2 -translate-x-1/2 text-center pointer-events-none transition-all duration-300 opacity-0" id="announcer">
+            <h1 class="text-4xl font-black tracking-widest text-yellow-400 drop-shadow-md" id="announce-title">스파이크 설치됨</h1>
+            <p class="text-sm text-gray-200 mt-1" id="announce-desc">수비팀은 제한 시간 내에 스파이크를 해체해야 합니다.</p>
+        </div>
+
+        <!-- Bottom Player HUD -->
+        <div class="flex justify-between items-end w-full max-w-5xl mx-auto mb-2">
+            
+            <!-- Health Monitor -->
+            <div class="hud-glass p-4 rounded-xl flex items-center gap-5 border-l-4 border-green-500">
+                <div>
+                    <div class="text-xs text-gray-400 font-semibold mb-1">HEALTH</div>
+                    <div class="flex items-baseline gap-1">
+                        <span class="text-4xl font-black text-green-400" id="hp-text">100</span>
+                        <span class="text-xs text-gray-500">/ 100</span>
+                    </div>
+                </div>
+                <div class="w-32 bg-gray-800 h-3 rounded-full overflow-hidden border border-gray-700">
+                    <div id="hp-bar" class="bg-green-500 h-full w-full transition-all duration-200"></div>
+                </div>
+            </div>
+
+            <!-- Agent Skills Bar -->
+            <div class="hud-glass px-6 py-3 rounded-xl flex gap-4 border-b-2 border-purple-500">
+                <div class="ability-slot flex flex-col items-center">
+                    <span class="text-[10px] text-gray-400 font-bold mb-0.5">Q</span>
+                    <div id="skill-q" class="w-12 h-12 rounded-lg bg-gray-800 border border-gray-600 flex items-center justify-center font-bold text-xs relative">
+                        <span>스킬1</span>
+                        <span class="absolute -top-1 -right-1 w-4 h-4 bg-purple-600 rounded-full text-[9px] flex items-center justify-center" id="skill-q-count">1</span>
+                    </div>
+                </div>
+                <div class="ability-slot flex flex-col items-center">
+                    <span class="text-[10px] text-gray-400 font-bold mb-0.5">E</span>
+                    <div id="skill-e" class="w-12 h-12 rounded-lg bg-gray-800 border border-gray-600 flex items-center justify-center font-bold text-xs relative">
+                        <span>스킬2</span>
+                        <span class="absolute -top-1 -right-1 w-4 h-4 bg-purple-600 rounded-full text-[9px] flex items-center justify-center" id="skill-e-count">1</span>
+                    </div>
+                </div>
+                <div class="ability-slot flex flex-col items-center">
+                    <span class="text-[10px] text-gray-400 font-bold mb-0.5">C</span>
+                    <div id="skill-c" class="w-12 h-12 rounded-lg bg-gray-800 border border-gray-600 flex items-center justify-center font-bold text-xs relative">
+                        <span>스킬3</span>
+                        <span class="absolute -top-1 -right-1 w-4 h-4 bg-purple-600 rounded-full text-[9px] flex items-center justify-center" id="skill-c-count">2</span>
+                    </div>
+                </div>
+                <div class="ability-slot flex flex-col items-center">
+                    <span class="text-[10px] text-yellow-400 font-bold mb-0.5">X (궁극기)</span>
+                    <div id="skill-x" class="w-12 h-12 rounded-lg bg-yellow-950/40 border border-yellow-500/60 flex items-center justify-center font-bold text-xs text-yellow-300 relative">
+                        <span>궁극기</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Economy & Weapon Info -->
+            <div class="hud-glass p-4 rounded-xl flex items-center gap-6 border-r-4 border-yellow-500 text-right">
+                <div>
+                    <div class="text-xs text-yellow-400 font-bold" id="money-display">$800</div>
+                    <div class="text-[10px] text-gray-400">보유 자금</div>
+                </div>
+                <div class="border-l border-gray-700 pl-4">
+                    <div class="text-xs text-gray-400 font-semibold mb-0.5" id="weapon-name">권총</div>
+                    <div class="text-3xl font-black text-yellow-400">
+                        <span id="ammo-clip">12</span><span class="text-sm text-gray-500"> / <span id="ammo-reserve">36</span></span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Agent Selection Modal -->
+    <div id="agent-select-modal" class="absolute inset-0 bg-slate-950/95 z-50 flex flex-col items-center justify-center p-6">
+        <h1 class="text-4xl font-extrabold text-cyan-400 tracking-wider mb-2">요원 선택 (OPERATION: APEX)</h1>
+        <p class="text-gray-400 mb-8 text-sm">3vs3 전술 전투에 참여할 인간 특수 요원을 선택하십시오.</p>
+
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-4 max-w-6xl w-full mb-8" id="agent-card-container"></div>
+
+        <button id="start-game-btn" class="px-10 py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-extrabold rounded-lg shadow-lg shadow-cyan-500/30 transition-all text-lg cursor-pointer">
+            전장 진입
+        </button>
+    </div>
+
+    <!-- Buy Menu Modal (B key) -->
+    <div id="buy-menu" class="absolute inset-0 bg-black/80 z-40 hidden flex-col justify-center items-center p-8 backdrop-blur-md">
+        <div class="max-w-5xl w-full hud-glass p-6 rounded-2xl border border-cyan-500/30">
+            <div class="flex justify-between items-center mb-6 border-b border-gray-800 pb-4">
+                <div>
+                    <h2 class="text-2xl font-black text-cyan-400">무기 및 능력 상점</h2>
+                    <p class="text-xs text-gray-400">구매 단계 동안 필요한 장비를 갖추십시오. [B] 키를 눌러 닫기</p>
+                </div>
+                <div class="text-2xl font-bold text-yellow-400" id="buy-menu-money">$800</div>
+            </div>
+
+            <!-- Weapons Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                <!-- Pistol / Sub -->
+                <div class="space-y-3">
+                    <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest border-b border-gray-800 pb-1">권총 / 기관단총</h3>
+                    <div class="buy-item border border-gray-800 p-3 rounded-lg hover:border-cyan-500 cursor-pointer flex justify-between items-center" onclick="game.buyWeapon('pistol')">
+                        <div>
+                            <div class="font-bold text-sm">기본 권총</div>
+                            <div class="text-xs text-gray-400">무료 기본 제공</div>
+                        </div>
+                        <span class="text-xs text-green-400 font-bold">보유중</span>
+                    </div>
+                    <div class="buy-item border border-gray-800 p-3 rounded-lg hover:border-cyan-500 cursor-pointer flex justify-between items-center" onclick="game.buyWeapon('smg')">
+                        <div>
+                            <div class="font-bold text-sm">SMG-9 (기관단총)</div>
+                            <div class="text-xs text-gray-400">빠른 연사, 근거리용</div>
+                        </div>
+                        <span class="text-xs text-yellow-400 font-bold">$1,200</span>
+                    </div>
+                </div>
+
+                <!-- Rifles / Heavy -->
+                <div class="space-y-3">
+                    <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest border-b border-gray-800 pb-1">주무기 (소총/산탄/저격)</h3>
+                    <div class="buy-item border border-gray-800 p-3 rounded-lg hover:border-cyan-500 cursor-pointer flex justify-between items-center" onclick="game.buyWeapon('shotgun')">
+                        <div>
+                            <div class="font-bold text-sm">벅샷-12 (산탄총)</div>
+                            <div class="text-xs text-gray-400">근접 파괴력</div>
+                        </div>
+                        <span class="text-xs text-yellow-400 font-bold">$1,500</span>
+                    </div>
+                    <div class="buy-item border border-gray-800 p-3 rounded-lg hover:border-cyan-500 cursor-pointer flex justify-between items-center" onclick="game.buyWeapon('rifle')">
+                        <div>
+                            <div class="font-bold text-sm">AR-47 (돌격소총)</div>
+                            <div class="text-xs text-gray-400">대표 주무기 소총</div>
+                        </div>
+                        <span class="text-xs text-yellow-400 font-bold">$2,800</span>
+                    </div>
+                    <div class="buy-item border border-gray-800 p-3 rounded-lg hover:border-cyan-500 cursor-pointer flex justify-between items-center" onclick="game.buyWeapon('sniper')">
+                        <div>
+                            <div class="font-bold text-sm">AP-저격소총</div>
+                            <div class="text-xs text-gray-400">원샷 정밀 사격</div>
+                        </div>
+                        <span class="text-xs text-yellow-400 font-bold">$4,500</span>
+                    </div>
+                </div>
+
+                <!-- Abilities Charging -->
+                <div class="space-y-3">
+                    <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest border-b border-gray-800 pb-1">요원 능력 충전</h3>
+                    <div class="buy-item border border-gray-800 p-3 rounded-lg hover:border-purple-500 cursor-pointer flex justify-between items-center" onclick="game.buySkill('q')">
+                        <div>
+                            <div class="font-bold text-sm" id="buy-q-name">능력 1 (Q)</div>
+                            <div class="text-xs text-gray-400">충전용 능력</div>
+                        </div>
+                        <span class="text-xs text-yellow-400 font-bold" id="buy-q-cost">$200</span>
+                    </div>
+                    <div class="buy-item border border-gray-800 p-3 rounded-lg hover:border-purple-500 cursor-pointer flex justify-between items-center" onclick="game.buySkill('e')">
+                        <div>
+                            <div class="font-bold text-sm" id="buy-e-name">능력 2 (E)</div>
+                            <div class="text-xs text-gray-400">전술 유틸리티</div>
+                        </div>
+                        <span class="text-xs text-yellow-400 font-bold" id="buy-e-cost">$300</span>
+                    </div>
+                    <div class="buy-item border border-gray-800 p-3 rounded-lg hover:border-purple-500 cursor-pointer flex justify-between items-center" onclick="game.buySkill('c')">
+                        <div>
+                            <div class="font-bold text-sm" id="buy-c-name">능력 3 (C)</div>
+                            <div class="text-xs text-gray-400">특수 기술</div>
+                        </div>
+                        <span class="text-xs text-yellow-400 font-bold" id="buy-c-cost">$250</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="text-center pt-2">
+                <button onclick="game.toggleBuyMenu()" class="px-8 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-bold">닫기 (B)</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Game Logic -->
+    <script>
+        // Web Audio Synthesizer Engine
+        class SoundEngine {
+            constructor() {
+                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            playGunshot(type) {
+                if (this.ctx.state === 'suspended') this.ctx.resume();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                let freq = 300;
+                let decay = 0.15;
+                if (type === 'rifle') { freq = 200; decay = 0.2; }
+                if (type === 'sniper') { freq = 100; decay = 0.4; }
+                if (type === 'smg') { freq = 450; decay = 0.1; }
+
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + decay);
+
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + decay);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + decay);
+            }
+
+            playFootstep(quiet = false) {
+                if (this.ctx.state === 'suspended') this.ctx.resume();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(quiet ? 60 : 120, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(10, this.ctx.currentTime + 0.08);
+
+                gain.gain.setValueAtTime(quiet ? 0.03 : 0.1, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.08);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.08);
+            }
+
+            playSpikeBeep(urgency = 1) {
+                if (this.ctx.state === 'suspended') this.ctx.resume();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(800 * urgency, this.ctx.currentTime);
+
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.1);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.1);
+            }
+
+            playAbilitySound() {
+                if (this.ctx.state === 'suspended') this.ctx.resume();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(400, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(800, this.ctx.currentTime + 0.3);
+
+                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.3);
+            }
+        }
+
+        const sound = new SoundEngine();
+
+        // Agents Human Data & Customization Attributes
+        const AGENTS = [
+            {
+                id: 1,
+                name: "요원 1 (섬광/회복)",
+                role: "지원형 리더",
+                skinColor: 0xdca282,
+                hairColor: 0x332211,
+                vestColor: 0x2a3e50,
+                desc: "체계적인 전술 훈련을 받은 정통 리더. 섬광 탄환과 아군 치유 시스템 사용",
+                skills: {
+                    q: { name: "섬광탄", cost: 200, count: 2 },
+                    e: { name: "약한 회복", cost: 150, count: 2 },
+                    c: { name: "연막탄", cost: 100, count: 1 },
+                    x: { name: "광역 힐링", cost: 0, count: 1 }
+                }
+            },
+            {
+                id: 2,
+                name: "요원 2 (기습/연막)",
+                role: "침투 요원",
+                skinColor: 0xf5c09e,
+                hairColor: 0x111111,
+                vestColor: 0x1e261c,
+                desc: "은밀 침투 전문가. 장막 연막을 치고 지정 위치로 순식간에 이동",
+                skills: {
+                    q: { name: "순간이동", cost: 250, count: 2 },
+                    e: { name: "장막 연막", cost: 150, count: 2 },
+                    c: { name: "디코이", cost: 100, count: 1 },
+                    x: { name: "기습 암살", cost: 0, count: 1 }
+                }
+            },
+            {
+                id: 3,
+                name: "요원 3 (지원/방어)",
+                role: "방어 거점 수호자",
+                skinColor: 0xc88e68,
+                hairColor: 0x664422,
+                vestColor: 0x3d3021,
+                desc: "단단한 중장갑 전술복 착용. 전술 방벽 구축과 거점 방어에 특화",
+                skills: {
+                    q: { name: "중형 치유", cost: 200, count: 1 },
+                    e: { name: "방벽 생성", cost: 300, count: 1 },
+                    c: { name: "둔화 장판", cost: 150, count: 1 },
+                    x: { name: "완전 치유", cost: 0, count: 1 }
+                }
+            },
+            {
+                id: 4,
+                name: "요원 4 (정찰/공격)",
+                role: "정찰 스나이퍼",
+                skinColor: 0xeac0a2,
+                hairColor: 0x887755,
+                vestColor: 0x223322,
+                desc: "원거리 수색 및 정보전 저격수. 센서 화살로 적 위치를 탐색",
+                skills: {
+                    q: { name: "정찰 핑", cost: 200, count: 2 },
+                    e: { name: "탐지 화살", cost: 200, count: 1 },
+                    c: { name: "공격 화살", cost: 250, count: 2 },
+                    x: { name: "전장 스캔", cost: 0, count: 1 }
+                }
+            },
+            {
+                id: 5,
+                name: "요원 5 (기동 공격)",
+                role: "기동 타격대",
+                skinColor: 0xeed3bd,
+                hairColor: 0xaaaaaa,
+                vestColor: 0x4a2c3a,
+                desc: "경량 전술 수트를 착용한 돌파꾼. 빠른 이동과 블레이드로 돌진",
+                skills: {
+                    q: { name: "전방 돌진", cost: 200, count: 2 },
+                    e: { name: "고속 이동", cost: 200, count: 1 },
+                    c: { name: "공중 도약", cost: 150, count: 2 },
+                    x: { name: "에너지 블레이드", cost: 0, count: 1 }
+                }
+            }
+        ];
+
+        // Weapons Stats
+        const WEAPONS = {
+            pistol: { name: "권총", damage: 26, clip: 12, reserve: 36, fireRate: 250, recoil: 0.02 },
+            smg: { name: "SMG-9", damage: 18, clip: 30, reserve: 90, fireRate: 90, recoil: 0.035 },
+            rifle: { name: "AR-47", damage: 38, clip: 30, reserve: 90, fireRate: 130, recoil: 0.045 },
+            shotgun: { name: "벅샷-12", damage: 14, clip: 6, reserve: 24, fireRate: 700, recoil: 0.1 },
+            sniper: { name: "AP-저격소총", damage: 110, clip: 5, reserve: 15, fireRate: 1200, recoil: 0.15 }
+        };
+
+        // Human Character Model Builder
+        class HumanCharacterBuilder {
+            static createAgentMesh(agent, isAlly) {
+                const characterGroup = new THREE.Group();
+
+                // 1. Head (Head & Hair)
+                const headGeo = new THREE.SphereGeometry(0.22, 16, 16);
+                headGeo.scale(1, 1.1, 1);
+                const headMat = new THREE.MeshStandardMaterial({ color: agent.skinColor, roughness: 0.6 });
+                const head = new THREE.Mesh(headGeo, headMat);
+                head.position.y = 1.6;
+                head.castShadow = true;
+                characterGroup.add(head);
+
+                // Hair
+                const hairGeo = new THREE.SphereGeometry(0.23, 12, 12);
+                hairGeo.scale(1, 0.6, 1.05);
+                const hairMat = new THREE.MeshStandardMaterial({ color: agent.hairColor, roughness: 0.9 });
+                const hair = new THREE.Mesh(hairGeo, hairMat);
+                hair.position.set(0, 1.72, -0.02);
+                characterGroup.add(hair);
+
+                // Visor
+                const visorGeo = new THREE.BoxGeometry(0.3, 0.08, 0.1);
+                const visorMat = new THREE.MeshStandardMaterial({ 
+                    color: isAlly ? 0x00e5ff : 0xff2200, 
+                    emissive: isAlly ? 0x006688 : 0x880000, 
+                    roughness: 0.2 
+                });
+                const visor = new THREE.Mesh(visorGeo, visorMat);
+                visor.position.set(0, 1.62, 0.18);
+                characterGroup.add(visor);
+
+                // 2. Torso (Human Chest & Tactical Vest)
+                const torsoGeo = new THREE.BoxGeometry(0.48, 0.6, 0.28);
+                const vestMat = new THREE.MeshStandardMaterial({ color: agent.vestColor, roughness: 0.5 });
+                const torso = new THREE.Mesh(torsoGeo, vestMat);
+                torso.position.y = 1.1;
+                torso.castShadow = true;
+                characterGroup.add(torso);
+
+                // Armor Plate
+                const plateGeo = new THREE.BoxGeometry(0.32, 0.35, 0.05);
+                const plateMat = new THREE.MeshStandardMaterial({ 
+                    color: isAlly ? 0x1177ff : 0xdd2233, 
+                    roughness: 0.3 
+                });
+                const plate = new THREE.Mesh(plateGeo, plateMat);
+                plate.position.set(0, 1.15, 0.15);
+                characterGroup.add(plate);
+
+                // 3. Arms
+                const armMat = new THREE.MeshStandardMaterial({ color: agent.skinColor, roughness: 0.7 });
+                const gloveMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8 });
+
+                // Left Arm
+                const lArmGroup = new THREE.Group();
+                const upperArmGeo = new THREE.CylinderGeometry(0.08, 0.07, 0.35);
+                const upperArmL = new THREE.Mesh(upperArmGeo, armMat);
+                upperArmL.position.y = -0.15;
+                lArmGroup.add(upperArmL);
+
+                const gloveL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.1), gloveMat);
+                gloveL.position.y = -0.35;
+                lArmGroup.add(gloveL);
+
+                lArmGroup.position.set(-0.3, 1.3, 0);
+                characterGroup.add(lArmGroup);
+
+                // Right Arm
+                const rArmGroup = new THREE.Group();
+                const upperArmR = new THREE.Mesh(upperArmGeo, armMat);
+                upperArmR.position.y = -0.15;
+                rArmGroup.add(upperArmR);
+
+                const gloveR = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.1), gloveMat);
+                gloveR.position.y = -0.35;
+                rArmGroup.add(gloveR);
+
+                rArmGroup.position.set(0.3, 1.3, 0);
+                characterGroup.add(rArmGroup);
+
+                // 4. Legs
+                const legPantsMat = new THREE.MeshStandardMaterial({ color: 0x1a212b, roughness: 0.8 });
+                const bootMat = new THREE.MeshStandardMaterial({ color: 0x0d0d0d, roughness: 0.9 });
+
+                const legGeo = new THREE.CylinderGeometry(0.1, 0.08, 0.7);
+                const legL = new THREE.Mesh(legGeo, legPantsMat);
+                legL.position.set(-0.14, 0.45, 0);
+                legL.castShadow = true;
+                characterGroup.add(legL);
+
+                const bootL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.15, 0.22), bootMat);
+                bootL.position.set(-0.14, 0.08, 0.04);
+                characterGroup.add(bootL);
+
+                const legR = new THREE.Mesh(legGeo, legPantsMat);
+                legR.position.set(0.14, 0.45, 0);
+                legR.castShadow = true;
+                characterGroup.add(legR);
+
+                const bootR = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.15, 0.22), bootMat);
+                bootR.position.set(0.14, 0.08, 0.04);
+                characterGroup.add(bootR);
+
+                return characterGroup;
+            }
+
+            static create1stPersonHands(agent) {
+                const fpsHandsGroup = new THREE.Group();
+
+                const gloveMat = new THREE.MeshStandardMaterial({ color: 0x1c1e22, roughness: 0.5 });
+                const sleeveMat = new THREE.MeshStandardMaterial({ color: agent.vestColor, roughness: 0.7 });
+
+                // Right Arm & Hand
+                const rightArmGroup = new THREE.Group();
+                const sleeveR = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.06, 0.35), sleeveMat);
+                sleeveR.position.set(0, 0, 0);
+                sleeveR.rotation.x = Math.PI / 3;
+                rightArmGroup.add(sleeveR);
+
+                const handR = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.09, 0.12), gloveMat);
+                handR.position.set(0, -0.12, -0.18);
+                rightArmGroup.add(handR);
+
+                rightArmGroup.position.set(0.22, -0.25, -0.35);
+                fpsHandsGroup.add(rightArmGroup);
+
+                // Left Arm & Hand
+                const leftArmGroup = new THREE.Group();
+                const sleeveL = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.06, 0.35), sleeveMat);
+                sleeveL.position.set(0, 0, 0);
+                sleeveL.rotation.x = Math.PI / 3.5;
+                sleeveL.rotation.y = -Math.PI / 6;
+                leftArmGroup.add(sleeveL);
+
+                const handL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.11), gloveMat);
+                handL.position.set(0.05, -0.1, -0.22);
+                leftArmGroup.add(handL);
+
+                leftArmGroup.position.set(-0.2, -0.28, -0.38);
+                fpsHandsGroup.add(leftArmGroup);
+
+                return fpsHandsGroup;
+            }
+        }
+
+        // Tactical FPS Game Main Class
+        class TacticalFPSGame {
+            constructor() {
+                this.selectedAgent = AGENTS[0];
+                this.money = 800;
+                this.score = { attack: 0, defend: 0 };
+                this.currentRound = 1;
+                this.isAttacker = true;
+                this.phase = 'BUY';
+                this.phaseTimer = 15;
+
+                this.spike = { planted: false, timer: 40 };
+
+                this.player = {
+                    hp: 100,
+                    weaponKey: 'pistol',
+                    ammo: 12,
+                    reserveAmmo: 36,
+                    skills: { q: 1, e: 1, c: 1, x: 0 },
+                    pos: new THREE.Vector3(0, 1.6, 35),
+                    rot: { pitch: 0, yaw: 0 },
+                    isADS: false,
+                    bobbingTimer: 0
+                };
+
+                this.bots = [];
+                this.keys = {};
+
+                this.initThreeJS();
+                this.initUI();
+                this.setupEventListeners();
+            }
+
+            safeRequestPointerLock() {
+                if (document.pointerLockElement === this.container) return;
+                try {
+                    const promise = this.container.requestPointerLock();
+                    if (promise && typeof promise.catch === 'function') {
+                        promise.catch(() => {});
+                    }
+                } catch (e) {}
+            }
+
+            initThreeJS() {
+                this.container = document.getElementById('canvas-container');
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x0c1017);
+                this.scene.fog = new THREE.FogExp2(0x0c1017, 0.015);
+
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.shadowMap.enabled = true;
+                this.container.appendChild(this.renderer.domElement);
+
+                const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+                this.scene.add(ambient);
+
+                const sun = new THREE.DirectionalLight(0xfff5ea, 0.9);
+                sun.position.set(40, 60, 20);
+                sun.castShadow = true;
+                this.scene.add(sun);
+
+                this.buildMap();
+
+                this.fpsRig = new THREE.Group();
+                
+                const gunGeo = new THREE.BoxGeometry(0.08, 0.1, 0.42);
+                const gunMat = new THREE.MeshStandardMaterial({ color: 0x22252a, roughness: 0.3 });
+                this.gunMesh = new THREE.Mesh(gunGeo, gunMat);
+                this.gunMesh.position.set(0.18, -0.2, -0.42);
+                this.fpsRig.add(this.gunMesh);
+
+                this.fpsHands = HumanCharacterBuilder.create1stPersonHands(this.selectedAgent);
+                this.fpsRig.add(this.fpsHands);
+
+                this.camera.add(this.fpsRig);
+                this.scene.add(this.camera);
+
+                this.camera.position.copy(this.player.pos);
+            }
+
+            buildMap() {
+                const floorGeo = new THREE.PlaneGeometry(90, 110);
+                const floorMat = new THREE.MeshStandardMaterial({ color: 0x242d38, roughness: 0.7 });
+                const floor = new THREE.Mesh(floorGeo, floorMat);
+                floor.rotation.x = -Math.PI / 2;
+                floor.receiveShadow = true;
+                this.scene.add(floor);
+
+                this.createWall(0, 5, -55, 90, 10, 2, 0x161d26);
+                this.createWall(0, 5, 55, 90, 10, 2, 0x161d26);
+                this.createWall(-45, 5, 0, 2, 10, 110, 0x161d26);
+                this.createWall(45, 5, 0, 2, 10, 110, 0x161d26);
+
+                this.createWall(-25, 4, -25, 20, 8, 2, 0x334155);
+                this.createSiteZone(-25, -35, 0xff3344);
+
+                this.createWall(25, 4, -25, 20, 8, 2, 0x334155);
+                this.createSiteZone(25, -35, 0x3388ff);
+
+                this.createBox(-5, 1.5, 0, 3, 3, 3, 0x9a6b38);
+                this.createBox(5, 1.5, -10, 4, 3, 2, 0x475569);
+                this.createBox(-20, 1.5, -30, 3, 3, 3, 0x475569);
+                this.createBox(20, 1.5, -30, 3, 3, 3, 0x475569);
+
+                this.createWall(0, 4, 10, 25, 8, 2, 0x27303e);
+            }
+
+            createWall(x, y, z, w, h, d, color) {
+                const geo = new THREE.BoxGeometry(w, h, d);
+                const mat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.6 });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(x, y, z);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                this.scene.add(mesh);
+            }
+
+            createBox(x, y, z, w, h, d, color) {
+                const geo = new THREE.BoxGeometry(w, h, d);
+                const mat = new THREE.MeshStandardMaterial({ color: color });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(x, y, z);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                this.scene.add(mesh);
+            }
+
+            createSiteZone(x, z, colorHex) {
+                const zoneGeo = new THREE.RingGeometry(6, 6.5, 32);
+                const zoneMat = new THREE.MeshBasicMaterial({ color: colorHex, side: THREE.DoubleSide });
+                const zone = new THREE.Mesh(zoneGeo, zoneMat);
+                zone.rotation.x = Math.PI / 2;
+                zone.position.set(x, 0.05, z);
+                this.scene.add(zone);
+            }
+
+            initUI() {
+                const container = document.getElementById('agent-card-container');
+                container.innerHTML = '';
+                
+                AGENTS.forEach(agent => {
+                    const card = document.createElement('div');
+                    card.className = `p-4 rounded-xl border border-gray-800 bg-slate-900/80 hover:border-cyan-400 cursor-pointer transition-all flex flex-col justify-between ${agent.id === 1 ? 'border-cyan-400 ring-2 ring-cyan-500/50' : ''}`;
+                    card.onclick = () => {
+                        document.querySelectorAll('#agent-card-container > div').forEach(c => c.classList.remove('border-cyan-400', 'ring-2', 'ring-cyan-500/50'));
+                        card.classList.add('border-cyan-400', 'ring-2', 'ring-cyan-500/50');
+                        this.selectedAgent = agent;
+                        this.rebuildFirstPersonHands();
+                        this.updateSkillsUI();
+                    };
+
+                    card.innerHTML = `
+                        <div>
+                            <span class="text-[10px] font-bold text-cyan-400 uppercase">${agent.role}</span>
+                            <h3 class="font-bold text-lg text-white mb-1">${agent.name}</h3>
+                            <p class="text-xs text-gray-400 leading-relaxed mb-4">${agent.desc}</p>
+                        </div>
+                        <div class="space-y-1 text-[11px] text-gray-300 font-mono">
+                            <div>Q: ${agent.skills.q.name}</div>
+                            <div>E: ${agent.skills.e.name}</div>
+                            <div>C: ${agent.skills.c.name}</div>
+                            <div class="text-yellow-400">X: ${agent.skills.x.name}</div>
+                        </div>
+                    `;
+                    container.appendChild(card);
+                });
+
+                document.getElementById('start-game-btn').onclick = () => {
+                    document.getElementById('agent-select-modal').classList.add('hidden');
+                    this.safeRequestPointerLock();
+                    this.startRound();
+                };
+
+                this.updateSkillsUI();
+            }
+
+            rebuildFirstPersonHands() {
+                if (this.fpsHands) this.fpsRig.remove(this.fpsHands);
+                this.fpsHands = HumanCharacterBuilder.create1stPersonHands(this.selectedAgent);
+                this.fpsRig.add(this.fpsHands);
+            }
+
+            updateSkillsUI() {
+                const s = this.selectedAgent.skills;
+                document.getElementById('skill-q').children[0].innerText = s.q.name;
+                document.getElementById('skill-e').children[0].innerText = s.e.name;
+                document.getElementById('skill-c').children[0].innerText = s.c.name;
+                document.getElementById('skill-x').children[0].innerText = s.x.name;
+
+                document.getElementById('buy-q-name').innerText = `${s.q.name} (Q)`;
+                document.getElementById('buy-e-name').innerText = `${s.e.name} (E)`;
+                document.getElementById('buy-c-name').innerText = `${s.c.name} (C)`;
+
+                document.getElementById('buy-q-cost').innerText = `$${s.q.cost}`;
+                document.getElementById('buy-e-cost').innerText = `$${s.e.cost}`;
+                document.getElementById('buy-c-cost').innerText = `$${s.c.cost}`;
+            }
+
+            setupEventListeners() {
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    if (document.pointerLockElement === this.container) {
+                        const sensitivity = 0.0022;
+                        this.player.rot.yaw -= e.movementX * sensitivity;
+                        this.player.rot.pitch -= e.movementY * sensitivity;
+
+                        this.player.rot.pitch = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, this.player.rot.pitch));
+
+                        this.camera.rotation.order = 'YXZ';
+                        this.camera.rotation.y = this.player.rot.yaw;
+                        this.camera.rotation.x = this.player.rot.pitch;
+                    }
+                });
+
+                window.addEventListener('keydown', (e) => {
+                    this.keys[e.code] = true;
+
+                    if (e.code === 'KeyB') this.toggleBuyMenu();
+                    if (e.code === 'KeyR') this.reloadWeapon();
+                    if (e.code === 'KeyQ') this.useSkill('q');
+                    if (e.code === 'KeyE') this.useSkill('e');
+                    if (e.code === 'KeyC') this.useSkill('c');
+                    if (e.code === 'KeyX') this.useSkill('x');
+                    if (e.code === 'KeyF') this.interactSpike();
+                });
+
+                window.addEventListener('keyup', (e) => {
+                    this.keys[e.code] = false;
+                });
+
+                window.addEventListener('mousedown', (e) => {
+                    if (document.pointerLockElement !== this.container) {
+                        this.safeRequestPointerLock();
+                        return;
+                    }
+                    if (e.button === 0) this.shoot();
+                    if (e.button === 2) this.toggleADS(true);
+                });
+
+                window.addEventListener('mouseup', (e) => {
+                    if (e.button === 2) this.toggleADS(false);
+                });
+
+                window.addEventListener('contextmenu', e => e.preventDefault());
+            }
+
+            toggleBuyMenu() {
+                if (this.phase !== 'BUY') return;
+                const menu = document.getElementById('buy-menu');
+                if (menu.classList.contains('hidden')) {
+                    menu.classList.remove('hidden');
+                    document.exitPointerLock();
+                } else {
+                    menu.classList.add('hidden');
+                    this.safeRequestPointerLock();
+                }
+            }
+
+            buyWeapon(key) {
+                const w = WEAPONS[key];
+                if (!w) return;
+                const cost = key === 'pistol' ? 0 : (key === 'smg' ? 1200 : (key === 'shotgun' ? 1500 : (key === 'rifle' ? 2800 : 4500)));
+                if (this.money >= cost) {
+                    this.money -= cost;
+                    this.player.weaponKey = key;
+                    this.player.ammo = w.clip;
+                    this.player.reserveAmmo = w.reserve;
+                    this.updateHUD();
+                }
+            }
+
+            buySkill(slot) {
+                const s = this.selectedAgent.skills[slot];
+                if (!s) return;
+                if (this.money >= s.cost && this.player.skills[slot] < 2) {
+                    this.money -= s.cost;
+                    this.player.skills[slot]++;
+                    this.updateHUD();
+                }
+            }
+
+            startRound() {
+                this.phase = 'BUY';
+                this.phaseTimer = 15;
+                this.spike.planted = false;
+
+                if (this.isAttacker) {
+                    this.player.pos.set(0, 1.6, 40);
+                } else {
+                    this.player.pos.set(0, 1.6, -40);
+                }
+                this.camera.position.copy(this.player.pos);
+
+                this.spawnBots();
+                this.updateHUD();
+                this.announce("구매 단계 시작", "B키를 눌러 필요한 장비를 구매하십시오.");
+
+                if (this.timerInterval) clearInterval(this.timerInterval);
+                this.timerInterval = setInterval(() => this.tickTimer(), 1000);
+            }
+
+            spawnBots() {
+                this.bots.forEach(b => this.scene.remove(b.mesh));
+                this.bots = [];
+
+                const isPlayerAttacker = this.isAttacker;
+
+                for (let i = 0; i < 2; i++) {
+                    const agentType = AGENTS[(i + 1) % 5];
+                    this.createHumanBot(agentType, true, isPlayerAttacker ? 10 * (i + 1) : -10 * (i + 1), isPlayerAttacker ? 40 : -40);
+                }
+                for (let i = 0; i < 3; i++) {
+                    const agentType = AGENTS[(i + 3) % 5];
+                    this.createHumanBot(agentType, false, -15 + (i * 15), isPlayerAttacker ? -40 : 40);
+                }
+            }
+
+            createHumanBot(agent, isAlly, x, z) {
+                const group = HumanCharacterBuilder.createAgentMesh(agent, isAlly);
+                group.position.set(x, 0, z);
+                this.scene.add(group);
+
+                this.bots.push({
+                    mesh: group,
+                    isAlly: isAlly,
+                    hp: 100,
+                    pos: group.position,
+                    alive: true
+                });
+            }
+
+            tickTimer() {
+                this.phaseTimer--;
+
+                if (this.phase === 'BUY' && this.phaseTimer <= 0) {
+                    this.phase = 'ACTION';
+                    this.phaseTimer = 100;
+                    this.announce("라운드 시작!", "모든 적을 무력화하거나 스파이크 목표를 달성하십시오.");
+                } else if (this.phase === 'ACTION' && this.phaseTimer <= 0 && !this.spike.planted) {
+                    this.endRound(false, "제한 시간 종료 (수비팀 승리)");
+                }
+
+                if (this.spike.planted) {
+                    this.spike.timer--;
+                    sound.playSpikeBeep(this.spike.timer < 10 ? 2 : 1);
+                    if (this.spike.timer <= 0) {
+                        this.endRound(true, "스파이크 폭발! (공격팀 승리)");
+                    }
+                }
+
+                this.updateHUD();
+            }
+
+            endRound(attackerWon, reason) {
+                clearInterval(this.timerInterval);
+                this.phase = 'ENDED';
+
+                if (attackerWon) this.score.attack++;
+                else this.score.defend++;
+
+                this.money += attackerWon ? 3000 : 1900;
+
+                this.announce(attackerWon ? "공격팀 승리!" : "수비팀 승리!", reason);
+
+                setTimeout(() => {
+                    this.currentRound++;
+                    if (this.currentRound === 6) {
+                        this.isAttacker = !this.isAttacker;
+                        this.announce("공수 교대!", "공격팀과 수비팀이 전환됩니다.");
+                    }
+
+                    if (this.score.attack >= 5 || this.score.defend >= 5) {
+                        alert(`경기 종료! 최종 승리: ${this.score.attack >= 5 ? '공격팀' : '수비팀'}`);
+                        location.reload();
+                    } else {
+                        this.startRound();
+                    }
+                }, 4000);
+            }
+
+            shoot() {
+                if (this.phase !== 'ACTION' || this.player.ammo <= 0) return;
+
+                const w = WEAPONS[this.player.weaponKey];
+                this.player.ammo--;
+                sound.playGunshot(this.player.weaponKey);
+
+                this.player.rot.pitch += w.recoil;
+
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera(new THREE.Vector2(0,0), this.camera);
+
+                const botMeshes = [];
+                this.bots.filter(b => b.alive).forEach(b => {
+                    b.mesh.traverse(child => {
+                        if (child.isMesh) botMeshes.push(child);
+                    });
+                });
+
+                const intersects = raycaster.intersectObjects(botMeshes);
+
+                if (intersects.length > 0) {
+                    const hitMesh = intersects[0].object;
+                    let hitBot = null;
+                    
+                    this.bots.forEach(b => {
+                        b.mesh.traverse(child => {
+                            if (child === hitMesh) hitBot = b;
+                        });
+                    });
+
+                    if (hitBot) {
+                        hitBot.hp -= w.damage;
+                        if (hitBot.hp <= 0 && hitBot.alive) {
+                            hitBot.alive = false;
+                            this.scene.remove(hitBot.mesh);
+                            this.money += 300;
+                            this.addKillFeed("플레이어", hitBot.isAlly ? "아군" : "적 요원", w.name);
+                            this.checkRoundState();
+                        }
+                    }
+                }
+
+                this.updateHUD();
+            }
+
+            checkRoundState() {
+                const enemiesAlive = this.bots.filter(b => !b.isAlly && b.alive).length;
+                const alliesAlive = this.bots.filter(b => b.isAlly && b.alive).length + (this.player.hp > 0 ? 1 : 0);
+
+                if (enemiesAlive === 0) {
+                    this.endRound(this.isAttacker, "적 부대 제압 완료");
+                } else if (alliesAlive === 0) {
+                    this.endRound(!this.isAttacker, "아군 부대 제압됨");
+                }
+            }
+
+            reloadWeapon() {
+                const w = WEAPONS[this.player.weaponKey];
+                const needed = w.clip - this.player.ammo;
+                if (needed > 0 && this.player.reserveAmmo > 0) {
+                    const add = Math.min(needed, this.player.reserveAmmo);
+                    this.player.ammo += add;
+                    this.player.reserveAmmo -= add;
+                    this.updateHUD();
+                }
+            }
+
+            toggleADS(enable) {
+                this.player.isADS = enable;
+                this.camera.fov = enable ? 45 : 75;
+                this.camera.updateProjectionMatrix();
+            }
+
+            useSkill(slot) {
+                if (this.player.skills[slot] <= 0) return;
+                this.player.skills[slot]--;
+                sound.playAbilitySound();
+
+                const skillName = this.selectedAgent.skills[slot].name;
+                this.announce("능력 사용", `${skillName} 발동!`);
+
+                if (skillName.includes("회복") || skillName.includes("치유")) {
+                    this.player.hp = Math.min(100, this.player.hp + 40);
+                } else if (skillName.includes("순간이동") || skillName.includes("돌진")) {
+                    const dir = new THREE.Vector3();
+                    this.camera.getWorldDirection(dir);
+                    this.player.pos.addScaledVector(dir, 8);
+                }
+
+                this.updateHUD();
+            }
+
+            interactSpike() {
+                const distA = this.player.pos.distanceTo(new THREE.Vector3(-25, 0, -35));
+                const distB = this.player.pos.distanceTo(new THREE.Vector3(25, 0, -35));
+
+                if ((distA < 8 || distB < 8) && !this.spike.planted && this.isAttacker) {
+                    this.spike.planted = true;
+                    this.spike.timer = 40;
+                    this.announce("스파이크 설치 완료!", "수비팀의 해체를 막으십시오.");
+                }
+            }
+
+            addKillFeed(killer, victim, weapon) {
+                const feed = document.getElementById('kill-feed');
+                const item = document.createElement('div');
+                item.className = "hud-glass p-1.5 rounded text-right flex justify-end gap-2 border-r-2 border-red-500";
+                item.innerHTML = `<span class="text-cyan-300 font-bold">${killer}</span> [${weapon}] <span class="text-red-400">${victim}</span>`;
+                feed.appendChild(item);
+                setTimeout(() => item.remove(), 4000);
+            }
+
+            announce(title, desc) {
+                const el = document.getElementById('announcer');
+                document.getElementById('announce-title').innerText = title;
+                document.getElementById('announce-desc').innerText = desc;
+                el.classList.remove('opacity-0');
+                setTimeout(() => el.classList.add('opacity-0'), 2500);
+            }
+
+            updateHUD() {
+                document.getElementById('hp-text').innerText = Math.max(0, Math.round(this.player.hp));
+                document.getElementById('hp-bar').style.width = `${Math.max(0, this.player.hp)}%`;
+
+                document.getElementById('money-display').innerText = `$${this.money}`;
+                document.getElementById('buy-menu-money').innerText = `$${this.money}`;
+
+                document.getElementById('weapon-name').innerText = WEAPONS[this.player.weaponKey].name;
+                document.getElementById('ammo-clip').innerText = this.player.ammo;
+                document.getElementById('ammo-reserve').innerText = this.player.reserveAmmo;
+
+                document.getElementById('score-attack').innerText = this.score.attack;
+                document.getElementById('score-defend').innerText = this.score.defend;
+
+                document.getElementById('round-phase').innerText = this.phase === 'BUY' ? '구매 단계' : (this.spike.planted ? '스파이크 해체 단계' : '교전 단계');
+                document.getElementById('timer').innerText = this.spike.planted ? `0:${this.spike.timer < 10 ? '0':''}${this.spike.timer}` : `0:${this.phaseTimer < 10 ? '0':''}${this.phaseTimer}`;
+
+                document.getElementById('skill-q-count').innerText = this.player.skills.q;
+                document.getElementById('skill-e-count').innerText = this.player.skills.e;
+                document.getElementById('skill-c-count').innerText = this.player.skills.c;
+
+                document.getElementById('team-a-label').innerText = this.isAttacker ? "공격팀 (플레이어)" : "공격팀 (적)";
+                document.getElementById('team-b-label').innerText = !this.isAttacker ? "수비팀 (플레이어)" : "수비팀 (적)";
+            }
+
+            update(delta) {
+                if (document.pointerLockElement !== this.container) return;
+
+                const speed = (this.keys['ShiftLeft'] ? 3 : 7);
+                const moveDir = new THREE.Vector3();
+
+                if (this.keys['KeyW']) moveDir.z -= 1;
+                if (this.keys['KeyS']) moveDir.z += 1;
+                if (this.keys['KeyA']) moveDir.x -= 1;
+                if (this.keys['KeyD']) moveDir.x += 1;
+
+                moveDir.normalize();
+                moveDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.player.rot.yaw);
+
+                this.player.pos.x += moveDir.x * speed * delta;
+                this.player.pos.z += moveDir.z * speed * delta;
+
+                // Weapon Bobbing Animation
+                if (moveDir.length() > 0) {
+                    this.player.bobbingTimer += delta * 10;
+                    this.fpsRig.position.y = Math.sin(this.player.bobbingTimer) * 0.015;
+                    this.fpsRig.position.x = Math.cos(this.player.bobbingTimer * 0.5) * 0.01;
+
+                    if (Math.random() < 0.05) {
+                        sound.playFootstep(this.keys['ShiftLeft']);
+                    }
+                } else {
+                    this.fpsRig.position.y = 0;
+                    this.fpsRig.position.x = 0;
+                }
+
+                this.player.pos.x = Math.max(-43, Math.min(43, this.player.pos.x));
+                this.player.pos.z = Math.max(-53, Math.min(53, this.player.pos.z));
+
+                this.camera.position.copy(this.player.pos);
+
+                // AI Agents Logic
+                this.bots.forEach(bot => {
+                    if (!bot.alive) return;
+                    const targetZ = bot.isAlly ? -20 : 20;
+                    bot.pos.z += (targetZ - bot.pos.z) * 0.2 * delta;
+
+                    if (!bot.isAlly && bot.pos.distanceTo(this.player.pos) < 30 && Math.random() < 0.02) {
+                        this.player.hp -= 8;
+                        sound.playGunshot('smg');
+                        this.updateHUD();
+                        if (this.player.hp <= 0) {
+                            this.checkRoundState();
+                        }
+                    }
+                });
+            }
+        }
+
+        // Initialize Game Loop
+        let game;
+        window.onload = () => {
+            game = new TacticalFPSGame();
+
+            let lastTime = performance.now();
+            function animate(time) {
+                requestAnimationFrame(animate);
+                const delta = (time - lastTime) / 1000;
+                lastTime = time;
+
+                if (delta < 0.1) {
+                    game.update(delta);
+                    game.renderer.render(game.scene, game.camera);
+                }
+            }
+            animate(performance.now());
+        };
+    </script>
+</body>
+</html>
