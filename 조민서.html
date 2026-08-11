@@ -1,0 +1,1652 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>우리 집 강아지 - 1인칭 강아지 육성 시뮬레이션</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Jua&family=Nanum+Gothic:wght@400;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            box-sizing: border-box;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0f172a;
+            font-family: 'Nanum Gothic', sans-serif;
+        }
+        .font-jua {
+            font-family: 'Jua', sans-serif;
+        }
+        #webgl-canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        .hud-card {
+            background: rgba(255, 255, 255, 0.90);
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(255, 255, 255, 0.7);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2);
+        }
+        .custom-slider {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 14px;
+            border-radius: 7px;
+            background: #cbd5e1;
+            outline: none;
+        }
+        .custom-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #f59e0b;
+            cursor: pointer;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.3);
+            border: 3px solid white;
+        }
+        .glass-modal {
+            background: rgba(255, 255, 255, 0.96);
+            backdrop-filter: blur(12px);
+            border: 3px solid #fcd34d;
+        }
+        .speech-bubble {
+            position: absolute;
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 10px 16px;
+            color: #1e293b;
+            font-weight: bold;
+            font-size: 15px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+            pointer-events: none;
+            transform: translate(-50%, -100%);
+            white-space: nowrap;
+            z-index: 20;
+            transition: opacity 0.2s ease, transform 0.1s linear;
+        }
+        .speech-bubble:after {
+            content: '';
+            position: absolute;
+            bottom: -10px;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border: 10px solid transparent;
+            border-top-color: #ffffff;
+            border-bottom: 0;
+            margin-left: -10px;
+        }
+        .crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 10;
+        }
+        .progress-bar-fill {
+            transition: width 0.4s ease-in-out;
+        }
+    </style>
+</head>
+<body class="relative bg-slate-900 text-slate-800">
+
+    <div id="canvas-container" class="w-full h-full relative">
+        <canvas id="webgl-canvas"></canvas>
+    </div>
+
+    <!-- Center Crosshair Overlay -->
+    <div class="crosshair flex flex-col items-center justify-center">
+        <div class="w-3 h-3 bg-white/90 border-2 border-slate-900 rounded-full shadow-md"></div>
+        <!-- Interaction Raycast Prompt -->
+        <div id="interaction-prompt" class="hidden mt-4 px-4 py-2 bg-slate-900/90 text-amber-300 font-bold text-sm rounded-full shadow-xl border border-amber-400/50 animate-bounce font-jua">
+            [E] 상호작용
+        </div>
+    </div>
+
+    <!-- 3D Dog Position Projected Speech Bubble -->
+    <div id="dog-speech-bubble" class="speech-bubble opacity-0 font-jua text-amber-900 border-2 border-amber-400">
+        멍멍!
+    </div>
+
+    <div id="hud-layer" class="absolute top-0 left-0 w-full h-full pointer-events-none p-4 flex flex-col justify-between z-10">
+        <!-- Top Navigation Status Bar -->
+        <div class="flex flex-wrap items-center justify-between gap-3 w-full max-w-6xl mx-auto">
+            <!-- Dog Status Card -->
+            <div class="hud-card pointer-events-auto rounded-2xl p-3 flex flex-wrap gap-3 items-center shadow-lg">
+                <!-- Stage Badge -->
+                <div class="bg-amber-500 text-white font-jua px-3.5 py-1.5 rounded-xl text-sm shadow-sm flex items-center gap-2">
+                    <span class="text-lg">🐶</span>
+                    <span id="stage-name-display" class="font-extrabold">아기 강아지</span>
+                </div>
+
+                <!-- Growth XP Bar -->
+                <div class="flex flex-col w-36 sm:w-48 bg-amber-50 p-2 rounded-xl border border-amber-200">
+                    <div class="flex justify-between items-center text-[11px] font-bold text-amber-900 mb-1 font-jua">
+                        <span>성장 경험치</span>
+                        <span id="growth-xp-text">0 / 100 XP</span>
+                    </div>
+                    <div class="w-full bg-slate-200 h-3 rounded-full overflow-hidden border border-slate-300">
+                        <div id="growth-xp-bar" class="bg-gradient-to-r from-amber-400 to-amber-600 h-full progress-bar-fill" style="width: 0%;"></div>
+                    </div>
+                </div>
+
+                <!-- Needs Stats Grid -->
+                <div class="grid grid-cols-3 sm:grid-cols-6 gap-2 text-xs font-bold">
+                    <div class="flex items-center gap-1.5 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200">
+                        <span>❤️</span>
+                        <div class="flex flex-col">
+                            <span class="text-[10px] text-rose-600 leading-tight">건강</span>
+                            <span id="stat-health-text" class="text-rose-700 font-extrabold">100</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-1.5 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
+                        <span>🍖</span>
+                        <div class="flex flex-col">
+                            <span class="text-[10px] text-amber-600 leading-tight">포만감</span>
+                            <span id="stat-hunger-text" class="text-amber-700 font-extrabold">80</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-1.5 bg-sky-50 px-2.5 py-1 rounded-lg border border-sky-200">
+                        <span>💧</span>
+                        <div class="flex flex-col">
+                            <span class="text-[10px] text-sky-600 leading-tight">수분</span>
+                            <span id="stat-thirst-text" class="text-sky-700 font-extrabold">80</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-1.5 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                        <span>🧼</span>
+                        <div class="flex flex-col">
+                            <span class="text-[10px] text-emerald-600 leading-tight">청결도</span>
+                            <span id="stat-cleanliness-text" class="text-emerald-700 font-extrabold">80</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-1.5 bg-pink-50 px-2.5 py-1 rounded-lg border border-pink-200">
+                        <span>😊</span>
+                        <div class="flex flex-col">
+                            <span class="text-[10px] text-pink-600 leading-tight">행복도</span>
+                            <span id="stat-happiness-text" class="text-pink-700 font-extrabold">90</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-1.5 bg-purple-50 px-2.5 py-1 rounded-lg border border-purple-200">
+                        <span>😴</span>
+                        <div class="flex flex-col">
+                            <span class="text-[10px] text-purple-600 leading-tight">체력</span>
+                            <span id="stat-stamina-text" class="text-purple-700 font-extrabold">90</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Time Clock Indicator -->
+            <div class="hud-card pointer-events-auto rounded-2xl px-4 py-2 flex items-center gap-3">
+                <div class="text-right">
+                    <div id="game-day-text" class="text-xs font-bold text-slate-500">Day 1</div>
+                    <div id="game-time-text" class="text-base font-jua text-slate-800">09:00 AM</div>
+                </div>
+                <div id="day-night-icon" class="text-2xl">☀️</div>
+            </div>
+        </div>
+
+        <!-- Bottom HUD Section -->
+        <div class="flex justify-between items-end w-full max-w-6xl mx-auto">
+            <!-- Daily Goal Tasks -->
+            <div class="hud-card pointer-events-auto rounded-2xl p-3.5 w-64 shadow-lg border border-white/80 mb-1">
+                <h3 class="font-jua text-amber-800 text-sm mb-2 flex items-center justify-between border-b border-amber-200 pb-1">
+                    <span>📋 오늘의 케어 목표</span>
+                    <span id="task-completed-count" class="text-xs text-amber-600 font-bold">0/4 완료</span>
+                </h3>
+                <ul class="space-y-1 text-xs text-slate-700 font-bold">
+                    <li id="task-feed" class="flex items-center gap-2">
+                        <span class="task-check text-slate-300">☐</span> <span>강아지 알맞게 밥 주기</span>
+                    </li>
+                    <li id="task-water" class="flex items-center gap-2">
+                        <span class="task-check text-slate-300">☐</span> <span>물 그릇 채우기</span>
+                    </li>
+                    <li id="task-bath" class="flex items-center gap-2">
+                        <span class="task-check text-slate-300">☐</span> <span>적정 온도로 목욕시키기</span>
+                    </li>
+                    <li id="task-play" class="flex items-center gap-2">
+                        <span class="task-check text-slate-300">☐</span> <span>장난감으로 신나게 놀기</span>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- Holding Item Notice Bar -->
+            <div id="holding-item-container" class="hidden hud-card pointer-events-auto rounded-xl px-4 py-2.5 bg-amber-500 text-white font-jua text-sm shadow-md animate-pulse">
+                손에 든 아이템: <span id="holding-item-name" class="underline">사료 봉지</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Start Game Modal -->
+    <div id="start-modal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+        <div class="glass-modal max-w-lg w-full rounded-3xl p-8 text-center shadow-2xl relative border-4 border-amber-300">
+            <div class="text-6xl mb-2">🐶🏠</div>
+            <h1 class="text-4xl font-jua text-amber-900 mb-2">우리 집 강아지</h1>
+            <p class="text-slate-600 text-sm mb-5 font-bold">3D 1인칭 강아지 육성 시뮬레이션</p>
+
+            <div class="bg-amber-50/90 p-4 rounded-2xl text-left text-xs text-slate-700 space-y-2 mb-6 border border-amber-200 shadow-inner">
+                <p class="font-bold text-amber-900 text-sm">🎮 조작 가이드</p>
+                <div class="grid grid-cols-2 gap-2 text-slate-800 font-bold">
+                    <div><b>W, A, S, D</b>: 집 안 이동</div>
+                    <div><b>마우스</b>: 시점 자유 회전</div>
+                    <div><b>E 키</b>: 상호작용 / 결정</div>
+                    <div><b>ESC 키</b>: 메뉴 / 일시정지</div>
+                </div>
+                <hr class="border-amber-200 my-2">
+                <p class="text-amber-800">
+                    💡 <b>성장 핵심:</b> 밥을 딱 맞게 주고, 목욕 온도를 잘 맞추며 놀아주면 <b>성장 경험치(XP)</b>가 쌓입니다.<br>
+                    강아지가 성장할수록 까다로워지며, <b>성체(4단계)</b>까지 성장시키면 게임 승리!
+                </p>
+            </div>
+
+            <button id="btn-start-game" class="w-full py-4 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-white font-jua text-xl rounded-2xl shadow-lg transition transform hover:-translate-y-0.5 active:translate-y-0">
+                게임 시작하기 🐾
+            </button>
+        </div>
+    </div>
+
+    <!-- Feeding Minigame Modal -->
+    <div id="feeding-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4 pointer-events-auto">
+        <div class="glass-modal max-w-md w-full rounded-3xl p-6 text-center shadow-2xl">
+            <h2 class="text-2xl font-jua text-amber-800 mb-1">🍖 사료 양 조절하기</h2>
+            <p id="feeding-hint" class="text-xs text-slate-600 mb-4 font-bold">강아지의 현재 성장 단계에 딱 알맞은 사료 양을 맞춰주세요!</p>
+
+            <div class="bg-slate-100 rounded-2xl p-6 mb-5 relative overflow-hidden border border-slate-200">
+                <div class="w-32 h-20 bg-slate-300 rounded-b-full border-4 border-slate-400 mx-auto relative flex items-end justify-center overflow-hidden shadow-inner">
+                    <div id="bowl-kibble-level" class="w-full bg-amber-600 transition-all duration-150 rounded-b-full" style="height: 0%;"></div>
+                </div>
+                <div class="mt-3 font-jua text-amber-900 text-xl">
+                    담은 사료: <span id="current-food-amount" class="text-2xl text-amber-600">0</span>g
+                </div>
+                <div class="text-xs text-slate-500 font-bold mt-1">
+                    (목표 추정치: <span id="target-food-hint" class="text-amber-700">100</span>g 전후)
+                </div>
+            </div>
+
+            <div class="mb-6 px-2">
+                <input type="range" id="food-slider" min="0" max="300" value="0" class="custom-slider">
+                <div class="flex justify-between text-xs font-bold text-slate-400 mt-1">
+                    <span>0g</span>
+                    <span>150g</span>
+                    <span>300g</span>
+                </div>
+            </div>
+
+            <div class="flex gap-3">
+                <button id="btn-cancel-feed" class="flex-1 py-3 bg-slate-200 text-slate-700 font-jua rounded-xl hover:bg-slate-300">취소</button>
+                <button id="btn-confirm-feed" class="flex-2 py-3 bg-amber-500 text-white font-jua rounded-xl hover:bg-amber-600 shadow-md">강아지에게 주기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bath Minigame Modal -->
+    <div id="bath-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4 pointer-events-auto">
+        <div class="glass-modal max-w-md w-full rounded-3xl p-6 text-center shadow-2xl">
+            <h2 class="text-2xl font-jua text-sky-800 mb-1">🚿 강아지 목욕시키기</h2>
+            <p id="bath-hint" class="text-xs text-slate-600 mb-4 font-bold">샤워기 온도를 강아지가 좋아하는 알맞은 온도로 맞추세요!</p>
+
+            <div class="bg-sky-50 rounded-2xl p-6 mb-5 border border-sky-100 flex flex-col items-center">
+                <div class="text-5xl mb-2 animate-bounce">🧼🐶</div>
+                <div class="font-jua text-2xl text-slate-800 my-1">
+                    현재 온도: <span id="bath-temp-display" class="text-sky-600">20.0</span> °C
+                </div>
+                <div id="bath-temp-status" class="text-xs font-bold px-3 py-1 rounded-full bg-blue-100 text-blue-700">
+                    너무 차가워요!
+                </div>
+            </div>
+
+            <div class="mb-6 px-2">
+                <input type="range" id="bath-temp-slider" min="10" max="60" value="20" step="0.5" class="custom-slider">
+                <div class="flex justify-between text-xs font-bold text-slate-400 mt-1">
+                    <span class="text-blue-500">10°C (차가움)</span>
+                    <span class="text-emerald-500">37.5°C (적정)</span>
+                    <span class="text-red-500">60°C (뜨거움)</span>
+                </div>
+            </div>
+
+            <div class="flex gap-3">
+                <button id="btn-cancel-bath" class="flex-1 py-3 bg-slate-200 text-slate-700 font-jua rounded-xl hover:bg-slate-300">취소</button>
+                <button id="btn-confirm-bath" class="flex-2 py-3 bg-sky-500 text-white font-jua rounded-xl hover:bg-sky-600 shadow-md">목욕하기 완료</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ESC / Pause Menu Modal -->
+    <div id="pause-modal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
+        <div class="glass-modal max-w-sm w-full rounded-3xl p-6 text-center shadow-2xl">
+            <h2 class="text-3xl font-jua text-slate-800 mb-4">일시 정지</h2>
+            <div class="space-y-3">
+                <button id="btn-resume" class="w-full py-3 bg-amber-500 text-white font-jua rounded-xl shadow hover:bg-amber-600">게임 계속하기</button>
+                <button id="btn-restart" class="w-full py-3 bg-slate-200 text-slate-700 font-jua rounded-xl hover:bg-slate-300">처음부터 다시하기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stage Level-Up Modal -->
+    <div id="levelup-modal" class="hidden fixed inset-0 bg-slate-900/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+        <div class="glass-modal max-w-md w-full rounded-3xl p-8 text-center shadow-2xl relative border-4 border-amber-400">
+            <div class="text-6xl mb-3">✨🐶🎉</div>
+            <h2 class="text-3xl font-jua text-amber-900 mb-2">성장했습니다!</h2>
+            <p class="text-slate-600 font-bold mb-4">강아지가 한 단계 더 자랐습니다!</p>
+
+            <div class="bg-amber-50 rounded-2xl p-4 border border-amber-200 mb-6 text-center">
+                <div class="text-xs text-amber-700 font-bold mb-1">새로운 성장 단계</div>
+                <div id="levelup-stage-name" class="text-2xl font-jua text-amber-900">어린 강아지</div>
+                <p id="levelup-stage-desc" class="text-xs text-slate-600 mt-2 font-bold">이제 알맞은 사료량과 목욕 온도가 더 까다로워집니다!</p>
+            </div>
+
+            <button id="btn-confirm-levelup" class="w-full py-4 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-white font-jua text-xl rounded-2xl shadow-lg transition transform hover:-translate-y-0.5">
+                계속해서 키우기 🐾
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Clear Modal -->
+    <div id="clear-modal" class="hidden fixed inset-0 bg-slate-900/90 backdrop-blur-md z-50 flex items-center justify-center p-4">
+        <div class="glass-modal max-w-lg w-full rounded-3xl p-8 text-center shadow-2xl border-4 border-amber-400">
+            <div class="text-6xl mb-3">🎉🐶👑</div>
+            <h1 class="text-3xl font-jua text-amber-900 mb-1">축하합니다!</h1>
+            <p class="text-slate-600 font-bold mb-6">강아지가 건강하고 멋진 성체로 훌륭하게 자랐습니다!</p>
+
+            <div class="bg-amber-50 rounded-2xl p-4 text-left font-bold text-sm text-slate-700 space-y-2 mb-6 border border-amber-200">
+                <div class="text-amber-900 font-jua text-base border-b border-amber-200 pb-1 mb-2">📊 최종 육성 리포트</div>
+                <div class="flex justify-between"><span>최종 건강도:</span><span id="end-health" class="text-rose-600 font-extrabold">100점</span></div>
+                <div class="flex justify-between"><span>평균 행복도:</span><span id="end-happiness" class="text-pink-600 font-extrabold">95점</span></div>
+                <div class="flex justify-between"><span>성공적 먹이 주기:</span><span id="end-feeds" class="text-amber-700">0회</span></div>
+                <div class="flex justify-between"><span>성공적 목욕:</span><span id="end-baths" class="text-sky-700">0회</span></div>
+                <div class="flex justify-between"><span>놀아준 횟수:</span><span id="end-plays" class="text-emerald-700">0회</span></div>
+                <div class="flex justify-between"><span>총 육성 소요 기간:</span><span id="end-days" class="text-slate-800">Day 3</span></div>
+            </div>
+
+            <button id="btn-clear-restart" class="w-full py-4 bg-amber-500 text-white font-jua text-xl rounded-2xl shadow-lg hover:bg-amber-600">
+                새로운 강아지 키우기 🐾
+            </button>
+        </div>
+    </div>
+
+    <script>
+        /* Audio Synthesizer Class (No external audio files required) */
+        class AudioEngine {
+            constructor() {
+                this.ctx = null;
+            }
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+            playBark(isAdult = false) {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'triangle';
+                const baseFreq = isAdult ? 200 : 420;
+                osc.frequency.setValueAtTime(baseFreq, now);
+                osc.frequency.exponentialRampToValueAtTime(baseFreq * 1.4, now + 0.08);
+                osc.frequency.exponentialRampToValueAtTime(baseFreq * 0.8, now + 0.18);
+
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.2);
+            }
+            playWhine() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(650, now);
+                osc.frequency.linearRampToValueAtTime(520, now + 0.3);
+
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.35);
+            }
+            playInteract() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(523.25, now);
+                osc.frequency.setValueAtTime(659.25, now + 0.08);
+
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.2);
+            }
+            playSqueak() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(1100, now);
+                osc.frequency.exponentialRampToValueAtTime(1700, now + 0.1);
+
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.15);
+            }
+            playWater() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(320, now);
+                osc.frequency.linearRampToValueAtTime(480, now + 0.25);
+
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.3);
+            }
+            playSuccess() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const notes = [523.25, 659.25, 783.99, 1046.50];
+                notes.forEach((freq, idx) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+                    gain.gain.setValueAtTime(0.15, now + idx * 0.08);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.25);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(now + idx * 0.08);
+                    osc.stop(now + idx * 0.08 + 0.25);
+                });
+            }
+        }
+
+        const audio = new AudioEngine();
+
+        const GROWTH_STAGES = [
+            { stage: 1, name: '아기 강아지', scale: 0.65, speed: 2.2, targetFood: 60, foodMargin: 35, idealTemp: 37.5, tempMargin: 6.5, speech: '멍멍! 맛있다!' },
+            { stage: 2, name: '어린 강아지', scale: 0.95, speed: 2.8, targetFood: 120, foodMargin: 25, idealTemp: 37.5, tempMargin: 4.5, speech: '멍! 아주 신나요!' },
+            { stage: 3, name: '성장기 강아지', scale: 1.25, speed: 3.4, targetFood: 180, foodMargin: 18, idealTemp: 37.5, tempMargin: 3.0, speech: '월월! 딱 좋은 양이에요!' },
+            { stage: 4, name: '건강한 성체', scale: 1.60, speed: 4.0, targetFood: 250, foodMargin: 10, idealTemp: 37.5, tempMargin: 1.8, speech: '월월! 최고입니다 주인님!' }
+        ];
+
+        class Dog {
+            constructor() {
+                this.x = 0;
+                this.y = 0.3;
+                this.z = -2;
+                this.yaw = 0;
+
+                // Needs Stats (0 to 100)
+                this.health = 100;
+                this.hunger = 80;
+                this.thirst = 80;
+                this.cleanliness = 80;
+                this.happiness = 90;
+                this.stamina = 90;
+
+                this.stageIndex = 0;
+                this.growthXP = 0; // 0 to 100 XP per level
+
+                // AI States
+                this.state = 'IDLE';
+                this.stateTimer = 0;
+                this.targetX = 0;
+                this.targetZ = -2;
+
+                this.meshGroup = null; // Three.js mesh reference
+                this.tailMesh = null;
+                this.speechBubbleText = '';
+                this.speechBubbleTimer = 0;
+            }
+
+            get currentStage() {
+                return GROWTH_STAGES[this.stageIndex];
+            }
+
+            say(text, duration = 3) {
+                this.speechBubbleText = text;
+                this.speechBubbleTimer = duration;
+            }
+
+            addGrowthXP(amount) {
+                if (this.stageIndex >= 3) return false;
+
+                this.growthXP += amount;
+                if (this.growthXP >= 100) {
+                    this.growthXP = 0;
+                    this.stageIndex++;
+                    audio.playSuccess();
+                    this.say(`🎉 ${this.currentStage.name}(으)로 성장했습니다!`);
+                    return true; // Stage upgraded
+                }
+                return false;
+            }
+
+            update(dt, playerPos) {
+                if (this.speechBubbleTimer > 0) {
+                    this.speechBubbleTimer -= dt;
+                    if (this.speechBubbleTimer <= 0) {
+                        this.speechBubbleText = '';
+                    }
+                }
+
+                // Passive needs decay over time
+                this.hunger = Math.max(0, this.hunger - dt * 0.7);
+                this.thirst = Math.max(0, this.thirst - dt * 1.0);
+                this.cleanliness = Math.max(0, this.cleanliness - dt * 0.4);
+                this.stamina = Math.max(0, this.stamina - dt * 0.5);
+
+                if (this.hunger < 20 || this.thirst < 20) {
+                    this.health = Math.max(0, this.health - dt * 0.4);
+                    this.happiness = Math.max(0, this.happiness - dt * 0.6);
+                } else if (this.hunger > 60 && this.thirst > 60) {
+                    this.health = Math.min(100, this.health + dt * 0.2);
+                }
+
+                // AI State Machine
+                this.stateTimer -= dt;
+                if (this.stateTimer <= 0 && this.state !== 'EATING' && this.state !== 'SLEEPING') {
+                    this.decideNextAction(playerPos);
+                }
+
+                // Movement Logic
+                if (this.state === 'WANDER' || this.state === 'FOLLOW' || this.state === 'GO_TO_TARGET') {
+                    const dx = this.targetX - this.x;
+                    const dz = this.targetZ - this.z;
+                    const dist = Math.hypot(dx, dz);
+
+                    if (dist > 0.4) {
+                        const moveSpeed = this.currentStage.speed * dt;
+                        this.x += (dx / dist) * moveSpeed;
+                        this.z += (dz / dist) * moveSpeed;
+                        this.yaw = Math.atan2(dx, dz);
+                    } else {
+                        this.state = 'IDLE';
+                        this.stateTimer = 2 + Math.random() * 3;
+                    }
+                }
+
+                // Synchronize 3D Mesh position & scale
+                if (this.meshGroup) {
+                    this.meshGroup.position.set(this.x, this.y, this.z);
+                    this.meshGroup.rotation.y = this.yaw;
+
+                    const targetScale = this.currentStage.scale;
+                    this.meshGroup.scale.set(targetScale, targetScale, targetScale);
+
+                    // Tail animation
+                    if (this.tailMesh) {
+                        this.tailMesh.rotation.z = Math.sin(Date.now() * 0.012) * 0.4;
+                    }
+                }
+            }
+
+            decideNextAction(playerPos) {
+                if (this.hunger < 25) {
+                    this.say('멍멍! 배가 고파요! 🍖');
+                } else if (this.thirst < 25) {
+                    this.say('목말라요... 물 주세요! 💧');
+                }
+
+                const rand = Math.random();
+                if (rand < 0.4) {
+                    this.state = 'WANDER';
+                    this.targetX = Math.max(-6, Math.min(6, this.x + (Math.random() * 6 - 3)));
+                    this.targetZ = Math.max(-8, Math.min(6, this.z + (Math.random() * 6 - 3)));
+                    this.stateTimer = 4;
+                } else if (rand < 0.75) {
+                    this.state = 'FOLLOW';
+                    this.targetX = playerPos.x + (Math.random() * 2 - 1);
+                    this.targetZ = playerPos.z + (Math.random() * 2 - 1);
+                    this.stateTimer = 5;
+                } else {
+                    this.state = 'IDLE';
+                    this.stateTimer = 3;
+                }
+            }
+        }
+
+        class GameEngine {
+            constructor() {
+                this.container = document.getElementById('canvas-container');
+                this.canvas = document.getElementById('webgl-canvas');
+
+                this.dog = new Dog();
+                this.isGameStarted = false;
+                this.isPaused = false;
+
+                // Player Camera State
+                this.cameraPos = new THREE.Vector3(0, 1.6, 2);
+                this.yaw = 0;
+                this.pitch = 0;
+                this.keys = {};
+                this.isPointerLocked = false;
+
+                // Daily Tasks
+                this.day = 1;
+                this.gameTime = 9 * 60; // 09:00 AM in minutes
+                this.tasks = { feed: false, water: false, bath: false, play: false };
+                this.statsReport = { successfulFeeds: 0, successfulBaths: 0, playCount: 0 };
+                this.holdingItem = null;
+
+                // Interactive Objects Raycaster targets
+                this.interactiveObjects = [];
+                this.targetedObject = null;
+
+                this.initThree();
+                this.buildHouseEnvironment();
+                this.create3DDogMesh();
+                this.initEvents();
+            }
+
+            initThree() {
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color('#1e293b');
+                this.scene.fog = new THREE.Fog('#1e293b', 10, 25);
+
+                this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
+                this.camera.position.copy(this.cameraPos);
+                this.camera.rotation.order = 'YXZ';
+
+                this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                this.renderer.shadowMap.enabled = true;
+
+                // Lighting
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
+                this.scene.add(ambientLight);
+
+                const dirLight = new THREE.DirectionalLight(0xfffbeb, 0.8);
+                dirLight.position.set(8, 15, 8);
+                dirLight.castShadow = true;
+                this.scene.add(dirLight);
+
+                this.raycaster = new THREE.Raycaster();
+            }
+
+            buildHouseEnvironment() {
+                // House Floor Plane with colorful room tiles
+                const floorGeo = new THREE.PlaneGeometry(16, 20);
+                const floorMat = new THREE.MeshStandardMaterial({ color: '#f1f5f9', roughness: 0.4 });
+                const floor = new THREE.Mesh(floorGeo, floorMat);
+                floor.rotation.x = -Math.PI / 2;
+                floor.receiveShadow = true;
+                this.scene.add(floor);
+
+                // Room Mats to differentiate Living, Kitchen, Bath, Dog Space
+                this.createRoomTile(0, 1, 10, 10, '#e2e8f0', '거실');
+                this.createRoomTile(-5, -6, 6, 8, '#dbece5', '주방');
+                this.createRoomTile(5, -6, 6, 8, '#d0e8f2', '욕실');
+                this.createRoomTile(0, -7, 4, 4, '#fef3c7', '강아지 공간');
+
+                // Outer House Walls
+                const wallMat = new THREE.MeshStandardMaterial({ color: '#cbd5e1' });
+                this.createWall(0, 1.5, -10, 16, 3, 0.3, wallMat); // North Wall
+                this.createWall(-8, 1.5, 0, 0.3, 3, 20, wallMat);  // West Wall
+                this.createWall(8, 1.5, 0, 0.3, 3, 20, wallMat);   // East Wall
+                this.createWall(0, 1.5, 10, 16, 3, 0.3, wallMat);  // South Wall
+
+                // Detailed Furniture & Interactive 3D Models
+                // 1. Realistic Fabric Sofa (Living Room)
+                this.buildSofa(new THREE.Vector3(0, 0, 4.2));
+
+                // 1b. TV Stand & Flat TV (Living Room)
+                this.buildTVUnit(new THREE.Vector3(0, 0, -1.0));
+
+                // 2. Realistic Toy Dog Bone (Living Room)
+                this.buildToyBone(new THREE.Vector3(1.8, 0.1, 1.8));
+
+                // 3. Kitchen Counter with Sink, Stove, Food Bag & Bowls
+                this.buildKitchenCounter(new THREE.Vector3(-5, 0, -8));
+                this.buildFoodBag(new THREE.Vector3(-4, 1.0, -8));
+                this.buildBowl('food_bowl', '밥그릇', new THREE.Vector3(-5.5, 0, -4), '#ef4444', '#78350f', '[E] 밥 주기');
+                this.buildBowl('water_bowl', '물그릇', new THREE.Vector3(-4.0, 0, -4), '#3b82f6', '#38bdf8', '[E] 물 채우기');
+
+                // 4. Detailed Bathtub with Faucet & Tap (Bathroom)
+                this.buildBathtub(new THREE.Vector3(5, 0, -7));
+
+                // 5. Plush Donut Dog Bed (Dog Area)
+                this.buildDogBed(new THREE.Vector3(0, 0, -7));
+            }
+
+            buildSofa(pos) {
+                const group = new THREE.Group();
+                group.position.copy(pos);
+
+                const leatherMat = new THREE.MeshStandardMaterial({ color: '#854d0e', roughness: 0.6 });
+                const cushionMat = new THREE.MeshStandardMaterial({ color: '#a16207', roughness: 0.7 });
+                const legMat = new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.3 });
+
+                // Base seat board
+                const base = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.3, 1.2), leatherMat);
+                base.position.y = 0.25;
+                base.castShadow = true;
+                group.add(base);
+
+                // Seat cushions (left & right)
+                for (let i of [-0.75, 0.75]) {
+                    const cushion = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.25, 1.0), cushionMat);
+                    cushion.position.set(i, 0.5, 0.05);
+                    cushion.castShadow = true;
+                    group.add(cushion);
+                }
+
+                // Backrest & Armrests
+                const back = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.8, 0.3), leatherMat);
+                back.position.set(0, 0.8, 0.5);
+                back.castShadow = true;
+                group.add(back);
+
+                for (let i of [-1.5, 1.5]) {
+                    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.6, 1.2), leatherMat);
+                    arm.position.set(i, 0.6, 0);
+                    arm.castShadow = true;
+                    group.add(arm);
+                }
+
+                // Wooden feet
+                for (let x of [-1.4, 1.4]) {
+                    for (let z of [-0.4, 0.4]) {
+                        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.03, 0.2, 12), legMat);
+                        leg.position.set(x, 0.1, z);
+                        group.add(leg);
+                    }
+                }
+
+                group.userData = { id: 'sofa', name: '소파', prompt: '[E] 소파에서 쉬기', interactable: true };
+                this.scene.add(group);
+                this.interactiveObjects.push(group);
+            }
+
+            buildTVUnit(pos) {
+                const group = new THREE.Group();
+                group.position.copy(pos);
+
+                const woodMat = new THREE.MeshStandardMaterial({ color: '#451a03', roughness: 0.5 });
+                const tvMat = new THREE.MeshStandardMaterial({ color: '#090d16', roughness: 0.1 });
+
+                // Console table
+                const table = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.5, 0.6), woodMat);
+                table.position.y = 0.25;
+                table.castShadow = true;
+                group.add(table);
+
+                // TV Screen
+                const screen = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.1, 0.08), tvMat);
+                screen.position.set(0, 1.2, 0);
+                screen.castShadow = true;
+                group.add(screen);
+
+                // TV Stand
+                const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.25, 0.3, 16), tvMat);
+                stand.position.set(0, 0.65, 0);
+                group.add(stand);
+
+                this.scene.add(group);
+            }
+
+            buildToyBone(pos) {
+                const group = new THREE.Group();
+                group.position.copy(pos);
+
+                const rubberMat = new THREE.MeshStandardMaterial({ color: '#f43f5e', roughness: 0.3 });
+
+                // Central shaft
+                const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.4, 16), rubberMat);
+                shaft.rotation.z = Math.PI / 2;
+                shaft.castShadow = true;
+                group.add(shaft);
+
+                // Spherical bone ends
+                const endGeo = new THREE.SphereGeometry(0.08, 12, 12);
+                const endOffsets = [
+                    [-0.2, 0.05, 0.04], [-0.2, -0.05, -0.04],
+                    [0.2, 0.05, 0.04], [0.2, -0.05, -0.04]
+                ];
+                endOffsets.forEach(p => {
+                    const end = new THREE.Mesh(endGeo, rubberMat);
+                    end.position.set(p[0], p[1], p[2]);
+                    end.castShadow = true;
+                    group.add(end);
+                });
+
+                group.userData = { id: 'toy_bone', name: '장난감 뼈다귀', prompt: '[E] 장난감 집기', interactable: true };
+                this.scene.add(group);
+                this.interactiveObjects.push(group);
+            }
+
+            buildKitchenCounter(pos) {
+                const group = new THREE.Group();
+                group.position.copy(pos);
+
+                const bodyMat = new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.5 });
+                const topMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.2 });
+                const metalMat = new THREE.MeshStandardMaterial({ color: '#94a3b8', metalness: 0.8, roughness: 0.2 });
+
+                // Main Cabinet
+                const cabinet = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.85, 1.2), bodyMat);
+                cabinet.position.y = 0.425;
+                cabinet.castShadow = true;
+                group.add(cabinet);
+
+                // Marble Top Slab
+                const top = new THREE.Mesh(new THREE.BoxGeometry(4.1, 0.08, 1.25), topMat);
+                top.position.y = 0.89;
+                top.castShadow = true;
+                group.add(top);
+
+                // Metal Handles
+                for (let x of [-1.2, -0.4, 0.4, 1.2]) {
+                    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.2, 8), metalMat);
+                    handle.position.set(x, 0.5, 0.62);
+                    group.add(handle);
+                }
+
+                this.scene.add(group);
+            }
+
+            buildFoodBag(pos) {
+                const group = new THREE.Group();
+                group.position.copy(pos);
+
+                const bagMat = new THREE.MeshStandardMaterial({ color: '#f59e0b', roughness: 0.6 });
+                const labelMat = new THREE.MeshStandardMaterial({ color: '#fef3c7', roughness: 0.4 });
+
+                // Main Bag Body (Slightly tapered cylinder shape)
+                const body = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.55, 16), bagMat);
+                body.position.y = 0.275;
+                body.scale.set(1.1, 1.0, 0.7);
+                body.castShadow = true;
+                group.add(body);
+
+                // Folded Top Seam
+                const fold = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.08, 0.12), bagMat);
+                fold.position.y = 0.57;
+                group.add(fold);
+
+                // Front Label
+                const label = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.32), labelMat);
+                label.position.set(0, 0.27, 0.18);
+                group.add(label);
+
+                group.userData = { id: 'food_bag', name: '사료 봉지', prompt: '[E] 사료 가지기', interactable: true };
+                this.scene.add(group);
+                this.interactiveObjects.push(group);
+            }
+
+            buildBowl(id, name, pos, rimColorHex, innerColorHex, prompt) {
+                const group = new THREE.Group();
+                group.position.copy(pos);
+
+                const bowlMat = new THREE.MeshStandardMaterial({ color: rimColorHex, roughness: 0.3 });
+                const fillMat = new THREE.MeshStandardMaterial({ color: innerColorHex, roughness: 0.4 });
+                const rubberMat = new THREE.MeshStandardMaterial({ color: '#0f172a', roughness: 0.8 });
+
+                // Flared Outer Dish
+                const dish = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.28, 0.18, 24), bowlMat);
+                dish.position.y = 0.09;
+                dish.castShadow = true;
+                group.add(dish);
+
+                // Non-slip rubber base ring
+                const baseRing = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.30, 0.02, 24), rubberMat);
+                baseRing.position.y = 0.01;
+                group.add(baseRing);
+
+                // Contents Surface
+                const fill = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.02, 24), fillMat);
+                fill.position.y = 0.14;
+                group.add(fill);
+
+                group.userData = { id, name, prompt, interactable: true };
+                this.scene.add(group);
+                this.interactiveObjects.push(group);
+            }
+
+            buildBathtub(pos) {
+                const group = new THREE.Group();
+                group.position.copy(pos);
+
+                const porcelainMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.1 });
+                const chromeMat = new THREE.MeshStandardMaterial({ color: '#e2e8f0', metalness: 0.9, roughness: 0.1 });
+                const waterMat = new THREE.MeshStandardMaterial({ color: '#38bdf8', opacity: 0.8, transparent: true, roughness: 0.1 });
+
+                // Outer Shell
+                const tubOuter = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.75, 1.4), porcelainMat);
+                tubOuter.position.y = 0.375;
+                tubOuter.castShadow = true;
+                group.add(tubOuter);
+
+                // Water plane
+                const water = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 1.1), waterMat);
+                water.rotation.x = -Math.PI / 2;
+                water.position.y = 0.55;
+                group.add(water);
+
+                // Metallic Faucet & Knobs
+                const faucet = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.35, 12), chromeMat);
+                faucet.position.set(0, 0.85, -0.6);
+                group.add(faucet);
+
+                const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.2, 12), chromeMat);
+                spout.rotation.x = Math.PI / 2;
+                spout.position.set(0, 0.98, -0.52);
+                group.add(spout);
+
+                group.userData = { id: 'bathtub', name: '욕조', prompt: '[E] 강아지 목욕시키기', interactable: true };
+                this.scene.add(group);
+                this.interactiveObjects.push(group);
+            }
+
+            buildDogBed(pos) {
+                const group = new THREE.Group();
+                group.position.copy(pos);
+
+                const ringMat = new THREE.MeshStandardMaterial({ color: '#d97706', roughness: 0.8 });
+                const cushionMat = new THREE.MeshStandardMaterial({ color: '#fef3c7', roughness: 0.9 });
+
+                // Doughnut Plush Border Ring
+                const ringGeo = new THREE.TorusGeometry(0.85, 0.22, 16, 32);
+                const ring = new THREE.Mesh(ringGeo, ringMat);
+                ring.rotation.x = Math.PI / 2;
+                ring.position.y = 0.18;
+                ring.castShadow = true;
+                group.add(ring);
+
+                // Inner Soft Mattress Pad
+                const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 0.15, 32), cushionMat);
+                pad.position.y = 0.08;
+                pad.receiveShadow = true;
+                group.add(pad);
+
+                group.userData = { id: 'dog_bed', name: '강아지 침대', prompt: '[E] 강아지 재우기', interactable: true };
+                this.scene.add(group);
+                this.interactiveObjects.push(group);
+            }
+
+            createRoomTile(x, z, width, length, colorHex, name) {
+                const geo = new THREE.PlaneGeometry(width, length);
+                const mat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.3 });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.rotation.x = -Math.PI / 2;
+                mesh.position.set(x, 0.01, z);
+                mesh.receiveShadow = true;
+                this.scene.add(mesh);
+            }
+
+            createWall(x, y, z, sx, sy, sz, material) {
+                const geo = new THREE.BoxGeometry(sx, sy, sz);
+                const mesh = new THREE.Mesh(geo, material);
+                mesh.position.set(x, y, z);
+                this.scene.add(mesh);
+            }
+
+            create3DDogMesh() {
+                const group = new THREE.Group();
+
+                // Fur Materials (Rough soft-shaded fur layers)
+                const bodyMat = new THREE.MeshStandardMaterial({ color: '#f59e0b', roughness: 0.8 });
+                const earMat = new THREE.MeshStandardMaterial({ color: '#d97706', roughness: 0.8 });
+                const snoutMat = new THREE.MeshStandardMaterial({ color: '#fef3c7', roughness: 0.7 });
+                const fluffMat = new THREE.MeshStandardMaterial({ color: '#f59e0b', roughness: 0.85 }); // 몸통 털색과 동일한 황금빛 털
+                const tuftHighlightMat = new THREE.MeshStandardMaterial({ color: '#fbbf24', roughness: 0.85 }); // 따뜻한 연황금빛 털 하이라이트
+                const chestFluffMat = new THREE.MeshStandardMaterial({ color: '#fef3c7', roughness: 0.9 }); // 자연스러운 크림빛 가슴 털
+                const darkMat = new THREE.MeshStandardMaterial({ color: '#0f172a' });
+                const collarMat = new THREE.MeshStandardMaterial({ color: '#ef4444', roughness: 0.3 });
+                const tagMat = new THREE.MeshStandardMaterial({ color: '#fbbf24', metalness: 0.8, roughness: 0.2 });
+
+                // Main Body Frame
+                const bodyGeo = new THREE.BoxGeometry(0.5, 0.4, 0.7);
+                const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+                bodyMesh.position.y = 0.3;
+                bodyMesh.castShadow = true;
+                group.add(bodyMesh);
+
+                // Back & Side Fur Tufts (등과 옆구리 털 뭉치 - 강아지 털색 매칭)
+                const furTuftGeo = new THREE.ConeGeometry(0.06, 0.15, 4);
+                const backTuftPositions = [
+                    [0, 0.52, 0.1, Math.PI / 6, 0],
+                    [-0.12, 0.51, -0.1, Math.PI / 5, -0.3],
+                    [0.12, 0.51, -0.1, Math.PI / 5, 0.3],
+                    [0, 0.52, -0.25, Math.PI / 4, 0],
+                    [-0.26, 0.35, 0.0, 0, -Math.PI / 3],
+                    [0.26, 0.35, 0.0, 0, Math.PI / 3]
+                ];
+                backTuftPositions.forEach(p => {
+                    const tuft = new THREE.Mesh(furTuftGeo, tuftHighlightMat);
+                    tuft.position.set(p[0], p[1], p[2]);
+                    tuft.rotation.x = p[3];
+                    tuft.rotation.z = p[4];
+                    tuft.castShadow = true;
+                    group.add(tuft);
+                });
+
+                // Fluffy Chest Ruff (가슴의 풍성하고 부드러운 크림빛 털)
+                const chestFluffGeo = new THREE.DodecahedronGeometry(0.14, 1);
+                const chestPositions = [
+                    [0, 0.32, 0.38],
+                    [-0.12, 0.28, 0.36],
+                    [0.12, 0.28, 0.36],
+                    [0, 0.20, 0.37]
+                ];
+                chestPositions.forEach(p => {
+                    const ruff = new THREE.Mesh(chestFluffGeo, chestFluffMat);
+                    ruff.position.set(p[0], p[1], p[2]);
+                    ruff.scale.set(1.1, 0.9, 1.0);
+                    ruff.castShadow = true;
+                    group.add(ruff);
+                });
+
+                // Collar with Gold Tag
+                const collar = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.08, 0.44), collarMat);
+                collar.position.set(0, 0.48, 0.28);
+                group.add(collar);
+
+                const goldTag = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.01, 12), tagMat);
+                goldTag.rotation.x = Math.PI / 2;
+                goldTag.position.set(0, 0.42, 0.51);
+                group.add(goldTag);
+
+                // Head Frame
+                const headGeo = new THREE.BoxGeometry(0.4, 0.38, 0.4);
+                const headMesh = new THREE.Mesh(headGeo, bodyMat);
+                headMesh.position.set(0, 0.58, 0.3);
+                headMesh.castShadow = true;
+                group.add(headMesh);
+
+                // Fluffy Forelock Hair Tufts (머리 위 귀여운 털 뭉치)
+                const headTuftGeo = new THREE.ConeGeometry(0.05, 0.14, 4);
+                const headTufts = [
+                    [0, 0.80, 0.33, -Math.PI / 8, 0],
+                    [-0.08, 0.79, 0.31, -Math.PI / 10, -0.2],
+                    [0.08, 0.79, 0.31, -Math.PI / 10, 0.2]
+                ];
+                headTufts.forEach(p => {
+                    const tuft = new THREE.Mesh(headTuftGeo, tuftHighlightMat);
+                    tuft.position.set(p[0], p[1], p[2]);
+                    tuft.rotation.x = p[3];
+                    tuft.rotation.z = p[4];
+                    group.add(tuft);
+                });
+
+                // Fluffy Cheek Tufts (양 볼 털)
+                const cheekTuftGeo = new THREE.ConeGeometry(0.06, 0.16, 4);
+                const leftCheek = new THREE.Mesh(cheekTuftGeo, fluffMat);
+                leftCheek.position.set(-0.23, 0.52, 0.35);
+                leftCheek.rotation.z = Math.PI / 2.5;
+                group.add(leftCheek);
+
+                const rightCheek = new THREE.Mesh(cheekTuftGeo, fluffMat);
+                rightCheek.position.set(0.23, 0.52, 0.35);
+                rightCheek.rotation.z = -Math.PI / 2.5;
+                group.add(rightCheek);
+
+                // Floppy Ears
+                const earGeo = new THREE.BoxGeometry(0.1, 0.25, 0.18);
+                const leftEar = new THREE.Mesh(earGeo, earMat);
+                leftEar.position.set(-0.24, 0.58, 0.3);
+                const rightEar = new THREE.Mesh(earGeo, earMat);
+                rightEar.position.set(0.24, 0.58, 0.3);
+                group.add(leftEar);
+                group.add(rightEar);
+
+                // Snout & Nose
+                const snoutGeo = new THREE.BoxGeometry(0.2, 0.16, 0.2);
+                const snout = new THREE.Mesh(snoutGeo, snoutMat);
+                snout.position.set(0, 0.52, 0.5);
+                group.add(snout);
+
+                const noseGeo = new THREE.BoxGeometry(0.08, 0.08, 0.08);
+                const nose = new THREE.Mesh(noseGeo, darkMat);
+                nose.position.set(0, 0.56, 0.61);
+                group.add(nose);
+
+                // Eyes
+                const eyeGeo = new THREE.BoxGeometry(0.06, 0.06, 0.06);
+                const leftEye = new THREE.Mesh(eyeGeo, darkMat);
+                leftEye.position.set(-0.12, 0.64, 0.51);
+                const rightEye = new THREE.Mesh(eyeGeo, darkMat);
+                rightEye.position.set(0.12, 0.64, 0.51);
+                group.add(leftEye);
+                group.add(rightEye);
+
+                // Legs, Paws & Leg Fluff
+                const legGeo = new THREE.BoxGeometry(0.12, 0.25, 0.12);
+                const pawGeo = new THREE.BoxGeometry(0.14, 0.06, 0.16);
+                const legTuftGeo = new THREE.ConeGeometry(0.04, 0.10, 4);
+                const legPositions = [
+                    [-0.18, 0.125, 0.22],
+                    [0.18, 0.125, 0.22],
+                    [-0.18, 0.125, -0.22],
+                    [0.18, 0.125, -0.22]
+                ];
+                legPositions.forEach(p => {
+                    const leg = new THREE.Mesh(legGeo, bodyMat);
+                    leg.position.set(p[0], p[1], p[2]);
+                    leg.castShadow = true;
+                    group.add(leg);
+
+                    const paw = new THREE.Mesh(pawGeo, snoutMat);
+                    paw.position.set(p[0], 0.03, p[2] + 0.02);
+                    group.add(paw);
+
+                    // Side Leg Fluff
+                    const legTuft = new THREE.Mesh(legTuftGeo, fluffMat);
+                    legTuft.position.set(p[0] * 1.2, p[1] + 0.05, p[2]);
+                    legTuft.rotation.z = p[0] < 0 ? Math.PI / 4 : -Math.PI / 4;
+                    group.add(legTuft);
+                });
+
+                // Bushy Fluffy Tail Assembly (몸통과 일치하는 황금빛 복실복실 꼬리)
+                const tailGroup = new THREE.Group();
+                tailGroup.position.set(0, 0.45, -0.35);
+
+                const tailMain = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.04, 0.28, 12), bodyMat);
+                tailMain.rotation.x = -Math.PI / 3;
+                tailMain.position.set(0, 0, -0.1);
+                tailGroup.add(tailMain);
+
+                // Layered Fluff Spheres for Plush Bushy Tail Effect
+                const tailFluffGeo = new THREE.DodecahedronGeometry(0.12, 1);
+                const tailFluff1 = new THREE.Mesh(tailFluffGeo, fluffMat);
+                tailFluff1.position.set(0, 0.08, -0.2);
+                tailFluff1.scale.set(1.1, 1.1, 1.4);
+                tailGroup.add(tailFluff1);
+
+                const tailFluff2 = new THREE.Mesh(tailFluffGeo, tuftHighlightMat);
+                tailFluff2.position.set(0, 0.14, -0.28);
+                tailFluff2.scale.set(1.3, 1.3, 1.5);
+                tailGroup.add(tailFluff2);
+
+                group.add(tailGroup);
+
+                group.userData = { id: 'dog', name: '강아지', interactable: true, prompt: '[E] 강아지 상호작용' };
+
+                this.scene.add(group);
+                this.dog.meshGroup = group;
+                this.dog.tailMesh = tailGroup;
+                this.interactiveObjects.push(group);
+            }
+
+            initEvents() {
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+
+                window.addEventListener('keydown', (e) => {
+                    this.keys[e.code] = true;
+                    if (e.code === 'KeyE' && this.isGameStarted && !this.isPaused) {
+                        this.handleInteraction();
+                    }
+                    if (e.code === 'Escape' && this.isGameStarted) {
+                        this.togglePause();
+                    }
+                });
+
+                window.addEventListener('keyup', (e) => {
+                    this.keys[e.code] = false;
+                });
+
+                this.canvas.addEventListener('click', () => {
+                    if (this.isGameStarted && !this.isPaused) {
+                        this.canvas.requestPointerLock();
+                    }
+                });
+
+                document.addEventListener('pointerlockchange', () => {
+                    this.isPointerLocked = (document.pointerLockElement === this.canvas);
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    if (this.isPointerLocked) {
+                        const sens = 0.0022;
+                        this.yaw -= e.movementX * sens;
+                        this.pitch -= e.movementY * sens;
+                        this.pitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.pitch));
+                    }
+                });
+            }
+
+            togglePause() {
+                this.isPaused = !this.isPaused;
+                const modal = document.getElementById('pause-modal');
+                if (this.isPaused) {
+                    modal.classList.remove('hidden');
+                    document.exitPointerLock();
+                } else {
+                    modal.classList.add('hidden');
+                    this.canvas.requestPointerLock();
+                }
+            }
+
+            updatePlayerMovement(dt) {
+                if (!this.isGameStarted || this.isPaused) return;
+
+                const moveSpeed = 4.5 * dt;
+                const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+                const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+
+                const moveDir = new THREE.Vector3();
+                if (this.keys['KeyW']) moveDir.add(forward);
+                if (this.keys['KeyS']) moveDir.sub(forward);
+                if (this.keys['KeyD']) moveDir.add(right);
+                if (this.keys['KeyA']) moveDir.sub(right);
+
+                if (moveDir.lengthSq() > 0) {
+                    moveDir.normalize().multiplyScalar(moveSpeed);
+                    this.cameraPos.add(moveDir);
+
+                    // Clamp player within house walls (-7.2 to 7.2 on X, -9 to 9 on Z)
+                    this.cameraPos.x = Math.max(-7.2, Math.min(7.2, this.cameraPos.x));
+                    this.cameraPos.z = Math.max(-9.0, Math.min(9.0, this.cameraPos.z));
+                }
+
+                // Apply Pure 2-Axis (Up/Down, Left/Right) Camera Rotation
+                this.camera.position.copy(this.cameraPos);
+                this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+
+                // Center Screen Raycast for interaction detection
+                this.detectTargetedObject();
+            }
+
+            detectTargetedObject() {
+                this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
+                const intersects = this.raycaster.intersectObjects(this.interactiveObjects, true);
+
+                let target = null;
+                if (intersects.length > 0 && intersects[0].distance < 3.8) {
+                    let obj = intersects[0].object;
+                    while (obj && !obj.userData?.interactable) {
+                        obj = obj.parent;
+                    }
+                    if (obj && obj.userData?.interactable) {
+                        target = obj.userData;
+                        if (target.id === 'dog') {
+                            target.prompt = this.holdingItem === 'TOY' ? '[E] 장난감으로 놀아주기' : '[E] 쓰다듬기';
+                        }
+                    }
+                }
+
+                this.targetedObject = target;
+                const promptEl = document.getElementById('interaction-prompt');
+                if (this.targetedObject) {
+                    promptEl.innerText = this.targetedObject.prompt;
+                    promptEl.classList.remove('hidden');
+                } else {
+                    promptEl.classList.add('hidden');
+                }
+            }
+
+            handleInteraction() {
+                if (!this.targetedObject) return;
+                audio.playInteract();
+
+                const id = this.targetedObject.id;
+
+                if (id === 'food_bag') {
+                    this.holdingItem = 'FOOD_BAG';
+                    this.updateHoldingUI('사료 봉지');
+                    this.dog.say('와! 사료 봉지다! 🍖');
+                } else if (id === 'food_bowl') {
+                    if (this.holdingItem === 'FOOD_BAG') {
+                        this.openFeedingMinigame();
+                    } else {
+                        this.dog.say('사료 봉지를 먼저 집어주세요!');
+                    }
+                } else if (id === 'water_bowl') {
+                    this.tasks.water = true;
+                    this.dog.thirst = Math.min(100, this.dog.thirst + 50);
+                    this.dog.happiness = Math.min(100, this.dog.happiness + 15);
+                    const upgraded = this.dog.addGrowthXP(15);
+                    this.dog.say('꿀꺽꿀꺽! 시원하다! 💧');
+                    audio.playWater();
+                    this.updateTasksUI();
+                    if (upgraded) this.showLevelUpModal();
+                } else if (id === 'bathtub') {
+                    this.openBathMinigame();
+                } else if (id === 'toy_bone') {
+                    this.holdingItem = 'TOY';
+                    this.updateHoldingUI('장난감 뼈다귀');
+                    audio.playSqueak();
+                } else if (id === 'dog') {
+                    if (this.holdingItem === 'TOY') {
+                        this.dog.happiness = Math.min(100, this.dog.happiness + 30);
+                        this.dog.stamina = Math.max(0, this.dog.stamina - 10);
+                        this.tasks.play = true;
+                        this.statsReport.playCount++;
+                        const upgraded = this.dog.addGrowthXP(30);
+                        this.dog.say('신난다! 멍멍! 🦴🎉');
+                        audio.playSqueak();
+                        this.updateTasksUI();
+                        if (upgraded) this.showLevelUpModal();
+                    } else {
+                        this.dog.happiness = Math.min(100, this.dog.happiness + 12);
+                        this.dog.say('헤헤... 따뜻해요! ❤️');
+                        audio.playBark(this.dog.stageIndex >= 2);
+                    }
+                } else if (id === 'dog_bed') {
+                    this.dog.stamina = 100;
+                    this.dog.health = Math.min(100, this.dog.health + 15);
+                    this.dog.say('쿨쿨... Zzz 😴');
+                }
+
+                // Check Game Clear Condition (Reaching Stage 4 Adult)
+                if (this.dog.stageIndex >= 3) {
+                    this.triggerGameClear();
+                }
+            }
+
+            updateHoldingUI(itemName) {
+                const container = document.getElementById('holding-item-container');
+                const nameEl = document.getElementById('holding-item-name');
+                if (itemName) {
+                    nameEl.innerText = itemName;
+                    container.classList.remove('hidden');
+                } else {
+                    container.classList.add('hidden');
+                }
+            }
+
+            openFeedingMinigame() {
+                document.exitPointerLock();
+                const modal = document.getElementById('feeding-modal');
+                modal.classList.remove('hidden');
+
+                const stage = this.dog.currentStage;
+                document.getElementById('target-food-hint').innerText = stage.targetFood;
+
+                const slider = document.getElementById('food-slider');
+                const kibbleLevel = document.getElementById('bowl-kibble-level');
+                const currentText = document.getElementById('current-food-amount');
+
+                slider.value = 0;
+                kibbleLevel.style.height = '0%';
+                currentText.innerText = '0';
+
+                slider.oninput = () => {
+                    const val = parseInt(slider.value);
+                    currentText.innerText = val;
+                    kibbleLevel.style.height = `${(val / 300) * 100}%`;
+                };
+            }
+
+            confirmFeeding() {
+                const amount = parseInt(document.getElementById('food-slider').value);
+                const stage = this.dog.currentStage;
+                const diff = Math.abs(amount - stage.targetFood);
+
+                document.getElementById('feeding-modal').classList.add('hidden');
+                this.canvas.requestPointerLock();
+                this.holdingItem = null;
+                this.updateHoldingUI(null);
+
+                if (diff <= stage.foodMargin) {
+                    // Successful Feeding!
+                    this.dog.hunger = Math.min(100, this.dog.hunger + 55);
+                    this.dog.happiness = Math.min(100, this.dog.happiness + 20);
+                    this.tasks.feed = true;
+                    this.statsReport.successfulFeeds++;
+                    const upgraded = this.dog.addGrowthXP(35);
+                    this.dog.say(stage.speech);
+                    audio.playSuccess();
+                    if (upgraded) this.showLevelUpModal();
+                } else {
+                    this.dog.hunger = Math.min(100, this.dog.hunger + 20);
+                    this.dog.say('멍... 알맞은 양이 아니에요 🥺');
+                    audio.playWhine();
+                }
+
+                this.updateTasksUI();
+            }
+
+            openBathMinigame() {
+                document.exitPointerLock();
+                const modal = document.getElementById('bath-modal');
+                modal.classList.remove('hidden');
+
+                const slider = document.getElementById('bath-temp-slider');
+                const tempDisplay = document.getElementById('bath-temp-display');
+                const statusEl = document.getElementById('bath-temp-status');
+
+                slider.value = 20;
+                tempDisplay.innerText = '20.0';
+
+                slider.oninput = () => {
+                    const temp = parseFloat(slider.value);
+                    tempDisplay.innerText = temp.toFixed(1);
+
+                    const stage = this.dog.currentStage;
+                    if (Math.abs(temp - stage.idealTemp) <= stage.tempMargin) {
+                        statusEl.innerText = '딱 좋은 따뜻한 온도입니다! ✨';
+                        statusEl.className = 'text-xs font-bold px-3 py-1 rounded-full bg-emerald-100 text-emerald-700';
+                    } else if (temp < stage.idealTemp - stage.tempMargin) {
+                        statusEl.innerText = '너무 차가워요! 🥶';
+                        statusEl.className = 'text-xs font-bold px-3 py-1 rounded-full bg-blue-100 text-blue-700';
+                    } else {
+                        statusEl.innerText = '너무 뜨거워요! 🥵';
+                        statusEl.className = 'text-xs font-bold px-3 py-1 rounded-full bg-red-100 text-red-700';
+                    }
+                };
+            }
+
+            confirmBath() {
+                const temp = parseFloat(document.getElementById('bath-temp-slider').value);
+                const stage = this.dog.currentStage;
+                const diff = Math.abs(temp - stage.idealTemp);
+
+                document.getElementById('bath-modal').classList.add('hidden');
+                this.canvas.requestPointerLock();
+
+                if (diff <= stage.tempMargin) {
+                    this.dog.cleanliness = 100;
+                    this.dog.happiness = Math.min(100, this.dog.happiness + 25);
+                    this.tasks.bath = true;
+                    this.statsReport.successfulBaths++;
+                    const upgraded = this.dog.addGrowthXP(35);
+                    this.dog.say('상쾌해요! 멍멍! 🧼✨');
+                    audio.playSuccess();
+                    if (upgraded) this.showLevelUpModal();
+                } else {
+                    this.dog.cleanliness = Math.min(100, this.dog.cleanliness + 30);
+                    this.dog.say('으으... 온도가 안 맞아요! 🥶');
+                    audio.playWhine();
+                }
+
+                this.updateTasksUI();
+            }
+
+            updateTasksUI() {
+                const updateTask = (id, done) => {
+                    const el = document.getElementById(id);
+                    const check = el.querySelector('.task-check');
+                    if (done) {
+                        check.innerText = '☑';
+                        check.className = 'task-check text-emerald-600 font-extrabold';
+                        el.classList.add('line-through', 'text-slate-400');
+                    } else {
+                        check.innerText = '☐';
+                        check.className = 'task-check text-slate-300';
+                        el.classList.remove('line-through', 'text-slate-400');
+                    }
+                };
+
+                updateTask('task-feed', this.tasks.feed);
+                updateTask('task-water', this.tasks.water);
+                updateTask('task-bath', this.tasks.bath);
+                updateTask('task-play', this.tasks.play);
+
+                const completed = Object.values(this.tasks).filter(Boolean).length;
+                document.getElementById('task-completed-count').innerText = `${completed}/4 완료`;
+            }
+
+            showLevelUpModal() {
+                if (this.dog.stageIndex >= 3) {
+                    this.triggerGameClear();
+                    return;
+                }
+                document.exitPointerLock();
+                const modal = document.getElementById('levelup-modal');
+                document.getElementById('levelup-stage-name').innerText = this.dog.currentStage.name;
+                document.getElementById('levelup-stage-desc').innerText = `필요 사료량: 약 ${this.dog.currentStage.targetFood}g | 관리 요구사항이 더 까다로워졌습니다!`;
+                modal.classList.remove('hidden');
+            }
+
+            triggerGameClear() {
+                document.exitPointerLock();
+                document.getElementById('clear-modal').classList.remove('hidden');
+
+                document.getElementById('end-health').innerText = `${Math.round(this.dog.health)}점`;
+                document.getElementById('end-happiness').innerText = `${Math.round(this.dog.happiness)}점`;
+                document.getElementById('end-feeds').innerText = `${this.statsReport.successfulFeeds}회`;
+                document.getElementById('end-baths').innerText = `${this.statsReport.successfulBaths}회`;
+                document.getElementById('end-plays').innerText = `${this.statsReport.playCount}회`;
+                document.getElementById('end-days').innerText = `Day ${this.day}`;
+            }
+
+            updateHUD() {
+                document.getElementById('stage-name-display').innerText = this.dog.currentStage.name;
+                document.getElementById('stat-health-text').innerText = Math.round(this.dog.health);
+                document.getElementById('stat-hunger-text').innerText = Math.round(this.dog.hunger);
+                document.getElementById('stat-thirst-text').innerText = Math.round(this.dog.thirst);
+                document.getElementById('stat-cleanliness-text').innerText = Math.round(this.dog.cleanliness);
+                document.getElementById('stat-happiness-text').innerText = Math.round(this.dog.happiness);
+                document.getElementById('stat-stamina-text').innerText = Math.round(this.dog.stamina);
+
+                document.getElementById('growth-xp-text').innerText = `${Math.round(this.dog.growthXP)} / 100 XP`;
+                document.getElementById('growth-xp-bar').style.width = `${Math.min(100, this.dog.growthXP)}%`;
+
+                // Game Clock
+                const hours = Math.floor(this.gameTime / 60) % 24;
+                const mins = Math.floor(this.gameTime % 60);
+                const ampm = hours >= 12 ? 'PM' : 'AM';
+                const formattedHours = (hours % 12 || 12).toString().padStart(2, '0');
+                const formattedMins = mins.toString().padStart(2, '0');
+
+                document.getElementById('game-day-text').innerText = `Day ${this.day}`;
+                document.getElementById('game-time-text').innerText = `${formattedHours}:${formattedMins} ${ampm}`;
+                document.getElementById('day-night-icon').innerText = (hours >= 6 && hours < 18) ? '☀️' : '🌙';
+
+                // Project 3D Dog position to screen space speech bubble
+                const bubbleEl = document.getElementById('dog-speech-bubble');
+                if (this.dog.speechBubbleText && this.dog.meshGroup) {
+                    const dogPos = this.dog.meshGroup.position.clone().add(new THREE.Vector3(0, 0.9 * this.dog.currentStage.scale, 0));
+                    dogPos.project(this.camera);
+
+                    const x = (dogPos.x * 0.5 + 0.5) * window.innerWidth;
+                    const y = (-(dogPos.y * 0.5) + 0.5) * window.innerHeight;
+
+                    bubbleEl.style.left = `${x}px`;
+                    bubbleEl.style.top = `${y}px`;
+                    bubbleEl.innerText = this.dog.speechBubbleText;
+                    bubbleEl.classList.remove('opacity-0');
+                } else {
+                    bubbleEl.classList.add('opacity-0');
+                }
+            }
+
+            gameLoop(timestamp) {
+                if (!this.lastTime) this.lastTime = timestamp;
+                const dt = Math.min(0.1, (timestamp - this.lastTime) / 1000);
+                this.lastTime = timestamp;
+
+                if (this.isGameStarted && !this.isPaused) {
+                    this.gameTime += dt * 10;
+                    if (this.gameTime >= 24 * 60) {
+                        this.gameTime = 0;
+                        this.day++;
+                        this.tasks = { feed: false, water: false, bath: false, play: false };
+                        this.updateTasksUI();
+                    }
+
+                    this.updatePlayerMovement(dt);
+                    this.dog.update(dt, { x: this.cameraPos.x, z: this.cameraPos.z });
+                    this.updateHUD();
+                }
+
+                this.renderer.render(this.scene, this.camera);
+                requestAnimationFrame((t) => this.gameLoop(t));
+            }
+
+            start() {
+                this.isGameStarted = true;
+                document.getElementById('start-modal').classList.add('hidden');
+                this.canvas.requestPointerLock();
+                audio.init();
+                this.dog.say('멍멍! 반갑습니다 주인님! 🐾');
+            }
+        }
+
+        window.onload = () => {
+            const game = new GameEngine();
+
+            document.getElementById('btn-start-game').addEventListener('click', () => game.start());
+            document.getElementById('btn-confirm-feed').addEventListener('click', () => game.confirmFeeding());
+            document.getElementById('btn-cancel-feed').addEventListener('click', () => {
+                document.getElementById('feeding-modal').classList.add('hidden');
+                game.canvas.requestPointerLock();
+            });
+
+            document.getElementById('btn-confirm-bath').addEventListener('click', () => game.confirmBath());
+            document.getElementById('btn-cancel-bath').addEventListener('click', () => {
+                document.getElementById('bath-modal').classList.add('hidden');
+                game.canvas.requestPointerLock();
+            });
+
+            document.getElementById('btn-confirm-levelup').addEventListener('click', () => {
+                document.getElementById('levelup-modal').classList.add('hidden');
+                game.canvas.requestPointerLock();
+            });
+
+            document.getElementById('btn-resume').addEventListener('click', () => game.togglePause());
+            document.getElementById('btn-restart').addEventListener('click', () => window.location.reload());
+            document.getElementById('btn-clear-restart').addEventListener('click', () => window.location.reload());
+
+            requestAnimationFrame((t) => game.gameLoop(t));
+        };
+    </script>
+</body>
+</html>

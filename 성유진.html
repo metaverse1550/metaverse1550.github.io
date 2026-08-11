@@ -1,0 +1,1185 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Shadows of the Forgotten - 3D Horror Survival</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Noto+Sans+KR:wght@300;400;700&display=swap');
+        
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Noto Sans KR', sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .cinzel-font {
+            font-family: 'Cinzel', serif;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* Screen overlays */
+        .vignette {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            box-shadow: inset 0 0 120px rgba(0,0,0,0.95);
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        .damage-flash {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle, rgba(255,0,0,0) 40%, rgba(180,0,0,0.6) 100%);
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            pointer-events: none;
+            z-index: 3;
+        }
+
+        .chase-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle, rgba(100,0,0,0.1) 0%, rgba(20,0,0,0.8) 100%);
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        /* Virtual Joystick */
+        .joystick-zone {
+            position: absolute;
+            bottom: 30px;
+            left: 30px;
+            width: 140px;
+            height: 140px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            z-index: 20;
+            touch-action: none;
+            display: none; /* Auto-shown on mobile touch */
+        }
+
+        .joystick-knob {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 50px;
+            height: 50px;
+            background: rgba(255, 255, 255, 0.3);
+            border: 2px solid rgba(255, 255, 255, 0.6);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        /* Glitch effect on Chase */
+        @keyframes glitch {
+            0% { transform: translate(0) }
+            20% { transform: translate(-3px, 3px) }
+            40% { transform: translate(-3px, -3px) }
+            60% { transform: translate(3px, 3px) }
+            80% { transform: translate(3px, -3px) }
+            100% { transform: translate(0) }
+        }
+        .glitch-anim {
+            animation: glitch 0.2s infinite;
+        }
+        
+        /* Custom scrollbar for inspect UI */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(0,0,0,0.5);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(150,0,0,0.5);
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="bg-black text-gray-200 select-none overflow-hidden">
+
+    <!-- 3D Render Canvas -->
+    <div id="canvas-container"></div>
+
+    <!-- Screen Effects -->
+    <div class="vignette"></div>
+    <div id="damage-overlay" class="damage-flash"></div>
+    <div id="chase-overlay" class="chase-overlay"></div>
+
+    <!-- UI Overlay Layer -->
+    <div id="ui-layer" class="absolute inset-0 z-10 pointer-events-none flex flex-col justify-between p-4 md:p-6">
+        
+        <!-- Header HUD -->
+        <div class="flex justify-between items-start">
+            <!-- Stage Info & Status -->
+            <div class="bg-black/70 border border-red-900/40 backdrop-blur-md p-3 md:p-4 rounded-lg max-w-xs md:max-w-md">
+                <div id="stage-title" class="text-red-500 font-bold text-sm md:text-base tracking-widest cinzel-font uppercase">STAGE 1: 폐병원</div>
+                <div id="objective-text" class="text-xs md:text-sm text-gray-300 mt-1 font-light">탈출할 방법을 찾으세요...</div>
+            </div>
+
+            <!-- Flashlight & Inventory Trigger -->
+            <div class="flex gap-2">
+                <button id="btn-inventory-toggle" class="pointer-events-auto bg-black/70 hover:bg-red-950/60 border border-gray-700 text-gray-300 px-3 py-2 rounded-lg flex items-center gap-2 text-xs md:text-sm transition">
+                    <i class="fa-solid fa-briefcase text-red-500"></i> <span class="hidden sm:inline">소지품</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Crosshair & Interaction Cue -->
+        <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+            <div id="crosshair" class="w-2 h-2 bg-white/70 rounded-full transition-all duration-150"></div>
+            <div id="interaction-prompt" class="opacity-0 transition-opacity duration-200 mt-8 bg-black/80 border border-yellow-600/50 text-yellow-200 px-4 py-1.5 rounded-full text-xs md:text-sm flex items-center gap-2 shadow-lg">
+                <span id="interact-key" class="bg-yellow-600 text-black font-bold px-2 py-0.5 rounded text-xs">E</span>
+                <span id="interact-msg">조사하기</span>
+            </div>
+        </div>
+
+        <!-- Bottom HUD: HP, Stamina, Flashlight -->
+        <div class="flex flex-col gap-2 max-w-sm w-full">
+            <!-- Health Bar -->
+            <div class="flex items-center gap-2">
+                <i class="fa-solid fa-heart text-red-600 text-xs w-4"></i>
+                <div class="w-full bg-gray-900/80 border border-gray-800 rounded-full h-2.5 overflow-hidden p-0.5">
+                    <div id="hp-bar" class="bg-gradient-to-r from-red-800 to-red-500 h-full rounded-full transition-all duration-200" style="width: 100%;"></div>
+                </div>
+            </div>
+            <!-- Stamina Bar -->
+            <div class="flex items-center gap-2">
+                <i class="fa-solid fa-bolt text-yellow-500 text-xs w-4"></i>
+                <div class="w-full bg-gray-900/80 border border-gray-800 rounded-full h-2 overflow-hidden p-0.5">
+                    <div id="stamina-bar" class="bg-gradient-to-r from-yellow-700 to-yellow-400 h-full rounded-full transition-all duration-100" style="width: 100%;"></div>
+                </div>
+            </div>
+            <!-- Flashlight Battery -->
+            <div class="flex items-center gap-2">
+                <i class="fa-solid fa-flashlight text-blue-400 text-xs w-4"></i>
+                <div class="w-full bg-gray-900/80 border border-gray-800 rounded-full h-1.5 overflow-hidden p-0.5">
+                    <div id="battery-bar" class="bg-blue-500 h-full rounded-full transition-all duration-300" style="width: 100%;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dialogue / Dialogue Overlay -->
+    <div id="dialogue-box" class="absolute bottom-16 left-1/2 -translate-x-1/2 w-11/12 max-w-2xl bg-black/90 border border-red-900/60 p-4 rounded-xl z-30 opacity-0 pointer-events-none transition-all duration-300 shadow-2xl backdrop-blur-md">
+        <div class="text-red-500 text-xs font-bold tracking-widest mb-1 cinzel-font" id="dialogue-speaker">독백</div>
+        <div class="text-sm md:text-base text-gray-200 leading-relaxed" id="dialogue-text">...여긴 어디지? 내가 왜 병원에 있는 거지?</div>
+        <div class="text-right text-xs text-gray-500 mt-2">[E] / 클릭하여 계속</div>
+    </div>
+
+    <!-- Clue / Note Inspector Modal -->
+    <div id="clue-modal" class="absolute inset-0 bg-black/85 z-40 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-opacity duration-300">
+        <div class="bg-stone-900 border border-stone-700 p-6 rounded-lg max-w-lg w-full text-stone-300 shadow-2xl relative">
+            <h3 id="clue-title" class="text-xl font-bold text-red-500 border-b border-stone-700 pb-2 mb-3 cinzel-font">오래된 일기장</h3>
+            <p id="clue-body" class="text-sm leading-relaxed whitespace-pre-line max-h-60 overflow-y-auto pr-2">
+                2024년 10월 12일... 원장님이 지하 구역 통로를 잠가버렸다. 저 아래서 기괴한 소리가 들린다.
+            </p>
+            <button id="btn-close-clue" class="mt-5 w-full bg-red-950 hover:bg-red-900 border border-red-700 text-red-200 py-2 rounded text-sm transition font-bold">
+                닫기 [E]
+            </button>
+        </div>
+    </div>
+
+    <!-- Inventory Popup -->
+    <div id="inventory-modal" class="absolute inset-0 bg-black/80 z-40 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-opacity duration-300 backdrop-blur-sm">
+        <div class="bg-gray-900/90 border border-gray-700 p-5 rounded-xl max-w-md w-full text-gray-200 shadow-2xl">
+            <div class="flex justify-between items-center border-b border-gray-800 pb-3 mb-4">
+                <h3 class="text-lg font-bold text-red-500 cinzel-font"><i class="fa-solid fa-briefcase mr-2"></i>소지품 인벤토리</h3>
+                <button id="btn-close-inventory" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <div id="inventory-grid" class="grid grid-cols-4 gap-3 min-h-[160px]">
+                <!-- Item slots dynamically populated -->
+            </div>
+            <div class="mt-4 text-xs text-gray-400 border-t border-gray-800 pt-3 flex justify-between">
+                <span>아이템 클릭시 자동 사용</span>
+                <span id="inv-item-count">0 / 8</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Start / Title Screen -->
+    <div id="title-screen" class="absolute inset-0 bg-black z-50 flex flex-col items-center justify-center p-6 text-center">
+        <div class="max-w-xl">
+            <h1 class="text-4xl md:text-6xl font-black text-red-600 tracking-wider mb-2 cinzel-font glitch-anim">SHADOWS OF THE FORGOTTEN</h1>
+            <p class="text-gray-400 text-sm md:text-base tracking-widest uppercase mb-8 cinzel-font">3D Survival Horror Experience</p>
+            
+            <div class="bg-gray-950 border border-red-950/80 p-5 rounded-xl text-left text-xs md:text-sm text-gray-400 mb-8 space-y-2">
+                <p class="text-red-400 font-bold mb-2">[ 조작 방법 ]</p>
+                <p>• <span class="text-white">WASD</span> : 이동 / <span class="text-white">마우스</span> : 시점 회전</p>
+                <p>• <span class="text-white">Shift</span> : 달리기 / <span class="text-white">Space</span> : 회피 step</p>
+                <p>• <span class="text-white">E</span> : 조사 및 상호작용</p>
+                <p>• <span class="text-white">F</span> : 손전등 ON/OFF</p>
+                <p class="text-yellow-500/80 pt-2 text-xs">* 헤드폰 착용을 강력히 권장합니다.</p>
+            </div>
+
+            <button id="btn-start-game" class="w-full bg-red-900 hover:bg-red-800 border border-red-500 text-white font-bold py-3 px-8 rounded-lg text-lg tracking-widest transition shadow-lg shadow-red-900/40 cinzel-font">
+                생존 시작하기
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="gameover-screen" class="absolute inset-0 bg-black/95 z-50 flex flex-col items-center justify-center p-6 text-center opacity-0 pointer-events-none transition-opacity duration-700">
+        <h2 class="text-5xl font-extrabold text-red-700 mb-4 cinzel-font tracking-widest">YOU DIED</h2>
+        <p id="gameover-reason" class="text-gray-400 mb-8 text-sm max-w-md">어둠 속 이상 생명체에게 상해를 입고 의식을 잃었습니다...</p>
+        <button id="btn-restart" class="bg-red-950 hover:bg-red-900 border border-red-600 text-red-200 font-bold py-3 px-8 rounded-lg text-base tracking-wider transition">
+            체크포인트에서 다시 시작
+        </button>
+    </div>
+
+    <!-- Ending Screen -->
+    <div id="ending-screen" class="absolute inset-0 bg-black z-50 flex flex-col items-center justify-center p-6 text-center opacity-0 pointer-events-none transition-opacity duration-1000">
+        <div class="max-w-2xl border border-red-900/50 p-8 rounded-2xl bg-gradient-to-b from-stone-950 to-black">
+            <h2 class="text-3xl md:text-4xl font-bold text-red-500 mb-4 cinzel-font">탈출 성공 : 진실의 종말</h2>
+            <p id="ending-text" class="text-gray-300 text-sm md:text-base leading-relaxed mb-8">
+                폐병원, 버려진 학교, 그리고 안개로 둘러싸인 숲속 마을... 당신은 모든 환영과 기괴한 생명체의 추격을 뚫고 마침내 바깥 세상으로 탈출했습니다. 그러나 당신 손에 남겨진 비밀 기록 문서들은 이 참사가 끝이 아닌 시작임을 암시하고 있습니다.
+            </p>
+            <button id="btn-title-return" class="bg-red-900 hover:bg-red-800 text-white font-bold py-3 px-8 rounded-lg text-sm tracking-widest uppercase transition">
+                메인 타이틀로
+            </button>
+        </div>
+    </div>
+
+    <!-- Mobile Touch Controls -->
+    <div id="mobile-controls" class="absolute inset-0 pointer-events-none z-20 hidden">
+        <!-- Virtual Joystick Area -->
+        <div id="joystick-container" class="joystick-zone pointer-events-auto">
+            <div id="joystick-knob" class="joystick-knob"></div>
+        </div>
+
+        <!-- Touch Look Area (Right Side) -->
+        <div id="touch-look-zone" class="absolute top-0 right-0 w-1/2 h-full pointer-events-auto"></div>
+
+        <!-- Touch Buttons -->
+        <div class="absolute bottom-6 right-6 flex flex-col gap-3 pointer-events-auto">
+            <button id="btn-m-interact" class="w-14 h-14 bg-yellow-600/80 active:bg-yellow-500 border border-yellow-300 rounded-full text-black font-bold text-lg shadow-lg flex items-center justify-center">
+                E
+            </button>
+            <div class="flex gap-3">
+                <button id="btn-m-flashlight" class="w-12 h-12 bg-blue-900/80 active:bg-blue-700 border border-blue-400 rounded-full text-white text-sm shadow-lg flex items-center justify-center">
+                    <i class="fa-solid fa-flashlight"></i>
+                </button>
+                <button id="btn-m-sprint" class="w-14 h-14 bg-red-900/80 active:bg-red-700 border border-red-400 rounded-full text-white font-bold text-xs shadow-lg flex items-center justify-center">
+                    RUN
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- GAME ENGINE CODE -->
+    <script>
+        // Sound Engine using Web Audio API
+        class AudioSystem {
+            constructor() {
+                this.ctx = null;
+                this.masterGain = null;
+                this.initialized = false;
+                this.heartbeatInterval = null;
+            }
+
+            init() {
+                if (this.initialized) return;
+                try {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioCtx();
+                    this.masterGain = this.ctx.createGain();
+                    this.masterGain.gain.setValueAtTime(0.7, this.ctx.currentTime);
+                    this.masterGain.connect(this.ctx.destination);
+                    this.initialized = true;
+                    this.startAmbientDrone();
+                } catch(e) { console.error("Audio init error", e); }
+            }
+
+            playFootstep() {
+                if (!this.initialized) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(80, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.12);
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.12);
+                osc.connect(gain);
+                gain.connect(this.masterGain);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.13);
+            }
+
+            playHeartbeat(fast = false) {
+                if (!this.initialized) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(60, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(20, this.ctx.currentTime + 0.15);
+                gain.gain.setValueAtTime(fast ? 0.4 : 0.2, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+                osc.connect(gain);
+                gain.connect(this.masterGain);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.16);
+            }
+
+            playCreatureScreech() {
+                if (!this.initialized) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(450, this.ctx.currentTime + 0.3);
+                osc.frequency.linearRampToValueAtTime(90, this.ctx.currentTime + 0.6);
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.6);
+                osc.connect(gain);
+                gain.connect(this.masterGain);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.6);
+            }
+
+            playInteractSound() {
+                if (!this.initialized) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(440, this.ctx.currentTime);
+                osc.frequency.setValueAtTime(880, this.ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+                osc.connect(gain);
+                gain.connect(this.masterGain);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.2);
+            }
+
+            playDoorSound() {
+                if (!this.initialized) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(50, this.ctx.currentTime + 0.4);
+                gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.4);
+                osc.connect(gain);
+                gain.connect(this.masterGain);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.4);
+            }
+
+            startAmbientDrone() {
+                if (!this.initialized) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(45, this.ctx.currentTime);
+                
+                // Lowpass filter for deep spooky drone
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(180, this.ctx.currentTime);
+
+                gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+                osc.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.masterGain);
+                osc.start();
+            }
+        }
+
+        const audioSys = new AudioSystem();
+
+        // Story Data & Stage Maps
+        const STORY_DATA = {
+            1: {
+                title: "STAGE 1 : 폐병원",
+                objective: "잠긴 지하 구역 열쇠를 찾아 탈출구를 개방하세요.",
+                clues: [
+                    { id: 'hospital_note1', name: '환자 기록지', title: '실험 기록 #104', text: '환자들의 병세가 급격히 악화되고 있다. 신체 가형 이상 변화... 검은 유기체가 온몸을 덮기 시작했다.', itemReward: null },
+                    { id: 'hospital_key', name: '지하 열쇠', title: '지하 탈출구 열쇠', text: '부식된 철제 열쇠를 획득했다. 병원 지하 비상구 문을 열 수 있다.', isKey: true }
+                ]
+            },
+            2: {
+                title: "STAGE 2 : 버려진 학교",
+                objective: "교무실의 비밀 기지 단서를 모으고 중앙 출입구 열쇠를 확보하세요.",
+                clues: [
+                    { id: 'school_note1', name: '학생 일기', title: '피묻은 학생 일기', text: '병원에서 시작된 이상 현상이 교실까지 번졌다. 선생님들도 모두 이상하게 변해버렸다...', itemReward: null },
+                    { id: 'school_key', name: '학교 정문 열쇠', title: '학교 중앙 출입 열쇠', text: '중앙 출입문 열쇠를 발견했다. 숲속 마을 방향 비상구로 나갈 수 있다.', isKey: true }
+                ]
+            },
+            3: {
+                title: "STAGE 3 : 숲속 마을",
+                objective: "짙은 안개 속 마을 중심부의 오두막 열쇠를 찾아 최종 탈출하세요.",
+                clues: [
+                    { id: 'village_note1', name: '의식의 기록', title: '교단 비밀 문서', text: '모든 이상 현상은 불사의 괴물을 깨운 것에서 시작되었다. 오두막 지하 제단에 최종 탈출 경로가 있다.', itemReward: null },
+                    { id: 'village_key', name: '오두막 최종 열쇠', title: '최종 탈출구 열쇠', text: '마을 외곽 오두막의 비밀 통로 열쇠를 찾았다. 이제 영원히 탈출할 시간이다.', isKey: true }
+                ]
+            }
+        };
+
+        class GameEngine {
+            constructor() {
+                this.container = document.getElementById('canvas-container');
+                this.stage = 1;
+                this.isPaused = false;
+                this.isGameOver = false;
+                this.isGameEnded = false;
+
+                // Three Scene Core
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+                this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+                
+                // Player Stats & State
+                this.player = {
+                    position: new THREE.Vector3(0, 1.6, 0),
+                    rotation: new THREE.Euler(0, 0, 0, 'YXZ'),
+                    hp: 100,
+                    stamina: 100,
+                    isSprinting: false,
+                    battery: 100,
+                    flashlightOn: true,
+                    inventory: [],
+                    moveSpeed: 3.2,
+                    sprintSpeed: 6.2,
+                    radius: 0.4
+                };
+
+                // Controls State
+                this.keys = {};
+                this.mouseSensitivity = 0.0022;
+                this.pitch = 0;
+                this.yaw = 0;
+
+                // Mobile Joystick
+                this.touchJoystick = { active: false, startX: 0, startY: 0, moveX: 0, moveY: 0 };
+
+                // Stage World
+                this.colliders = [];
+                this.interactables = [];
+                this.creatures = [];
+                this.checkpointPos = new THREE.Vector3(0, 1.6, 0);
+
+                // Lighting
+                this.flashlight = null;
+                this.ambientLight = null;
+
+                // Animation & Raycasting
+                this.clock = new THREE.Clock();
+                this.raycaster = new THREE.Raycaster();
+                this.focusedObject = null;
+
+                this.init();
+            }
+
+            init() {
+                // Setup Renderer
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                this.container.appendChild(this.renderer.domElement);
+
+                // Fog Setup for Horror ambience
+                this.scene.fog = new THREE.FogExp2(0x020205, 0.08);
+
+                // Flashlight Setup
+                this.flashlight = new THREE.SpotLight(0xfff5ea, 3, 18, Math.PI / 6, 0.4, 1);
+                this.flashlight.castShadow = true;
+                this.camera.add(this.flashlight);
+                this.flashlight.position.set(0.2, -0.2, 0);
+                this.flashlight.target.position.set(0, 0, -1);
+                this.camera.add(this.flashlight.target);
+                this.scene.add(this.camera);
+
+                // Ambient Light
+                this.ambientLight = new THREE.AmbientLight(0x0a0d18, 0.25);
+                this.scene.add(this.ambientLight);
+
+                // Build Stage 1 World
+                this.loadStage(1);
+
+                // Event Listeners
+                this.setupInputs();
+                window.addEventListener('resize', () => this.onWindowResize());
+
+                // Loop
+                this.animate();
+            }
+
+            loadStage(stageNum) {
+                this.stage = stageNum;
+                // Clear previous stage meshes
+                while (this.scene.children.length > 0) {
+                    this.scene.remove(this.scene.children[0]);
+                }
+                this.colliders = [];
+                this.interactables = [];
+                this.creatures = [];
+
+                this.scene.add(this.camera);
+                this.scene.add(this.ambientLight);
+
+                // Update UI Header
+                document.getElementById('stage-title').innerText = STORY_DATA[stageNum].title;
+                document.getElementById('objective-text').innerText = STORY_DATA[stageNum].objective;
+
+                // Build Geometry per stage
+                if (stageNum === 1) {
+                    this.buildHospitalStage();
+                } else if (stageNum === 2) {
+                    this.buildSchoolStage();
+                } else {
+                    this.buildVillageStage();
+                }
+
+                // Reset Player position to start
+                this.player.position.copy(this.checkpointPos);
+                this.camera.position.copy(this.player.position);
+
+                // Play intro dialogue for stage
+                setTimeout(() => {
+                    if (stageNum === 1) this.showDialogue("독백", "...여긴 폐병원 입구다. 공기가 섬뜩하군. 탈출할 열쇠를 찾아야 해.");
+                    else if (stageNum === 2) this.showDialogue("독백", "버려진 학교건물까지 도망쳐왔다. 크리쳐의 숨소리가 계속 쫓아오고 있어.");
+                    else this.showDialogue("독백", "안개에 덮인 숲속 마을... 오두막 근처에 최종 탈출 통로가 있을 것이다.");
+                }, 800);
+            }
+
+            buildHospitalStage() {
+                this.scene.fog.color.setHex(0x030308);
+                this.scene.fog.density = 0.08;
+                this.checkpointPos.set(0, 1.6, 12);
+
+                const wallMat = new THREE.MeshStandardMaterial({ color: 0x22252a, roughness: 0.9 });
+                const floorMat = new THREE.MeshStandardMaterial({ color: 0x111317, roughness: 0.5 });
+                const ceilingMat = new THREE.MeshStandardMaterial({ color: 0x0f1114 });
+
+                // Hallway Floor
+                const floor = new THREE.Mesh(new THREE.PlaneGeometry(8, 30), floorMat);
+                floor.rotation.x = -Math.PI / 2;
+                floor.receiveShadow = true;
+                this.scene.add(floor);
+
+                // Ceiling
+                const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(8, 30), ceilingMat);
+                ceiling.rotation.x = Math.PI / 2;
+                ceiling.position.y = 3.2;
+                this.scene.add(ceiling);
+
+                // Walls
+                this.createWall(-4, 1.6, 0, 0.4, 3.2, 30, wallMat);
+                this.createWall(4, 1.6, 0, 0.4, 3.2, 30, wallMat);
+                this.createWall(0, 1.6, 15, 8, 3.2, 0.4, wallMat); // Back Wall
+
+                // Exit Door at Far End (-14 Z)
+                this.createExitDoor(0, 1.2, -14.5, 1);
+
+                // Rooms Props & Clues
+                this.createClueObject(-2.5, 0.8, 5, 'hospital_note1', '조사하기 [E]');
+                this.createClueObject(2.5, 0.8, -6, 'hospital_key', '열쇠 줍기 [E]');
+
+                // Flickering Ceiling Light
+                this.createFlickerLight(0, 3.0, 0, 0xff4422);
+                this.createFlickerLight(0, 3.0, -8, 0x3366ff);
+
+                // Creature Spawn
+                this.spawnCreature(0, 0, -10);
+            }
+
+            buildSchoolStage() {
+                this.scene.fog.color.setHex(0x050205);
+                this.scene.fog.density = 0.07;
+                this.checkpointPos.set(0, 1.6, 14);
+
+                const wallMat = new THREE.MeshStandardMaterial({ color: 0x302520, roughness: 0.8 });
+                const floorMat = new THREE.MeshStandardMaterial({ color: 0x1f1814, roughness: 0.7 });
+
+                // Corridors & Rooms layout
+                const floor = new THREE.Mesh(new THREE.PlaneGeometry(12, 36), floorMat);
+                floor.rotation.x = -Math.PI / 2;
+                this.scene.add(floor);
+
+                this.createWall(-6, 1.6, 0, 0.4, 3.5, 36, wallMat);
+                this.createWall(6, 1.6, 0, 0.4, 3.5, 36, wallMat);
+                this.createWall(0, 1.6, 18, 12, 3.5, 0.4, wallMat);
+
+                // School Desks & Chairs
+                for(let z = 6; z >= -10; z -= 4) {
+                    this.createPropBox(-2.5, 0.5, z, 1.2, 0.8, 0.9, 0x4a3525);
+                    this.createPropBox(2.5, 0.5, z, 1.2, 0.8, 0.9, 0x4a3525);
+                }
+
+                // Exit Door
+                this.createExitDoor(0, 1.2, -17.5, 2);
+
+                // Clues
+                this.createClueObject(-2.5, 1.0, 2, 'school_note1', '노트 조사 [E]');
+                this.createClueObject(2.5, 1.0, -8, 'school_key', '정문 열쇠 [E]');
+
+                this.createFlickerLight(0, 3.2, 4, 0xffaa44);
+                this.spawnCreature(-3, 0, -5);
+            }
+
+            buildVillageStage() {
+                this.scene.fog.color.setHex(0x080c10);
+                this.scene.fog.density = 0.09;
+                this.checkpointPos.set(0, 1.6, 20);
+
+                const terrainMat = new THREE.MeshStandardMaterial({ color: 0x0a120b, roughness: 0.95 });
+                const terrain = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), terrainMat);
+                terrain.rotation.x = -Math.PI / 2;
+                this.scene.add(terrain);
+
+                // Boundaries / Trees
+                for(let i = 0; i < 40; i++) {
+                    const angle = (i / 40) * Math.PI * 2;
+                    const radius = 26 + Math.random() * 4;
+                    const tx = Math.cos(angle) * radius;
+                    const tz = Math.sin(angle) * radius;
+                    this.createTree(tx, tz);
+                }
+
+                // Creepy Cabin at End
+                this.createCabin(0, 0, -12);
+
+                // Exit inside cabin
+                this.createExitDoor(0, 1.2, -16, 3);
+
+                // Clues
+                this.createClueObject(6, 0.8, 5, 'village_note1', '비밀 문서 [E]');
+                this.createClueObject(-8, 0.8, -4, 'village_key', '오두막 열쇠 [E]');
+
+                this.spawnCreature(0, 0, -2);
+            }
+
+            createWall(x, y, z, w, h, d, mat) {
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+                mesh.position.set(x, y, z);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                this.scene.add(mesh);
+
+                // Bounding Box for Collision
+                const box = new THREE.Box3().setFromObject(mesh);
+                this.colliders.push(box);
+            }
+
+            createPropBox(x, y, z, w, h, d, color) {
+                const mesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(w, h, d),
+                    new THREE.MeshStandardMaterial({ color, roughness: 0.8 })
+                );
+                mesh.position.set(x, y, z);
+                mesh.castShadow = true;
+                this.scene.add(mesh);
+                this.colliders.push(new THREE.Box3().setFromObject(mesh));
+            }
+
+            createTree(x, z) {
+                const trunk = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.3, 0.5, 5),
+                    new THREE.MeshStandardMaterial({ color: 0x1c120c })
+                );
+                trunk.position.set(x, 2.5, z);
+                this.scene.add(trunk);
+                this.colliders.push(new THREE.Box3().setFromObject(trunk));
+            }
+
+            createCabin(x, y, z) {
+                const mat = new THREE.MeshStandardMaterial({ color: 0x241a15 });
+                this.createWall(x - 4, y + 2, z, 0.3, 4, 8, mat);
+                this.createWall(x + 4, y + 2, z, 0.3, 4, 8, mat);
+                this.createWall(x, y + 2, z - 4, 8, 4, 0.3, mat);
+            }
+
+            createClueObject(x, y, z, clueId, promptText) {
+                const geo = new THREE.BoxGeometry(0.4, 0.1, 0.4);
+                const mat = new THREE.MeshStandardMaterial({ color: 0xe0c080, emissive: 0x332200 });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(x, y, z);
+                mesh.userData = { isInteractable: true, type: 'clue', clueId: clueId, prompt: promptText };
+                this.scene.add(mesh);
+                this.interactables.push(mesh);
+            }
+
+            createExitDoor(x, y, z, requiredStage) {
+                const geo = new THREE.BoxGeometry(1.6, 2.6, 0.2);
+                const mat = new THREE.MeshStandardMaterial({ color: 0x4a2a18, roughness: 0.6 });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(x, y, z);
+                mesh.userData = { isInteractable: true, type: 'door', stageRequired: requiredStage, prompt: '탈출문 열기 [E]' };
+                this.scene.add(mesh);
+                this.interactables.push(mesh);
+                this.colliders.push(new THREE.Box3().setFromObject(mesh));
+            }
+
+            createFlickerLight(x, y, z, color) {
+                const light = new THREE.PointLight(color, 1.5, 10);
+                light.position.set(x, y, z);
+                this.scene.add(light);
+
+                // Simple light animation state
+                light.userData = { baseIntensity: 1.5, time: Math.random() * 100 };
+            }
+
+            spawnCreature(x, y, z) {
+                const group = new THREE.Group();
+
+                // Creepy multi-limbed torso visual
+                const bodyGeo = new THREE.ConeGeometry(0.5, 2.2, 6);
+                const bodyMat = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.2, metalness: 0.8 });
+                const body = new THREE.Mesh(bodyGeo, bodyMat);
+                body.position.y = 1.1;
+                group.add(body);
+
+                // Glowing eyes
+                const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+                const eye1 = new THREE.Mesh(new THREE.SphereGeometry(0.06), eyeMat);
+                eye1.position.set(-0.15, 1.8, -0.3);
+                const eye2 = new THREE.Mesh(new THREE.SphereGeometry(0.06), eyeMat);
+                eye2.position.set(0.15, 1.8, -0.3);
+                group.add(eye1);
+                group.add(eye2);
+
+                group.position.set(x, y, z);
+                this.scene.add(group);
+
+                this.creatures.push({
+                    mesh: group,
+                    state: 'patrol', // 'patrol', 'chase'
+                    targetPos: new THREE.Vector3(x + (Math.random()*6-3), y, z + (Math.random()*6-3)),
+                    speed: 2.2,
+                    chaseSpeed: 4.8,
+                    detectRadius: 8.0,
+                    attackRadius: 1.2
+                });
+            }
+
+            updateCreatures(delta) {
+                let anyChasing = false;
+
+                this.creatures.forEach(c => {
+                    const distToPlayer = c.mesh.position.distanceTo(this.player.position);
+
+                    // State machine transition
+                    if (distToPlayer < c.detectRadius) {
+                        if (c.state !== 'chase') {
+                            c.state = 'chase';
+                            audioSys.playCreatureScreech();
+                        }
+                    } else if (distToPlayer > c.detectRadius * 1.8) {
+                        c.state = 'patrol';
+                    }
+
+                    if (c.state === 'chase') {
+                        anyChasing = true;
+                        // Move toward player
+                        const dir = new THREE.Vector3().subVectors(this.player.position, c.mesh.position).normalize();
+                        dir.y = 0;
+                        c.mesh.position.addScaledVector(dir, c.chaseSpeed * delta);
+                        c.mesh.lookAt(this.player.position.x, c.mesh.position.y, this.player.position.z);
+
+                        // Attack check
+                        if (distToPlayer < c.attackRadius) {
+                            this.damagePlayer(25 * delta);
+                        }
+                    } else {
+                        // Patrol wandering
+                        if (c.mesh.position.distanceTo(c.targetPos) < 0.5) {
+                            c.targetPos.set(
+                                c.mesh.position.x + (Math.random() * 12 - 6),
+                                0,
+                                c.mesh.position.z + (Math.random() * 12 - 6)
+                            );
+                        }
+                        const dir = new THREE.Vector3().subVectors(c.targetPos, c.mesh.position).normalize();
+                        dir.y = 0;
+                        c.mesh.position.addScaledVector(dir, c.speed * delta);
+                        c.mesh.lookAt(c.targetPos.x, c.mesh.position.y, c.targetPos.z);
+                    }
+                });
+
+                // Overlay & Heartbeat on Chase
+                const chaseOverlay = document.getElementById('chase-overlay');
+                if (anyChasing) {
+                    chaseOverlay.style.opacity = '1';
+                    if (Math.random() < 0.05) audioSys.playHeartbeat(true);
+                } else {
+                    chaseOverlay.style.opacity = '0';
+                }
+            }
+
+            setupInputs() {
+                // PC Keyboard
+                window.addEventListener('keydown', (e) => {
+                    this.keys[e.code] = true;
+                    if (e.code === 'KeyE') this.triggerInteraction();
+                    if (e.code === 'KeyF') this.toggleFlashlight();
+                });
+                window.addEventListener('keyup', (e) => { this.keys[e.code] = false; });
+
+                // Pointer Lock Mouse look
+                this.container.addEventListener('click', () => {
+                    if (!this.isGameOver && !this.isGameEnded) {
+                        audioSys.init();
+                        this.container.requestPointerLock();
+                    }
+                });
+
+                window.addEventListener('mousemove', (e) => {
+                    if (document.pointerLockElement === this.container) {
+                        this.yaw -= e.movementX * this.mouseSensitivity;
+                        this.pitch -= e.movementY * this.mouseSensitivity;
+                        this.pitch = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, this.pitch));
+                    }
+                });
+
+                // Mobile Touch Setup
+                this.setupMobileControls();
+
+                // Inventory & UI Buttons
+                document.getElementById('btn-inventory-toggle').addEventListener('click', () => this.toggleInventoryUI());
+                document.getElementById('btn-close-inventory').addEventListener('click', () => this.toggleInventoryUI(false));
+                document.getElementById('btn-close-clue').addEventListener('click', () => this.closeClueModal());
+                document.getElementById('btn-start-game').addEventListener('click', () => {
+                    document.getElementById('title-screen').style.display = 'none';
+                    audioSys.init();
+                    this.container.requestPointerLock();
+                });
+                document.getElementById('btn-restart').addEventListener('click', () => this.restartFromCheckpoint());
+                document.getElementById('btn-title-return').addEventListener('click', () => location.reload());
+            }
+
+            setupMobileControls() {
+                if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+                    document.getElementById('mobile-controls').classList.remove('hidden');
+                    document.getElementById('joystick-container').style.display = 'block';
+
+                    const jContainer = document.getElementById('joystick-container');
+                    const jKnob = document.getElementById('joystick-knob');
+
+                    jContainer.addEventListener('touchstart', (e) => {
+                        const touch = e.touches[0];
+                        const rect = jContainer.getBoundingClientRect();
+                        this.touchJoystick.active = true;
+                        this.touchJoystick.startX = rect.left + rect.width / 2;
+                        this.touchJoystick.startY = rect.top + rect.height / 2;
+                    });
+
+                    window.addEventListener('touchmove', (e) => {
+                        if (!this.touchJoystick.active) return;
+                        for (let i = 0; i < e.touches.length; i++) {
+                            const touch = e.touches[i];
+                            const dx = touch.clientX - this.touchJoystick.startX;
+                            const dy = touch.clientY - this.touchJoystick.startY;
+                            const dist = Math.min(Math.hypot(dx, dy), 50);
+                            const angle = Math.atan2(dy, dx);
+
+                            this.touchJoystick.moveX = (Math.cos(angle) * dist) / 50;
+                            this.touchJoystick.moveY = (Math.sin(angle) * dist) / 50;
+
+                            jKnob.style.transform = `translate(-50%, -50%) translate(${this.touchJoystick.moveX * 30}px, ${this.touchJoystick.moveY * 30}px)`;
+                        }
+                    });
+
+                    const endJoystick = () => {
+                        this.touchJoystick.active = false;
+                        this.touchJoystick.moveX = 0;
+                        this.touchJoystick.moveY = 0;
+                        jKnob.style.transform = 'translate(-50%, -50%)';
+                    };
+                    window.addEventListener('touchend', endJoystick);
+                    window.addEventListener('touchcancel', endJoystick);
+
+                    // Touch look right area
+                    const touchLookZone = document.getElementById('touch-look-zone');
+                    let lastTouchX = 0, lastTouchY = 0;
+                    touchLookZone.addEventListener('touchstart', (e) => {
+                        lastTouchX = e.touches[0].clientX;
+                        lastTouchY = e.touches[0].clientY;
+                    });
+                    touchLookZone.addEventListener('touchmove', (e) => {
+                        const touch = e.touches[0];
+                        const dx = touch.clientX - lastTouchX;
+                        const dy = touch.clientY - lastTouchY;
+                        this.yaw -= dx * 0.005;
+                        this.pitch -= dy * 0.005;
+                        this.pitch = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, this.pitch));
+                        lastTouchX = touch.clientX;
+                        lastTouchY = touch.clientY;
+                    });
+
+                    // Mobile Buttons
+                    document.getElementById('btn-m-interact').addEventListener('click', () => this.triggerInteraction());
+                    document.getElementById('btn-m-flashlight').addEventListener('click', () => this.toggleFlashlight());
+                    
+                    const btnSprint = document.getElementById('btn-m-sprint');
+                    btnSprint.addEventListener('touchstart', () => { this.player.isSprinting = true; });
+                    btnSprint.addEventListener('touchend', () => { this.player.isSprinting = false; });
+                }
+            }
+
+            toggleFlashlight() {
+                this.player.flashlightOn = !this.player.flashlightOn;
+                this.flashlight.visible = this.player.flashlightOn;
+                audioSys.playInteractSound();
+            }
+
+            updateRaycast() {
+                this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
+                const intersects = this.raycaster.intersectObjects(this.interactables);
+
+                const promptEl = document.getElementById('interaction-prompt');
+                if (intersects.length > 0 && intersects[0].distance < 3.0) {
+                    this.focusedObject = intersects[0].object;
+                    document.getElementById('interact-msg').innerText = this.focusedObject.userData.prompt || '조사하기';
+                    promptEl.style.opacity = '1';
+                } else {
+                    this.focusedObject = null;
+                    promptEl.style.opacity = '0';
+                }
+            }
+
+            triggerInteraction() {
+                if (!this.focusedObject) return;
+                const data = this.focusedObject.userData;
+                audioSys.playInteractSound();
+
+                if (data.type === 'clue') {
+                    const clueInfo = STORY_DATA[this.stage].clues.find(c => c.id === data.clueId);
+                    if (clueInfo) {
+                        this.showClueModal(clueInfo.title, clueInfo.text);
+                        // Add item if key
+                        if (clueInfo.isKey) {
+                            this.addItemToInventory(clueInfo.name, clueInfo.id);
+                        }
+                        // Remove object from world
+                        this.scene.remove(this.focusedObject);
+                        this.interactables = this.interactables.filter(o => o !== this.focusedObject);
+                    }
+                } else if (data.type === 'door') {
+                    const requiredKeyId = STORY_DATA[this.stage].clues.find(c => c.isKey)?.id;
+                    const hasKey = this.player.inventory.some(item => item.id === requiredKeyId);
+
+                    if (hasKey) {
+                        audioSys.playDoorSound();
+                        if (this.stage < 3) {
+                            this.loadStage(this.stage + 1);
+                        } else {
+                            this.triggerEnding();
+                        }
+                    } else {
+                        this.showDialogue("열쇠 필요", "문이 굳게 잠겨있다. 해당 장소의 탈출 열쇠가 필요하다.");
+                    }
+                }
+            }
+
+            addItemToInventory(name, id) {
+                this.player.inventory.push({ name, id });
+                this.showDialogue("아이템 획득", `[${name}] 을(를) 획득했습니다.`);
+            }
+
+            showDialogue(speaker, text) {
+                const box = document.getElementById('dialogue-box');
+                document.getElementById('dialogue-speaker').innerText = speaker;
+                document.getElementById('dialogue-text').innerText = text;
+                box.style.opacity = '1';
+
+                const closeBox = () => {
+                    box.style.opacity = '0';
+                    window.removeEventListener('click', closeBox);
+                };
+                setTimeout(() => window.addEventListener('click', closeBox), 200);
+            }
+
+            showClueModal(title, body) {
+                document.getElementById('clue-title').innerText = title;
+                document.getElementById('clue-body').innerText = body;
+                const modal = document.getElementById('clue-modal');
+                modal.style.opacity = '1';
+                modal.style.pointerEvents = 'auto';
+            }
+
+            closeClueModal() {
+                const modal = document.getElementById('clue-modal');
+                modal.style.opacity = '0';
+                modal.style.pointerEvents = 'none';
+            }
+
+            toggleInventoryUI(show = true) {
+                const modal = document.getElementById('inventory-modal');
+                const grid = document.getElementById('inventory-grid');
+                grid.innerHTML = '';
+
+                if (show) {
+                    this.player.inventory.forEach(item => {
+                        const slot = document.createElement('div');
+                        slot.className = 'bg-gray-800 border border-red-900/50 rounded-lg p-2 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-gray-700 transition';
+                        slot.innerHTML = `<i class="fa-solid fa-key text-yellow-500 text-xl mb-1"></i><span class="text-xs text-gray-200 font-bold">${item.name}</span>`;
+                        grid.appendChild(slot);
+                    });
+                    document.getElementById('inv-item-count').innerText = `${this.player.inventory.length} / 8`;
+                    modal.style.opacity = '1';
+                    modal.style.pointerEvents = 'auto';
+                } else {
+                    modal.style.opacity = '0';
+                    modal.style.pointerEvents = 'none';
+                }
+            }
+
+            damagePlayer(amount) {
+                if (this.isGameOver) return;
+                this.player.hp -= amount;
+                
+                // Red flash overlay
+                const dmgOverlay = document.getElementById('damage-overlay');
+                dmgOverlay.style.opacity = '0.8';
+                setTimeout(() => { dmgOverlay.style.opacity = '0'; }, 150);
+
+                if (this.player.hp <= 0) {
+                    this.triggerGameOver();
+                }
+            }
+
+            triggerGameOver() {
+                this.isGameOver = true;
+                document.exitPointerLock();
+                const screen = document.getElementById('gameover-screen');
+                screen.style.opacity = '1';
+                screen.style.pointerEvents = 'auto';
+            }
+
+            restartFromCheckpoint() {
+                this.isGameOver = false;
+                this.player.hp = 100;
+                this.player.stamina = 100;
+                document.getElementById('gameover-screen').style.opacity = '0';
+                document.getElementById('gameover-screen').style.pointerEvents = 'none';
+                this.loadStage(this.stage);
+                this.container.requestPointerLock();
+            }
+
+            triggerEnding() {
+                this.isGameEnded = true;
+                document.exitPointerLock();
+                const screen = document.getElementById('ending-screen');
+                screen.style.opacity = '1';
+                screen.style.pointerEvents = 'auto';
+            }
+
+            updatePlayer(delta) {
+                if (this.isGameOver || this.isGameEnded) return;
+
+                // Stamina & Sprint
+                const isShift = this.keys['ShiftLeft'] || this.keys['ShiftRight'] || this.player.isSprinting;
+                const moveSpeed = (isShift && this.player.stamina > 5) ? this.player.sprintSpeed : this.player.moveSpeed;
+
+                if (isShift && this.player.stamina > 0) {
+                    this.player.stamina = Math.max(0, this.player.stamina - 30 * delta);
+                } else {
+                    this.player.stamina = Math.min(100, this.player.stamina + 15 * delta);
+                }
+
+                // Update UI Bars
+                document.getElementById('hp-bar').style.width = `${Math.max(0, this.player.hp)}%`;
+                document.getElementById('stamina-bar').style.width = `${this.player.stamina}%`;
+
+                // Calculate Movement Vector
+                let moveForward = 0;
+                let moveSide = 0;
+
+                if (this.keys['KeyW']) moveForward += 1;
+                if (this.keys['KeyS']) moveForward -= 1;
+                if (this.keys['KeyA']) moveSide -= 1;
+                if (this.keys['KeyD']) moveSide += 1;
+
+                // Add Touch Joystick
+                if (this.touchJoystick.active) {
+                    moveForward -= this.touchJoystick.moveY;
+                    moveSide += this.touchJoystick.moveX;
+                }
+
+                if (moveForward !== 0 || moveSide !== 0) {
+                    const euler = new THREE.Euler(0, this.yaw, 0, 'YXZ');
+                    const moveDir = new THREE.Vector3(moveSide, 0, -moveForward).normalize().applyEuler(euler);
+                    const deltaPos = moveDir.multiplyScalar(moveSpeed * delta);
+
+                    // AABB Simple Collision Check
+                    const nextPos = this.player.position.clone().add(deltaPos);
+                    let collision = false;
+                    for (let box of this.colliders) {
+                        if (box.containsPoint(nextPos)) {
+                            collision = true;
+                            break;
+                        }
+                    }
+
+                    if (!collision) {
+                        this.player.position.copy(nextPos);
+                        if (Math.random() < 0.04) audioSys.playFootstep();
+                    }
+                }
+
+                // Camera Rotation Update
+                this.camera.position.copy(this.player.position);
+                this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+            }
+
+            onWindowResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+
+                const delta = Math.min(this.clock.getDelta(), 0.1);
+
+                this.updatePlayer(delta);
+                this.updateCreatures(delta);
+                this.updateRaycast();
+
+                // Animate light flickers
+                this.scene.traverse((obj) => {
+                    if (obj.isPointLight && obj.userData.baseIntensity) {
+                        obj.userData.time += delta * 10;
+                        obj.intensity = obj.userData.baseIntensity + Math.sin(obj.userData.time) * 0.5 + (Math.random() < 0.05 ? -1 : 0);
+                    }
+                });
+
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+
+        // Launch Game on Load
+        window.addEventListener('DOMContentLoaded', () => {
+            new GameEngine();
+        });
+    </script>
+</body>
+</html>
