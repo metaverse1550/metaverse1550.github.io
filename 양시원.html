@@ -1,0 +1,1433 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>폐교: 생존 공포 (Abandoned School Horror)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Creepster&family=Noto+Sans+KR:wght@300;400;700&display=swap');
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Noto Sans KR', sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        .horror-title {
+            font-family: 'Creepster', cursive;
+            text-shadow: 0 0 10px #ff0000, 0 0 20px #880000;
+        }
+
+        /* Jumpscare canvas overlay */
+        #jumpscare-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 100;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.05s ease-in;
+            background: rgba(0, 0, 0, 0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Screen distortion filter for fear */
+        .scare-flash {
+            animation: flashRed 0.15s infinite alternate;
+        }
+
+        @keyframes flashRed {
+            0% { background-color: rgba(255, 0, 0, 0.4); }
+            100% { background-color: rgba(0, 0, 0, 0.9); }
+        }
+
+        /* Lockpick Minigame Modal */
+        #lockpick-modal {
+            background: rgba(10, 10, 12, 0.95);
+            border: 2px solid #555;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.9);
+        }
+
+        .sweet-spot {
+            background: linear-gradient(90deg, #333 0%, #ffcc00 50%, #333 100%);
+        }
+
+        /* Mobile Touch Controls */
+        .touch-btn {
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            backdrop-filter: blur(4px);
+            touch-action: manipulation;
+        }
+        .touch-btn:active {
+            background: rgba(255, 0, 0, 0.4);
+        }
+
+        /* CRT Vignette Effect */
+        .vignette {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            box-shadow: 0 0 120px rgba(0,0,0,0.95) inset;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .blood-vignette {
+            box-shadow: 0 0 100px rgba(180, 0, 0, 0.6) inset !important;
+        }
+    </style>
+</head>
+<body class="text-gray-200">
+
+    <!-- 3D Canvas -->
+    <div id="canvas-container"></div>
+    <div id="vignette-elem" class="vignette"></div>
+
+    <!-- HUD Layer -->
+    <div id="hud" class="absolute inset-0 z-20 pointer-events-none flex flex-col justify-between p-4 md:p-6 hidden">
+        <!-- Top Info Bar -->
+        <div class="flex justify-between items-start">
+            <div class="bg-black/60 p-3 rounded-lg border border-red-900/50 backdrop-blur">
+                <div class="text-xs text-gray-400 font-bold uppercase tracking-widest mb-1">탈출 진행도</div>
+                <div class="text-lg font-bold text-red-500 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>
+                    잠금 해제: <span id="locks-cleared-text" class="text-white">0</span> / <span id="locks-total-text">5</span>
+                </div>
+                <div id="escape-ready-msg" class="text-xs text-green-400 font-bold mt-1 hidden animate-pulse">★ 모든 잠금 해제됨! 정문 탈출 가능!</div>
+            </div>
+
+            <!-- Health & Flashlight Battery -->
+            <div class="flex flex-col gap-2 items-end">
+                <div class="bg-black/60 p-2 px-4 rounded-lg border border-gray-800 backdrop-blur flex items-center gap-3">
+                    <span class="text-xs text-gray-400">정신력 / 체력</span>
+                    <div class="w-32 bg-gray-900 rounded-full h-3 border border-gray-700 overflow-hidden">
+                        <div id="health-bar" class="bg-red-600 h-full w-full transition-all duration-300"></div>
+                    </div>
+                </div>
+                <div class="bg-black/60 p-2 px-4 rounded-lg border border-gray-800 backdrop-blur flex items-center gap-3">
+                    <span class="text-xs text-gray-400">손전등 [F]</span>
+                    <div class="w-24 bg-gray-900 rounded-full h-2 border border-gray-700 overflow-hidden">
+                        <div id="flashlight-bar" class="bg-yellow-400 h-full w-full"></div>
+                    </div>
+                    <span id="flashlight-status" class="text-xs font-bold text-yellow-400">ON</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Crosshair & Interaction Prompt -->
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
+            <div id="crosshair" class="w-2 h-2 bg-white/70 rounded-full mx-auto transition-transform duration-100"></div>
+            <div id="interaction-prompt" class="mt-4 bg-black/80 px-4 py-2 rounded-md border border-amber-500/50 text-amber-300 text-sm font-medium hidden shadow-lg animate-bounce">
+                [E] 상호작용
+            </div>
+        </div>
+
+        <!-- Bottom Quick Slot & Controls Hint -->
+        <div class="flex justify-between items-end">
+            <div class="bg-black/60 p-3 rounded-lg border border-gray-800 backdrop-blur max-w-xs hidden md:block">
+                <div class="text-xs text-gray-400 mb-1">조작 가이드</div>
+                <div class="text-xs text-gray-300 grid grid-cols-2 gap-x-3 gap-y-0.5">
+                    <span>WASD: 이동</span> <span>Shift: 달리기</span>
+                    <span>E: 상호작용</span> <span>F: 손전등</span>
+                    <span>Tab: 인벤토리</span> <span>Q: 버리기</span>
+                    <span>Z: 점프</span> <span>C: 엎드리기</span>
+                </div>
+            </div>
+
+            <!-- Current Selected Item Indicator -->
+            <div class="bg-black/70 p-3 rounded-lg border border-gray-700 flex items-center gap-3">
+                <div id="active-item-icon" class="w-10 h-10 bg-gray-800 rounded border border-gray-600 flex items-center justify-center text-xl">
+                    ✊
+                </div>
+                <div>
+                    <div class="text-xs text-gray-400">선택된 아이템</div>
+                    <div id="active-item-name" class="text-sm font-bold text-amber-400">맨손</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Inventory Modal (TAB) -->
+    <div id="inventory-modal" class="fixed inset-0 z-40 bg-black/80 backdrop-blur-md flex items-center justify-center hidden">
+        <div class="bg-gray-900 border border-red-900/80 rounded-xl p-6 w-11/12 max-w-lg shadow-2xl">
+            <div class="flex justify-between items-center border-b border-gray-800 pb-3 mb-4">
+                <h2 class="text-xl font-bold text-red-500 tracking-wider">소지품 (INVENTORY)</h2>
+                <span class="text-xs text-gray-500">[Tab] 닫기</span>
+            </div>
+            <div id="inventory-grid" class="grid grid-cols-3 gap-3 mb-4">
+                <!-- Dynamic Item Slots -->
+            </div>
+            <div class="flex justify-between items-center bg-black/40 p-3 rounded border border-gray-800">
+                <div id="inventory-item-desc" class="text-xs text-gray-400">아이템을 선택하세요.</div>
+                <button id="drop-item-btn" class="px-3 py-1.5 bg-red-900/60 hover:bg-red-800 text-red-200 rounded text-xs border border-red-700 disabled:opacity-40" disabled>
+                    버리기 [Q]
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lockpicking Minigame Modal -->
+    <div id="lockpick-modal-wrapper" class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center hidden">
+        <div id="lockpick-modal" class="p-6 rounded-2xl w-80 text-center">
+            <h3 class="text-lg font-bold text-amber-400 mb-2">락픽 해제 작업</h3>
+            <p class="text-xs text-gray-400 mb-4">지정된 녹색 구역에 바늘이 올 때 스페이스바/클릭을 누르세요!</p>
+            <div class="relative w-full h-8 bg-gray-800 rounded-full overflow-hidden mb-4 border border-gray-600">
+                <div id="lp-target-zone" class="absolute top-0 bottom-0 bg-green-500/80" style="left: 40%; width: 20%;"></div>
+                <div id="lp-needle" class="absolute top-0 bottom-0 w-1.5 bg-red-500 shadow-lg" style="left: 0%;"></div>
+            </div>
+            <div class="text-xs text-gray-300 mb-4">성공 횟수: <span id="lp-score" class="text-amber-400 font-bold">0</span> / 3</div>
+            <button id="lp-action-btn" class="w-full py-2 bg-amber-600 hover:bg-amber-500 font-bold text-black rounded transition">시도 (Space)</button>
+        </div>
+    </div>
+
+    <!-- Start / Pause / Game Over / Clear Screens -->
+    <div id="menu-overlay" class="fixed inset-0 z-50 bg-black/90 flex flex-col items-center justify-center p-6">
+        <div class="text-center max-w-md">
+            <h1 class="text-5xl font-extrabold text-red-700 horror-title mb-2">폐교 : 廢校</h1>
+            <p class="text-xs text-gray-400 mb-6 tracking-widest">ABANDONED SCHOOL SURVIVAL HORROR</p>
+            
+            <div id="menu-start-content" class="space-y-4">
+                <p class="text-sm text-gray-300 leading-relaxed bg-black/50 p-4 rounded border border-gray-800">
+                    실종된 친구의 흔적을 찾아 심야의 버려진 학교에 침입했습니다.<br>
+                    학교 구석구석을 수색해 도구(망치, 락픽, 마스터키, 비밀 키, 쇠 지렛대)를 모으고 <b>5개의 잠금 장치</b>를 모두 풀어 탈출하세요.<br>
+                    어둠 속에서 당신을 노리는 살인마와 정체불명의 귀신을 조심하십시오.
+                </p>
+                <button id="start-game-btn" class="w-full py-4 bg-red-900 hover:bg-red-800 text-white font-bold text-lg rounded-lg border border-red-600 shadow-lg hover:shadow-red-900/50 transition">
+                    조사 시작하기 (GAME START)
+                </button>
+            </div>
+
+            <div id="menu-pause-content" class="space-y-4 hidden">
+                <h2 class="text-2xl font-bold text-gray-200">일시 정지</h2>
+                <button id="resume-game-btn" class="w-full py-3 bg-gray-800 hover:bg-gray-700 text-white font-bold rounded">게임 계속하기</button>
+            </div>
+
+            <div id="menu-gameover-content" class="space-y-4 hidden">
+                <h2 class="text-4xl font-extrabold text-red-600 horror-title">당신은 사망했습니다</h2>
+                <p id="death-cause" class="text-sm text-gray-400">폐교의 어둠 속으로 영원히 사라졌습니다...</p>
+                <button id="restart-game-btn" class="w-full py-3 bg-red-900 hover:bg-red-800 text-white font-bold rounded border border-red-600">다시 도전하기</button>
+            </div>
+
+            <div id="menu-clear-content" class="space-y-4 hidden">
+                <h2 class="text-4xl font-extrabold text-green-500">탈출 성공!</h2>
+                <p class="text-sm text-gray-300">모든 잠금을 해제하고 무사히 폐교를 벗어났습니다!</p>
+                <button id="clear-restart-btn" class="w-full py-3 bg-green-700 hover:bg-green-600 text-white font-bold rounded">다시 플레이</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Jumpscare Overlay Canvas/Container -->
+    <div id="jumpscare-overlay">
+        <svg id="ghost-face" class="w-72 h-72 text-red-600 animate-ping" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 2C6.47 2 2 6.47 2 12c0 4.41 2.87 8.14 6.84 9.5.39.07.54-.17.54-.38 0-.19-.01-.82-.01-1.49-2.43.45-3.03-.58-3.22-1.12-.11-.28-.58-1.12-.99-1.35-.34-.18-.83-.63-.02-.64.77-.01 1.32.71 1.5 1 1 .88.88 2.5 2.5 2.5 1.8 0 2.29-.28 2.84-.57.1-.72.39-1.2.71-1.48-2.73-.31-5.6-1.37-5.6-6.08 0-1.34.48-2.45 1.26-3.32-.13-.31-.55-1.57.12-3.27 0 0 1.03-.33 3.38 1.26.98-.27 2.03-.41 3.08-.41 1.05 0 2.1.14 3.08.41 2.35-1.59 3.38-1.26 3.38-1.26.67 1.7.25 2.96.12 3.27.79.87 1.26 1.97 1.26 3.32 0 4.72-2.88 5.76-5.63 6.07.4.35.76 1.02.76 2.07 0 1.5-.01 2.7-.01 3.07 0 .22.15.46.55.38C19.14 20.14 22 16.41 22 12c0-5.53-4.47-10-10-10z"/>
+        </svg>
+    </div>
+
+    <!-- Touch Controls for Mobile Devices -->
+    <div id="touch-controls" class="fixed inset-0 z-30 pointer-events-none hidden">
+        <!-- Left Joystick Zone -->
+        <div id="joystick-zone" class="absolute bottom-8 left-8 w-32 h-32 rounded-full bg-white/10 border border-white/20 pointer-events-auto flex items-center justify-center">
+            <div id="joystick-knob" class="w-12 h-12 rounded-full bg-red-600/60 border border-white/50"></div>
+        </div>
+
+        <!-- Right Action Buttons -->
+        <div class="absolute bottom-8 right-8 flex flex-col gap-3 pointer-events-auto">
+            <div class="flex gap-2 justify-end">
+                <button id="touch-flash" class="touch-btn w-12 h-12 rounded-full text-xs font-bold text-yellow-300">💡</button>
+                <button id="touch-interact" class="touch-btn w-14 h-14 rounded-full text-sm font-bold text-amber-400">E</button>
+            </div>
+            <div class="flex gap-2 justify-end">
+                <button id="touch-crouch" class="touch-btn w-12 h-12 rounded-full text-xs font-bold text-gray-300">C</button>
+                <button id="touch-jump" class="touch-btn w-12 h-12 rounded-full text-xs font-bold text-gray-300">Z</button>
+                <button id="touch-run" class="touch-btn w-12 h-12 rounded-full text-xs font-bold text-red-400">🏃</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /* Procedural Audio Generator using Web Audio API */
+        class SoundEngine {
+            constructor() {
+                this.ctx = null;
+                this.isMuted = false;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContext();
+                }
+            }
+
+            playFootstep(type = 'walk') {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                const now = this.ctx.currentTime;
+
+                osc.type = 'triangle';
+                const baseFreq = type === 'run' ? 120 : (type === 'crouch' ? 60 : 90);
+                osc.frequency.setValueAtTime(baseFreq, now);
+                osc.frequency.exponentialRampToValueAtTime(30, now + 0.12);
+
+                gain.gain.setValueAtTime(type === 'run' ? 0.3 : 0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.12);
+            }
+
+            playFlashlightClick() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(800, now);
+                osc.frequency.setValueAtTime(400, now + 0.02);
+
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.05);
+            }
+
+            playJumpscare() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                
+                // Harsh screech oscillator
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(300, now);
+                osc.frequency.linearRampToValueAtTime(1200, now + 0.1);
+                osc.frequency.linearRampToValueAtTime(200, now + 0.6);
+
+                gain.gain.setValueAtTime(0.8, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.8);
+            }
+
+            playLockSuccess() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(523.25, now); // C5
+                osc.frequency.setValueAtTime(659.25, now + 0.1); // E5
+
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.3);
+            }
+
+            playItemPickup() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(440, now);
+                osc.frequency.exponentialRampToValueAtTime(880, now + 0.15);
+
+                gain.gain.setValueAtTime(0.25, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.2);
+            }
+
+            playHeartbeat(rate = 1.0) {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(60, now);
+                osc.frequency.exponentialRampToValueAtTime(20, now + 0.15);
+
+                gain.gain.setValueAtTime(0.4, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.2);
+            }
+        }
+
+        const audio = new SoundEngine();
+    </script>
+
+    <script>
+        /* Items Master Database */
+        const ITEM_DATA = {
+            hammer: { id: 'hammer', name: '망치', icon: '🔨', desc: '나무 판자로 막힌 문이나 바리케이드를 부술 수 있습니다.' },
+            lockpick: { id: 'lockpick', name: '락픽', icon: '🪛', desc: '일반적인 자물쇠를 정밀하게 해제할 수 있습니다.' },
+            masterkey: { id: 'masterkey', name: '마스터키', icon: '🔑', desc: '교무실 및 주요 입출입문 전용 열쇠입니다.' },
+            secretkey: { id: 'secretkey', name: '비밀 키', icon: '🗝️', desc: '학교 깊은 곳의 비밀 장치를 여는 특수 키입니다.' },
+            crowbar: { id: 'crowbar', name: '쇠 지렛대', icon: '⛏️', desc: '단단히 닫힌 비상구와 셔터를 강제로 제끼는 도구입니다.' }
+        };
+
+        /* Game State Manager */
+        class GameState {
+            constructor() {
+                this.isStarted = false;
+                this.isPaused = false;
+                this.isGameOver = false;
+                this.isClear = false;
+
+                this.health = 100;
+                this.maxHealth = 100;
+                this.flashlightBattery = 100;
+                this.flashlightOn = true;
+
+                this.inventory = [];
+                this.selectedItemIndex = -1;
+
+                this.locksTotal = 5;
+                this.locksCleared = 0;
+
+                this.lockpickMinigameActive = false;
+                this.pendingLockObj = null;
+            }
+
+            reset() {
+                this.isStarted = true;
+                this.isPaused = false;
+                this.isGameOver = false;
+                this.isClear = false;
+
+                this.health = 100;
+                this.flashlightBattery = 100;
+                this.flashlightOn = true;
+
+                this.inventory = [];
+                this.selectedItemIndex = -1;
+                this.locksCleared = 0;
+
+                this.updateUI();
+            }
+
+            addItem(itemId) {
+                if (this.inventory.length >= 6) return false;
+                this.inventory.push(itemId);
+                audio.playItemPickup();
+                this.updateUI();
+                return true;
+            }
+
+            removeItem(itemId) {
+                const idx = this.inventory.indexOf(itemId);
+                if (idx !== -1) {
+                    this.inventory.splice(idx, 1);
+                    if (this.selectedItemIndex >= this.inventory.length) {
+                        this.selectedItemIndex = this.inventory.length - 1;
+                    }
+                    this.updateUI();
+                    return true;
+                }
+                return false;
+            }
+
+            getSelectedItem() {
+                if (this.selectedItemIndex >= 0 && this.selectedItemIndex < this.inventory.length) {
+                    return this.inventory[this.selectedItemIndex];
+                }
+                return null;
+            }
+
+            unlockProgress() {
+                this.locksCleared++;
+                audio.playLockSuccess();
+                this.updateUI();
+                if (this.locksCleared >= this.locksTotal) {
+                    const readyMsg = document.getElementById('escape-ready-msg');
+                    if (readyMsg) readyMsg.classList.remove('hidden');
+                }
+            }
+
+            updateUI() {
+                // Locks HUD
+                document.getElementById('locks-cleared-text').textContent = this.locksCleared;
+                document.getElementById('locks-total-text').textContent = this.locksTotal;
+
+                // Health Bar
+                const hpBar = document.getElementById('health-bar');
+                hpBar.style.width = `${Math.max(0, this.health)}%`;
+
+                // Selected Item Display
+                const activeItem = this.getSelectedItem();
+                const iconElem = document.getElementById('active-item-icon');
+                const nameElem = document.getElementById('active-item-name');
+
+                if (activeItem && ITEM_DATA[activeItem]) {
+                    iconElem.textContent = ITEM_DATA[activeItem].icon;
+                    nameElem.textContent = ITEM_DATA[activeItem].name;
+                } else {
+                    iconElem.textContent = '✊';
+                    nameElem.textContent = '맨손';
+                }
+
+                // Flashlight UI
+                const flBar = document.getElementById('flashlight-bar');
+                const flStatus = document.getElementById('flashlight-status');
+                flBar.style.width = `${this.flashlightBattery}%`;
+                flStatus.textContent = this.flashlightOn ? 'ON' : 'OFF';
+                flStatus.className = this.flashlightOn ? 'text-xs font-bold text-yellow-400' : 'text-xs font-bold text-gray-500';
+
+                this.renderInventoryGrid();
+            }
+
+            renderInventoryGrid() {
+                const grid = document.getElementById('inventory-grid');
+                grid.innerHTML = '';
+
+                for (let i = 0; i < 6; i++) {
+                    const itemId = this.inventory[i];
+                    const slot = document.createElement('div');
+                    slot.className = `h-20 rounded-lg border-2 flex flex-col items-center justify-center cursor-pointer transition ${
+                        this.selectedItemIndex === i ? 'border-amber-400 bg-amber-950/40' : 'border-gray-700 bg-black/50 hover:border-gray-500'
+                    }`;
+
+                    if (itemId && ITEM_DATA[itemId]) {
+                        slot.innerHTML = `<span class="text-2xl">${ITEM_DATA[itemId].icon}</span><span class="text-xs text-gray-300 mt-1 font-medium">${ITEM_DATA[itemId].name}</span>`;
+                    } else {
+                        slot.innerHTML = `<span class="text-xs text-gray-700">빈 슬롯</span>`;
+                    }
+
+                    slot.onclick = () => {
+                        this.selectedItemIndex = i;
+                        this.updateUI();
+                        this.updateInventoryDesc();
+                    };
+
+                    grid.appendChild(slot);
+                }
+                this.updateInventoryDesc();
+            }
+
+            updateInventoryDesc() {
+                const desc = document.getElementById('inventory-item-desc');
+                const dropBtn = document.getElementById('drop-item-btn');
+                const selected = this.getSelectedItem();
+
+                if (selected && ITEM_DATA[selected]) {
+                    desc.textContent = ITEM_DATA[selected].desc;
+                    dropBtn.disabled = false;
+                } else {
+                    desc.textContent = '아이템을 선택하세요.';
+                    dropBtn.disabled = true;
+                }
+            }
+        }
+
+        const state = new GameState();
+    </script>
+
+    <script>
+        /* 3D Engine Variables */
+        let scene, camera, renderer;
+        let flashlight, ambientLight;
+        const objectsToInteract = [];
+        const colliders = [];
+
+        /* Player Physical State */
+        const player = {
+            position: new THREE.Vector3(0, 1.6, 12),
+            velocity: new THREE.Vector3(),
+            rotation: new THREE.Euler(0, 0, 0, 'YXZ'),
+            height: 1.6,
+            crouchHeight: 0.9,
+            isCrouching: false,
+            isSprinting: false,
+            speed: 3.5,
+            sprintSpeed: 6.5,
+            crouchSpeed: 1.8,
+            onGround: true,
+            cameraShake: 0
+        };
+
+        /* Input Controls Setup */
+        const keys = {};
+        let isPointerLocked = false;
+
+        function initEngine() {
+            const container = document.getElementById('canvas-container');
+
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0a12);
+            scene.fog = new THREE.FogExp2(0x0a0a12, 0.035);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 50);
+            camera.rotation.order = 'YXZ';
+            scene.add(camera);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // Lights - Ambient light intensity boosted for higher visibility
+            ambientLight = new THREE.AmbientLight(0x777788, 0.85);
+            scene.add(ambientLight);
+
+            // Flashlight - Increased intensity and coverage angle
+            flashlight = new THREE.SpotLight(0xfff5ea, 4.2, 25, Math.PI / 5, 0.4, 1);
+            flashlight.castShadow = true;
+            flashlight.shadow.mapSize.width = 1024;
+            flashlight.shadow.mapSize.height = 1024;
+            camera.add(flashlight);
+            flashlight.target = new THREE.Object3D();
+            camera.add(flashlight.target);
+            flashlight.target.position.set(0, 0, -1);
+
+            buildSchoolMap();
+            setupEventListeners();
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        /* Generate Procedural Canvas Textures for Realistic Creepy Look */
+        function createWallTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256; canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#2b2b2b'; ctx.fillRect(0, 0, 256, 256);
+            // Mold / Dirt overlay
+            for (let i = 0; i < 400; i++) {
+                ctx.fillStyle = `rgba(10, 20, 10, ${Math.random() * 0.3})`;
+                ctx.fillRect(Math.random() * 256, Math.random() * 256, Math.random() * 20, Math.random() * 20);
+            }
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping;
+            return texture;
+        }
+
+        /* Build Entire School Architecture */
+        function buildSchoolMap() {
+            const wallMat = new THREE.MeshStandardMaterial({
+                color: 0x66666a,
+                roughness: 0.8,
+                map: createWallTexture()
+            });
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x3a3a40, roughness: 0.5 });
+            const ceilingMat = new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 0.8 });
+
+            // Floor & Ceiling
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(30, 50), floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(30, 50), ceilingMat);
+            ceiling.rotation.x = Math.PI / 2;
+            ceiling.position.y = 3.5;
+            scene.add(ceiling);
+
+            // Outer Bounds Walls
+            createWall(0, 1.75, -25, 30, 3.5, 0.4, wallMat); // North
+            createWall(0, 1.75, 25, 30, 3.5, 0.4, wallMat);  // South
+            createWall(-15, 1.75, 0, 0.4, 3.5, 50, wallMat); // West
+            createWall(15, 1.75, 0, 0.4, 3.5, 50, wallMat);  // East
+
+            // Hallway Partitions (Main Corridor in middle: z = -20 to 20, x = -3 to 3)
+            createWall(-3, 1.75, -5, 0.3, 3.5, 30, wallMat);
+            createWall(3, 1.75, -5, 0.3, 3.5, 30, wallMat);
+
+            // Classroom Doors & Locks
+            buildClassrooms(wallMat);
+            spawnFlickeringLights();
+            spawnGameObjects();
+        }
+
+        function createWall(x, y, z, w, h, d, mat) {
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+            wall.position.set(x, y, z);
+            wall.castShadow = true;
+            wall.receiveShadow = true;
+            scene.add(wall);
+
+            // Collision box
+            colliders.push(new THREE.Box3().setFromObject(wall));
+            return wall;
+        }
+
+        function buildClassrooms(wallMat) {
+            // Classroom 1 (Left North)
+            spawnDoor(-3, 1.2, 5, 'lockpick', '교실 1 (자물쇠)');
+            // Classroom 2 (Right North)
+            spawnDoor(3, 1.2, 5, 'hammer', '교실 2 (바리케이드)');
+            // Staff Room (Left South)
+            spawnDoor(-3, 1.2, -10, 'masterkey', '교무실 (마스터키 필요)');
+            // Storage (Right South)
+            spawnDoor(3, 1.2, -10, 'secretkey', '비밀 창고 (비밀 키 필요)');
+            // Main Exit Shutter (Far South Corridor)
+            spawnExitDoor(0, 1.5, 24.5, 'crowbar', '학교 정문 (쇠 지렛대 필요)');
+
+            // Furniture Decor (Desks, Lockers)
+            const deskMat = new THREE.MeshStandardMaterial({ color: 0x3d2817, roughness: 0.8 });
+            for (let i = 0; i < 6; i++) {
+                const desk = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.8, 0.8), deskMat);
+                desk.position.set(-8 + (i % 2) * 2, 0.4, 8 + Math.floor(i / 2) * 2);
+                scene.add(desk);
+                colliders.push(new THREE.Box3().setFromObject(desk));
+            }
+        }
+
+        function spawnFlickeringLights() {
+            const lightPositions = [
+                new THREE.Vector3(0, 3.2, 10),
+                new THREE.Vector3(0, 3.2, 0),
+                new THREE.Vector3(0, 3.2, -10),
+                new THREE.Vector3(-8, 3.2, 5),
+                new THREE.Vector3(8, 3.2, -10)
+            ];
+
+            lightPositions.forEach((pos, idx) => {
+                const pLight = new THREE.PointLight(0xffeedd, 1.6, 12);
+                pLight.position.copy(pos);
+                pLight.castShadow = true;
+                scene.add(pLight);
+
+                // Lamp Mesh
+                const lamp = new THREE.Mesh(
+                    new THREE.BoxGeometry(1, 0.1, 0.3),
+                    new THREE.MeshBasicMaterial({ color: 0xffffff })
+                );
+                lamp.position.copy(pos);
+                scene.add(lamp);
+
+                // Flickering behavior logic in frame loop
+                pLight.userData = { isFlickering: idx % 2 === 0, baseIntensity: 1.6 };
+            });
+        }
+    </script>
+
+    <script>
+        function spawnGameObjects() {
+            // Item Spawns hidden inside rooms/corners
+            spawnItem('hammer', new THREE.Vector3(10, 0.5, 12));
+            spawnItem('lockpick', new THREE.Vector3(-10, 0.5, 12));
+            spawnItem('masterkey', new THREE.Vector3(-8, 0.5, -5));
+            spawnItem('secretkey', new THREE.Vector3(8, 0.5, 2));
+            spawnItem('crowbar', new THREE.Vector3(-12, 0.5, -18));
+        }
+
+        function spawnItem(type, pos) {
+            const group = new THREE.Group();
+            group.position.copy(pos);
+
+            // Placeholder Mesh representation per item
+            const mat = new THREE.MeshStandardMaterial({ color: 0xffcc00, metalness: 0.5, roughness: 0.3 });
+            const geo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+            const mesh = new THREE.Mesh(geo, mat);
+            group.add(mesh);
+
+            group.userData = {
+                isInteractable: true,
+                type: 'item',
+                itemId: type,
+                prompt: `[E] ${ITEM_DATA[type].name} 줍기`
+            };
+
+            scene.add(group);
+            objectsToInteract.push(group);
+        }
+
+        function spawnDoor(x, y, z, requiredItem, nameStr) {
+            const doorGroup = new THREE.Group();
+            doorGroup.position.set(x, y, z);
+
+            const doorMesh = new THREE.Mesh(
+                new THREE.BoxGeometry(1.8, 2.4, 0.2),
+                new THREE.MeshStandardMaterial({ color: 0x5a3d28, roughness: 0.8 })
+            );
+            doorGroup.add(doorMesh);
+
+            doorGroup.userData = {
+                isInteractable: true,
+                type: 'lock',
+                requiredItem: requiredItem,
+                isUnlocked: false,
+                name: nameStr,
+                prompt: `[E] ${nameStr} (${ITEM_DATA[requiredItem].name} 필요)`
+            };
+
+            scene.add(doorGroup);
+            objectsToInteract.push(doorGroup);
+            colliders.push(new THREE.Box3().setFromObject(doorMesh));
+        }
+
+        function spawnExitDoor(x, y, z, requiredItem, nameStr) {
+            const exitMesh = new THREE.Mesh(
+                new THREE.BoxGeometry(3.5, 3.0, 0.3),
+                new THREE.MeshStandardMaterial({ color: 0x882222, metalness: 0.8, roughness: 0.2 })
+            );
+            exitMesh.position.set(x, y, z);
+
+            exitMesh.userData = {
+                isInteractable: true,
+                type: 'exit_lock',
+                requiredItem: requiredItem,
+                isUnlocked: false,
+                prompt: `[E] ${nameStr}`
+            };
+
+            scene.add(exitMesh);
+            objectsToInteract.push(exitMesh);
+            colliders.push(new THREE.Box3().setFromObject(exitMesh));
+        }
+    </script>
+
+    <script>
+        /* Enemy AI Base Architecture */
+        class EnemyAI {
+            constructor(mesh, speed = 2.2) {
+                this.mesh = mesh;
+                this.speed = speed;
+                this.state = 'patrol'; // 'patrol', 'chase', 'search'
+                this.patrolPoints = [
+                    new THREE.Vector3(0, 1.0, 15),
+                    new THREE.Vector3(0, 1.0, -15),
+                    new THREE.Vector3(-8, 1.0, 0),
+                    new THREE.Vector3(8, 1.0, 0)
+                ];
+                this.currentPatrolIdx = 0;
+                this.chaseTimer = 0;
+            }
+
+            update(delta, playerPos) {
+                const distToPlayer = this.mesh.position.distanceTo(playerPos);
+
+                // Detection range (Visual + Audio)
+                if (distToPlayer < 7.0 && state.isStarted && !state.isGameOver) {
+                    this.state = 'chase';
+                    this.chaseTimer = 5.0; // Chase for 5 seconds
+                }
+
+                if (this.state === 'chase') {
+                    // Look and Move towards player
+                    this.mesh.lookAt(playerPos.x, this.mesh.position.y, playerPos.z);
+                    this.mesh.translateZ(this.speed * delta);
+
+                    // Heartbeat sound frequency based on distance
+                    if (Math.random() < 0.05) audio.playHeartbeat(1.0 / distToPlayer);
+
+                    // Attack logic
+                    if (distToPlayer < 1.3) {
+                        triggerGameOver('살인마에게 잡혔습니다!');
+                    }
+
+                    this.chaseTimer -= delta;
+                    if (this.chaseTimer <= 0) {
+                        this.state = 'patrol';
+                    }
+                } else {
+                    // Patrol logic
+                    const target = this.patrolPoints[this.currentPatrolIdx];
+                    this.mesh.lookAt(target.x, this.mesh.position.y, target.z);
+                    this.mesh.translateZ(this.speed * 0.5 * delta);
+
+                    if (this.mesh.position.distanceTo(target) < 1.0) {
+                        this.currentPatrolIdx = (this.currentPatrolIdx + 1) % this.patrolPoints.length;
+                    }
+                }
+            }
+        }
+
+        let killerAI, hostileGhostGroup, friendlyGhostGroup;
+
+        function initEnemies() {
+            // 1. Killer Entity (Composite Mesh compatible with Three.js r128)
+            const killerGroup = new THREE.Group();
+
+            const bodyMesh = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.4, 0.3, 1.4, 8),
+                new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2 })
+            );
+            bodyMesh.position.y = 0.7;
+            killerGroup.add(bodyMesh);
+
+            const headMesh = new THREE.Mesh(
+                new THREE.SphereGeometry(0.25, 8, 8),
+                new THREE.MeshStandardMaterial({ color: 0x880000, roughness: 0.5 })
+            );
+            headMesh.position.y = 1.6;
+            killerGroup.add(headMesh);
+
+            killerGroup.position.set(0, 0, -15);
+            scene.add(killerGroup);
+
+            killerAI = new EnemyAI(killerGroup, 2.8);
+
+            // 2. Hostile Ghost Entity (Spawns periodically with Jumpscares)
+            const ghostMat = new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true, transparent: true, opacity: 0.7 });
+            hostileGhostGroup = new THREE.Mesh(new THREE.SphereGeometry(0.6, 8, 8), ghostMat);
+            hostileGhostGroup.position.set(100, -100, 100); // Hide initially
+            scene.add(hostileGhostGroup);
+
+            // 3. Friendly Ghost Entity (Points toward key items)
+            const friendlyMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.4 });
+            friendlyGhostGroup = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.5, 8), friendlyMat);
+            friendlyGhostGroup.position.set(10, 1.0, 10);
+            scene.add(friendlyGhostGroup);
+        }
+
+        function triggerJumpscare() {
+            const overlay = document.getElementById('jumpscare-overlay');
+            overlay.style.opacity = '1';
+            overlay.classList.add('scare-flash');
+            audio.playJumpscare();
+
+            // Camera shake intensity
+            player.cameraShake = 0.5;
+
+            setTimeout(() => {
+                overlay.style.opacity = '0';
+                overlay.classList.remove('scare-flash');
+            }, 800);
+        }
+
+        function triggerGameOver(reasonStr) {
+            state.isGameOver = true;
+            document.exitPointerLock();
+            document.getElementById('death-cause').textContent = reasonStr;
+            document.getElementById('menu-overlay').classList.remove('hidden');
+            document.getElementById('menu-start-content').classList.add('hidden');
+            document.getElementById('menu-pause-content').classList.add('hidden');
+            document.getElementById('menu-gameover-content').classList.remove('hidden');
+            document.getElementById('menu-clear-content').classList.add('hidden');
+        }
+
+        function triggerGameClear() {
+            state.isClear = true;
+            document.exitPointerLock();
+            document.getElementById('menu-overlay').classList.remove('hidden');
+            document.getElementById('menu-start-content').classList.add('hidden');
+            document.getElementById('menu-pause-content').classList.add('hidden');
+            document.getElementById('menu-gameover-content').classList.add('hidden');
+            document.getElementById('menu-clear-content').classList.remove('hidden');
+        }
+    </script>
+
+    <script>
+        class LockpickMinigame {
+            constructor() {
+                this.active = false;
+                this.needlePos = 0;
+                this.needleSpeed = 120;
+                this.targetPos = 40;
+                this.targetWidth = 20;
+                this.score = 0;
+                this.requiredScore = 3;
+                this.targetObj = null;
+
+                this.needleElem = document.getElementById('lp-needle');
+                this.targetElem = document.getElementById('lp-target-zone');
+                this.scoreElem = document.getElementById('lp-score');
+                this.modalWrapper = document.getElementById('lockpick-modal-wrapper');
+
+                document.getElementById('lp-action-btn').onclick = () => this.checkAttempt();
+            }
+
+            start(targetObj) {
+                this.targetObj = targetObj;
+                this.active = true;
+                this.score = 0;
+                this.needlePos = 0;
+                this.scoreElem.textContent = '0';
+                this.randomizeTarget();
+                this.modalWrapper.classList.remove('hidden');
+                document.exitPointerLock();
+            }
+
+            randomizeTarget() {
+                this.targetPos = 15 + Math.random() * 60;
+                this.targetWidth = 15 + Math.random() * 10;
+                this.targetElem.style.left = `${this.targetPos}%`;
+                this.targetElem.style.width = `${this.targetWidth}%`;
+            }
+
+            update(delta) {
+                if (!this.active) return;
+                this.needlePos += this.needleSpeed * delta;
+                if (this.needlePos > 100 || this.needlePos < 0) {
+                    this.needleSpeed *= -1;
+                }
+                this.needleElem.style.left = `${this.needlePos}%`;
+            }
+
+            checkAttempt() {
+                if (!this.active) return;
+                if (this.needlePos >= this.targetPos && this.needlePos <= (this.targetPos + this.targetWidth)) {
+                    this.score++;
+                    audio.playLockSuccess();
+                    this.scoreElem.textContent = this.score;
+                    if (this.score >= this.requiredScore) {
+                        this.success();
+                    } else {
+                        this.randomizeTarget();
+                    }
+                } else {
+                    // Failed attempt camera shake & reset score
+                    player.cameraShake = 0.2;
+                    this.score = 0;
+                    this.scoreElem.textContent = '0';
+                    this.randomizeTarget();
+                }
+            }
+
+            success() {
+                this.active = false;
+                this.modalWrapper.classList.add('hidden');
+                if (this.targetObj) {
+                    this.targetObj.userData.isUnlocked = true;
+                    scene.remove(this.targetObj);
+                    state.unlockProgress();
+                }
+            }
+        }
+
+        const lockpickGame = new LockpickMinigame();
+    </script>
+
+    <script>
+        function setupEventListeners() {
+            // Keyboard Controls
+            window.addEventListener('keydown', (e) => {
+                keys[e.code] = true;
+
+                if (e.code === 'KeyF' && state.isStarted && !state.isPaused) {
+                    state.flashlightOn = !state.flashlightOn;
+                    flashlight.visible = state.flashlightOn;
+                    audio.playFlashlightClick();
+                    state.updateUI();
+                }
+
+                if (e.code === 'Tab' && state.isStarted && !state.isGameOver) {
+                    e.preventDefault();
+                    toggleInventory();
+                }
+
+                if (e.code === 'KeyQ' && state.isStarted) {
+                    dropCurrentItem();
+                }
+
+                if (e.code === 'KeyE' && state.isStarted && !state.isPaused) {
+                    performInteraction();
+                }
+
+                if (e.code === 'Space' && lockpickGame.active) {
+                    lockpickGame.checkAttempt();
+                }
+
+                if (e.code === 'Escape' && state.isStarted) {
+                    togglePause();
+                }
+            });
+
+            window.addEventListener('keyup', (e) => {
+                keys[e.code] = false;
+            });
+
+            // Pointer Lock Look Controls
+            window.addEventListener('mousemove', (e) => {
+                if (!isPointerLocked || state.isPaused || state.isGameOver) return;
+                const sensitivity = 0.002;
+                player.rotation.y -= e.movementX * sensitivity;
+                player.rotation.x -= e.movementY * sensitivity;
+
+                // Pitch clamp
+                player.rotation.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, player.rotation.x));
+            });
+
+            // Canvas Click to Lock Pointer
+            renderer.domElement.addEventListener('click', () => {
+                if (state.isStarted && !state.isPaused && !isPointerLocked && !lockpickGame.active) {
+                    renderer.domElement.requestPointerLock();
+                }
+            });
+
+            document.addEventListener('pointerlockchange', () => {
+                isPointerLocked = (document.pointerLockElement === renderer.domElement);
+            });
+
+            // Menu Button Listeners
+            document.getElementById('start-game-btn').onclick = startGame;
+            document.getElementById('resume-game-btn').onclick = togglePause;
+            document.getElementById('restart-game-btn').onclick = startGame;
+            document.getElementById('clear-restart-btn').onclick = startGame;
+            document.getElementById('drop-item-btn').onclick = dropCurrentItem;
+
+            setupTouchControls();
+        }
+
+        function setupTouchControls() {
+            // Show Touch HUD on mobile devices
+            if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+                document.getElementById('touch-controls').classList.remove('hidden');
+            }
+
+            const joystick = document.getElementById('joystick-zone');
+            const knob = document.getElementById('joystick-knob');
+            let touchId = null;
+            let startX = 0, startY = 0;
+
+            joystick.addEventListener('touchstart', (e) => {
+                const touch = e.changedTouches[0];
+                touchId = touch.identifier;
+                startX = touch.clientX;
+                startY = touch.clientY;
+            });
+
+            joystick.addEventListener('touchmove', (e) => {
+                for (let touch of e.changedTouches) {
+                    if (touch.identifier === touchId) {
+                        const dx = touch.clientX - startX;
+                        const dy = touch.clientY - startY;
+                        const dist = Math.min(40, Math.hypot(dx, dy));
+                        const angle = Math.atan2(dy, dx);
+
+                        knob.style.transform = `translate(${Math.cos(angle) * dist}px, ${Math.sin(angle) * dist}px)`;
+
+                        keys['KeyW'] = dy < -10;
+                        keys['KeyS'] = dy > 10;
+                        keys['KeyA'] = dx < -10;
+                        keys['KeyD'] = dx > 10;
+                    }
+                }
+            });
+
+            const resetJoystick = () => {
+                touchId = null;
+                knob.style.transform = 'translate(0px, 0px)';
+                keys['KeyW'] = keys['KeyS'] = keys['KeyA'] = keys['KeyD'] = false;
+            };
+
+            joystick.addEventListener('touchend', resetJoystick);
+            joystick.addEventListener('touchcancel', resetJoystick);
+
+            // Action Buttons
+            document.getElementById('touch-interact').onclick = performInteraction;
+            document.getElementById('touch-flash').onclick = () => {
+                state.flashlightOn = !state.flashlightOn;
+                flashlight.visible = state.flashlightOn;
+                audio.playFlashlightClick();
+                state.updateUI();
+            };
+            document.getElementById('touch-crouch').onclick = () => { keys['KeyC'] = !keys['KeyC']; };
+            document.getElementById('touch-run').onclick = () => { keys['ShiftLeft'] = !keys['ShiftLeft']; };
+            document.getElementById('touch-jump').onclick = () => {
+                if (player.onGround) player.velocity.y = 4.0;
+            };
+        }
+
+        function toggleInventory() {
+            const modal = document.getElementById('inventory-modal');
+            const isHidden = modal.classList.contains('hidden');
+            if (isHidden) {
+                modal.classList.remove('hidden');
+                document.exitPointerLock();
+            } else {
+                modal.classList.add('hidden');
+                if (state.isStarted && !state.isPaused) renderer.domElement.requestPointerLock();
+            }
+        }
+
+        function togglePause() {
+            state.isPaused = !state.isPaused;
+            const menu = document.getElementById('menu-overlay');
+            if (state.isPaused) {
+                menu.classList.remove('hidden');
+                document.getElementById('menu-start-content').classList.add('hidden');
+                document.getElementById('menu-pause-content').classList.remove('hidden');
+                document.exitPointerLock();
+            } else {
+                menu.classList.add('hidden');
+                renderer.domElement.requestPointerLock();
+            }
+        }
+
+        function dropCurrentItem() {
+            const currentItem = state.getSelectedItem();
+            if (!currentItem) return;
+
+            // Spawn Item back into 3D world in front of player
+            const dropPos = player.position.clone().add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(1.5));
+            dropPos.y = 0.3;
+            spawnItem(currentItem, dropPos);
+
+            state.removeItem(currentItem);
+        }
+
+        function performInteraction() {
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const intersects = raycaster.intersectObjects(objectsToInteract, true);
+
+            if (intersects.length > 0 && intersects[0].distance < 2.5) {
+                let obj = intersects[0].object;
+                while (obj.parent && !obj.userData.isInteractable) {
+                    obj = obj.parent;
+                }
+
+                const data = obj.userData;
+                if (!data || !data.isInteractable) return;
+
+                // Pick up Item
+                if (data.type === 'item') {
+                    if (state.addItem(data.itemId)) {
+                        scene.remove(obj);
+                        const idx = objectsToInteract.indexOf(obj);
+                        if (idx !== -1) objectsToInteract.splice(idx, 1);
+                    }
+                }
+                // Unlock Doors / Locks
+                else if (data.type === 'lock') {
+                    const activeItem = state.getSelectedItem();
+                    if (data.requiredItem === 'lockpick' && activeItem === 'lockpick') {
+                        lockpickGame.start(obj);
+                    } else if (activeItem === data.requiredItem) {
+                        data.isUnlocked = true;
+                        scene.remove(obj);
+                        state.unlockProgress();
+                        state.removeItem(activeItem);
+                    } else {
+                        // Wrong or missing tool prompt hint
+                        player.cameraShake = 0.1;
+                    }
+                }
+                // Exit Gate Shutter
+                else if (data.type === 'exit_lock') {
+                    if (state.locksCleared < state.locksTotal) {
+                        alert('아직 해제하지 않은 잠금 장치가 남아있습니다!');
+                    } else if (state.getSelectedItem() === 'crowbar') {
+                        triggerGameClear();
+                    } else {
+                        alert('학교 정문을 강제로 제끼려면 쇠 지렛대가 필요합니다!');
+                    }
+                }
+            }
+        }
+
+        function updateInteractionPrompt() {
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const intersects = raycaster.intersectObjects(objectsToInteract, true);
+
+            const promptElem = document.getElementById('interaction-prompt');
+
+            if (intersects.length > 0 && intersects[0].distance < 2.5) {
+                let obj = intersects[0].object;
+                while (obj.parent && !obj.userData.isInteractable) {
+                    obj = obj.parent;
+                }
+                if (obj.userData && obj.userData.prompt) {
+                    promptElem.textContent = obj.userData.prompt;
+                    promptElem.classList.remove('hidden');
+                    return;
+                }
+            }
+            promptElem.classList.add('hidden');
+        }
+    </script>
+
+    <script>
+        let clock = new THREE.Clock();
+
+        function startGame() {
+            audio.init();
+            state.reset();
+
+            // Reset Player Pos
+            player.position.set(0, 1.6, 20);
+            player.rotation.set(0, 0, 0);
+
+            document.getElementById('menu-overlay').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+
+            renderer.domElement.requestPointerLock();
+        }
+
+        /* Physics & Movement Loop */
+        function updatePlayer(delta) {
+            if (!state.isStarted || state.isPaused || state.isGameOver) return;
+
+            // Crouch & Sprint Speed Settings
+            player.isCrouching = keys['KeyC'] || keys['ControlLeft'];
+            player.isSprinting = keys['ShiftLeft'] && !player.isCrouching;
+
+            let speed = player.speed;
+            if (player.isSprinting) speed = player.sprintSpeed;
+            if (player.isCrouching) speed = player.crouchSpeed;
+
+            // Smooth Height Adjustment (Crouch)
+            const targetHeight = player.isCrouching ? player.crouchHeight : player.height;
+            camera.position.y += (targetHeight - camera.position.y) * 10 * delta;
+
+            // Velocity Vector Calculation
+            const moveDir = new THREE.Vector3();
+            if (keys['KeyW']) moveDir.z -= 1;
+            if (keys['KeyS']) moveDir.z += 1;
+            if (keys['KeyA']) moveDir.x -= 1;
+            if (keys['KeyD']) moveDir.x += 1;
+            moveDir.normalize();
+
+            // Apply Rotation to Movement Vector
+            moveDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotation.y);
+
+            // Footsteps Audio
+            if (moveDir.length() > 0 && player.onGround) {
+                if (Math.random() < (player.isSprinting ? 0.08 : 0.04)) {
+                    audio.playFootstep(player.isSprinting ? 'run' : (player.isCrouching ? 'crouch' : 'walk'));
+                }
+            }
+
+            // Move position & Basic Collision check
+            const nextPos = player.position.clone().addScaledVector(moveDir, speed * delta);
+
+            // Simple Box Collisions check against environment
+            let canMove = true;
+            const playerBox = new THREE.Box3().setFromCenterAndSize(nextPos, new THREE.Vector3(0.6, 1.8, 0.6));
+            for (let collider of colliders) {
+                if (playerBox.intersectsBox(collider)) {
+                    canMove = false;
+                    break;
+                }
+            }
+
+            if (canMove) {
+                player.position.copy(nextPos);
+            }
+
+            // Jump Gravity
+            if (keys['KeyZ'] && player.onGround) {
+                player.velocity.y = 4.5;
+                player.onGround = false;
+            }
+
+            player.velocity.y -= 12.0 * delta; // Gravity
+            player.position.y += player.velocity.y * delta;
+
+            if (player.position.y <= camera.position.y) {
+                player.position.y = camera.position.y;
+                player.velocity.y = 0;
+                player.onGround = true;
+            }
+
+            // Sync Camera Position & Rotation
+            camera.position.x = player.position.x;
+            camera.position.z = player.position.z;
+            camera.rotation.copy(player.rotation);
+
+            // Camera Shake Effect (Jumpscare / Fail)
+            if (player.cameraShake > 0) {
+                camera.rotation.x += (Math.random() - 0.5) * player.cameraShake;
+                camera.rotation.y += (Math.random() - 0.5) * player.cameraShake;
+                player.cameraShake -= delta * 1.5;
+            }
+
+            updateInteractionPrompt();
+        }
+
+        /* Random Hostile Ghost Spawner & Jumpscare Event Generator */
+        let ghostEventTimer = 0;
+        function updateGhosts(delta) {
+            ghostEventTimer += delta;
+
+            // Random Jumpscare every 25-40 seconds
+            if (ghostEventTimer > 25 + Math.random() * 15) {
+                ghostEventTimer = 0;
+                triggerJumpscare();
+            }
+        }
+
+        /* Global Animation / Render Loop */
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = Math.min(clock.getDelta(), 0.1);
+
+            if (state.isStarted && !state.isPaused && !state.isGameOver) {
+                updatePlayer(delta);
+
+                if (killerAI) {
+                    killerAI.update(delta, player.position);
+                }
+
+                if (lockpickGame.active) {
+                    lockpickGame.update(delta);
+                }
+
+                updateGhosts(delta);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Initialize on Window Load
+        window.onload = () => {
+            initEngine();
+            initEnemies();
+            animate();
+        };
+    </script>
+</body>
+</html>
