@@ -1,0 +1,1366 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>MLB World Champions 3D Pro</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- FontAwesome icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Teko:wght@600;700&family=Noto+Sans+KR:wght@400;700;900&family=Roboto+Condensed:wght@700;900&display=swap" rel="stylesheet">
+    
+    <style>
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #030712;
+            font-family: 'Roboto Condensed', 'Noto Sans KR', sans-serif;
+            color: #ffffff;
+        }
+        .font-teko {
+            font-family: 'Teko', sans-serif;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        .hud-box {
+            background: rgba(10, 15, 26, 0.88);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(8px);
+        }
+        .hud-sub-box {
+            background: rgba(18, 25, 42, 0.92);
+        }
+        .btn-action {
+            transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+        }
+        .btn-action:hover {
+            transform: translateY(-2px);
+            filter: brightness(1.2);
+        }
+        .btn-action:active {
+            transform: translateY(1px) scale(0.97);
+        }
+        .btn-pitch {
+            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+        .btn-pitch.active {
+            background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%);
+            border-color: #fef08a;
+            box-shadow: 0 0 16px rgba(245, 158, 11, 0.7);
+        }
+        @keyframes popup-banner {
+            0% { transform: scale(0.2) rotate(-5deg); opacity: 0; }
+            50% { transform: scale(1.15) rotate(1deg); opacity: 1; }
+            100% { transform: scale(1) rotate(0deg); opacity: 1; }
+        }
+        .animate-popup {
+            animation: popup-banner 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        @keyframes hr-bounce {
+            0% { transform: scale(0.3) translateY(40px); opacity: 0; }
+            50% { transform: scale(1.25) translateY(-10px); opacity: 1; }
+            70% { transform: scale(0.95) translateY(0); opacity: 1; }
+            100% { transform: scale(1) translateY(0); opacity: 1; }
+        }
+        .animate-hr-score {
+            animation: hr-bounce 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+        .hr-gold-glow {
+            text-shadow: 0 0 25px rgba(250, 204, 21, 0.9), 0 0 50px rgba(234, 179, 8, 0.8), 0 0 80px rgba(239, 68, 68, 0.6);
+        }
+        .scoreboard-flash {
+            animation: flash-gold 0.8s ease-in-out 2 alternate;
+        }
+        @keyframes flash-gold {
+            0% { box-shadow: 0 0 0 rgba(245, 158, 11, 0); }
+            100% { box-shadow: 0 0 30px rgba(245, 158, 11, 0.9), inset 0 0 15px rgba(254, 240, 138, 0.6); }
+        }
+    </style>
+</head>
+<body class="w-full h-full relative overflow-hidden select-none">
+
+    <!-- 3D Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- BROADCAST OVERLAY UI -->
+    <div id="ui-layer" class="relative z-10 w-full h-full pointer-events-none flex flex-col justify-between p-3 sm:p-5">
+        
+        <!-- TOP BROADCAST SCOREBOARD BAR -->
+        <div class="flex justify-between items-start w-full max-w-7xl mx-auto">
+            
+            <!-- TOP-LEFT: MLB Broadcast Score Bug -->
+            <div class="flex flex-col space-y-1.5">
+                <div class="hud-box rounded-xl p-3 flex items-center space-x-4 pointer-events-auto">
+                    <!-- Teams & Scores -->
+                    <div class="flex items-center space-x-3 font-black text-xl sm:text-2xl tracking-wider">
+                        <div class="flex flex-col items-center">
+                            <span class="text-xs text-blue-400 font-bold">AWAY (USER)</span>
+                            <span id="away-team-code" class="text-blue-300">TOR</span>
+                            <span id="away-score-display" class="text-3xl text-white font-teko">0</span>
+                        </div>
+                        <span class="text-xs text-gray-500 font-extrabold">VS</span>
+                        <div class="flex flex-col items-center">
+                            <span class="text-xs text-red-400 font-bold">HOME (AI)</span>
+                            <span id="home-team-code" class="text-red-300">NYY</span>
+                            <span id="home-score-display" class="text-3xl text-white font-teko">0</span>
+                        </div>
+                    </div>
+
+                    <!-- Base Diamond Indicator -->
+                    <div class="relative w-8 h-8 mx-1">
+                        <div id="hud-base-2" class="absolute top-0 left-1/2 -translate-x-1/2 w-3 h-3 bg-slate-700 rotate-45 border border-slate-500 transition-colors"></div>
+                        <div id="hud-base-3" class="absolute top-1/2 left-0 -translate-y-1/2 w-3 h-3 bg-slate-700 rotate-45 border border-slate-500 transition-colors"></div>
+                        <div id="hud-base-1" class="absolute top-1/2 right-0 -translate-y-1/2 w-3 h-3 bg-slate-700 rotate-45 border border-slate-500 transition-colors"></div>
+                    </div>
+
+                    <!-- Inning & Outs Indicator -->
+                    <div class="border-l border-slate-700 pl-3 flex flex-col text-xs font-bold leading-tight">
+                        <span id="hud-inning-text" class="text-yellow-400 text-sm font-extrabold">TOP 1st</span>
+                        <div class="flex items-center space-x-1 mt-1">
+                            <span class="text-[11px] text-gray-300">OUT:</span>
+                            <span id="hud-out-val" class="text-white font-extrabold">0</span>
+                            <div id="hud-out-dots" class="flex space-x-1 ml-1">
+                                <span id="out-dot-1" class="w-2.5 h-2.5 rounded-full bg-slate-700"></span>
+                                <span id="out-dot-2" class="w-2.5 h-2.5 rounded-full bg-slate-700"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Match Role Status Banner -->
+                <div class="hud-sub-box rounded-lg px-3 py-1.5 border border-white/10 text-xs font-bold tracking-wide flex items-center justify-between pointer-events-auto">
+                    <span>모드: <span id="hud-role-text" class="text-yellow-300">공격 (타격)</span></span>
+                    <span id="hud-play-status" class="text-cyan-400 ml-2">준비 완료</span>
+                </div>
+            </div>
+
+            <!-- TOP-RIGHT: Ball/Strike Count, Pitch Velocity & Game Points -->
+            <div class="flex flex-col items-end space-y-1.5">
+                <!-- BSO Count Widget -->
+                <div class="hud-box rounded-xl px-4 py-2 flex items-center space-x-4 text-sm font-black tracking-wider pointer-events-auto">
+                    <div>B: <span id="hud-ball-count" class="text-blue-400 text-lg">0</span></div>
+                    <div class="border-l border-slate-700 h-4"></div>
+                    <div>S: <span id="hud-strike-count" class="text-yellow-400 text-lg">0</span></div>
+                    <div class="border-l border-slate-700 h-4"></div>
+                    <div>O: <span id="hud-out-count" class="text-red-400 text-lg">0</span></div>
+                </div>
+
+                <!-- Pitch Radar & Quality Banner -->
+                <div class="hud-box rounded-xl p-2 px-3 flex items-center space-x-3 pointer-events-auto min-w-[160px]">
+                    <div class="relative w-8 h-8 flex items-center justify-center rounded-full border-2 border-emerald-400/80 bg-slate-900">
+                        <i class="fa-solid fa-gauge-high text-emerald-400 text-xs"></i>
+                    </div>
+                    <div class="flex flex-col leading-none">
+                        <span id="hud-pitch-speed" class="font-teko text-2xl font-bold text-white">95 MPH</span>
+                        <span id="hud-pitch-type" class="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">FASTBALL</span>
+                    </div>
+                </div>
+
+                <!-- Contact Timing Feedback Overlay -->
+                <div id="contact-feedback" class="hidden hud-box rounded-lg px-3 py-1 border border-cyan-400/50 font-extrabold text-sm tracking-widest text-cyan-300 pointer-events-auto animate-pulse">
+                    PERFECT TIMING
+                </div>
+
+                <!-- Points Tag -->
+                <div class="hud-box rounded-lg px-3 py-1 border border-yellow-500/30 font-extrabold text-xs tracking-wider text-yellow-400 pointer-events-auto">
+                    GAME POINT: <span id="hud-game-points">1450</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- CENTER ANNOUNCEMENT BANNER -->
+        <div id="announcement-container" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+            <div id="announcement-text" class="hidden font-teko text-7xl sm:text-9xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-amber-400 to-red-500 drop-shadow-[0_10px_25px_rgba(0,0,0,0.95)] tracking-wider">
+                HOME RUN!
+            </div>
+            <div id="announcement-sub" class="hidden font-teko text-4xl sm:text-5xl font-bold text-yellow-200 drop-shadow-md tracking-widest mt-[-10px]">
+                438 FT • LINE DRIVE
+            </div>
+            <div id="hr-score-popup" class="hidden font-teko text-5xl sm:text-7xl font-black text-yellow-300 hr-gold-glow mt-2 tracking-widest">
+                +4 RUNS! GRAND SLAM!
+            </div>
+        </div>
+
+        <!-- BOTTOM CONTROLS HINT BAR -->
+        <div class="w-full max-w-4xl mx-auto pointer-events-auto mb-1 flex flex-col items-center gap-2">
+            <!-- Pitch Selector Panel (Visible when User is Pitching) -->
+            <div id="pitch-control-panel" class="hidden hud-box rounded-xl p-2 flex items-center justify-center space-x-2 pointer-events-auto">
+                <button class="btn-pitch active px-3 py-1.5 rounded-lg text-xs font-black tracking-wider text-white" data-pitch="FASTBALL">직구 (FB)</button>
+                <button class="btn-pitch px-3 py-1.5 rounded-lg text-xs font-black tracking-wider text-white" data-pitch="SLIDER">슬라이더 (SL)</button>
+                <button class="btn-pitch px-3 py-1.5 rounded-lg text-xs font-black tracking-wider text-white" data-pitch="CURVE">커브 (CB)</button>
+                <button class="btn-pitch px-3 py-1.5 rounded-lg text-xs font-black tracking-wider text-white" data-pitch="CHANGEUP">체인지업 (CH)</button>
+            </div>
+
+            <div id="control-prompt" class="hud-box rounded-xl py-2.5 px-4 text-center text-xs font-bold tracking-wider text-gray-200 border border-white/20 flex items-center justify-center flex-wrap gap-2 sm:gap-6 w-full">
+                <span><i class="fa-solid fa-computer-mouse text-blue-400 mr-1"></i> MOUSE: 조준</span>
+                <span class="text-slate-600">|</span>
+                <span><i class="fa-solid fa-hand-pointer text-green-400 mr-1"></i> CLICK: 스윙/투구</span>
+                <span class="text-slate-600">|</span>
+                <span><i class="fa-solid fa-bolt text-yellow-400 mr-1"></i> SHIFT+CLICK: 파워 스윙</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN MENU & END GAME MODALS -->
+    <div id="modal-container" class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/85 backdrop-blur-md">
+        
+        <!-- Start Screen -->
+        <div id="screen-main-menu" class="hud-box rounded-3xl p-6 sm:p-10 max-w-xl w-full text-center relative overflow-hidden shadow-2xl border border-blue-500/30">
+            <div class="absolute -top-24 -right-24 w-60 h-60 bg-blue-500/20 rounded-full blur-3xl"></div>
+            <div class="absolute -bottom-24 -left-24 w-60 h-60 bg-red-500/20 rounded-full blur-3xl"></div>
+
+            <div class="inline-block px-3.5 py-1 rounded-full bg-blue-500/20 border border-blue-400/40 text-blue-300 text-xs font-extrabold tracking-widest mb-3">
+                REALISTIC 3D CONSOLE BASEBALL
+            </div>
+            <h1 class="font-teko text-6xl sm:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-100 to-blue-300 tracking-wider leading-none mb-2">
+                MLB CHAMPIONS <span class="text-red-500">3D PRO</span>
+            </h1>
+            <p class="text-sm text-gray-300 mb-6">
+                실제 MLB 중계 시점 적용! 디테일한 3D 선수 모델링, 9인 수비 AI 실시간 추적, 직접 투구/타격 및 실제 송구 판정 시뮬레이션.
+            </p>
+
+            <div class="grid grid-cols-3 gap-3 mb-6 bg-slate-900/80 p-4 rounded-2xl border border-slate-700/60 shadow-inner">
+                <div>
+                    <div class="text-[10px] text-gray-400 font-bold uppercase">포인트</div>
+                    <div id="menu-points" class="font-teko text-3xl font-bold text-yellow-400">1450 PT</div>
+                </div>
+                <div>
+                    <div class="text-[10px] text-gray-400 font-bold uppercase">경기 매치</div>
+                    <div class="font-teko text-3xl font-bold text-blue-400">9 INNINGS</div>
+                </div>
+                <div>
+                    <div class="text-[10px] text-gray-400 font-bold uppercase">수비 AI 레벨</div>
+                    <div class="font-teko text-3xl font-bold text-green-400">PRO AI</div>
+                </div>
+            </div>
+
+            <button id="btn-start-game" class="btn-action w-full py-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-500 hover:to-indigo-500 text-white rounded-2xl font-black text-lg shadow-xl border border-blue-400/40 tracking-wide flex items-center justify-center space-x-2">
+                <i class="fa-solid fa-baseball-bat-ball"></i>
+                <span>정규 9이닝 경기 시작하기</span>
+            </button>
+        </div>
+
+        <!-- End Game Screen -->
+        <div id="screen-game-over" class="hidden hud-box rounded-3xl p-6 sm:p-10 max-w-xl w-full text-center relative overflow-hidden shadow-2xl border border-yellow-500/40">
+            <h2 id="end-game-title" class="font-teko text-6xl font-black text-yellow-400 leading-none mb-2">FINAL SCORE</h2>
+            <div id="end-game-score" class="font-teko text-5xl font-bold text-white mb-4">TOR 4 : 2 NYY</div>
+            
+            <div class="bg-slate-900/90 rounded-2xl p-4 mb-6 border border-slate-700 text-xs space-y-2">
+                <div class="flex justify-between"><span>획득 포인트:</span><span id="end-earned-pts" class="text-yellow-400 font-bold">+350 PT</span></div>
+                <div class="flex justify-between"><span>총 안타 수:</span><span id="end-hits-cnt" class="text-white font-bold">8 HITS</span></div>
+                <div class="flex justify-between"><span>홈런:</span><span id="end-hr-cnt" class="text-white font-bold">2 HR</span></div>
+                <div class="flex justify-between"><span>탈삼진:</span><span id="end-so-cnt" class="text-white font-bold">6 SO</span></div>
+            </div>
+
+            <button id="btn-restart-game" class="btn-action w-full py-4 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-2xl font-black text-lg shadow-xl border border-amber-300/40 tracking-wide">
+                새 경기 시작하기
+            </button>
+        </div>
+
+    </div>
+
+    <script>
+        class SoundEngine {
+            constructor() {
+                this.ctx = null;
+            }
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+            playHit(isPower = false) {
+                this.init();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = isPower ? 'triangle' : 'sine';
+                osc.frequency.setValueAtTime(isPower ? 480 : 600, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 0.18);
+                gain.gain.setValueAtTime(1.0, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.18);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.18);
+            }
+            playCatch() {
+                this.init();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(260, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(35, this.ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.5, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.08);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.08);
+            }
+            playStrikeCall() {
+                this.init();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(200, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(380, this.ctx.currentTime + 0.22);
+                gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.24);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.24);
+            }
+            playCheer() {
+                this.init();
+                const bufferSize = this.ctx.sampleRate * 2.5;
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.value = 1100;
+                filter.Q.value = 0.8;
+                const gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 2.5);
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.ctx.destination);
+                noise.start();
+            }
+
+            playFanfare() {
+                this.init();
+                const notes = [523.25, 659.25, 783.99, 1046.50, 1318.51];
+                notes.forEach((freq, idx) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime + idx * 0.1);
+                    gain.gain.setValueAtTime(0.45, this.ctx.currentTime + idx * 0.1);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + idx * 0.1 + 0.45);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(this.ctx.currentTime + idx * 0.1);
+                    osc.stop(this.ctx.currentTime + idx * 0.1 + 0.45);
+                });
+            }
+        }
+        const audioFX = new SoundEngine();
+    </script>
+
+    <script>
+        class Stadium3D {
+            constructor(container) {
+                this.container = container;
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x60a5fa);
+                this.scene.fog = new THREE.FogExp2(0x60a5fa, 0.0015);
+
+                this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 900);
+                this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                container.appendChild(this.renderer.domElement);
+
+                this.initLighting();
+                this.buildStadiumField();
+                this.buildGrandstandsAndCrowd();
+
+                window.addEventListener('resize', () => this.onWindowResize());
+            }
+
+            initLighting() {
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+                this.scene.add(ambientLight);
+
+                const sunLight = new THREE.DirectionalLight(0xfffbeb, 1.4);
+                sunLight.position.set(35, 95, 65);
+                sunLight.castShadow = true;
+                sunLight.shadow.mapSize.width = 2048;
+                sunLight.shadow.mapSize.height = 2048;
+                sunLight.shadow.camera.near = 1;
+                sunLight.shadow.camera.far = 280;
+                const d = 130;
+                sunLight.shadow.camera.left = -d;
+                sunLight.shadow.camera.right = d;
+                sunLight.shadow.camera.top = d;
+                sunLight.shadow.camera.bottom = -d;
+                this.scene.add(sunLight);
+            }
+
+            buildStadiumField() {
+                const grassCanvas = document.createElement('canvas');
+                grassCanvas.width = 512;
+                grassCanvas.height = 512;
+                const ctx = grassCanvas.getContext('2d');
+                ctx.fillStyle = '#1e7e34';
+                ctx.fillRect(0, 0, 512, 512);
+                ctx.fillStyle = '#28a745';
+                for (let i = 0; i < 512; i += 32) {
+                    ctx.fillRect(0, i, 512, 16);
+                }
+                const grassTex = new THREE.CanvasTexture(grassCanvas);
+                grassTex.wrapS = THREE.RepeatWrapping;
+                grassTex.wrapT = THREE.RepeatWrapping;
+                grassTex.repeat.set(18, 18);
+
+                const grass = new THREE.Mesh(
+                    new THREE.CircleGeometry(165, 64),
+                    new THREE.MeshStandardMaterial({ map: grassTex, roughness: 0.85 })
+                );
+                grass.rotation.x = -Math.PI / 2;
+                grass.receiveShadow = true;
+                this.scene.add(grass);
+
+                const dirtMat = new THREE.MeshStandardMaterial({ color: 0x9b5123, roughness: 0.92 });
+                const dirtDiamond = new THREE.Mesh(new THREE.PlaneGeometry(42, 42), dirtMat);
+                dirtDiamond.rotation.x = -Math.PI / 2;
+                dirtDiamond.rotation.z = Math.PI / 4;
+                dirtDiamond.position.set(0, 0.01, -18.4);
+                dirtDiamond.receiveShadow = true;
+                this.scene.add(dirtDiamond);
+
+                const homeCircle = new THREE.Mesh(new THREE.CircleGeometry(5.4, 32), dirtMat);
+                homeCircle.rotation.x = -Math.PI / 2;
+                homeCircle.position.set(0, 0.015, 0);
+                homeCircle.receiveShadow = true;
+                this.scene.add(homeCircle);
+
+                const mound = new THREE.Mesh(new THREE.CylinderGeometry(2.8, 3.6, 0.28, 32), dirtMat);
+                mound.position.set(0, 0.14, -18.4);
+                mound.receiveShadow = true;
+                this.scene.add(mound);
+
+                const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.2 });
+                const rubber = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.04, 0.18), whiteMat);
+                rubber.position.set(0, 0.3, -18.4);
+                this.scene.add(rubber);
+
+                const shape = new THREE.Shape();
+                shape.moveTo(0, -0.3);
+                shape.lineTo(0.3, 0);
+                shape.lineTo(0.3, 0.3);
+                shape.lineTo(-0.3, 0.3);
+                shape.lineTo(-0.3, 0);
+                const homePlate = new THREE.Mesh(new THREE.ShapeGeometry(shape), whiteMat);
+                homePlate.rotation.x = -Math.PI / 2;
+                homePlate.position.set(0, 0.025, 0);
+                this.scene.add(homePlate);
+
+                const baseGeo = new THREE.BoxGeometry(0.5, 0.08, 0.5);
+                this.base1 = new THREE.Mesh(baseGeo, whiteMat);
+                this.base1.position.set(14.8, 0.04, -18.4);
+                this.base1.rotation.y = -Math.PI / 4;
+
+                this.base2 = new THREE.Mesh(baseGeo, whiteMat);
+                this.base2.position.set(0, 0.04, -36.8);
+                this.base2.rotation.y = -Math.PI / 4;
+
+                this.base3 = new THREE.Mesh(baseGeo, whiteMat);
+                this.base3.position.set(-14.8, 0.04, -18.4);
+                this.base3.rotation.y = -Math.PI / 4;
+
+                this.scene.add(this.base1, this.base2, this.base3);
+
+                const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                const boxGeo = new THREE.BoxGeometry(1.2, 0.01, 2.0);
+                const leftBox = new THREE.Mesh(boxGeo, lineMat);
+                leftBox.position.set(-1.1, 0.02, 0);
+                const rightBox = new THREE.Mesh(boxGeo, lineMat);
+                rightBox.position.set(1.1, 0.02, 0);
+                this.scene.add(leftBox, rightBox);
+
+                const wallMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, side: THREE.DoubleSide });
+                const wall = new THREE.Mesh(
+                    new THREE.CylinderGeometry(105, 105, 8, 48, 1, true, -Math.PI / 4, Math.PI / 2),
+                    wallMat
+                );
+                wall.position.set(0, 4, -18.4);
+                this.scene.add(wall);
+            }
+
+            buildGrandstandsAndCrowd() {
+                const standMat = new THREE.MeshStandardMaterial({ color: 0x1e293b });
+                const standGeo = new THREE.CylinderGeometry(112, 145, 24, 32, 1, true, -Math.PI * 0.65, Math.PI * 1.3);
+                const grandstand = new THREE.Mesh(standGeo, standMat);
+                grandstand.position.set(0, 12, -18.4);
+                this.scene.add(grandstand);
+            }
+
+            onWindowResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        }
+    </script>
+
+    <script>
+        class PlayerModel3D {
+            static createDetailedHuman(jerseyColor = 0x1d4ed8, isBatter = false) {
+                const group = new THREE.Group();
+
+                const skinMat = new THREE.MeshStandardMaterial({ color: 0xdf9a62, roughness: 0.6 });
+                const jerseyMat = new THREE.MeshStandardMaterial({ color: jerseyColor, roughness: 0.4 });
+                const pantsMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.5 });
+                const gloveMat = new THREE.MeshStandardMaterial({ color: 0x542605, roughness: 0.7 });
+                const capMat = new THREE.MeshStandardMaterial({ color: jerseyColor, roughness: 0.3 });
+                const shoeMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.2 });
+
+                const hips = new THREE.Group();
+                hips.position.y = 0.95;
+                group.add(hips);
+                group.hips = hips;
+
+                const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.75, 0.32), jerseyMat);
+                torso.position.y = 0.42;
+                torso.castShadow = true;
+                hips.add(torso);
+                group.torso = torso;
+
+                const headGroup = new THREE.Group();
+                headGroup.position.y = 0.92;
+                
+                const head = new THREE.Mesh(new THREE.SphereGeometry(0.19, 16, 16), skinMat);
+                head.scale.set(1, 1.15, 1);
+                head.castShadow = true;
+                headGroup.add(head);
+
+                const cap = new THREE.Mesh(new THREE.SphereGeometry(0.20, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2), capMat);
+                cap.position.y = 0.04;
+                const visor = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.02, 0.16), capMat);
+                visor.position.set(0, 0.06, 0.22);
+                visor.rotation.x = 0.1;
+                headGroup.add(cap, visor);
+
+                hips.add(headGroup);
+                group.headGroup = headGroup;
+
+                const leftShoulder = new THREE.Group();
+                leftShoulder.position.set(-0.34, 0.68, 0);
+                const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.55, 10), jerseyMat);
+                leftArm.position.y = -0.27;
+                leftShoulder.add(leftArm);
+                hips.add(leftShoulder);
+                group.leftShoulder = leftShoulder;
+
+                const rightShoulder = new THREE.Group();
+                rightShoulder.position.set(0.34, 0.68, 0);
+                const rightArm = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.55, 10), jerseyMat);
+                rightArm.position.y = -0.27;
+                rightShoulder.add(rightArm);
+                hips.add(rightShoulder);
+                group.rightShoulder = rightShoulder;
+
+                const leftHip = new THREE.Group();
+                leftHip.position.set(-0.16, 0, 0);
+                const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.07, 0.85, 10), pantsMat);
+                leftLeg.position.y = -0.42;
+                leftHip.add(leftLeg);
+                hips.add(leftHip);
+                group.leftHip = leftHip;
+
+                const rightHip = new THREE.Group();
+                rightHip.position.set(0.16, 0, 0);
+                const rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.07, 0.85, 10), pantsMat);
+                rightLeg.position.y = -0.42;
+                rightHip.add(rightLeg);
+                hips.add(rightHip);
+                group.rightHip = rightHip;
+
+                if (isBatter) {
+                    const bat = new THREE.Mesh(
+                        new THREE.CylinderGeometry(0.02, 0.055, 1.25, 16),
+                        new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.3 })
+                    );
+                    bat.position.set(0, -0.5, 0.2);
+                    bat.rotation.x = Math.PI / 2;
+                    rightShoulder.add(bat);
+                    group.batMesh = bat;
+                } else {
+                    const glove = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 12), gloveMat);
+                    glove.position.set(0, -0.52, 0.05);
+                    leftShoulder.add(glove);
+                }
+
+                group.animationState = 'IDLE';
+                group.animTime = 0;
+                return group;
+            }
+
+            static setOpacity(player, opacity) {
+                if (!player) return;
+                player.traverse((child) => {
+                    if (child.isMesh && child.material) {
+                        const mats = Array.isArray(child.material) ? child.material : [child.material];
+                        mats.forEach(m => {
+                            m.transparent = opacity < 1.0;
+                            m.opacity = opacity;
+                            m.needsUpdate = true;
+                        });
+                    }
+                });
+            }
+
+            static updateAnimation(player, delta) {
+                player.animTime += delta * 6;
+                const t = player.animTime;
+
+                if (player.animationState === 'RUNNING') {
+                    player.leftHip.rotation.x = Math.sin(t) * 0.7;
+                    player.rightHip.rotation.x = -Math.sin(t) * 0.7;
+                } else if (player.animationState === 'SWINGING') {
+                    const progress = Math.min(t / 2.0, 1.0);
+                    player.rotation.y = -Math.PI / 4 + progress * Math.PI * 0.95;
+                    player.rightShoulder.rotation.x = -Math.sin(progress * Math.PI) * 1.8;
+                } else if (player.animationState === 'PITCHING') {
+                    const progress = Math.min(t / 2.5, 1.0);
+                    if (progress < 0.3) {
+                        player.leftHip.rotation.x = -1.2;
+                    } else if (progress < 0.7) {
+                        player.rightShoulder.rotation.x = -Math.PI * 0.85;
+                    } else {
+                        player.rightShoulder.rotation.x = -0.2;
+                    }
+                } else {
+                    player.leftHip.rotation.x = 0;
+                    player.rightHip.rotation.x = 0;
+                }
+            }
+        }
+    </script>
+
+    <script>
+        class BaseballGameEngine {
+            constructor() {
+                this.stadium = new Stadium3D(document.getElementById('canvas-container'));
+                this.sound = audioFX;
+
+                this.homeScore = 0;
+                this.awayScore = 0;
+                this.inning = 1;
+                this.isTop = true;
+                this.outs = 0;
+                this.balls = 0;
+                this.strikes = 0;
+                this.gamePoints = 1450;
+                this.runners = [false, false, false];
+                this.totalHits = 0;
+                this.totalHR = 0;
+                this.totalSO = 0;
+
+                this.isPlaying = false;
+                this.isUserBatting = true;
+                this.pitchState = 'READY';
+                this.selectedPitchType = 'FASTBALL';
+                this.pitchSpeedMph = 95;
+                this.hasBounced = false;
+
+                this.ball = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.12, 16, 16),
+                    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.25 })
+                );
+                this.ball.castShadow = true;
+                this.stadium.scene.add(this.ball);
+
+                this.ballPos = new THREE.Vector3();
+                this.ballVel = new THREE.Vector3();
+
+                this.pciPos = new THREE.Vector3(0, 1.15, -0.28);
+                this.buildPCIAndStrikeZone();
+
+                this.basePositions = {
+                    HOME: new THREE.Vector3(0, 0, 0),
+                    '1B': new THREE.Vector3(14.8, 0, -18.4),
+                    '2B': new THREE.Vector3(0, 0, -36.8),
+                    '3B': new THREE.Vector3(-14.8, 0, -18.4)
+                };
+
+                this.initPlayers();
+                this.setupControls();
+                this.setupUI();
+                this.updateHUD();
+
+                this.lastTime = performance.now();
+                this.animate = this.animate.bind(this);
+                requestAnimationFrame(this.animate);
+            }
+
+            buildPCIAndStrikeZone() {
+                const szGeo = new THREE.BoxGeometry(1.2, 1.4, 0.05);
+                const szMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, wireframe: true, transparent: true, opacity: 0.4 });
+                this.strikeZoneMesh = new THREE.Mesh(szGeo, szMat);
+                this.strikeZoneMesh.position.set(0, 1.15, -0.28);
+                this.stadium.scene.add(this.strikeZoneMesh);
+
+                const pciGroup = new THREE.Group();
+                const ring = new THREE.Mesh(
+                    new THREE.RingGeometry(0.12, 0.16, 32),
+                    new THREE.MeshBasicMaterial({ color: 0xfacc15, side: THREE.DoubleSide, transparent: true, opacity: 0.85 })
+                );
+                pciGroup.add(ring);
+
+                const innerDot = new THREE.Mesh(
+                    new THREE.CircleGeometry(0.04, 16),
+                    new THREE.MeshBasicMaterial({ color: 0xef4444, side: THREE.DoubleSide })
+                );
+                pciGroup.add(innerDot);
+
+                this.pciMesh = pciGroup;
+                this.pciMesh.position.copy(this.pciPos);
+                this.stadium.scene.add(this.pciMesh);
+            }
+
+            trigger3DFireworks() {
+                this.sound.playCheer();
+                this.sound.playFanfare();
+            }
+
+            initPlayers() {
+                this.fielders = {};
+                const defs = [
+                    { key: 'P', pos: [0, 0.3, -18.4] },
+                    { key: 'C', pos: [0, 0.2, 1.2] },
+                    { key: '1B', pos: [13.5, 0, -17.5] },
+                    { key: '2B', pos: [6.0, 0, -26.0] },
+                    { key: '3B', pos: [-13.5, 0, -17.5] },
+                    { key: 'SS', pos: [-6.0, 0, -26.0] },
+                    { key: 'LF', pos: [-32.0, 0, -60.0] },
+                    { key: 'CF', pos: [0.0, 0, -78.0] },
+                    { key: 'RF', pos: [32.0, 0, -60.0] }
+                ];
+
+                defs.forEach(d => {
+                    const model = PlayerModel3D.createDetailedHuman(0x1d4ed8, false);
+                    model.position.set(...d.pos);
+                    model.defaultPos = new THREE.Vector3(...d.pos);
+                    this.stadium.scene.add(model);
+                    this.fielders[d.key] = model;
+                });
+
+                this.batter = PlayerModel3D.createDetailedHuman(0xb91c1c, true);
+                this.batter.position.set(-1.45, 0, 0.3);
+                this.batter.rotation.y = Math.PI / 3;
+                this.stadium.scene.add(this.batter);
+            }
+
+            setupControls() {
+                window.addEventListener('mousemove', (e) => {
+                    if (!this.isPlaying) return;
+                    const normX = (e.clientX / window.innerWidth) * 2 - 1;
+                    const normY = -(e.clientY / window.innerHeight) * 2 + 1;
+
+                    this.pciPos.x = normX * 1.5;
+                    this.pciPos.y = 1.15 + normY * 1.1;
+                    this.pciMesh.position.set(this.pciPos.x, this.pciPos.y, -0.26);
+                });
+
+                window.addEventListener('mousedown', (e) => {
+                    if (!this.isPlaying) return;
+                    // Ignore clicks on UI buttons
+                    if (e.target.tagName === 'BUTTON' || e.target.closest('button') || e.target.closest('#modal-container')) return;
+
+                    if (this.isUserBatting) {
+                        this.triggerBatSwing(e.shiftKey);
+                    } else {
+                        this.triggerUserPitch();
+                    }
+                });
+
+                document.querySelectorAll('.btn-pitch').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        document.querySelectorAll('.btn-pitch').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        this.selectedPitchType = btn.dataset.pitch;
+                    });
+                });
+            }
+
+            setupUI() {
+                document.getElementById('btn-start-game').addEventListener('click', () => {
+                    document.getElementById('modal-container').classList.add('hidden');
+                    this.startGame();
+                });
+
+                document.getElementById('btn-restart-game').addEventListener('click', () => {
+                    document.getElementById('screen-game-over').classList.add('hidden');
+                    document.getElementById('modal-container').classList.add('hidden');
+                    this.startGame();
+                });
+            }
+
+            startGame() {
+                this.isPlaying = true;
+                this.inning = 1;
+                this.isTop = true;
+                this.outs = 0;
+                this.balls = 0;
+                this.strikes = 0;
+                this.homeScore = 0;
+                this.awayScore = 0;
+                this.runners = [false, false, false];
+                this.isUserBatting = true;
+                this.updateHUD();
+                this.startPitchSequence();
+            }
+
+            startPitchSequence() {
+                if (!this.isPlaying) return;
+
+                this.pitchState = 'READY';
+                this.resetBallToPitcherHand();
+                this.setCameraView(this.isUserBatting ? 'BATTER_VIEW' : 'PITCHER_VIEW');
+
+                if (this.isUserBatting) {
+                    const pitches = ['FASTBALL', 'SLIDER', 'CURVE', 'CHANGEUP'];
+                    this.selectedPitchType = pitches[Math.floor(Math.random() * pitches.length)];
+                    this.pitchSpeedMph = 86 + Math.floor(Math.random() * 12);
+                    this.updatePitchSpeedHUD(this.selectedPitchType, this.pitchSpeedMph);
+
+                    setTimeout(() => {
+                        if (this.isPlaying && this.isUserBatting && this.pitchState === 'READY') {
+                            this.executePitch();
+                        }
+                    }, 1400);
+                } else {
+                    this.updatePitchSpeedHUD(this.selectedPitchType, 95);
+                }
+            }
+
+            resetBallToPitcherHand() {
+                this.ballPos.set(0, 1.3, -18.4);
+                this.ball.position.copy(this.ballPos);
+                this.ballVel.set(0, 0, 0);
+            }
+
+            triggerUserPitch() {
+                if (this.pitchState !== 'READY' || this.isUserBatting) return;
+                this.pitchSpeedMph = this.selectedPitchType === 'FASTBALL' ? 98 : 86;
+                this.updatePitchSpeedHUD(this.selectedPitchType, this.pitchSpeedMph);
+                this.executePitch();
+
+                setTimeout(() => {
+                    if (this.pitchState === 'IN_FLIGHT' && Math.random() > 0.4) {
+                        this.triggerBatSwing(Math.random() > 0.65);
+                    }
+                }, 550);
+            }
+
+            executePitch() {
+                this.pitchState = 'IN_FLIGHT';
+                if (this.fielders && this.fielders.P) {
+                    this.fielders.P.animationState = 'PITCHING';
+                    this.fielders.P.animTime = 0;
+                }
+
+                let targetX, targetY;
+                if (this.isUserBatting) {
+                    // AI Pitcher: 80% Strikes inside zone
+                    const insideZone = Math.random() < 0.80;
+                    if (insideZone) {
+                        targetX = (Math.random() - 0.5) * 0.8;
+                        targetY = 0.65 + Math.random() * 0.8;
+                    } else {
+                        targetX = (Math.random() > 0.5 ? 1 : -1) * 0.85;
+                        targetY = 0.5 + Math.random() * 1.1;
+                    }
+                } else {
+                    targetX = this.pciPos.x;
+                    targetY = this.pciPos.y;
+                }
+
+                this.pitchStart = new THREE.Vector3(0, 1.3, -18.4);
+                this.pitchTarget = new THREE.Vector3(targetX, targetY, 0.0);
+                this.pitchProgress = 0;
+                this.flightDuration = 75; // frames (~1.25s)
+            }
+
+            triggerBatSwing(isPower = false) {
+                // Allow swing during flight or immediately when crossing plate
+                if (this.pitchState !== 'IN_FLIGHT' && this.pitchState !== 'LOOKING_STRIKE' && this.pitchState !== 'BALL') return;
+
+                if (this.batter) {
+                    this.batter.animationState = 'SWINGING';
+                    this.batter.animTime = 0;
+                }
+
+                const distZ = Math.abs(this.ballPos.z - 0.0);
+                const distPCI = Math.hypot(this.ballPos.x - this.pciPos.x, this.ballPos.y - this.pciPos.y);
+
+                // Very generous contact window
+                if (distZ < 4.5 && distPCI < 2.2) {
+                    this.processHitOutcome(distZ, distPCI, isPower);
+                } else {
+                    this.pitchState = 'SWING_MISS';
+                    this.processStrike('SWING MISS (헛스윙)');
+                }
+            }
+
+            processHitOutcome(distZ, distPCI, isPower) {
+                this.sound.playHit(isPower);
+                this.totalHits++;
+
+                const timingQuality = Math.max(0, 1.0 - (distZ / 4.0));
+                const pciQuality = Math.max(0, 1.0 - (distPCI / 2.0));
+                const quality = Math.max(0.25, (timingQuality * 0.6 + pciQuality * 0.4));
+
+                const exitVelocity = (75 + quality * 45) * (isPower ? 1.15 : 1.0);
+                const sprayAngle = (this.pciPos.x - this.ballPos.x) * 0.8 + (Math.random() - 0.5) * 0.25;
+                const launchAngle = 0.20 + quality * 0.45;
+
+                const speedFactor = exitVelocity * 0.018;
+                this.ballVel.set(
+                    Math.sin(sprayAngle) * speedFactor,
+                    Math.sin(launchAngle) * speedFactor * 1.1,
+                    -Math.cos(sprayAngle) * speedFactor
+                );
+
+                this.setCameraView('FIELD_ACTION');
+
+                const feedbackEl = document.getElementById('contact-feedback');
+                feedbackEl.classList.remove('hidden');
+                feedbackEl.textContent = quality > 0.70 ? 'PERFECT TIMING!' : quality > 0.45 ? 'GOOD CONTACT!' : 'CONTACT!';
+                setTimeout(() => feedbackEl.classList.add('hidden'), 1500);
+
+                if (quality > 0.60 && isPower && Math.abs(sprayAngle) < 0.65) {
+                    this.pitchState = 'HOMERUN';
+                    this.totalHR++;
+
+                    const baseRunnersCount = this.runners.filter(Boolean).length;
+                    const scoreGained = baseRunnersCount + 1;
+
+                    let hrTitle = 'SOLO HOME RUN!';
+                    if (baseRunnersCount === 1) hrTitle = '2-RUN HOMER!';
+                    if (baseRunnersCount === 2) hrTitle = '3-RUN HOMER!';
+                    if (baseRunnersCount === 3) hrTitle = '★ GRAND SLAM! ★';
+
+                    const distanceFt = Math.floor(400 + quality * 80);
+
+                    this.showAnnouncement('HOME RUN!', `${distanceFt} FT • ${hrTitle}`);
+                    this.showHRScorePopup(`+${scoreGained} RUNS! (${hrTitle})`);
+                    this.trigger3DFireworks();
+                    this.setCameraView('CINEMATIC_HR');
+
+                    if (this.isUserBatting) {
+                        this.awayScore += scoreGained;
+                        this.gamePoints += 300 + baseRunnersCount * 150;
+                    } else {
+                        this.homeScore += scoreGained;
+                    }
+
+                    const scoreboard = document.querySelector('.hud-box');
+                    if (scoreboard) {
+                        scoreboard.classList.add('scoreboard-flash');
+                        setTimeout(() => scoreboard.classList.remove('scoreboard-flash'), 1600);
+                    }
+
+                    this.runners = [false, false, false];
+                    this.updateHUD();
+
+                    setTimeout(() => {
+                        this.endPlaySequence();
+                    }, 3400);
+                } else {
+                    this.pitchState = 'HIT';
+                    this.activateFieldingAI();
+                }
+            }
+
+            activateFieldingAI() {
+                this.pitchState = 'FIELDING';
+                this.hasBounced = false;
+
+                let closestKey = 'CF';
+                let minDist = 999;
+
+                Object.keys(this.fielders).forEach(k => {
+                    if (k === 'P' || k === 'C') return;
+                    const f = this.fielders[k];
+                    const d = f.position.distanceTo(this.ballPos);
+                    if (d < minDist) {
+                        minDist = d;
+                        closestKey = k;
+                    }
+                });
+
+                this.activeFielder = this.fielders[closestKey];
+                if (this.activeFielder) this.activeFielder.animationState = 'RUNNING';
+
+                setTimeout(() => {
+                    if (this.pitchState === 'FIELDING') {
+                        this.resolveFieldingPlay();
+                    }
+                }, 3000);
+            }
+
+            resolveFieldingPlay() {
+                if (this.pitchState !== 'FIELDING') return;
+
+                this.sound.playCatch();
+
+                if (!this.hasBounced) {
+                    this.outs++;
+                    this.showAnnouncement('FLY OUT!', '플라이 아웃!');
+                } else {
+                    const distFromHome = Math.hypot(this.ballPos.x, this.ballPos.z);
+                    let bases = 1;
+                    let hitType = 'BASE HIT!';
+                    if (distFromHome > 65) { bases = 3; hitType = '3-BASE HIT!'; }
+                    else if (distFromHome > 40) { bases = 2; hitType = '2-BASE HIT!'; }
+
+                    this.showAnnouncement(hitType, '안타 출루!');
+                    this.advanceRunnersOnHit(bases);
+                }
+
+                if (this.activeFielder) this.activeFielder.animationState = 'IDLE';
+
+                setTimeout(() => {
+                    this.endPlaySequence();
+                }, 2000);
+            }
+
+            advanceRunnersOnHit(bases) {
+                let runsScored = 0;
+                const newRunners = [false, false, false];
+
+                for (let i = 2; i >= 0; i--) {
+                    if (this.runners[i]) {
+                        const nextPos = i + bases;
+                        if (nextPos >= 3) runsScored++;
+                        else newRunners[nextPos] = true;
+                    }
+                }
+
+                if (bases - 1 >= 3) runsScored++;
+                else newRunners[bases - 1] = true;
+
+                this.runners = newRunners;
+
+                if (runsScored > 0) {
+                    if (this.isUserBatting) {
+                        this.awayScore += runsScored;
+                        this.gamePoints += runsScored * 150;
+                    } else {
+                        this.homeScore += runsScored;
+                    }
+                    this.showHRScorePopup(`+${runsScored} RUN!`);
+                }
+                this.updateHUD();
+            }
+
+            processStrike(reason) {
+                if (this.pitchState === 'PROCESSING_STRIKE' || this.pitchState === 'OVER') return;
+                this.pitchState = 'PROCESSING_STRIKE';
+
+                this.sound.playStrikeCall();
+                this.strikes += 1;
+                
+                if (this.strikes >= 3) {
+                    this.outs++;
+                    this.totalSO++;
+                    this.strikes = 0;
+                    this.balls = 0;
+                    this.showAnnouncement('STRIKE OUT!', '삼진 아웃!');
+                } else {
+                    this.showAnnouncement('STRIKE!', reason);
+                }
+
+                this.updateHUD();
+                setTimeout(() => this.checkInningState(), 1800);
+            }
+
+            processBall() {
+                if (this.pitchState === 'PROCESSING_BALL' || this.pitchState === 'OVER') return;
+                this.pitchState = 'PROCESSING_BALL';
+
+                this.balls += 1;
+                if (this.balls >= 4) {
+                    this.balls = 0;
+                    this.strikes = 0;
+                    this.showAnnouncement('BALL 4!', '볼넷 출루!');
+                    this.advanceRunnersOnWalk();
+                } else {
+                    this.showAnnouncement('BALL!', `${this.balls} B - ${this.strikes} S`);
+                }
+
+                this.updateHUD();
+                setTimeout(() => this.checkInningState(), 1800);
+            }
+
+            advanceRunnersOnWalk() {
+                if (!this.runners[0]) this.runners[0] = true;
+                else if (!this.runners[1]) this.runners[1] = true;
+                else if (!this.runners[2]) this.runners[2] = true;
+                else {
+                    if (this.isUserBatting) this.awayScore += 1;
+                    else this.homeScore += 1;
+                }
+                this.updateHUD();
+            }
+
+            endPlaySequence() {
+                this.pitchState = 'OVER';
+                this.resetBallToPitcherHand();
+                if (this.batter) {
+                    this.batter.animationState = 'IDLE';
+                    this.batter.animTime = 0;
+                }
+                Object.values(this.fielders).forEach(f => {
+                    f.animationState = 'IDLE';
+                    if (f.defaultPos) f.position.copy(f.defaultPos);
+                });
+
+                this.updateHUD();
+                this.checkInningState();
+            }
+
+            checkInningState() {
+                if (this.outs >= 3) {
+                    this.outs = 0;
+                    this.strikes = 0;
+                    this.balls = 0;
+                    this.runners = [false, false, false];
+
+                    if (this.isTop) {
+                        this.isTop = false;
+                        this.isUserBatting = false;
+                        this.showAnnouncement(`${this.inning}회말 수비`, '투수 시점 전환');
+                    } else {
+                        this.isTop = true;
+                        this.inning++;
+                        this.isUserBatting = true;
+                        if (this.inning > 9) {
+                            this.endGame();
+                            return;
+                        }
+                        this.showAnnouncement(`${this.inning}회초 공격`, '타격 시점 전환');
+                    }
+                }
+                this.updateHUD();
+                this.startPitchSequence();
+            }
+
+            endGame() {
+                this.isPlaying = false;
+                document.getElementById('modal-container').classList.remove('hidden');
+                document.getElementById('screen-main-menu').classList.add('hidden');
+                document.getElementById('screen-game-over').classList.remove('hidden');
+
+                document.getElementById('end-game-score').textContent = `TOR ${this.awayScore} : ${this.homeScore} NYY`;
+                document.getElementById('end-earned-pts').textContent = `+${this.gamePoints - 1450} PT`;
+                document.getElementById('end-hits-cnt').textContent = `${this.totalHits} HITS`;
+                document.getElementById('end-hr-cnt').textContent = `${this.totalHR} HR`;
+                document.getElementById('end-so-cnt').textContent = `${this.totalSO} SO`;
+            }
+
+            updatePitchSpeedHUD(type, speed) {
+                document.getElementById('hud-pitch-speed').textContent = `${speed} MPH`;
+                document.getElementById('hud-pitch-type').textContent = type;
+            }
+
+            updateHUD() {
+                document.getElementById('away-score-display').textContent = this.awayScore;
+                document.getElementById('home-score-display').textContent = this.homeScore;
+                document.getElementById('hud-inning-text').textContent = `${this.isTop ? 'TOP' : 'BOT'} ${this.inning}th`;
+                document.getElementById('hud-out-val').textContent = this.outs;
+                document.getElementById('hud-ball-count').textContent = this.balls;
+                document.getElementById('hud-strike-count').textContent = this.strikes;
+                document.getElementById('hud-out-count').textContent = this.outs;
+                document.getElementById('hud-game-points').textContent = this.gamePoints;
+
+                document.getElementById('out-dot-1').className = `w-2.5 h-2.5 rounded-full ${this.outs >= 1 ? 'bg-red-500' : 'bg-slate-700'}`;
+                document.getElementById('out-dot-2').className = `w-2.5 h-2.5 rounded-full ${this.outs >= 2 ? 'bg-red-500' : 'bg-slate-700'}`;
+
+                document.getElementById('hud-base-1').className = `absolute top-1/2 right-0 -translate-y-1/2 w-3 h-3 rotate-45 border transition-colors ${this.runners[0] ? 'bg-orange-500 border-yellow-200' : 'bg-slate-700 border-slate-500'}`;
+                document.getElementById('hud-base-2').className = `absolute top-0 left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 border transition-colors ${this.runners[1] ? 'bg-orange-500 border-yellow-200' : 'bg-slate-700 border-slate-500'}`;
+                document.getElementById('hud-base-3').className = `absolute top-1/2 left-0 -translate-y-1/2 w-3 h-3 rotate-45 border transition-colors ${this.runners[2] ? 'bg-orange-500 border-yellow-200' : 'bg-slate-700 border-slate-500'}`;
+
+                const pitchPanel = document.getElementById('pitch-control-panel');
+                const roleText = document.getElementById('hud-role-text');
+
+                if (this.isUserBatting) {
+                    if (pitchPanel) pitchPanel.classList.add('hidden');
+                    roleText.textContent = '공격 (타격)';
+                    roleText.className = 'text-yellow-300';
+                } else {
+                    if (pitchPanel) pitchPanel.classList.remove('hidden');
+                    roleText.textContent = '수비 (투구)';
+                    roleText.className = 'text-emerald-400';
+                }
+            }
+
+            setCameraView(type) {
+                const cam = this.stadium.camera;
+                if (type === 'BATTER_VIEW') {
+                    cam.position.set(0.0, 2.1, 2.6);
+                    cam.lookAt(0, 1.15, -18.4);
+                    
+                    if (this.fielders && this.fielders.C) PlayerModel3D.setOpacity(this.fielders.C, 0.15);
+                    if (this.batter) PlayerModel3D.setOpacity(this.batter, 0.25);
+                    if (this.fielders && this.fielders.P) PlayerModel3D.setOpacity(this.fielders.P, 1.0);
+                } else if (type === 'PITCHER_VIEW') {
+                    cam.position.set(0.85, 2.7, -21.8);
+                    cam.lookAt(0, 1.05, 0.0);
+                    
+                    if (this.fielders && this.fielders.C) PlayerModel3D.setOpacity(this.fielders.C, 1.0);
+                    if (this.batter) PlayerModel3D.setOpacity(this.batter, 1.0);
+                    if (this.fielders && this.fielders.P) PlayerModel3D.setOpacity(this.fielders.P, 0.35);
+                } else if (type === 'FIELD_ACTION') {
+                    cam.position.set(0, 24, 18);
+                    cam.lookAt(0, 0, -38);
+                    if (this.fielders && this.fielders.C) PlayerModel3D.setOpacity(this.fielders.C, 1.0);
+                    if (this.fielders && this.fielders.P) PlayerModel3D.setOpacity(this.fielders.P, 1.0);
+                    if (this.batter) PlayerModel3D.setOpacity(this.batter, 1.0);
+                } else if (type === 'CINEMATIC_HR') {
+                    cam.position.set(-16, 8, -52);
+                    cam.lookAt(0, 16, -92);
+                    if (this.fielders && this.fielders.C) PlayerModel3D.setOpacity(this.fielders.C, 1.0);
+                    if (this.fielders && this.fielders.P) PlayerModel3D.setOpacity(this.fielders.P, 1.0);
+                    if (this.batter) PlayerModel3D.setOpacity(this.batter, 1.0);
+                }
+            }
+
+            showAnnouncement(mainText, subText) {
+                const textEl = document.getElementById('announcement-text');
+                const subEl = document.getElementById('announcement-sub');
+
+                textEl.textContent = mainText;
+                subEl.textContent = subText;
+
+                textEl.classList.remove('hidden', 'animate-popup');
+                subEl.classList.remove('hidden');
+
+                void textEl.offsetWidth;
+                textEl.classList.add('animate-popup');
+
+                setTimeout(() => {
+                    textEl.classList.add('hidden');
+                    subEl.classList.add('hidden');
+                }, 1800);
+            }
+
+            showHRScorePopup(text) {
+                const popupEl = document.getElementById('hr-score-popup');
+                if (!popupEl) return;
+
+                popupEl.textContent = text;
+                popupEl.classList.remove('hidden', 'animate-hr-score');
+                void popupEl.offsetWidth;
+                popupEl.classList.add('animate-hr-score');
+
+                setTimeout(() => {
+                    popupEl.classList.add('hidden');
+                }, 3200);
+            }
+
+            animate() {
+                requestAnimationFrame(this.animate);
+
+                const now = performance.now();
+                const delta = (now - this.lastTime) * 0.001;
+                this.lastTime = now;
+
+                Object.values(this.fielders).forEach(f => PlayerModel3D.updateAnimation(f, delta));
+                if (this.batter) PlayerModel3D.updateAnimation(this.batter, delta);
+
+                if (this.pitchState === 'IN_FLIGHT') {
+                    this.pitchProgress += 1 / this.flightDuration;
+                    const t = Math.min(this.pitchProgress, 1.0);
+
+                    this.ballPos.lerpVectors(this.pitchStart, this.pitchTarget, t);
+
+                    // Curve trajectory effect
+                    const curveAmount = Math.sin(t * Math.PI);
+                    if (this.selectedPitchType === 'SLIDER') this.ballPos.x -= curveAmount * 0.25;
+                    if (this.selectedPitchType === 'CURVE') this.ballPos.y -= curveAmount * 0.35;
+                    if (this.selectedPitchType === 'SINKER') { this.ballPos.x += curveAmount * 0.15; this.ballPos.y -= curveAmount * 0.2; }
+
+                    this.ball.position.copy(this.ballPos);
+
+                    if (t >= 1.0) {
+                        const inZoneX = Math.abs(this.ballPos.x) <= 0.72;
+                        const inZoneY = this.ballPos.y >= 0.38 && this.ballPos.y <= 1.92;
+
+                        if (inZoneX && inZoneY) {
+                            this.pitchState = 'LOOKING_STRIKE';
+                            this.processStrike('STRIKE (루킹 스트라이크)');
+                        } else {
+                            this.pitchState = 'BALL';
+                            this.processBall();
+                        }
+                    }
+                } else if (this.pitchState === 'HIT' || this.pitchState === 'FIELDING' || this.pitchState === 'HOMERUN') {
+                    this.ballVel.y -= 0.008;
+                    this.ballPos.add(this.ballVel);
+
+                    if (this.pitchState !== 'HOMERUN' && this.ballPos.y <= 0.12) {
+                        this.ballPos.y = 0.12;
+                        if (Math.abs(this.ballVel.y) > 0.01) {
+                            this.hasBounced = true;
+                        }
+                        this.ballVel.y = -this.ballVel.y * 0.55;
+                        this.ballVel.x *= 0.88;
+                        this.ballVel.z *= 0.88;
+                    }
+                    this.ball.position.copy(this.ballPos);
+
+                    if (this.activeFielder && this.pitchState === 'FIELDING') {
+                        const targetPos = this.ballPos.clone();
+                        targetPos.y = 0;
+                        const fPos = this.activeFielder.position.clone();
+                        fPos.y = 0;
+
+                        const dist = fPos.distanceTo(targetPos);
+                        if (dist > 0.5) {
+                            const dir = new THREE.Vector3().subVectors(targetPos, fPos).normalize();
+                            const speed = 15.0 * delta;
+                            this.activeFielder.position.x += dir.x * speed;
+                            this.activeFielder.position.z += dir.z * speed;
+                            this.activeFielder.rotation.y = Math.atan2(dir.x, dir.z);
+                        }
+
+                        if (dist < 2.0) {
+                            this.resolveFieldingPlay();
+                        }
+                    }
+                }
+
+                this.stadium.renderer.render(this.stadium.scene, this.stadium.camera);
+            }
+        }
+
+        window.addEventListener('load', () => {
+            window.game = new BaseballGameEngine();
+        });
+    </script>
+</body>
+</html>
