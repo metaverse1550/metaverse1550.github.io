@@ -1,0 +1,1471 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>와일드 헌트: 야생 몬스터 추적자 (3D Action Hunter)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Noto+Sans+KR:wght@300;400;700&display=swap');
+
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            user-select: none;
+            overflow: hidden;
+            background-color: #050805;
+            color: #e0e6ed;
+        }
+
+        .title-font {
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        /* Scope overlay effect */
+        #scope-overlay {
+            background: radial-gradient(circle at center, transparent 30%, rgba(0,0,0,0.85) 60%, black 100%);
+            pointer-events: none;
+        }
+
+        /* Crosshair styles */
+        .crosshair-line {
+            background-color: rgba(255, 255, 255, 0.8);
+            box-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+        }
+
+        /* Custom scrollbar for modals */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 15, 0.6);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(34, 197, 94, 0.4);
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(34, 197, 94, 0.8);
+        }
+
+        /* Pulse glow for fresh traces */
+        @keyframes tracePulse {
+            0% { transform: scale(1); opacity: 0.8; box-shadow: 0 0 10px #4ade80; }
+            50% { transform: scale(1.15); opacity: 1; box-shadow: 0 0 20px #22c55e, 0 0 30px #15803d; }
+            100% { transform: scale(1); opacity: 0.8; box-shadow: 0 0 10px #4ade80; }
+        }
+        .pulse-trace {
+            animation: tracePulse 1.8s infinite ease-in-out;
+        }
+
+        /* Floating damage numbers */
+        .damage-number {
+            position: absolute;
+            font-weight: 900;
+            font-family: 'Orbitron', sans-serif;
+            pointer-events: none;
+            animation: floatUp 0.9s forwards ease-out;
+            text-shadow: 0 0 6px rgba(0,0,0,0.9), 0 0 2px black;
+        }
+        @keyframes floatUp {
+            0% { opacity: 1; transform: translateY(0) scale(0.8); }
+            30% { transform: translateY(-20px) scale(1.2); }
+            100% { opacity: 0; transform: translateY(-50px) scale(0.9); }
+        }
+    </style>
+</head>
+<body class="relative w-screen h-screen m-0 p-0 overflow-hidden bg-black text-white">
+
+    <!-- 3D Canvas Container -->
+    <div id="game-canvas-container" class="absolute inset-0 w-full h-full"></div>
+
+    <!-- Scope Zoom View Overlay -->
+    <div id="scope-overlay" class="hidden absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+        <div class="w-72 h-72 rounded-full border border-green-500/40 relative flex items-center justify-center">
+            <div class="w-full h-[1px] bg-green-500/60 absolute"></div>
+            <div class="h-full w-[1px] bg-green-500/60 absolute"></div>
+            <div class="w-48 h-48 rounded-full border border-dashed border-green-400/30"></div>
+            <div class="text-[10px] text-green-400 title-font absolute bottom-4 tracking-widest">ZOOM 4.0X | DIST: <span id="scope-dist">--</span>m</div>
+        </div>
+    </div>
+
+    <!-- HUD Overlay -->
+    <div id="hud" class="absolute inset-0 pointer-events-none z-10 flex flex-col justify-between p-4 md:p-6 select-none">
+        <!-- Top HUD Bar -->
+        <div class="flex justify-between items-start w-full">
+            <!-- Player Stats Box -->
+            <div class="bg-black/70 backdrop-blur-md p-4 rounded-xl border border-green-900/50 shadow-lg w-72 space-y-2 pointer-events-auto">
+                <div class="flex justify-between items-center">
+                    <span class="text-xs font-bold text-green-400 tracking-wider">사냥꾼 상태 (HUNTER)</span>
+                    <span class="text-xs bg-green-900/80 px-2 py-0.5 rounded text-green-300 font-mono title-font">LV.<span id="hud-level">1</span></span>
+                </div>
+                <!-- Health Bar -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-red-400 font-semibold"><i class="fa-solid fa-heart mr-1"></i>체력</span>
+                        <span id="hud-hp-text" class="font-mono text-gray-300">100 / 100</span>
+                    </div>
+                    <div class="w-full h-3 bg-gray-900 rounded-full overflow-hidden border border-red-900/40">
+                        <div id="hud-hp-bar" class="h-full bg-gradient-to-r from-red-600 to-red-500 w-full transition-all duration-200"></div>
+                    </div>
+                </div>
+                <!-- Stamina Bar -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-yellow-400 font-semibold"><i class="fa-solid fa-bolt mr-1"></i>스태미나</span>
+                        <span id="hud-stamina-text" class="font-mono text-gray-300">100 / 100</span>
+                    </div>
+                    <div class="w-full h-2 bg-gray-900 rounded-full overflow-hidden border border-yellow-900/40">
+                        <div id="hud-stamina-bar" class="h-full bg-yellow-500 w-full transition-all duration-75"></div>
+                    </div>
+                </div>
+                <!-- XP Bar -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-blue-400 font-semibold"><i class="fa-solid fa-star mr-1"></i>경험치</span>
+                        <span id="hud-xp-text" class="font-mono text-gray-300">0 / 100</span>
+                    </div>
+                    <div class="w-full h-1.5 bg-gray-900 rounded-full overflow-hidden">
+                        <div id="hud-xp-bar" class="h-full bg-blue-500 w-0 transition-all duration-300"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Environment & Weather Info -->
+            <div class="bg-black/70 backdrop-blur-md px-4 py-3 rounded-xl border border-green-900/50 shadow-lg text-right flex items-center space-x-4 pointer-events-auto">
+                <div class="text-right">
+                    <div class="text-xs text-gray-400 font-mono" id="hud-time">12:00 PM (낮)</div>
+                    <div class="text-sm font-bold text-green-300 flex items-center justify-end gap-1">
+                        <i id="hud-weather-icon" class="fa-solid fa-sun text-yellow-400"></i>
+                        <span id="hud-weather-text">맑음</span>
+                    </div>
+                </div>
+                <div class="border-l border-green-800/40 pl-3">
+                    <div class="text-[10px] text-gray-400 uppercase tracking-widest">사냥 점수</div>
+                    <div class="text-xl font-bold title-font text-yellow-400" id="hud-score">0</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center Crosshair & Interaction Prompt -->
+        <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+            <!-- Dynamic Crosshair -->
+            <div id="crosshair" class="relative w-6 h-6 flex items-center justify-center">
+                <div class="crosshair-line absolute w-2 h-[2px] left-0"></div>
+                <div class="crosshair-line absolute w-2 h-[2px] right-0"></div>
+                <div class="crosshair-line absolute h-2 w-[2px] top-0"></div>
+                <div class="crosshair-line absolute h-2 w-[2px] bottom-0"></div>
+                <div class="w-1 h-1 bg-red-500 rounded-full"></div>
+            </div>
+
+            <!-- Trace Interaction Prompt -->
+            <div id="interaction-prompt" class="hidden mt-12 bg-black/80 border border-green-500/50 backdrop-blur-md px-4 py-2 rounded-lg text-sm text-green-300 flex items-center gap-2 shadow-lg animate-bounce">
+                <span class="bg-green-600 text-black font-bold px-2 py-0.5 rounded text-xs">E</span>
+                <span id="interaction-text">흔적 조사하기 (발자국)</span>
+            </div>
+        </div>
+
+        <!-- Bottom HUD Bar -->
+        <div class="flex justify-between items-end w-full">
+            <!-- Active Tracking Info & Log -->
+            <div class="bg-black/70 backdrop-blur-md p-4 rounded-xl border border-green-900/50 shadow-lg w-80 max-h-48 overflow-hidden pointer-events-auto">
+                <div class="text-xs font-bold text-green-400 mb-2 flex items-center justify-between">
+                    <span><i class="fa-solid fa-compass mr-1"></i>추적 레이더 & 흔적 정보</span>
+                    <span id="tracking-status" class="text-[10px] text-gray-400">탐색 중...</span>
+                </div>
+                <div id="trace-info-box" class="text-xs text-gray-300 space-y-1 bg-green-950/30 p-2.5 rounded-lg border border-green-800/30 mb-2">
+                    <p class="text-gray-400 italic">"주변 숲에서 몬스터의 발자국, 핏자국, 나무 긁힌 자국을 찾아보세요."</p>
+                </div>
+                <div id="hunt-log" class="text-[11px] text-gray-400 space-y-1 h-16 overflow-y-auto pr-1">
+                    <p class="text-green-400">❖ 수풀 숲에 진입했습니다. 무기를 준비하세요.</p>
+                </div>
+            </div>
+
+            <!-- Minimap -->
+            <div class="relative bg-black/80 rounded-full border-2 border-green-700/60 p-1 shadow-2xl w-36 h-36 flex items-center justify-center pointer-events-auto">
+                <canvas id="minimap-canvas" width="130" height="130" class="rounded-full bg-emerald-950/60"></canvas>
+                <div class="absolute top-1 text-[9px] font-bold text-green-400 font-mono">N</div>
+            </div>
+
+            <!-- Weapon & Ammo Display -->
+            <div class="bg-black/70 backdrop-blur-md p-4 rounded-xl border border-green-900/50 shadow-lg w-72 pointer-events-auto flex items-center justify-between">
+                <div>
+                    <div class="text-[10px] text-gray-400 uppercase tracking-wider">현재 장착 무기</div>
+                    <div id="weapon-name" class="text-lg font-bold text-yellow-400 title-font">볼트 액션 라이플</div>
+                    <div class="text-xs text-gray-400 mt-1 flex items-center gap-2">
+                        <span>[1] 라이플</span>
+                        <span>[2] 활</span>
+                        <span>[3] 샷건</span>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <div class="text-2xl font-bold title-font text-white" id="ammo-count">5 / 5</div>
+                    <div class="text-[10px] text-green-400" id="reload-prompt">[R] 재장전</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Floating Damage Container -->
+    <div id="damage-container" class="absolute inset-0 pointer-events-none z-20"></div>
+
+    <!-- Start / Title Screen Overlay -->
+    <div id="start-screen" class="absolute inset-0 bg-gradient-to-t from-black via-black/90 to-emerald-950/80 z-50 flex flex-col items-center justify-center p-6 text-center">
+        <div class="max-w-2xl bg-black/80 p-8 rounded-2xl border border-green-600/40 shadow-2xl backdrop-blur-lg">
+            <h1 class="text-4xl md:text-5xl font-black title-font text-transparent bg-clip-text bg-gradient-to-r from-green-400 via-emerald-300 to-yellow-400 mb-3 tracking-widest">
+                WILD HUNT
+            </h1>
+            <p class="text-lg text-green-300 mb-6 font-light">3D 1인칭 야생 몬스터 추적 사냥</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-left text-xs bg-green-950/40 p-4 rounded-xl border border-green-800/30 mb-6 text-gray-300">
+                <div>
+                    <h3 class="text-green-400 font-bold mb-2 text-sm"><i class="fa-solid fa-gamepad mr-1"></i>조작 방법</h3>
+                    <ul class="space-y-1">
+                        <li>• <b class="text-white">WASD</b>: 사냥꾼 이동</li>
+                        <li>• <b class="text-white">마우스</b>: 시선 이동 / 조준</li>
+                        <li>• <b class="text-white">좌클릭</b>: 발사 / 공격</li>
+                        <li>• <b class="text-white">우클릭</b>: 정밀 조준 (줌)</li>
+                        <li>• <b class="text-white">E 키</b>: 흔적 조사 / 상호작용</li>
+                        <li>• <b class="text-white">Shift / Ctrl</b>: 달리기 / 앉기</li>
+                        <li>• <b class="text-white">F 키</b>: 플래시 후두 조명 ON/OFF</li>
+                        <li>• <b class="text-white">B 키</b>: 몬스터 도감 / 장비창</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="text-green-400 font-bold mb-2 text-sm"><i class="fa-solid fa-bullseye mr-1"></i>핵심 목표 및 규칙</h3>
+                    <ul class="space-y-1">
+                        <li>• 넓은 숲속에서 <b class="text-yellow-300">발자국, 핏자국, 나무 상처</b> 흔적을 찾으세요.</li>
+                        <li>• <b class="text-emerald-300">신선한 흔적(밝게 빛남)</b>일수록 몬스터가 가깝습니다.</li>
+                        <li>• 몬스터의 <b class="text-red-400">약점(머리, 심장 core)</b>을 노려 치명타를 입히세요.</li>
+                        <li>• 사냥 성공 시 경험치와 전리품 장비를 획득하고 레벨업하세요!</li>
+                    </ul>
+                </div>
+            </div>
+
+            <button id="btn-start-game" class="w-full py-4 bg-gradient-to-r from-green-600 via-emerald-500 to-green-700 hover:from-green-500 hover:to-emerald-600 text-black font-extrabold text-xl rounded-xl transition-all shadow-lg shadow-green-900/50 transform hover:scale-[1.02] active:scale-[0.98] cursor-pointer title-font">
+                <i class="fa-solid fa-crosshairs mr-2"></i>사냥 시작하기 (START HUNT)
+            </button>
+        </div>
+    </div>
+
+    <!-- Monster Codex / Equipment Modal (Press B) -->
+    <div id="codex-modal" class="hidden absolute inset-0 z-40 bg-black/85 backdrop-blur-md flex items-center justify-center p-6">
+        <div class="bg-gray-950 border border-green-700/50 rounded-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden shadow-2xl">
+            <!-- Modal Header -->
+            <div class="flex justify-between items-center px-6 py-4 bg-green-950/60 border-b border-green-800/40">
+                <div class="flex items-center space-x-4">
+                    <h2 class="text-xl font-bold title-font text-green-400"><i class="fa-solid fa-book-skull mr-2"></i>사냥꾼 도감 & 장비</h2>
+                    <div class="flex space-x-2">
+                        <button id="tab-codex-btn" class="px-3 py-1 bg-green-700 text-black font-bold text-xs rounded">몬스터 도감</button>
+                        <button id="tab-equip-btn" class="px-3 py-1 bg-gray-800 text-gray-300 hover:bg-gray-700 text-xs rounded">장비 & 스탯</button>
+                    </div>
+                </div>
+                <button id="btn-close-codex" class="text-gray-400 hover:text-white text-2xl"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <!-- Modal Content Body -->
+            <div class="flex-1 p-6 overflow-y-auto">
+                <!-- Tab 1: Monster Codex -->
+                <div id="tab-codex-content" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <!-- Monster Card 1 -->
+                    <div class="bg-gray-900/80 border border-green-900 rounded-xl p-4 space-y-3">
+                        <div class="h-32 bg-emerald-950/50 rounded-lg flex items-center justify-center text-4xl text-green-500 border border-green-800/30">
+                            <i class="fa-solid fa-dragon"></i>
+                        </div>
+                        <h3 class="text-lg font-bold text-yellow-400">페느리르 베히모스</h3>
+                        <p class="text-xs text-gray-400">숲의 정상을 지배하는 거대 늑대형 괴수. 날카로운 발톱과 무서운 치악력을 가짐.</p>
+                        <div class="text-xs space-y-1 bg-black/40 p-2 rounded border border-gray-800">
+                            <div class="text-red-400 font-semibold">• 주요 약점: <span class="text-white">머리 (3.0x), 가슴 코어 (4.0x)</span></div>
+                            <div class="text-green-400">• 처치 횟수: <span id="codex-kill-0" class="text-white">0회</span></div>
+                        </div>
+                    </div>
+                    <!-- Monster Card 2 -->
+                    <div class="bg-gray-900/80 border border-green-900 rounded-xl p-4 space-y-3">
+                        <div class="h-32 bg-emerald-950/50 rounded-lg flex items-center justify-center text-4xl text-amber-500 border border-green-800/30">
+                            <i class="fa-solid fa-hippo"></i>
+                        </div>
+                        <h3 class="text-lg font-bold text-yellow-400">티버 고어혼</h3>
+                        <p class="text-xs text-gray-400">단단한 바위 장갑판으로 둘러싸인 거대 뿔 괴수. 충돌 돌진 공격이 위협적.</p>
+                        <div class="text-xs space-y-1 bg-black/40 p-2 rounded border border-gray-800">
+                            <div class="text-red-400 font-semibold">• 주요 약점: <span class="text-white">부드러운 배 (3.5x), 척추 (2.5x)</span></div>
+                            <div class="text-green-400">• 처치 횟수: <span id="codex-kill-1" class="text-white">0회</span></div>
+                        </div>
+                    </div>
+                    <!-- Monster Card 3 -->
+                    <div class="bg-gray-900/80 border border-green-900 rounded-xl p-4 space-y-3">
+                        <div class="h-32 bg-emerald-950/50 rounded-lg flex items-center justify-center text-4xl text-cyan-500 border border-green-800/30">
+                            <i class="fa-solid fa-ghost"></i>
+                        </div>
+                        <h3 class="text-lg font-bold text-yellow-400">프로스트 드레이크</h3>
+                        <p class="text-xs text-gray-400">안개 속에서 빠르게 움직이는 냉기 드래곤. 날개로 숲의 기온을 떨어뜨림.</p>
+                        <div class="text-xs space-y-1 bg-black/40 p-2 rounded border border-gray-800">
+                            <div class="text-red-400 font-semibold">• 주요 약점: <span class="text-white">날개 관절 (3.0x), 눈 (5.0x)</span></div>
+                            <div class="text-green-400">• 처치 횟수: <span id="codex-kill-2" class="text-white">0회</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Equipment & Stats -->
+                <div id="tab-equip-content" class="hidden space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Stats Boost Box -->
+                        <div class="bg-gray-900 p-4 rounded-xl border border-green-800/40 space-y-4">
+                            <h3 class="font-bold text-green-400 border-b border-green-800 pb-2">사냥꾼 능력치 강화</h3>
+                            <div class="space-y-3 text-xs">
+                                <div class="flex justify-between items-center">
+                                    <span>공격력 (Attack Power): <b id="stat-atk" class="text-yellow-400">100%</b></span>
+                                    <button id="btn-up-atk" class="px-3 py-1 bg-green-600 text-black font-bold rounded hover:bg-green-500">+ 강화</button>
+                                </div>
+                                <div class="flex justify-between items-center">
+                                    <span>최대 체력 (Max Health): <b id="stat-hp" class="text-red-400">100</b></span>
+                                    <button id="btn-up-hp" class="px-3 py-1 bg-green-600 text-black font-bold rounded hover:bg-green-500">+ 강화</button>
+                                </div>
+                                <div class="flex justify-between items-center">
+                                    <span>추적 범위 (Track Radius): <b id="stat-track" class="text-blue-400">30m</b></span>
+                                    <button id="btn-up-track" class="px-3 py-1 bg-green-600 text-black font-bold rounded hover:bg-green-500">+ 강화</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Inventory Loot Box -->
+                        <div class="bg-gray-900 p-4 rounded-xl border border-green-800/40 space-y-3">
+                            <h3 class="font-bold text-green-400 border-b border-green-800 pb-2">사냥 전리품 보급고</h3>
+                            <div id="loot-inventory-list" class="space-y-2 text-xs text-gray-300">
+                                <div class="p-2 bg-black/40 rounded border border-gray-800 flex justify-between">
+                                    <span><i class="fa-solid fa-shield-halved text-yellow-500 mr-2"></i>야생 사냥꾼의 강화 갑옷</span>
+                                    <span class="text-green-400">장착 중</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game End / Death / Victory Modal -->
+    <div id="end-modal" class="hidden absolute inset-0 z-50 bg-black/90 backdrop-blur-xl flex flex-col items-center justify-center p-6 text-center">
+        <div class="max-w-md bg-gray-950 p-8 rounded-2xl border border-red-700/60 shadow-2xl space-y-6">
+            <h2 id="end-title" class="text-4xl font-black title-font text-red-500">사냥 실패</h2>
+            <p id="end-desc" class="text-sm text-gray-300">몬스터의 거센 공격을 견디지 못하고 쓰러졌습니다.</p>
+
+            <div class="bg-black/60 p-4 rounded-xl border border-gray-800 text-left text-xs space-y-2">
+                <div class="flex justify-between"><span>최종 사냥 점수:</span><b id="end-score" class="text-yellow-400 font-mono">0</b></div>
+                <div class="flex justify-between"><span>발견한 흔적 수:</span><b id="end-traces" class="text-green-400 font-mono">0개</b></div>
+                <div class="flex justify-between"><span>처치한 거대 몬스터:</span><b id="end-kills" class="text-emerald-400 font-mono">0마리</b></div>
+            </div>
+
+            <button id="btn-restart" class="w-full py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-black font-extrabold rounded-xl transition-all shadow-lg cursor-pointer title-font">
+                <i class="fa-solid fa-rotate-right mr-2"></i>다시 사냥 도전
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Web Audio API Synthesizer for realistic procedural sound effects without external URLs
+        class SoundEngine {
+            constructor() {
+                this.ctx = null;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+
+            playShotgun() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                // Noise buffer for blast
+                const bufferSize = this.ctx.sampleRate * 0.3;
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(1200, now);
+                filter.frequency.exponentialRampToValueAtTime(100, now + 0.3);
+
+                const gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(0.8, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.ctx.destination);
+                noise.start(now);
+            }
+
+            playBowShot() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(400, now);
+                osc.frequency.exponentialRampToValueAtTime(80, now + 0.15);
+
+                gain.gain.setValueAtTime(0.4, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.15);
+            }
+
+            playTraceFound() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(523.25, now); // C5
+                osc.frequency.setValueAtTime(659.25, now + 0.1); // E5
+                osc.frequency.setValueAtTime(783.99, now + 0.2); // G5
+
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.4);
+            }
+
+            playMonsterRoar() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(80, now);
+                osc.frequency.linearRampToValueAtTime(140, now + 0.4);
+                osc.frequency.linearRampToValueAtTime(50, now + 1.2);
+
+                gain.gain.setValueAtTime(0.7, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 1.2);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 1.2);
+            }
+
+            playHit() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.exponentialRampToValueAtTime(40, now + 0.1);
+
+                gain.gain.setValueAtTime(0.5, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            }
+        }
+
+        const audio = new SoundEngine();
+
+        // Game State Variables
+        const GAME_STATE = {
+            MENU: 0,
+            PLAYING: 1,
+            PAUSED: 2,
+            GAMEOVER: 3
+        };
+
+        let currentState = GAME_STATE.MENU;
+
+        // Player Stats & Progression
+        const playerState = {
+            hp: 100,
+            maxHp: 100,
+            stamina: 100,
+            maxStamina: 100,
+            level: 1,
+            xp: 0,
+            xpToNext: 100,
+            score: 0,
+            traceRadius: 30,
+            atkMultiplier: 1.0,
+            tracesFound: 0,
+            monstersKilled: 0,
+            currentWeaponIndex: 0,
+            flashlightOn: false,
+            isZoomed: false
+        };
+
+        // Weapon Configuration
+        const WEAPONS = [
+            { name: "볼트 액션 라이플", damage: 65, ammoMax: 5, ammoCurrent: 5, reloadTime: 2000, zoomable: true },
+            { name: "컴파운드 사냥 활", damage: 45, ammoMax: 10, ammoCurrent: 10, reloadTime: 1200, zoomable: false },
+            { name: "헤비 샷건", damage: 120, ammoMax: 3, ammoCurrent: 3, reloadTime: 2500, zoomable: false }
+        ];
+
+        let scene, camera, renderer;
+        let clock = new THREE.Clock();
+        const MAP_SIZE = 400; // 400x400 Forest world
+
+        // Three.js Objects
+        let terrainMesh, trees = [], rocks = [], weatherParticles;
+        let sunLight, ambientLight, playerFlashlight;
+        let tracesList = [];
+        let activeMonster = null;
+        let monsterKillsCount = [0, 0, 0];
+
+        // Player Input
+        const keys = {};
+        let moveVector = new THREE.Vector3();
+        let cameraRotation = { pitch: 0, yaw: 0 };
+
+        function initThree() {
+            const container = document.getElementById('game-canvas-container');
+
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a150d);
+            scene.fog = new THREE.FogExp2(0x0a150d, 0.015);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 500);
+            camera.position.set(0, 1.8, 0);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // Lighting
+            ambientLight = new THREE.AmbientLight(0x223322, 0.8);
+            scene.add(ambientLight);
+
+            sunLight = new THREE.DirectionalLight(0xfffaed, 1.2);
+            sunLight.position.set(100, 150, 50);
+            sunLight.castShadow = true;
+            sunLight.shadow.mapSize.width = 2048;
+            sunLight.shadow.mapSize.height = 2048;
+            sunLight.shadow.camera.near = 0.5;
+            sunLight.shadow.camera.far = 400;
+            const d = 150;
+            sunLight.shadow.camera.left = -d;
+            sunLight.shadow.camera.right = d;
+            sunLight.shadow.camera.top = d;
+            sunLight.shadow.camera.bottom = -d;
+            scene.add(sunLight);
+
+            // Player Flashlight
+            playerFlashlight = new THREE.SpotLight(0xffffff, 0, 40, Math.PI / 6, 0.5);
+            playerFlashlight.position.copy(camera.position);
+            scene.add(playerFlashlight);
+            scene.add(playerFlashlight.target);
+
+            // Generate Forest World
+            buildTerrain();
+            buildForest();
+            buildWeatherSystem();
+
+            // Resize listener
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function getTerrainHeight(x, z) {
+            // Procedural hill height
+            return Math.sin(x * 0.02) * Math.cos(z * 0.02) * 6 + Math.sin(x * 0.05) * 2;
+        }
+
+        function buildTerrain() {
+            const geo = new THREE.PlaneBufferGeometry(MAP_SIZE, MAP_SIZE, 80, 80);
+            geo.rotateX(-Math.PI / 2);
+
+            const pos = geo.attributes.position;
+            for (let i = 0; i < pos.count; i++) {
+                const x = pos.getX(i);
+                const z = pos.getZ(i);
+                pos.setY(i, getTerrainHeight(x, z));
+            }
+            geo.computeVertexNormals();
+
+            // Ground material with realistic forest green/brown color
+            const mat = new THREE.MeshStandardMaterial({
+                color: 0x1e3a1e,
+                roughness: 0.9,
+                metalness: 0.1,
+                flatShading: true
+            });
+
+            terrainMesh = new THREE.Mesh(geo, mat);
+            terrainMesh.receiveShadow = true;
+            scene.add(terrainMesh);
+        }
+
+        function buildForest() {
+            // Shared geometries for performance
+            const trunkGeo = new THREE.CylinderBufferGeometry(0.3, 0.6, 6, 6);
+            const leavesGeo = new THREE.ConeBufferGeometry(3, 8, 6);
+            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3d2817, roughness: 0.9 });
+            const leavesMat = new THREE.MeshStandardMaterial({ color: 0x0f4d19, roughness: 0.8 });
+
+            // Generate Trees
+            for (let i = 0; i < 280; i++) {
+                const x = (Math.random() - 0.5) * (MAP_SIZE - 20);
+                const z = (Math.random() - 0.5) * (MAP_SIZE - 20);
+                if (Math.abs(x) < 15 && Math.abs(z) < 15) continue; // Keep spawn clear
+
+                const y = getTerrainHeight(x, z);
+
+                const treeGroup = new THREE.Group();
+                const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+                trunk.position.y = 3;
+                trunk.castShadow = true;
+                treeGroup.add(trunk);
+
+                const leaves = new THREE.Mesh(leavesGeo, leavesMat);
+                leaves.position.y = 7;
+                leaves.castShadow = true;
+                treeGroup.add(leaves);
+
+                const scale = 0.8 + Math.random() * 0.7;
+                treeGroup.scale.set(scale, scale, scale);
+                treeGroup.position.set(x, y, z);
+
+                scene.add(treeGroup);
+                trees.push(treeGroup);
+            }
+
+            // Generate Rocks & Boulders
+            const rockGeo = new THREE.DodecahedronBufferGeometry(1.5, 1);
+            const rockMat = new THREE.MeshStandardMaterial({ color: 0x4a524a, roughness: 0.9 });
+            for (let i = 0; i < 90; i++) {
+                const x = (Math.random() - 0.5) * (MAP_SIZE - 20);
+                const z = (Math.random() - 0.5) * (MAP_SIZE - 20);
+                const y = getTerrainHeight(x, z);
+
+                const rock = new THREE.Mesh(rockGeo, rockMat);
+                rock.position.set(x, y + 0.5, z);
+                rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+                const s = 0.7 + Math.random() * 1.5;
+                rock.scale.set(s, s, s);
+                rock.castShadow = true;
+
+                scene.add(rock);
+                rocks.push(rock);
+            }
+        }
+
+        function buildWeatherSystem() {
+            const count = 1000;
+            const geo = new THREE.BufferGeometry();
+            const positions = new Float32Array(count * 3);
+
+            for (let i = 0; i < count * 3; i += 3) {
+                positions[i] = (Math.random() - 0.5) * 200;
+                positions[i + 1] = Math.random() * 50;
+                positions[i + 2] = (Math.random() - 0.5) * 200;
+            }
+
+            geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const mat = new THREE.PointsMaterial({
+                color: 0x90b0d0,
+                size: 0.25,
+                transparent: true,
+                opacity: 0.6
+            });
+
+            weatherParticles = new THREE.Points(geo, mat);
+            scene.add(weatherParticles);
+        }
+
+        function updateWeather(delta) {
+            if (!weatherParticles) return;
+            const pos = weatherParticles.geometry.attributes.position;
+            for (let i = 0; i < pos.count; i++) {
+                let y = pos.getY(i);
+                y -= 25 * delta;
+                if (y < 0) y = 40;
+                pos.setY(i, y);
+            }
+            weatherParticles.geometry.attributes.position.needsUpdate = true;
+            weatherParticles.position.x = camera.position.x;
+            weatherParticles.position.z = camera.position.z;
+        }
+
+        class GiantMonster {
+            constructor(typeIndex = 0) {
+                this.typeIndex = typeIndex;
+                this.hp = 500 + typeIndex * 250;
+                this.maxHp = this.hp;
+                this.speed = 4.5 + typeIndex * 0.5;
+                this.state = 'PATROL'; // PATROL, ALERT, CHASE, ATTACK
+                this.mesh = new THREE.Group();
+
+                // Build Procedural 3D Monster Mesh
+                this.createMesh();
+
+                // Random spawn location in forest
+                const angle = Math.random() * Math.PI * 2;
+                const dist = 60 + Math.random() * 80;
+                this.position = new THREE.Vector3(
+                    Math.cos(angle) * dist,
+                    0,
+                    Math.sin(angle) * dist
+                );
+                this.position.y = getTerrainHeight(this.position.x, this.position.z);
+                this.mesh.position.copy(this.position);
+
+                scene.add(this.mesh);
+
+                // Weak Point Hitboxes references
+                this.weakPoints = [];
+                this.setupHitboxes();
+
+                this.attackCooldown = 0;
+            }
+
+            createMesh() {
+                // Main Torso Body
+                const bodyGeo = new THREE.BoxBufferGeometry(3, 2.5, 5);
+                const bodyMat = new THREE.MeshStandardMaterial({
+                    color: this.typeIndex === 0 ? 0x2b1d0c : (this.typeIndex === 1 ? 0x3d3228 : 0x1c3840),
+                    roughness: 0.7
+                });
+                const body = new THREE.Mesh(bodyGeo, bodyMat);
+                body.position.y = 2.5;
+                body.castShadow = true;
+                this.mesh.add(body);
+
+                // Head
+                const headGeo = new THREE.BoxBufferGeometry(2, 2, 2.5);
+                const headMat = new THREE.MeshStandardMaterial({ color: 0x1a120a, roughness: 0.6 });
+                this.headMesh = new THREE.Mesh(headGeo, headMat);
+                this.headMesh.position.set(0, 3.2, -3);
+                this.headMesh.castShadow = true;
+                this.mesh.add(this.headMesh);
+
+                // Glowing Heart/Core Weak Spot
+                const coreGeo = new THREE.SphereBufferGeometry(0.8, 12, 12);
+                const coreMat = new THREE.MeshBasicMaterial({ color: 0xff3300 });
+                this.coreMesh = new THREE.Mesh(coreGeo, coreMat);
+                this.coreMesh.position.set(0, 2.5, 0);
+                this.mesh.add(this.coreMesh);
+
+                // Legs
+                const legGeo = new THREE.CylinderBufferGeometry(0.5, 0.4, 2.5, 6);
+                const legMat = new THREE.MeshStandardMaterial({ color: 0x1a120a });
+                const offsets = [
+                    [-1.3, -1.8], [1.3, -1.8],
+                    [-1.3, 1.8], [1.3, 1.8]
+                ];
+                offsets.forEach(off => {
+                    const leg = new THREE.Mesh(legGeo, legMat);
+                    leg.position.set(off[0], 1.25, off[1]);
+                    leg.castShadow = true;
+                    this.mesh.add(leg);
+                });
+            }
+
+            setupHitboxes() {
+                // Attach references for weak spot hit identification
+                this.headMesh.userData = { isWeakSpot: true, multiplier: 3.0, name: "머리 (치명타!)" };
+                this.coreMesh.userData = { isWeakSpot: true, multiplier: 4.0, name: "심장 코어 (핵심 약점!)" };
+            }
+
+            update(delta, playerPos) {
+                if (this.hp <= 0) return;
+
+                const distToPlayer = this.position.distanceTo(playerPos);
+
+                // AI State Logic
+                if (distToPlayer < 8) {
+                    this.state = 'ATTACK';
+                } else if (distToPlayer < 35) {
+                    this.state = 'CHASE';
+                } else {
+                    this.state = 'PATROL';
+                }
+
+                if (this.state === 'CHASE' || this.state === 'ATTACK') {
+                    // Turn towards player
+                    const dir = new THREE.Vector3().subVectors(playerPos, this.position);
+                    dir.y = 0;
+                    dir.normalize();
+
+                    const angle = Math.atan2(dir.x, dir.z);
+                    this.mesh.rotation.y = angle + Math.PI;
+
+                    if (this.state === 'CHASE') {
+                        this.position.addScaledVector(dir, this.speed * delta);
+                        this.position.y = getTerrainHeight(this.position.x, this.position.z);
+                        this.mesh.position.copy(this.position);
+                    }
+
+                    if (this.state === 'ATTACK') {
+                        this.attackCooldown -= delta;
+                        if (this.attackCooldown <= 0) {
+                            this.performAttack();
+                            this.attackCooldown = 2.0; // 2 seconds between monster attacks
+                        }
+                    }
+                } else {
+                    // Idle / Random slow wander
+                    this.mesh.rotation.y += delta * 0.2;
+                }
+
+                // Core pulsing animation effect
+                if (this.coreMesh) {
+                    const scale = 1 + Math.sin(clock.getElapsedTime() * 5) * 0.15;
+                    this.coreMesh.scale.set(scale, scale, scale);
+                }
+            }
+
+            performAttack() {
+                audio.playMonsterRoar();
+                // Check if player is still in range to damage
+                const dist = this.position.distanceTo(camera.position);
+                if (dist < 10) {
+                    damagePlayer(25 + this.typeIndex * 10);
+                    addLog("<span class='text-red-500 font-bold'>⚠️ 몬스터의 강력한 강타 공격을 받았습니다!</span>");
+                }
+            }
+
+            takeDamage(amount, isWeak, hitPartName) {
+                this.hp -= amount;
+                audio.playHit();
+
+                // Alert monster to player's presence
+                this.state = 'CHASE';
+
+                if (this.hp <= 0) {
+                    this.onDeath();
+                }
+
+                return { currentHp: this.hp, maxHp: this.maxHp };
+            }
+
+            onDeath() {
+                scene.remove(this.mesh);
+                audio.playMonsterRoar();
+
+                playerState.score += 500 * (this.typeIndex + 1);
+                playerState.monstersKilled++;
+                monsterKillsCount[this.typeIndex]++;
+
+                // Update Codex UI kill counter
+                const killEl = document.getElementById(`codex-kill-${this.typeIndex}`);
+                if (killEl) killEl.innerText = `${monsterKillsCount[this.typeIndex]}회`;
+
+                addXP(150 + this.typeIndex * 100);
+                addLog(`<span class='text-yellow-400 font-bold'>🎉 거대 몬스터 사냥 성공! (+${500 * (this.typeIndex + 1)}점)</span>`);
+
+                // Respawn next monster after delay
+                setTimeout(() => {
+                    spawnNextMonster();
+                }, 4000);
+            }
+        }
+
+        // Trace Types: Footprints (발자국), Blood (핏자국), Claw Marks (나무 긁힌 자국)
+        class TraceNode {
+            constructor(x, z, type, ageInSec, targetMonster) {
+                this.x = x;
+                this.z = z;
+                this.type = type; // 0: Footprint, 1: Blood, 2: Scratch
+                this.age = ageInSec; // 0 (Fresh) -> 60 (Old)
+                this.targetMonster = targetMonster;
+                this.inspected = false;
+
+                this.y = getTerrainHeight(x, z);
+
+                // Create visual representation in 3D
+                this.mesh = new THREE.Group();
+
+                if (type === 0) {
+                    // Footprint
+                    const geo = new THREE.RingBufferGeometry(0.3, 0.7, 6);
+                    geo.rotateX(-Math.PI / 2);
+                    const mat = new THREE.MeshBasicMaterial({ color: 0x4ade80, side: THREE.DoubleSide });
+                    this.decal = new THREE.Mesh(geo, mat);
+                    this.mesh.add(this.decal);
+                } else if (type === 1) {
+                    // Blood Splatter
+                    const geo = new THREE.CircleBufferGeometry(0.8, 8);
+                    geo.rotateX(-Math.PI / 2);
+                    const mat = new THREE.MeshBasicMaterial({ color: 0xd97706, side: THREE.DoubleSide });
+                    this.decal = new THREE.Mesh(geo, mat);
+                    this.mesh.add(this.decal);
+                } else {
+                    // Tree Claw Mark
+                    const geo = new THREE.BoxBufferGeometry(0.2, 1.2, 0.2);
+                    const mat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+                    this.decal = new THREE.Mesh(geo, mat);
+                    this.mesh.add(this.decal);
+                }
+
+                this.mesh.position.set(x, this.y + 0.05, z);
+                scene.add(this.mesh);
+            }
+
+            getIsFresh() {
+                return this.age < 25; // Under 25s is fresh
+            }
+
+            updateVisuals() {
+                if (this.decal) {
+                    if (this.getIsFresh()) {
+                        // Glowing Fresh Trace
+                        this.decal.material.color.setHex(0x22c55e); // Bright emerald green
+                    } else {
+                        // Faded Old Trace
+                        this.decal.material.color.setHex(0x71717a); // Faded grayish brown
+                    }
+                }
+            }
+        }
+
+        function generateTracesForMonster(monster) {
+            // Remove existing traces
+            tracesList.forEach(t => scene.remove(t.mesh));
+            tracesList = [];
+
+            const startPos = new THREE.Vector3(0, 0, 0);
+            const endPos = monster.position.clone();
+
+            const steps = 12;
+            for (let i = 1; i <= steps; i++) {
+                const ratio = i / steps;
+                // Add noise offset for natural footprint paths
+                const x = THREE.MathUtils.lerp(startPos.x, endPos.x, ratio) + (Math.random() - 0.5) * 12;
+                const z = THREE.MathUtils.lerp(startPos.z, endPos.z, ratio) + (Math.random() - 0.5) * 12;
+
+                const type = Math.floor(Math.random() * 3);
+                const age = (1 - ratio) * 50; // Traces closer to monster are fresh!
+
+                const trace = new TraceNode(x, z, type, age, monster);
+                trace.updateVisuals();
+                tracesList.push(trace);
+            }
+        }
+
+        function spawnNextMonster() {
+            const monsterType = Math.floor(Math.random() * 3);
+            activeMonster = new GiantMonster(monsterType);
+            generateTracesForMonster(activeMonster);
+            addLog(`<span class='text-amber-400 font-bold'>⚠️ 새로운 야생 몬스터가 숲에 나타났습니다! 흔적을 추적하세요.</span>`);
+        }
+
+        function setupInput() {
+            // Keyboard Listeners
+            window.addEventListener('keydown', (e) => {
+                keys[e.code] = true;
+
+                if (e.code === 'KeyE') {
+                    interactWithTraces();
+                } else if (e.code === 'KeyF') {
+                    toggleFlashlight();
+                } else if (e.code === 'KeyB') {
+                    toggleCodexModal();
+                } else if (e.code === 'KeyR') {
+                    reloadWeapon();
+                } else if (e.code === 'Digit1') {
+                    switchWeapon(0);
+                } else if (e.code === 'Digit2') {
+                    switchWeapon(1);
+                } else if (e.code === 'Digit3') {
+                    switchWeapon(2);
+                }
+            });
+
+            window.addEventListener('keyup', (e) => {
+                keys[e.code] = false;
+            });
+
+            // Pointer Lock Setup
+            const container = document.getElementById('game-canvas-container');
+            container.addEventListener('click', () => {
+                if (currentState === GAME_STATE.PLAYING && document.pointerLockElement !== container) {
+                    container.requestPointerLock();
+                }
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (document.pointerLockElement === container) {
+                    const sensitivity = 0.002;
+                    cameraRotation.yaw -= e.movementX * sensitivity;
+                    cameraRotation.pitch -= e.movementY * sensitivity;
+
+                    // Clamp pitch
+                    cameraRotation.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, cameraRotation.pitch));
+
+                    const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+                    euler.x = cameraRotation.pitch;
+                    euler.y = cameraRotation.yaw;
+                    camera.quaternion.setFromEuler(euler);
+                }
+            });
+
+            // Mouse Click Shooting & Zooming
+            window.addEventListener('mousedown', (e) => {
+                if (currentState !== GAME_STATE.PLAYING) return;
+
+                if (e.button === 0) { // Left Click: Fire
+                    shootWeapon();
+                } else if (e.button === 2) { // Right Click: Scope Zoom
+                    toggleScopeZoom(true);
+                }
+            });
+
+            window.addEventListener('mouseup', (e) => {
+                if (e.button === 2) {
+                    toggleScopeZoom(false);
+                }
+            });
+
+            // Prevent right click menu
+            window.addEventListener('contextmenu', e => e.preventDefault());
+        }
+
+        function shootWeapon() {
+            const w = WEAPONS[playerState.currentWeaponIndex];
+            if (w.ammoCurrent <= 0) {
+                addLog("<span class='text-red-400'>탄약이 부족합니다! [R] 키로 재장전하세요.</span>");
+                return;
+            }
+
+            w.ammoCurrent--;
+            updateHUDWeapon();
+
+            // Play Sound Effect
+            if (playerState.currentWeaponIndex === 1) {
+                audio.playBowShot();
+            } else {
+                audio.playShotgun();
+            }
+
+            // Raycast shot from screen center
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+
+            if (activeMonster && activeMonster.hp > 0) {
+                const intersects = raycaster.intersectObjects(activeMonster.mesh.children, true);
+
+                if (intersects.length > 0) {
+                    const hitObj = intersects[0].object;
+                    let damage = w.damage * playerState.atkMultiplier;
+                    let isWeak = false;
+                    let hitName = "몸통";
+
+                    if (hitObj.userData && hitObj.userData.isWeakSpot) {
+                        isWeak = true;
+                        damage *= hitObj.userData.multiplier;
+                        hitName = hitObj.userData.name;
+                    }
+
+                    damage = Math.round(damage);
+                    activeMonster.takeDamage(damage, isWeak, hitName);
+
+                    // Display Floating Damage Number
+                    showFloatingDamage(damage, isWeak, hitName);
+
+                    if (isWeak) {
+                        addLog(`<span class='text-red-400 font-bold'>🎯 약점 타격! [${hitName}] - ${damage} 피해!!</span>`);
+                    } else {
+                        addLog(`몬스터 명중 - ${damage} 피해`);
+                    }
+                }
+            }
+        }
+
+        function showFloatingDamage(dmg, isWeak, text) {
+            const container = document.getElementById('damage-container');
+            const el = document.createElement('div');
+            el.className = `damage-number ${isWeak ? 'text-yellow-300 text-2xl' : 'text-white text-lg'}`;
+            el.innerText = `${dmg} ${isWeak ? '🔥 Weak!' : ''}`;
+
+            // Place near screen center with slight randomized offset
+            el.style.left = `${window.innerWidth / 2 + (Math.random() - 0.5) * 80}px`;
+            el.style.top = `${window.innerHeight / 2 - 40 + (Math.random() - 0.5) * 40}px`;
+
+            container.appendChild(el);
+            setTimeout(() => el.remove(), 900);
+        }
+
+        function toggleScopeZoom(enable) {
+            const scopeOverlay = document.getElementById('scope-overlay');
+            playerState.isZoomed = enable;
+
+            if (enable && WEAPONS[playerState.currentWeaponIndex].zoomable) {
+                camera.fov = 25;
+                scopeOverlay.classList.remove('hidden');
+            } else {
+                camera.fov = 75;
+                scopeOverlay.classList.add('hidden');
+            }
+            camera.updateProjectionMatrix();
+        }
+
+        function switchWeapon(index) {
+            if (index < 0 || index >= WEAPONS.length) return;
+            playerState.currentWeaponIndex = index;
+            updateHUDWeapon();
+            addLog(`무기 교체: <b class='text-yellow-400'>${WEAPONS[index].name}</b>`);
+        }
+
+        function reloadWeapon() {
+            const w = WEAPONS[playerState.currentWeaponIndex];
+            w.ammoCurrent = w.ammoMax;
+            updateHUDWeapon();
+            addLog("재장전 완료!");
+        }
+
+        function toggleFlashlight() {
+            playerState.flashlightOn = !playerState.flashlightOn;
+            playerFlashlight.intensity = playerState.flashlightOn ? 2.5 : 0;
+            addLog(`손전등 조명 ${playerState.flashlightOn ? '켜짐 ON' : '꺼짐 OFF'}`);
+        }
+
+        function interactWithTraces() {
+            let closestTrace = null;
+            let minDist = 4.0; // 4 meters interactive radius
+
+            tracesList.forEach(t => {
+                const dist = camera.position.distanceTo(new THREE.Vector3(t.x, t.y, t.z));
+                if (dist < minDist) {
+                    minDist = dist;
+                    closestTrace = t;
+                }
+            });
+
+            if (closestTrace) {
+                closestTrace.inspected = true;
+                playerState.tracesFound++;
+                audio.playTraceFound();
+
+                const isFresh = closestTrace.getIsFresh();
+                const typeName = closestTrace.type === 0 ? "발자국" : (closestTrace.type === 1 ? "핏자국" : "나무 긁힌 자국");
+
+                // Update Trace Info Box on HUD
+                const traceBox = document.getElementById('trace-info-box');
+                traceBox.innerHTML = `
+                    <div class="font-bold ${isFresh ? 'text-green-400' : 'text-amber-400'}">
+                        <i class="fa-solid fa-shoe-prints mr-1"></i>[${typeName}] ${isFresh ? '신선한 흔적 (방금 전)' : '오래된 흔적'}
+                    </div>
+                    <div class="text-[11px] text-gray-300">
+                        ${isFresh ? '⚡ 몬스터가 바로 근처 수풀에 위치해 있습니다! 무기를 정조준하세요.' : '🍂 몬스터가 북서쪽으로 이동했습니다. 경로를 계속 추적하세요.'}
+                    </div>
+                `;
+
+                addXP(30);
+                addLog(`<span class='text-green-300'>🔍 흔적 조사 완료: [${typeName}] (+30 XP)</span>`);
+            }
+        }
+
+        function updatePlayerMovement(delta) {
+            if (currentState !== GAME_STATE.PLAYING) return;
+
+            // Stamina & Sprinting
+            let moveSpeed = 6.0;
+            const isSprinting = keys['ShiftLeft'] && playerState.stamina > 10;
+
+            if (isSprinting) {
+                moveSpeed = 11.0;
+                playerState.stamina = Math.max(0, playerState.stamina - 25 * delta);
+            } else {
+                playerState.stamina = Math.min(playerState.maxStamina, playerState.stamina + 15 * delta);
+            }
+
+            // Direction calculation
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            forward.y = 0;
+            forward.normalize();
+
+            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+            right.y = 0;
+            right.normalize();
+
+            moveVector.set(0, 0, 0);
+
+            if (keys['KeyW']) moveVector.add(forward);
+            if (keys['KeyS']) moveVector.sub(forward);
+            if (keys['KeyD']) moveVector.add(right);
+            if (keys['KeyA']) moveVector.sub(right);
+
+            if (moveVector.lengthSq() > 0) {
+                moveVector.normalize();
+                camera.position.addScaledVector(moveVector, moveSpeed * delta);
+            }
+
+            // Map Boundary Constraints
+            const halfMap = MAP_SIZE / 2 - 5;
+            camera.position.x = Math.max(-halfMap, Math.min(halfMap, camera.position.x));
+            camera.position.z = Math.max(-halfMap, Math.min(halfMap, camera.position.z));
+
+            // Terrain Height Following
+            const groundY = getTerrainHeight(camera.position.x, camera.position.z);
+            camera.position.y = groundY + (keys['ControlLeft'] ? 1.0 : 1.8); // Crouch height toggle
+
+            // Update Flashlight position & rotation
+            playerFlashlight.position.copy(camera.position);
+            const flashTarget = camera.position.clone().add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(10));
+            playerFlashlight.target.position.copy(flashTarget);
+
+            // Distance reading in scope
+            if (playerState.isZoomed && activeMonster) {
+                const dist = Math.round(camera.position.distanceTo(activeMonster.position));
+                document.getElementById('scope-dist').innerText = dist;
+            }
+
+            // Check trace interaction proximity
+            checkTraceProximity();
+        }
+
+        function checkTraceProximity() {
+            let promptShown = false;
+            tracesList.forEach(t => {
+                const dist = camera.position.distanceTo(new THREE.Vector3(t.x, t.y, t.z));
+                if (dist < 4.0) {
+                    promptShown = true;
+                    const typeName = t.type === 0 ? "발자국" : (t.type === 1 ? "핏자국" : "나무 긁힌 자국");
+                    document.getElementById('interaction-text').innerText = `흔적 조사하기 (${typeName})`;
+                }
+            });
+
+            const promptEl = document.getElementById('interaction-prompt');
+            if (promptShown) {
+                promptEl.classList.remove('hidden');
+            } else {
+                promptEl.classList.add('hidden');
+            }
+        }
+
+        function damagePlayer(amount) {
+            playerState.hp = Math.max(0, playerState.hp - amount);
+            updateHUDStats();
+
+            if (playerState.hp <= 0) {
+                gameOver(false);
+            }
+        }
+
+        function addXP(amount) {
+            playerState.xp += amount;
+            if (playerState.xp >= playerState.xpToNext) {
+                playerState.xp -= playerState.xpToNext;
+                playerState.level++;
+                playerState.xpToNext = Math.round(playerState.xpToNext * 1.5);
+
+                // Stat Boost on Level Up
+                playerState.maxHp += 20;
+                playerState.hp = playerState.maxHp;
+                playerState.atkMultiplier += 0.15;
+
+                addLog(`<span class='text-yellow-300 font-bold'>🌟 레벨 업! (LV.${playerState.level}) - 공격력 & 체력 상승!</span>`);
+            }
+            updateHUDStats();
+        }
+
+        function updateHUDStats() {
+            document.getElementById('hud-level').innerText = playerState.level;
+            document.getElementById('hud-hp-text').innerText = `${Math.round(playerState.hp)} / ${playerState.maxHp}`;
+            document.getElementById('hud-hp-bar').style.width = `${(playerState.hp / playerState.maxHp) * 100}%`;
+
+            document.getElementById('hud-stamina-text').innerText = `${Math.round(playerState.stamina)} / ${playerState.maxStamina}`;
+            document.getElementById('hud-stamina-bar').style.width = `${(playerState.stamina / playerState.maxStamina) * 100}%`;
+
+            document.getElementById('hud-xp-text').innerText = `${playerState.xp} / ${playerState.xpToNext}`;
+            document.getElementById('hud-xp-bar').style.width = `${(playerState.xp / playerState.xpToNext) * 100}%`;
+
+            document.getElementById('hud-score').innerText = playerState.score;
+        }
+
+        function updateHUDWeapon() {
+            const w = WEAPONS[playerState.currentWeaponIndex];
+            document.getElementById('weapon-name').innerText = w.name;
+            document.getElementById('ammo-count').innerText = `${w.ammoCurrent} / ${w.ammoMax}`;
+        }
+
+        function addLog(msg) {
+            const logEl = document.getElementById('hunt-log');
+            const p = document.createElement('p');
+            p.innerHTML = `❖ ${msg}`;
+            logEl.prepend(p);
+        }
+
+        function renderMinimap() {
+            const canvas = document.getElementById('minimap-canvas');
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const center = w / 2;
+
+            ctx.clearRect(0, 0, w, h);
+
+            // Radar Background Grid
+            ctx.strokeStyle = 'rgba(34, 197, 94, 0.2)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(center, center, center - 2, 0, Math.PI * 2);
+            ctx.stroke();
+
+            const scale = 0.6; // Scale factor
+
+            // Draw Traces on Minimap
+            tracesList.forEach(t => {
+                const relX = (t.x - camera.position.x) * scale;
+                const relZ = (t.z - camera.position.z) * scale;
+
+                if (Math.hypot(relX, relZ) < center - 5) {
+                    ctx.fillStyle = t.getIsFresh() ? '#22c55e' : '#a1a1aa';
+                    ctx.beginPath();
+                    ctx.arc(center + relX, center + relZ, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+
+            // Draw Active Monster Radar Icon
+            if (activeMonster && activeMonster.hp > 0) {
+                const relX = (activeMonster.position.x - camera.position.x) * scale;
+                const relZ = (activeMonster.position.z - camera.position.z) * scale;
+
+                if (Math.hypot(relX, relZ) < center - 5) {
+                    ctx.fillStyle = '#ef4444'; // Red monster dot
+                    ctx.beginPath();
+                    ctx.arc(center + relX, center + relZ, 5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            // Draw Player Heading Indicator (Center Arrow)
+            ctx.fillStyle = '#facc15';
+            ctx.beginPath();
+            ctx.arc(center, center, 4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function toggleCodexModal() {
+            const modal = document.getElementById('codex-modal');
+            if (modal.classList.contains('hidden')) {
+                modal.classList.remove('hidden');
+                document.exitPointerLock();
+            } else {
+                modal.classList.add('hidden');
+                document.getElementById('game-canvas-container').requestPointerLock();
+            }
+        }
+
+        function setupUIEvents() {
+            document.getElementById('btn-start-game').addEventListener('click', () => {
+                document.getElementById('start-screen').classList.add('hidden');
+                currentState = GAME_STATE.PLAYING;
+                audio.init();
+                document.getElementById('game-canvas-container').requestPointerLock();
+                spawnNextMonster();
+            });
+
+            document.getElementById('btn-close-codex').addEventListener('click', toggleCodexModal);
+
+            // Tab Switchers
+            document.getElementById('tab-codex-btn').addEventListener('click', () => {
+                document.getElementById('tab-codex-content').classList.remove('hidden');
+                document.getElementById('tab-equip-content').classList.add('hidden');
+            });
+            document.getElementById('tab-equip-btn').addEventListener('click', () => {
+                document.getElementById('tab-equip-content').classList.remove('hidden');
+                document.getElementById('tab-codex-content').classList.add('hidden');
+            });
+
+            // Stats Upgrade Buttons
+            document.getElementById('btn-up-atk').addEventListener('click', () => {
+                playerState.atkMultiplier += 0.2;
+                document.getElementById('stat-atk').innerText = `${Math.round(playerState.atkMultiplier * 100)}%`;
+            });
+            document.getElementById('btn-up-hp').addEventListener('click', () => {
+                playerState.maxHp += 25;
+                playerState.hp = playerState.maxHp;
+                document.getElementById('stat-hp').innerText = playerState.maxHp;
+                updateHUDStats();
+            });
+
+            document.getElementById('btn-restart').addEventListener('click', () => {
+                location.reload();
+            });
+        }
+
+        function gameOver(isVictory) {
+            currentState = GAME_STATE.GAMEOVER;
+            document.exitPointerLock();
+
+            const endModal = document.getElementById('end-modal');
+            const endTitle = document.getElementById('end-title');
+            const endDesc = document.getElementById('end-desc');
+
+            if (isVictory) {
+                endTitle.innerText = "사냥 완료!";
+                endTitle.className = "text-4xl font-black title-font text-green-400";
+                endDesc.innerText = "숲의 전설적인 몬스터 사냥에 성공했습니다.";
+            }
+
+            document.getElementById('end-score').innerText = playerState.score;
+            document.getElementById('end-traces').innerText = `${playerState.tracesFound}개`;
+            document.getElementById('end-kills').innerText = `${playerState.monstersKilled}마리`;
+
+            endModal.classList.remove('hidden');
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+
+            if (currentState === GAME_STATE.PLAYING) {
+                updatePlayerMovement(delta);
+                updateWeather(delta);
+
+                if (activeMonster) {
+                    activeMonster.update(delta, camera.position);
+                }
+
+                renderMinimap();
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // Start initialization on window load
+        window.onload = function () {
+            initThree();
+            setupInput();
+            setupUIEvents();
+            animate();
+        };
+    </script>
+</body>
+</html>
