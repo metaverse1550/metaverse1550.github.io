@@ -1,0 +1,1444 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>해성고등학교 탈출 액션 게임</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+        * {
+            font-family: 'Pretendard', sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body {
+            background-color: #090d16;
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            max-width: 1280px;
+            max-height: 720px;
+            background: #000;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.9);
+            border: 4px solid #334155;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            image-rendering: -moz-crisp-edges;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+</div>
+
+<script>
+const CONFIG = {
+    CANVAS_WIDTH: 1280,
+    CANVAS_HEIGHT: 720,
+    GRAVITY: 0.65,
+    ULTIMATE_HITS_REQUIRED: 10,
+    PIXEL_SIZE: 4
+};
+
+const GAME_STATE = {
+    TITLE: 'TITLE',
+    CHAR_SELECT: 'CHAR_SELECT',
+    PLAYING: 'PLAYING',
+    GAME_OVER: 'GAME_OVER',
+    CLEAR: 'CLEAR'
+};
+
+const CHARACTERS = {
+    GONG: {
+        id: 'GONG',
+        name: '공 (모사드 요원)',
+        desc: '베테랑 비밀요원! 원거리 사격과 강력한 폭격을 가한다.',
+        color: '#2563eb',
+        hp: 120,
+        speed: 5.5,
+        attacks: {
+            Q: { name: '권총 사격', cd: 15, damage: 18, range: 600, type: 'GUN' },
+            W: { name: '소총 연사', cd: 35, damage: 10, count: 4, range: 650, type: 'RIFLE' },
+            E: { name: 'RPG 로켓', cd: 80, damage: 55, radius: 100, type: 'RPG' }
+        },
+        ultName: '행님~ (초대형 지원 폭격)'
+    },
+    HOO: {
+        id: 'HOO',
+        name: '후 (두부)',
+        desc: '말랑탱글하지만 묵직한 두부! 배 만지기와 강력한 밀쳐내기.',
+        color: '#f8fafc',
+        hp: 170,
+        speed: 4.8,
+        attacks: {
+            Q: { name: '마구 휘두르기', cd: 12, damage: 22, range: 90, type: 'MELEE' },
+            W: { name: '배 만지기', cd: 28, damage: 32, range: 140, type: 'BELLY_RUB' },
+            E: { name: '강력한 배치기', cd: 55, damage: 50, range: 150, dash: 14, type: 'BELLY' }
+        },
+        ultName: '단단한 두부의 분노 (전방 대폭발)'
+    },
+    SHIN: {
+        id: 'SHIN',
+        name: '신 (시간조절자)',
+        desc: '엽기 특수능력자! 재채기 비말, 수면 회복, 고래 인형과 시공간 조작.',
+        color: '#06b6d4',
+        hp: 125,
+        speed: 5.2,
+        attacks: {
+            Q: { name: '재채기 (비말)', cd: 18, damage: 18, count: 3, type: 'SNEEZE' },
+            W: { name: '수면 (HP회복)', cd: 110, heal: 40, type: 'SLEEP' },
+            E: { name: '고래 인형', cd: 45, damage: 45, type: 'WHALE' }
+        },
+        ultName: '시간 정지 / 초시공 감속'
+    }
+};
+
+// Stage-specific student & enemy names
+const STAGE_ENEMY_NAMES = {
+    1: ['사회부원 박지훈', '역사동아리 윤서준', '지리마니아 최민서', '사회과 반장 정수빈', '법정 스터디 김철수'],
+    2: ['1반 체육부장 이영희', '1반 선도부원 한지우', '1반 서기 임도윤', '1반 분위기기반 송현우', '1반 오락부장 오민재'],
+    3: ['교무실 심부름꾼 강동현', '선도부장 배주원', '학생회 유진', '교내 순찰대원 서아인', '자습 감독 조교 황준서'],
+    4: ['통제구역 정예학생 신유진', '최종 수호대 박지훈', '해성 블랙요원 윤서준', '수호대장 최민서', '통제 대원 정수빈']
+};
+
+// Boss Attack Phrases
+const BOSS_QUOTES = {
+    1: ['📚 수능 특강 폭격!', '✏️ 수행평가 감점!', '📖 교과서 암기해라!', '📝 오답노트 작성!', '📊 사회 탐구 기습!'],
+    2: ['✏️ 출석부 날리기!', '🧹 대자루 회오리!', '📢 조용히 안 해?!', '📋 주번일지 폭격!', '🔔 수업종 공격!'],
+    3: ['📜 훈화 말씀!', '🔊 애국가 4절 제창!', '🏆 학교의 전통과 역사!', '👔 복장 및 두발 단속!', '🏫 해성의 정신!'],
+    '4_P1': ['말랑탱글 배 만지기!', 'RPG 연속 사격!', '시간 파동 공격!', '묵직한 두부 배치기!', '시공간 구체!'],
+    '4_P2': ['🔥 행님~ 지원 폭격!!', '🧊 단단한 두부의 분노!', '⏱️ 시간 정지!! (SLOW)', '💣 삼위일체 대폭발!', '⚡ 초시공 일격!']
+};
+
+const Input = {
+    keys: {},
+    lastDir: 1,
+    init() {
+        window.addEventListener('keydown', (e) => {
+            this.keys[e.code] = true;
+            if (e.code === 'ArrowLeft') this.lastDir = -1;
+            if (e.code === 'ArrowRight') this.lastDir = 1;
+        });
+        window.addEventListener('keyup', (e) => {
+            this.keys[e.code] = false;
+        });
+    },
+    isPressed(code) {
+        return !!this.keys[code];
+    }
+};
+
+class EffectSystem {
+    constructor() {
+        this.particles = [];
+        this.texts = [];
+    }
+
+    addParticle(x, y, vx, vy, color, size, life, shape = 'circle') {
+        this.particles.push({ x, y, vx, vy, color, size, life, maxLife: life, shape });
+    }
+
+    addDamageText(x, y, text, color = '#ffffff', size = 20) {
+        this.texts.push({ x, y, text, color, size, life: 35, maxLife: 35, vy: -1.5 });
+    }
+
+    addExplosion(x, y, color = '#f97316', count = 25) {
+        for (let i = 0; i < count; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = Math.random() * 8 + 2;
+            this.addParticle(
+                x, y,
+                Math.cos(angle) * speed,
+                Math.sin(angle) * speed,
+                color,
+                Math.random() * 8 + 4,
+                25 + Math.random() * 15
+            );
+        }
+    }
+
+    update() {
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            let p = this.particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life--;
+            if (p.life <= 0) this.particles.splice(i, 1);
+        }
+        for (let i = this.texts.length - 1; i >= 0; i--) {
+            let t = this.texts[i];
+            t.y += t.vy;
+            t.life--;
+            if (t.life <= 0) this.texts.splice(i, 1);
+        }
+    }
+
+    draw(ctx, camera) {
+        for (let p of this.particles) {
+            ctx.save();
+            ctx.globalAlpha = p.life / p.maxLife;
+            ctx.fillStyle = p.color;
+            let screenX = p.x - camera.x;
+            let screenY = p.y - camera.y;
+
+            if (p.shape === 'circle') {
+                ctx.beginPath();
+                ctx.arc(screenX, screenY, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            } else if (p.shape === 'rect') {
+                ctx.fillRect(screenX - p.size/2, screenY - p.size/2, p.size, p.size);
+            }
+            ctx.restore();
+        }
+
+        for (let t of this.texts) {
+            ctx.save();
+            ctx.globalAlpha = t.life / t.maxLife;
+            ctx.font = `bold ${t.size}px Pretendard`;
+            ctx.fillStyle = t.color;
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 3;
+            let screenX = t.x - camera.x;
+            let screenY = t.y - camera.y;
+            ctx.strokeText(t.text, screenX, screenY);
+            ctx.fillText(t.text, screenX, screenY);
+            ctx.restore();
+        }
+    }
+
+    clear() {
+        this.particles = [];
+        this.texts = [];
+    }
+}
+
+class KinderChocolate {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.w = 36;
+        this.h = 42;
+        this.collected = false;
+        this.bounce = 0;
+    }
+
+    update() {
+        this.bounce += 0.08;
+    }
+
+    draw(ctx, camera) {
+        if (this.collected) return;
+
+        let sx = Math.floor(this.x - camera.x);
+        let sy = Math.floor(this.y - camera.y + Math.sin(this.bounce) * 6);
+
+        ctx.save();
+        // Chocolate wrapper background (Kinder red & white)
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(sx, sy, this.w, this.h);
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(sx, sy + this.h - 16, this.w, 16);
+
+        // Chocolate bar peek on top
+        ctx.fillStyle = '#78350f';
+        ctx.fillRect(sx + 6, sy + 4, this.w - 12, 12);
+
+        // Glow outline
+        ctx.strokeStyle = '#fba124';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(sx - 2, sy - 2, this.w + 4, this.h + 4);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 11px Pretendard';
+        ctx.fillText('킨더', sx + 6, sy + 36);
+
+        ctx.restore();
+    }
+}
+
+class LevelMap {
+    constructor() {
+        this.width = 3600;
+        this.height = 720;
+        this.floorY = 600;
+
+        this.stageInfo = {
+            1: { name: 'STAGE 1 : 1F 사회과 교실 구역', color: '#1e293b' },
+            2: { name: 'STAGE 2 : 1학년 1반 & 복도', color: '#0f172a' },
+            3: { name: 'STAGE 3 : 2F 교무실 구역', color: '#111827' },
+            4: { name: 'STAGE 4 : 통제구역 (최종 삼위일체)', color: '#311212' }
+        };
+
+        this.platforms = [
+            { x: 400, y: 460, w: 220, h: 20 },
+            { x: 900, y: 410, w: 220, h: 20 },
+            { x: 1500, y: 470, w: 250, h: 20 },
+            { x: 2100, y: 400, w: 240, h: 20 },
+            { x: 2700, y: 460, w: 220, h: 20 }
+        ];
+
+        this.exitDoorX = 3400;
+        this.isDoorOpen = false;
+    }
+
+    draw(ctx, camera, stageNum) {
+        let info = this.stageInfo[stageNum] || this.stageInfo[1];
+        ctx.fillStyle = info.color;
+        ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+        // Stage Title background watermark
+        ctx.fillStyle = 'rgba(255,255,255,0.03)';
+        ctx.font = '80px Pretendard';
+        ctx.fillText(info.name, 100 - camera.x, 200);
+
+        // Windows & Wall Props
+        for (let x = 200; x < this.width; x += 400) {
+            let wx = x - camera.x;
+            ctx.fillStyle = '#334155';
+            ctx.fillRect(wx, 180, 120, 140);
+            ctx.fillStyle = '#7dd3fc';
+            ctx.globalAlpha = 0.2;
+            ctx.fillRect(wx + 10, 190, 100, 120);
+            ctx.globalAlpha = 1.0;
+        }
+
+        // Floor
+        ctx.fillStyle = '#334155';
+        ctx.fillRect(0 - camera.x, this.floorY, this.width, this.height - this.floorY);
+        ctx.fillStyle = '#475569';
+        ctx.fillRect(0 - camera.x, this.floorY, this.width, 15);
+
+        // Platforms
+        ctx.fillStyle = '#64748b';
+        for (let p of this.platforms) {
+            let px = p.x - camera.x;
+            let py = p.y - camera.y;
+            if (px + p.w > 0 && px < CONFIG.CANVAS_WIDTH) {
+                ctx.fillRect(px, py, p.w, p.h);
+                ctx.fillStyle = '#94a3b8';
+                ctx.fillRect(px, py, p.w, 4);
+                ctx.fillStyle = '#64748b';
+            }
+        }
+
+        // Exit Door (Next Stage Portal)
+        let doorX = this.exitDoorX - camera.x;
+        if (this.isDoorOpen) {
+            ctx.fillStyle = '#22c55e';
+            ctx.fillRect(doorX, this.floorY - 180, 110, 180);
+            ctx.fillStyle = '#bbf7d0';
+            ctx.fillRect(doorX + 10, this.floorY - 170, 90, 160);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 20px Pretendard';
+            ctx.fillText(stageNum === 4 ? 'CLEAR (탈출)' : 'NEXT STAGE ➔', doorX - 10, this.floorY - 195);
+        } else {
+            ctx.fillStyle = '#dc2626';
+            ctx.fillRect(doorX, this.floorY - 180, 110, 180);
+            ctx.fillStyle = '#7f1d1d';
+            ctx.fillRect(doorX + 10, this.floorY - 170, 90, 160);
+
+            ctx.fillStyle = '#fef08a';
+            ctx.font = 'bold 18px Pretendard';
+            ctx.fillText('🔒 보스 처치 필요!', doorX - 15, this.floorY - 195);
+        }
+    }
+}
+
+class Camera {
+    constructor() {
+        this.x = 0;
+        this.y = 0;
+        this.width = CONFIG.CANVAS_WIDTH;
+        this.height = CONFIG.CANVAS_HEIGHT;
+    }
+
+    follow(target, map) {
+        this.x = target.x + target.w / 2 - this.width / 2;
+        if (this.x < 0) this.x = 0;
+        if (this.x > map.width - this.width) this.x = map.width - this.width;
+    }
+}
+
+class Projectile {
+    constructor(x, y, vx, vy, damage, owner, type, size = 10, extra = {}) {
+        this.x = x;
+        this.y = y;
+        this.vx = vx;
+        this.vy = vy;
+        this.damage = damage;
+        this.owner = owner;
+        this.type = type;
+        this.size = size;
+        this.extra = extra;
+        this.active = true;
+        this.life = extra.life || 120;
+    }
+
+    update(map, globalTimeSlow = 1.0) {
+        let speedMult = (this.owner !== 'PLAYER') ? globalTimeSlow : 1.0;
+        this.x += this.vx * speedMult;
+        this.y += this.vy * speedMult;
+        this.life--;
+
+        if (this.type === 'RPG' || this.type === 'TIME_SPHERE') {
+            this.vy += 0.2 * speedMult;
+        }
+
+        if (this.life <= 0 || this.y >= map.floorY) {
+            this.active = false;
+        }
+    }
+
+    draw(ctx, camera) {
+        let sx = Math.floor(this.x - camera.x);
+        let sy = Math.floor(this.y - camera.y);
+
+        ctx.save();
+        if (this.type === 'GUN' || this.type === 'RIFLE') {
+            ctx.fillStyle = '#facc15';
+            ctx.fillRect(sx - 6, sy - 3, 12, 6);
+            ctx.fillStyle = '#f97316';
+            ctx.fillRect(sx - 8, sy - 2, 4, 4);
+        } else if (this.type === 'RPG') {
+            ctx.fillStyle = '#ef4444';
+            ctx.fillRect(sx - 15, sy - 6, 24, 12);
+            ctx.fillStyle = '#facc15';
+            ctx.fillRect(sx + 9, sy - 4, 6, 8);
+        } else if (this.type === 'SNEEZE' || this.type === 'TIME_WAVE') {
+            ctx.fillStyle = '#38bdf8';
+            ctx.beginPath();
+            ctx.arc(sx, sy, 8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#e0f2fe';
+            ctx.beginPath();
+            ctx.arc(sx - 2, sy - 2, 3, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (this.type === 'WHALE' || this.type === 'TIME_SPHERE') {
+            // Whale plushie shape
+            ctx.fillStyle = '#0284c7';
+            ctx.beginPath();
+            ctx.ellipse(sx, sy, 18, 12, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#f8fafc';
+            ctx.beginPath();
+            ctx.ellipse(sx, sy + 4, 14, 6, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(sx + (this.vx > 0 ? 8 : -10), sy - 4, 3, 3);
+        } else if (this.type === 'ENEMY_CHALK') {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(sx - 8, sy - 4, 16, 8);
+            ctx.strokeStyle = '#94a3b8';
+            ctx.strokeRect(sx - 8, sy - 4, 16, 8);
+        } else if (this.type === 'ENEMY_PLANE') {
+            ctx.fillStyle = '#38bdf8';
+            ctx.beginPath();
+            ctx.moveTo(sx + (this.vx > 0 ? 12 : -12), sy);
+            ctx.lineTo(sx - (this.vx > 0 ? 12 : -12), sy - 8);
+            ctx.lineTo(sx - (this.vx > 0 ? 12 : -12), sy + 8);
+            ctx.closePath();
+            ctx.fill();
+        } else if (this.type === 'BOSS_SPEECH' || this.type === 'BOSS_ATTACK') {
+            ctx.fillStyle = '#f43f5e';
+            ctx.font = 'bold 18px Pretendard';
+            ctx.fillText(this.extra.text || '공격!', sx, sy);
+        }
+        ctx.restore();
+    }
+}
+
+class Player {
+    constructor() {
+        this.x = 100;
+        this.y = 400;
+        this.w = 52;
+        this.h = 80;
+        this.vx = 0;
+        this.vy = 0;
+        this.isGrounded = false;
+        this.dir = 1;
+
+        this.charData = CHARACTERS.GONG;
+        this.hp = 120;
+        this.maxHp = 120;
+        this.speed = 5.5;
+
+        this.cdQ = 0;
+        this.cdW = 0;
+        this.cdE = 0;
+
+        this.hitCount = 0;
+        this.ultReady = false;
+
+        this.isAttacking = false;
+        this.attackMotion = '';
+        this.timeSlowActiveTimer = 0;
+    }
+
+    selectCharacter(charKey) {
+        this.charData = CHARACTERS[charKey];
+        this.hp = this.charData.hp;
+        this.maxHp = this.charData.hp;
+        this.speed = this.charData.speed;
+        this.hitCount = 0;
+        this.ultReady = false;
+        this.timeSlowActiveTimer = 0;
+    }
+
+    resetPos() {
+        this.x = 100;
+        this.y = 400;
+        this.vx = 0;
+        this.vy = 0;
+        this.timeSlowActiveTimer = 0;
+    }
+
+    registerHit() {
+        if (!this.ultReady) {
+            this.hitCount++;
+            if (this.hitCount >= CONFIG.ULTIMATE_HITS_REQUIRED) {
+                this.hitCount = CONFIG.ULTIMATE_HITS_REQUIRED;
+                this.ultReady = true;
+            }
+        }
+    }
+
+    update(map, projectiles, effectSys) {
+        if (this.cdQ > 0) this.cdQ--;
+        if (this.cdW > 0) this.cdW--;
+        if (this.cdE > 0) this.cdE--;
+
+        if (this.timeSlowActiveTimer > 0) {
+            this.timeSlowActiveTimer--;
+        }
+
+        this.vx = 0;
+        if (Input.isPressed('ArrowLeft')) {
+            this.vx = -this.speed;
+            this.dir = -1;
+        }
+        if (Input.isPressed('ArrowRight')) {
+            this.vx = this.speed;
+            this.dir = 1;
+        }
+
+        if (Input.isPressed('ArrowUp') && this.isGrounded) {
+            this.vy = -14;
+            this.isGrounded = false;
+        }
+
+        this.vy += CONFIG.GRAVITY;
+        this.x += this.vx;
+        this.y += this.vy;
+
+        this.isGrounded = false;
+        if (this.y + this.h >= map.floorY) {
+            this.y = map.floorY - this.h;
+            this.vy = 0;
+            this.isGrounded = true;
+        }
+
+        for (let p of map.platforms) {
+            if (this.x + this.w > p.x && this.x < p.x + p.w) {
+                if (this.y + this.h >= p.y && this.y + this.h <= p.y + 15 && this.vy >= 0) {
+                    this.y = p.y - this.h;
+                    this.vy = 0;
+                    this.isGrounded = true;
+                }
+            }
+        }
+
+        if (this.x < 0) this.x = 0;
+        if (this.x + this.w > map.width) this.x = map.width - this.w;
+
+        if (Input.isPressed('KeyQ') && this.cdQ <= 0) this.useSkill('Q', projectiles, effectSys);
+        if (Input.isPressed('KeyW') && this.cdW <= 0) this.useSkill('W', projectiles, effectSys);
+        if (Input.isPressed('KeyE') && this.cdE <= 0) this.useSkill('E', projectiles, effectSys);
+        if (Input.isPressed('KeyS') && this.ultReady) this.useUltimate(projectiles, effectSys);
+    }
+
+    useSkill(key, projectiles, effectSys) {
+        const atk = this.charData.attacks[key];
+        if (!atk) return;
+
+        if (key === 'Q') this.cdQ = atk.cd;
+        if (key === 'W') this.cdW = atk.cd;
+        if (key === 'E') this.cdE = atk.cd;
+
+        this.isAttacking = true;
+        this.attackMotion = atk.name;
+        setTimeout(() => this.isAttacking = false, 300);
+
+        if (this.charData.id === 'GONG') {
+            if (key === 'Q') {
+                projectiles.push(new Projectile(this.x + this.w/2, this.y + 30, this.dir * 15, 0, atk.damage, 'PLAYER', 'GUN', 6));
+            } else if (key === 'W') {
+                for (let i = 0; i < 4; i++) {
+                    setTimeout(() => {
+                        projectiles.push(new Projectile(this.x + this.w/2, this.y + 30, this.dir * 17, (Math.random() - 0.5) * 2, atk.damage, 'PLAYER', 'RIFLE', 5));
+                    }, i * 50);
+                }
+            } else if (key === 'E') {
+                projectiles.push(new Projectile(this.x + this.w/2, this.y + 30, this.dir * 11, -3, atk.damage, 'PLAYER', 'RPG', 12));
+            }
+        } else if (this.charData.id === 'HOO') {
+            if (key === 'Q') {
+                effectSys.addParticle(this.x + (this.dir > 0 ? this.w : -30), this.y + 30, this.dir * 4, 0, '#e2e8f0', 20, 10);
+                this.hitMelee(atk.range, atk.damage, effectSys);
+            } else if (key === 'W') {
+                effectSys.addDamageText(this.x + this.w/2, this.y - 20, '말랑말랑~ 배 만지기!', '#38bdf8', 24);
+                effectSys.addParticle(this.x + this.w/2, this.y + 40, 0, 0, '#e2e8f0', 50, 20, 'circle');
+                this.hitMelee(atk.range, atk.damage, effectSys, 'BELLY_RUB');
+            } else if (key === 'E') {
+                this.vx = this.dir * atk.dash;
+                this.x += this.vx * 3;
+                effectSys.addParticle(this.x + this.w/2, this.y + this.h/2, 0, 0, '#cbd5e1', 45, 15, 'rect');
+                this.hitMelee(atk.range, atk.damage, effectSys);
+            }
+        } else if (this.charData.id === 'SHIN') {
+            if (key === 'Q') {
+                for (let i = 0; i < 3; i++) {
+                    projectiles.push(new Projectile(this.x + this.w/2, this.y + 20, this.dir * (9 + i * 2), (Math.random() - 0.5) * 3, atk.damage, 'PLAYER', 'SNEEZE', 8));
+                }
+            } else if (key === 'W') {
+                this.hp = Math.min(this.maxHp, this.hp + atk.heal);
+                effectSys.addDamageText(this.x + this.w/2, this.y - 10, `💤 수면 (HP +${atk.heal})`, '#38bdf8', 24);
+                for (let i = 0; i < 12; i++) {
+                    effectSys.addParticle(this.x + Math.random()*this.w, this.y + Math.random()*this.h, 0, -2, '#0284c7', 8, 25);
+                }
+            } else if (key === 'E') {
+                projectiles.push(new Projectile(this.x + this.w/2, this.y + 20, this.dir * 10, -4, atk.damage, 'PLAYER', 'WHALE', 18));
+            }
+        }
+    }
+
+    hitMelee(range, damage, effectSys, special = null) {
+        this.pendingMelee = { range, damage, special };
+    }
+
+    useUltimate(projectiles, effectSys) {
+        this.ultReady = false;
+        this.hitCount = 0;
+
+        if (this.charData.id === 'GONG') {
+            effectSys.addDamageText(this.x + this.w/2, this.y - 45, `🔥 행님~! 초대형 지원 폭격!`, '#f59e0b', 34);
+            for (let i = -6; i <= 6; i++) {
+                setTimeout(() => {
+                    projectiles.push(new Projectile(this.x + i * 90, this.y - 350, 0, 16, 70, 'PLAYER', 'RPG', 18));
+                    effectSys.addDamageText(this.x + i * 90, this.y - 200, '행님~!', '#ef4444', 22);
+                }, Math.abs(i) * 50);
+            }
+        } else if (this.charData.id === 'HOO') {
+            effectSys.addDamageText(this.x + this.w/2, this.y - 45, `🧊 단단한 두부의 분노!`, '#f8fafc', 34);
+            this.pendingMelee = { range: 650, damage: 140, special: 'ULT' };
+            effectSys.addExplosion(this.x + this.w/2, this.y + this.h/2, '#cbd5e1', 60);
+        } else if (this.charData.id === 'SHIN') {
+            effectSys.addDamageText(this.x + this.w/2, this.y - 45, `⏱️ 시간 정지 / 초시공 발동! (SLOW)`, '#0284c7', 36);
+            this.timeSlowActiveTimer = 380;
+            for (let i = 0; i < 30; i++) {
+                let angle = (i / 30) * Math.PI * 2;
+                effectSys.addParticle(
+                    this.x + this.w/2 + Math.cos(angle) * 200,
+                    this.y + this.h/2 + Math.sin(angle) * 200,
+                    -Math.cos(angle) * 4, -Math.sin(angle) * 4,
+                    '#38bdf8', 12, 40
+                );
+            }
+        }
+    }
+
+    draw(ctx, camera) {
+        let sx = Math.floor(this.x - camera.x);
+        let sy = Math.floor(this.y - camera.y);
+
+        ctx.save();
+        if (this.timeSlowActiveTimer > 0) {
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.arc(sx + this.w/2, sy + this.h/2, 250, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(56, 189, 248, 0.1)';
+            ctx.fill();
+        }
+
+        if (this.charData.id === 'GONG') {
+            ctx.fillStyle = '#1e293b';
+            ctx.fillRect(sx + 10, sy + 50, 12, 30);
+            ctx.fillRect(sx + 30, sy + 50, 12, 30);
+            ctx.fillStyle = '#2563eb';
+            ctx.fillRect(sx + 8, sy + 22, 36, 30);
+            ctx.fillStyle = '#fca5a5';
+            ctx.fillRect(sx + 12, sy + 6, 28, 18);
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(sx + 8, sy + 2, 36, 8);
+        } else if (this.charData.id === 'HOO') {
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillRect(sx, sy, this.w, this.h);
+            ctx.fillStyle = '#cbd5e1';
+            ctx.fillRect(sx, sy + this.h - 8, this.w, 8);
+            ctx.fillStyle = '#dc2626';
+            ctx.fillRect(sx, sy + 12, this.w, 8);
+            ctx.fillStyle = '#0f172a';
+            let eyeX = this.dir > 0 ? sx + 30 : sx + 10;
+            ctx.fillRect(eyeX, sy + 30, 6, 8);
+            ctx.fillRect(eyeX + 12, sy + 30, 6, 8);
+        } else if (this.charData.id === 'SHIN') {
+            ctx.fillStyle = '#0284c7';
+            ctx.fillRect(sx + 6, sy + 20, 40, 55);
+            ctx.fillStyle = '#38bdf8';
+            ctx.fillRect(sx + 10, sy + 8, 32, 16);
+            ctx.fillStyle = '#fef08a';
+            let visorX = this.dir > 0 ? sx + 22 : sx + 10;
+            ctx.fillRect(visorX, sy + 12, 18, 8);
+        }
+
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(sx, sy, this.w, this.h);
+
+        if (this.isAttacking) {
+            ctx.fillStyle = '#facc15';
+            ctx.font = 'bold 16px Pretendard';
+            ctx.fillText(this.attackMotion, sx - 10, sy - 20);
+        }
+        ctx.restore();
+    }
+}
+
+class Enemy {
+    constructor(x, y, nameIndex, stageNum = 1, isRanged = false) {
+        this.x = x;
+        this.y = y;
+        this.w = 50;
+        this.h = 75;
+        this.hp = 60 + stageNum * 15;
+        this.maxHp = this.hp;
+        this.speed = isRanged ? 2.2 : 3.0;
+        this.damage = 10;
+        this.dir = -1;
+        this.active = true;
+        this.attackCd = 0;
+        this.isRanged = isRanged;
+
+        this.color = isRanged ? '#0284c7' : '#3b82f6';
+        let names = STAGE_ENEMY_NAMES[stageNum] || STAGE_ENEMY_NAMES[1];
+        this.name = (isRanged ? '🎯 ' : '') + names[nameIndex % names.length];
+    }
+
+    update(player, map, projectiles, effectSys) {
+        if (!this.active) return;
+        if (this.attackCd > 0) this.attackCd--;
+
+        let timeSlowMult = (player.timeSlowActiveTimer > 0) ? 0.2 : 1.0;
+        let dist = Math.abs((player.x + player.w/2) - (this.x + this.w/2));
+
+        if (dist < 600) {
+            this.dir = player.x > this.x ? 1 : -1;
+
+            if (this.isRanged) {
+                // Ranged enemy logic: Keep distance and shoot
+                if (dist > 280) {
+                    this.x += this.dir * this.speed * timeSlowMult;
+                } else if (dist < 180) {
+                    this.x -= this.dir * this.speed * timeSlowMult;
+                }
+
+                if (dist < 550 && this.attackCd <= 0) {
+                    this.attackCd = Math.floor(100 / timeSlowMult);
+                    let pType = Math.random() > 0.5 ? 'ENEMY_CHALK' : 'ENEMY_PLANE';
+                    projectiles.push(new Projectile(
+                        this.x + this.w/2, this.y + 25,
+                        this.dir * 8, -1.5, 12, 'ENEMY', pType, 8
+                    ));
+                    effectSys.addDamageText(this.x + this.w/2, this.y - 15, pType === 'ENEMY_CHALK' ? '✏️ 분필 투척!' : '✈️ 종이비행기!', '#38bdf8', 14);
+                }
+            } else {
+                // Melee enemy logic
+                this.x += this.dir * this.speed * timeSlowMult;
+                if (dist < 55 && this.attackCd <= 0) {
+                    this.attackCd = Math.floor(60 / timeSlowMult);
+                    player.hp -= this.damage;
+                    effectSys.addDamageText(player.x + player.w/2, player.y, `-${this.damage}`, '#ef4444', 22);
+                }
+            }
+        }
+    }
+
+    draw(ctx, camera) {
+        if (!this.active) return;
+        let sx = Math.floor(this.x - camera.x);
+        let sy = Math.floor(this.y - camera.y);
+
+        ctx.save();
+        ctx.fillStyle = this.color;
+        ctx.fillRect(sx, sy, this.w, this.h);
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(sx, sy, this.w, this.h);
+
+        // Indicator for ranged unit
+        if (this.isRanged) {
+            ctx.fillStyle = '#fef08a';
+            ctx.fillRect(sx + 10, sy + 10, this.w - 20, 8);
+        }
+
+        // HP Bar
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(sx, sy - 10, this.w, 6);
+        ctx.fillStyle = '#22c55e';
+        ctx.fillRect(sx, sy - 10, (this.hp / this.maxHp) * this.w, 6);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 12px Pretendard';
+        ctx.fillText(this.name, sx - 10, sy - 15);
+        ctx.restore();
+    }
+}
+
+class StageBoss {
+    constructor(x, y, stageNum) {
+        this.x = x;
+        this.y = y;
+        this.stageNum = stageNum;
+        this.active = true;
+        this.attackTimer = 0;
+        this.dir = -1;
+
+        if (stageNum === 1) {
+            this.w = 80; this.h = 115; this.hp = 380; this.maxHp = 380;
+            this.name = 'STAGE 1 보스 : 정시온t (사회 선생님)';
+            this.color = '#8b5cf6';
+        } else if (stageNum === 2) {
+            this.w = 75; this.h = 110; this.hp = 500; this.maxHp = 500;
+            this.name = 'STAGE 2 보스 : 1-1반장';
+            this.color = '#ec4899';
+        } else if (stageNum === 3) {
+            this.w = 85; this.h = 125; this.hp = 700; this.maxHp = 700;
+            this.name = 'STAGE 3 보스 : 백종기 교장 선생님';
+            this.color = '#4c1d95';
+        } else {
+            // Stage 4 Final Boss (Combination of Hoo + Gong + Shin)
+            this.w = 110; this.h = 145; this.hp = 1200; this.maxHp = 1200;
+            this.name = 'FINAL BOSS : 삼위일체 후공신 (1페이즈)';
+            this.color = '#991b1b';
+            this.phase = 1;
+        }
+    }
+
+    getRandomQuote(quotesList) {
+        return quotesList[Math.floor(Math.random() * quotesList.length)];
+    }
+
+    update(player, map, projectiles, effectSys) {
+        if (!this.active) return;
+        let timeSlowMult = (player.timeSlowActiveTimer > 0) ? 0.25 : 1.0;
+
+        let dist = Math.abs((player.x + player.w/2) - (this.x + this.w/2));
+        this.dir = player.x > this.x ? 1 : -1;
+        this.attackTimer += timeSlowMult;
+
+        // Boss attacks as long as boss is visible on screen (approx screen width range ~950px)
+        if (dist < 950) {
+            if (this.stageNum === 1) { // 정시온t
+                if (Math.floor(this.attackTimer) % 60 === 0) {
+                    let text = this.getRandomQuote(BOSS_QUOTES[1]);
+                    projectiles.push(new Projectile(
+                        this.x + this.w/2, this.y + 40, 
+                        this.dir * 6, 0, 14, 'BOSS', 'BOSS_SPEECH', 16, 
+                        { text, life: 55 }
+                    ));
+                }
+            } else if (this.stageNum === 2) { // 1-1반장
+                if (Math.floor(this.attackTimer) % 48 === 0) {
+                    let text = this.getRandomQuote(BOSS_QUOTES[2]);
+                    projectiles.push(new Projectile(
+                        this.x + this.w/2, this.y + 35, 
+                        this.dir * 7, -1, 16, 'BOSS', 'BOSS_ATTACK', 18, 
+                        { text, life: 50 }
+                    ));
+                }
+            } else if (this.stageNum === 3) { // 백종기 교장 선생님
+                if (Math.floor(this.attackTimer) % 52 === 0) {
+                    let text = this.getRandomQuote(BOSS_QUOTES[3]);
+                    projectiles.push(new Projectile(
+                        this.x + this.w/2, this.y + 30, 
+                        this.dir * 7, (Math.random()-0.5)*2, 20, 'BOSS', 'BOSS_SPEECH', 18, 
+                        { text, life: 60 }
+                    ));
+                }
+            } else if (this.stageNum === 4) { // 후공신 합체 보스
+                if (this.phase === 1 && this.hp <= 600) {
+                    this.phase = 2;
+                    this.name = '💥 각성 후공신 (2페이즈)';
+                    this.color = '#7f1d1d';
+                    effectSys.addDamageText(this.x + this.w/2, this.y - 50, '🔥 2페이즈: 초시공 후공신 각성!', '#dc2626', 36);
+                    effectSys.addExplosion(this.x + this.w/2, this.y + this.h/2, '#dc2626', 50);
+                }
+
+                let frequency = this.phase === 1 ? 40 : 25;
+                if (Math.floor(this.attackTimer) % frequency === 0) {
+                    let quotes = this.phase === 1 ? BOSS_QUOTES['4_P1'] : BOSS_QUOTES['4_P2'];
+                    let text = this.getRandomQuote(quotes);
+                    projectiles.push(new Projectile(
+                        this.x + this.w/2, this.y + 40, 
+                        this.dir * (this.phase === 1 ? 8 : 10), (Math.random()-0.5)*3, 24, 'BOSS', 'BOSS_SPEECH', 22, 
+                        { text, life: 50 }
+                    ));
+                }
+            }
+        }
+    }
+
+    draw(ctx, camera) {
+        if (!this.active) return;
+        let sx = Math.floor(this.x - camera.x);
+        let sy = Math.floor(this.y - camera.y);
+
+        ctx.save();
+        ctx.fillStyle = this.color;
+        ctx.fillRect(sx, sy, this.w, this.h);
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(sx, sy, this.w, this.h);
+
+        // Boss Details
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(sx + 10, sy + 10, this.w - 20, 20);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 16px Pretendard';
+        ctx.fillText(this.name, sx - 20, sy - 20);
+        ctx.restore();
+    }
+}
+
+class GameUI {
+    static drawHUD(ctx, player, stageNum, boss, chocolatesCollected) {
+        ctx.save();
+
+        // Top Left Info Panel
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+        ctx.fillRect(20, 20, 360, 115);
+        ctx.strokeStyle = '#334155';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(20, 20, 360, 115);
+
+        // HP
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 14px Pretendard';
+        ctx.fillText(`${player.charData.name}`, 35, 45);
+
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(35, 52, 210, 16);
+        let hpRatio = Math.max(0, player.hp / player.maxHp);
+        ctx.fillStyle = hpRatio > 0.4 ? '#22c55e' : '#ef4444';
+        ctx.fillRect(35, 52, 210 * hpRatio, 16);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '12px Pretendard';
+        ctx.fillText(`${Math.ceil(player.hp)} / ${player.maxHp}`, 105, 65);
+
+        // Ult Bar
+        ctx.fillText(`궁극기 게이지 (10회 히트)`, 35, 90);
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(35, 96, 210, 14);
+        let ultRatio = player.hitCount / CONFIG.ULTIMATE_HITS_REQUIRED;
+        ctx.fillStyle = player.ultReady ? '#f59e0b' : '#3b82f6';
+        ctx.fillRect(35, 96, 210 * ultRatio, 14);
+
+        if (player.ultReady) {
+            ctx.fillStyle = '#fbbf24';
+            ctx.font = 'bold 12px Pretendard';
+            ctx.fillText('[S] Ready!', 252, 108);
+        }
+
+        // Kinder Chocolate Collection Status
+        ctx.fillStyle = '#fef08a';
+        ctx.font = 'bold 14px Pretendard';
+        ctx.fillText(`🍫 킨더 초콜릿: ${chocolatesCollected} / 4`, 252, 45);
+
+        // Top Right Stage Banner
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+        ctx.fillRect(CONFIG.CANVAS_WIDTH - 240, 20, 220, 50);
+        ctx.strokeRect(CONFIG.CANVAS_WIDTH - 240, 20, 220, 50);
+
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = 'bold 18px Pretendard';
+        ctx.fillText(`STAGE ${stageNum} / 4`, CONFIG.CANVAS_WIDTH - 220, 52);
+
+        // Boss Health Bar Top Center
+        if (boss && boss.active) {
+            ctx.fillStyle = 'rgba(0,0,0,0.85)';
+            ctx.fillRect(CONFIG.CANVAS_WIDTH/2 - 250, 20, 500, 45);
+            ctx.fillStyle = '#dc2626';
+            ctx.fillRect(CONFIG.CANVAS_WIDTH/2 - 240, 42, 480 * Math.max(0, boss.hp / boss.maxHp), 16);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 14px Pretendard';
+            ctx.fillText(`${boss.name}`, CONFIG.CANVAS_WIDTH/2 - 140, 36);
+        }
+
+        ctx.restore();
+    }
+
+    static drawStageBanner(ctx, stageInfo, timer) {
+        if (timer <= 0) return;
+
+        ctx.save();
+        let alpha = 1.0;
+        if (timer > 120) alpha = (150 - timer) / 30; // Fade in
+        else if (timer < 30) alpha = timer / 30; // Fade out
+
+        ctx.globalAlpha = Math.max(0, Math.min(1.0, alpha));
+
+        // Dark banner backdrop
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+        ctx.fillRect(0, CONFIG.CANVAS_HEIGHT / 2 - 60, CONFIG.CANVAS_WIDTH, 120);
+
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(0, CONFIG.CANVAS_HEIGHT / 2 - 60);
+        ctx.lineTo(CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT / 2 - 60);
+        ctx.moveTo(0, CONFIG.CANVAS_HEIGHT / 2 + 60);
+        ctx.lineTo(CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT / 2 + 60);
+        ctx.stroke();
+
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = 'bold 42px Pretendard';
+        ctx.textAlign = 'center';
+        ctx.fillText(stageInfo.name, CONFIG.CANVAS_WIDTH / 2, CONFIG.CANVAS_HEIGHT / 2 + 12);
+
+        ctx.restore();
+    }
+
+    static drawTitle(ctx) {
+        ctx.save();
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+        ctx.fillStyle = '#ef4444';
+        ctx.font = 'bold 56px Pretendard';
+        ctx.textAlign = 'center';
+        ctx.fillText('🏫 해성고등학교 탈출작전 🏫', CONFIG.CANVAS_WIDTH / 2, 200);
+
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = '20px Pretendard';
+        ctx.fillText('숨겨진 4개의 킨더 초콜릿을 모으면 고백 엔딩을 볼 수 있습니다!', CONFIG.CANVAS_WIDTH / 2, 270);
+
+        ctx.fillStyle = '#f59e0b';
+        ctx.font = 'bold 28px Pretendard';
+        ctx.fillText('Press [ SPACE ] or Click to Start', CONFIG.CANVAS_WIDTH / 2, 450);
+        ctx.restore();
+    }
+
+    static drawCharSelect(ctx, selectedIndex) {
+        ctx.save();
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 40px Pretendard';
+        ctx.textAlign = 'center';
+        ctx.fillText('캐릭터를 선택하세요 (◀ ▶ 방향키, 선택: SPACE)', CONFIG.CANVAS_WIDTH / 2, 100);
+
+        const keys = Object.keys(CHARACTERS);
+        const cardW = 320;
+        const cardH = 420;
+        const startX = (CONFIG.CANVAS_WIDTH - (cardW * 3 + 60)) / 2;
+
+        keys.forEach((key, idx) => {
+            const char = CHARACTERS[key];
+            const cx = startX + idx * (cardW + 30);
+            const cy = 170;
+            let isSelected = idx === selectedIndex;
+
+            ctx.fillStyle = isSelected ? '#1e293b' : '#0f172a';
+            ctx.fillRect(cx, cy, cardW, cardH);
+            ctx.strokeStyle = isSelected ? '#f59e0b' : '#334155';
+            ctx.lineWidth = isSelected ? 4 : 2;
+            ctx.strokeRect(cx, cy, cardW, cardH);
+
+            ctx.fillStyle = char.color;
+            ctx.fillRect(cx + 40, cy + 30, cardW - 80, 120);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 22px Pretendard';
+            ctx.fillText(char.name, cx + cardW/2, cy + 185);
+
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '14px Pretendard';
+            ctx.fillText(char.desc, cx + cardW/2, cy + 225, cardW - 30);
+
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = '13px Pretendard';
+            ctx.fillText(`[Q] ${char.attacks.Q.name}`, cx + cardW/2, cy + 270);
+            ctx.fillText(`[W] ${char.attacks.W.name}`, cx + cardW/2, cy + 295);
+            ctx.fillText(`[E] ${char.attacks.E.name}`, cx + cardW/2, cy + 320);
+            ctx.fillText(`[S] ${char.ultName}`, cx + cardW/2, cy + 355);
+        });
+        ctx.restore();
+    }
+
+    static drawGameOver(ctx) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+        ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+        ctx.fillStyle = '#ef4444';
+        ctx.font = 'bold 60px Pretendard';
+        ctx.textAlign = 'center';
+        ctx.fillText('GAME OVER', CONFIG.CANVAS_WIDTH / 2, 280);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '24px Pretendard';
+        ctx.fillText('학교 탈출 실패... 보충수업 확정!', CONFIG.CANVAS_WIDTH / 2, 350);
+
+        ctx.fillStyle = '#f59e0b';
+        ctx.font = 'bold 24px Pretendard';
+        ctx.fillText('Press [ R ] to Restart', CONFIG.CANVAS_WIDTH / 2, 450);
+        ctx.restore();
+    }
+
+    static drawClear(ctx, chocolatesCollected) {
+        ctx.save();
+        let isRomanceEnding = (chocolatesCollected >= 4);
+
+        if (isRomanceEnding) {
+            // Special Kinder Romance Ending
+            ctx.fillStyle = '#831843';
+            ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+            ctx.fillStyle = '#fbcfe8';
+            ctx.font = 'bold 48px Pretendard';
+            ctx.textAlign = 'center';
+            ctx.fillText('💖 해성고등학교 탈출 & 고백 성공! 💖', CONFIG.CANVAS_WIDTH / 2, 200);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '22px Pretendard';
+            ctx.fillText('숨겨진 4개의 킨더 초콜릿을 모두 건네주어 고백에 성공했습니다!', CONFIG.CANVAS_WIDTH / 2, 280);
+            ctx.fillText('"오늘부터 우리 1일이야! 💕"', CONFIG.CANVAS_WIDTH / 2, 330);
+
+            ctx.font = '60px Pretendard';
+            ctx.fillText('🍫👩‍❤️‍👨🍫 (해피 고백 엔딩!)', CONFIG.CANVAS_WIDTH / 2, 450);
+        } else {
+            // Normal Friend Ending
+            ctx.fillStyle = '#064e3b';
+            ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+            ctx.fillStyle = '#fef08a';
+            ctx.font = 'bold 48px Pretendard';
+            ctx.textAlign = 'center';
+            ctx.fillText('🎉 해성고등학교 탈출 성공! 🎉', CONFIG.CANVAS_WIDTH / 2, 200);
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '22px Pretendard';
+            ctx.fillText('모든 보스를 물리치고 학교 밖으로 무사히 탈출했습니다!', CONFIG.CANVAS_WIDTH / 2, 280);
+            ctx.fillText(`"안도야! 떡볶이 먹으러 가자!" (킨더 초콜릿: ${chocolatesCollected}/4 수집)`, CONFIG.CANVAS_WIDTH / 2, 330);
+
+            ctx.font = '60px Pretendard';
+            ctx.fillText('🏃‍♂️💨   🏃‍♀️ (우정 엔딩!)', CONFIG.CANVAS_WIDTH / 2, 450);
+        }
+
+        ctx.fillStyle = '#f59e0b';
+        ctx.font = 'bold 22px Pretendard';
+        ctx.textAlign = 'center';
+        ctx.fillText('Press [ R ] to Play Again', CONFIG.CANVAS_WIDTH / 2, 570);
+        ctx.restore();
+    }
+}
+
+class Game {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.canvas.width = CONFIG.CANVAS_WIDTH;
+        this.canvas.height = CONFIG.CANVAS_HEIGHT;
+
+        this.state = GAME_STATE.TITLE;
+        this.currentStage = 1;
+        this.chocolatesCollected = 0;
+        this.stageTitleTimer = 0;
+
+        this.player = new Player();
+        this.map = new LevelMap();
+        this.camera = new Camera();
+        this.effects = new EffectSystem();
+
+        this.projectiles = [];
+        this.enemies = [];
+        this.boss = null;
+        this.kinderChocolate = null;
+        this.charSelectIndex = 0;
+
+        Input.init();
+        this.bindEvents();
+    }
+
+    initStage(stageNum) {
+        this.currentStage = stageNum;
+        this.player.resetPos();
+        this.projectiles = [];
+        this.effects.clear();
+        this.map.isDoorOpen = false;
+        this.stageTitleTimer = 150; // Show stage title banner for 2.5 seconds
+
+        // Spawn student enemies with mix of Melee & Ranged
+        this.enemies = [];
+        let enemyCount = 10 + stageNum * 3;
+        for (let i = 0; i < enemyCount; i++) {
+            let enemyX = 500 + i * 190;
+            let isRanged = (i % 3 === 2); // Every 3rd enemy is a ranged unit
+            this.enemies.push(new Enemy(enemyX, this.map.floorY - 75, i, stageNum, isRanged));
+        }
+
+        // Spawn Stage Boss
+        this.boss = new StageBoss(3000, this.map.floorY - 130, stageNum);
+
+        // Spawn Kinder Chocolate on platform in each stage
+        let platformIndex = (stageNum - 1) % this.map.platforms.length;
+        let p = this.map.platforms[platformIndex];
+        this.kinderChocolate = new KinderChocolate(p.x + p.w/2 - 18, p.y - 45);
+    }
+
+    bindEvents() {
+        window.addEventListener('keydown', (e) => {
+            if (this.state === GAME_STATE.TITLE) {
+                if (e.code === 'Space' || e.code === 'Enter') {
+                    this.state = GAME_STATE.CHAR_SELECT;
+                }
+            } else if (this.state === GAME_STATE.CHAR_SELECT) {
+                if (e.code === 'ArrowLeft') {
+                    this.charSelectIndex = (this.charSelectIndex - 1 + 3) % 3;
+                } else if (e.code === 'ArrowRight') {
+                    this.charSelectIndex = (this.charSelectIndex + 1) % 3;
+                } else if (e.code === 'Space' || e.code === 'Enter') {
+                    const keys = Object.keys(CHARACTERS);
+                    this.player.selectCharacter(keys[this.charSelectIndex]);
+                    this.chocolatesCollected = 0;
+                    this.initStage(1);
+                    this.state = GAME_STATE.PLAYING;
+                }
+            } else if (this.state === GAME_STATE.GAME_OVER || this.state === GAME_STATE.CLEAR) {
+                if (e.code === 'KeyR') {
+                    this.restart();
+                }
+            }
+        });
+
+        this.canvas.addEventListener('click', () => {
+            if (this.state === GAME_STATE.TITLE) this.state = GAME_STATE.CHAR_SELECT;
+        });
+    }
+
+    restart() {
+        this.player.selectCharacter(Object.keys(CHARACTERS)[this.charSelectIndex]);
+        this.chocolatesCollected = 0;
+        this.initStage(1);
+        this.state = GAME_STATE.PLAYING;
+    }
+
+    update() {
+        if (this.state === GAME_STATE.PLAYING) {
+            let globalTimeSlow = (this.player.timeSlowActiveTimer > 0) ? 0.2 : 1.0;
+
+            if (this.stageTitleTimer > 0) {
+                this.stageTitleTimer--;
+            }
+
+            this.player.update(this.map, this.projectiles, this.effects);
+            this.camera.follow(this.player, this.map);
+            this.effects.update();
+
+            // Update Kinder Chocolate collectible
+            if (this.kinderChocolate && !this.kinderChocolate.collected) {
+                this.kinderChocolate.update();
+                if (this.checkCollision(this.player, this.kinderChocolate)) {
+                    this.kinderChocolate.collected = true;
+                    this.chocolatesCollected++;
+                    this.effects.addDamageText(this.player.x, this.player.y - 30, '🍫 킨더 초콜릿 획득!', '#fef08a', 28);
+                }
+            }
+
+            // Update Enemies
+            for (let enemy of this.enemies) {
+                enemy.update(this.player, this.map, this.projectiles, this.effects);
+            }
+
+            // Update Boss
+            if (this.boss && this.boss.active) {
+                this.boss.update(this.player, this.map, this.projectiles, this.effects);
+            }
+
+            // Check Boss Defeat -> Open Door
+            if (this.boss && !this.boss.active && !this.map.isDoorOpen) {
+                this.map.isDoorOpen = true;
+                this.effects.addDamageText(this.player.x, this.player.y - 40, '🚪 출구 문이 열렸습니다!', '#22c55e', 28);
+            }
+
+            // Door Collision -> Proceed Stage or Clear Game
+            if (this.map.isDoorOpen && this.player.x >= this.map.exitDoorX) {
+                if (this.currentStage < 4) {
+                    this.initStage(this.currentStage + 1);
+                } else {
+                    this.state = GAME_STATE.CLEAR;
+                }
+            }
+
+            // Update Projectiles & Collisions
+            for (let i = this.projectiles.length - 1; i >= 0; i--) {
+                let p = this.projectiles[i];
+                p.update(this.map, globalTimeSlow);
+
+                if (!p.active) {
+                    this.projectiles.splice(i, 1);
+                    continue;
+                }
+
+                // Player Projectiles vs Enemies / Boss
+                if (p.owner === 'PLAYER') {
+                    for (let enemy of this.enemies) {
+                        if (enemy.active && this.checkCollision(p, enemy)) {
+                            enemy.hp -= p.damage;
+                            p.active = false;
+                            this.player.registerHit();
+                            this.effects.addDamageText(enemy.x + enemy.w/2, enemy.y, `-${p.damage}`, '#fba124');
+
+                            if (enemy.hp <= 0) enemy.active = false;
+                            break;
+                        }
+                    }
+
+                    if (this.boss && this.boss.active && this.checkCollision(p, this.boss)) {
+                        this.boss.hp -= p.damage;
+                        p.active = false;
+                        this.player.registerHit();
+                        this.effects.addDamageText(this.boss.x + this.boss.w/2, this.boss.y, `-${p.damage}`, '#fba124', 24);
+
+                        if (this.boss.hp <= 0) {
+                            this.boss.active = false;
+                            this.effects.addExplosion(this.boss.x + this.boss.w/2, this.boss.y + this.boss.h/2, '#ef4444', 60);
+                        }
+                    }
+                }
+
+                // Enemy / Boss Projectiles vs Player
+                if ((p.owner === 'ENEMY' || p.owner === 'BOSS') && this.checkCollision(p, this.player)) {
+                    this.player.hp -= p.damage;
+                    p.active = false;
+                    this.effects.addDamageText(this.player.x + this.player.w/2, this.player.y, `-${p.damage}`, '#ef4444', 24);
+                }
+            }
+
+            // Player Melee Skill pending hit test
+            if (this.player.pendingMelee) {
+                let m = this.player.pendingMelee;
+                let hitBox = {
+                    x: this.player.dir > 0 ? this.player.x + this.player.w : this.player.x - m.range,
+                    y: this.player.y,
+                    w: m.range,
+                    h: this.player.h
+                };
+
+                for (let enemy of this.enemies) {
+                    if (enemy.active && this.checkCollision(hitBox, enemy)) {
+                        enemy.hp -= m.damage;
+                        this.player.registerHit();
+                        if (m.special === 'BELLY_RUB') enemy.x += this.player.dir * 70;
+                        this.effects.addDamageText(enemy.x + enemy.w/2, enemy.y, `-${m.damage}`, '#ef4444', 22);
+                        if (enemy.hp <= 0) enemy.active = false;
+                    }
+                }
+
+                if (this.boss && this.boss.active && this.checkCollision(hitBox, this.boss)) {
+                    this.boss.hp -= m.damage;
+                    this.player.registerHit();
+                    this.effects.addDamageText(this.boss.x + this.boss.w/2, this.boss.y, `-${m.damage}`, '#ef4444', 26);
+                    if (this.boss.hp <= 0) {
+                        this.boss.active = false;
+                        this.effects.addExplosion(this.boss.x + this.boss.w/2, this.boss.y + this.boss.h/2, '#ef4444', 60);
+                    }
+                }
+                this.player.pendingMelee = null;
+            }
+
+            if (this.player.hp <= 0) {
+                this.state = GAME_STATE.GAME_OVER;
+            }
+        }
+    }
+
+    checkCollision(rect1, rect2) {
+        let r1x = rect1.x || (rect1.x - (rect1.size || 0));
+        let r1y = rect1.y || (rect1.y - (rect1.size || 0));
+        let r1w = rect1.w || (rect1.size * 2 || 10);
+        let r1h = rect1.h || (rect1.size * 2 || 10);
+
+        return r1x < rect2.x + rect2.w &&
+               r1x + r1w > rect2.x &&
+               r1y < rect2.y + rect2.h &&
+               r1y + r1h > rect2.y;
+    }
+
+    draw() {
+        this.ctx.clearRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+        if (this.state === GAME_STATE.TITLE) {
+            GameUI.drawTitle(this.ctx);
+        } else if (this.state === GAME_STATE.CHAR_SELECT) {
+            GameUI.drawCharSelect(this.ctx, this.charSelectIndex);
+        } else if (this.state === GAME_STATE.PLAYING) {
+            this.map.draw(this.ctx, this.camera, this.currentStage);
+
+            if (this.kinderChocolate) this.kinderChocolate.draw(this.ctx, this.camera);
+            for (let enemy of this.enemies) enemy.draw(this.ctx, this.camera);
+            if (this.boss) this.boss.draw(this.ctx, this.camera);
+
+            this.player.draw(this.ctx, this.camera);
+
+            for (let p of this.projectiles) p.draw(this.ctx, this.camera);
+            this.effects.draw(this.ctx, this.camera);
+
+            GameUI.drawHUD(this.ctx, this.player, this.currentStage, this.boss, this.chocolatesCollected);
+
+            // Draw Stage Title Banner overlay when entering stage
+            let stageInfo = this.map.stageInfo[this.currentStage] || this.map.stageInfo[1];
+            GameUI.drawStageBanner(this.ctx, stageInfo, this.stageTitleTimer);
+        } else if (this.state === GAME_STATE.GAME_OVER) {
+            GameUI.drawGameOver(this.ctx);
+        } else if (this.state === GAME_STATE.CLEAR) {
+            GameUI.drawClear(this.ctx, this.chocolatesCollected);
+        }
+    }
+
+    loop() {
+        this.update();
+        this.draw();
+        requestAnimationFrame(() => this.loop());
+    }
+}
+
+window.onload = () => {
+    const game = new Game();
+    game.loop();
+};
+</script>
+</body>
+</html>
