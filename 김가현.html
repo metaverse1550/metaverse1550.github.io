@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>개구리의 숲속 파리 사냥</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background-color: #1a3c34;
+            color: #2d6a4f;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 10px 30px rgba(10, 30, 25, 0.5);
+            border: 6px solid #2d6a4f;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+            image-rendering: pixelated; /* 픽셀아트 렌더링 유지 */
+            image-rendering: crisp-edges;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+</div>
+
+<script>
+/**
+ * ------------------------------------------------------------------
+ * CONFIGURATION (게임 설정)
+ * ------------------------------------------------------------------
+ */
+const CONFIG = {
+    SCREEN_WIDTH: 960,
+    SCREEN_HEIGHT: 640,
+    WORLD_WIDTH: 960,
+    WORLD_HEIGHT: 4800, // 세로로 긴 위쪽 진행 맵
+    GRAVITY: 0.50,
+    FRICTION: 0.82,
+    
+    // 플레이어 설정
+    PLAYER: {
+        WIDTH: 32,
+        HEIGHT: 32,
+        SPEED: 4.5, // 조작감 개선
+        JUMP_FORCE: -12.2, // 확실한 도약력
+        MAX_LIVES: 3,
+        INVINCIBLE_TIME: 90 // 충돌 후 무적 프레임
+    },
+    
+    // 승리 조건 및 파리 수 설정
+    TARGET_FLIES: 10, // 클리어에 필요한 파리 수
+    TOTAL_FLIES: 15,  // 맵 전체에 생성되는 총 파리 수 (5마리 추가)
+    
+    // 적 설정
+    SNAKE_SPEED: 0.6,
+    SPIDER_SPEED: 0.7,
+    
+    // 색상 팔레트
+    COLORS: {
+        FOREST_DARK: '#142c26',
+        FOREST_MID: '#1e483e',
+        FOREST_LIGHT: '#2e6b5c',
+        LEAF_DARK: '#28584c',
+        LEAF_MID: '#428876',
+        LEAF_LIGHT: '#64b49f',
+        GRASS: '#52a28d',
+        DIRT: '#b8a379',
+        DIRT_LIGHT: '#d6c59b',
+        SUNRAY: 'rgba(255, 255, 230, 0.18)',
+        UI_BG: 'rgba(20, 44, 38, 0.88)',
+        UI_BORDER: '#52a28d',
+        UI_TEXT: '#e0f8cf',
+        HEART: '#ff4d6d'
+    }
+};
+
+/**
+ * ------------------------------------------------------------------
+ * INPUT HANDLER (키보드 입력 처리)
+ * ------------------------------------------------------------------
+ */
+const INPUT = {
+    keys: {
+        a: false,
+        d: false,
+        w: false,
+        s: false,
+        space: false,
+        r: false
+    },
+    init() {
+        window.addEventListener('keydown', (e) => this.changeKey(e, true));
+        window.addEventListener('keyup', (e) => this.changeKey(e, false));
+    },
+    changeKey(e, state) {
+        const k = e.key.toLowerCase();
+        if (k === 'a' || k === 'ㅁ') this.keys.a = state;
+        if (k === 'd' || k === 'ㅇ') this.keys.d = state;
+        if (k === 'w' || k === 'ㅈ') this.keys.w = state;
+        if (k === 's' || k === 'ㄴ') this.keys.s = state;
+        if (e.code === 'Space') this.keys.space = state;
+        if (k === 'r' || k === 'ㄱ') this.keys.r = state;
+
+        if (e.code === 'Space' && e.target === document.body) {
+            e.preventDefault();
+        }
+    }
+};
+
+/**
+ * ------------------------------------------------------------------
+ * PIXEL ART SPRITES (픽셀아트 그래픽 데이터)
+ * ------------------------------------------------------------------
+ */
+const SPRITES = {
+    drawPixelGrid(ctx, x, y, pixelSize, colorMap, grid) {
+        ctx.save();
+        for (let r = 0; r < grid.length; r++) {
+            for (let c = 0; c < grid[r].length; c++) {
+                const colorKey = grid[r][c];
+                if (colorKey !== '.') {
+                    ctx.fillStyle = colorMap[colorKey] || colorKey;
+                    ctx.fillRect(
+                        Math.floor(x + c * pixelSize), 
+                        Math.floor(y + r * pixelSize), 
+                        pixelSize, 
+                        pixelSize
+                    );
+                }
+            }
+        }
+        ctx.restore();
+    },
+
+    // 개구리 도트 디자인 (16x16)
+    frog: {
+        colorMap: {
+            'G': '#4bd549', // 밝은 연두
+            'D': '#258029', // 어두운 초록
+            'W': '#ffffff', // 눈/배 흰색
+            'B': '#111111', // 동공/라인
+            'P': '#ff85a1', // 볼터치
+            'Y': '#d8f032'  // 하이라이트
+        },
+        idleRight: [
+            "....GG.....GG...",
+            "...GWWG...GWWG..",
+            "...GWBG...GWBG..",
+            "..GGGGGGGGGGGG..",
+            ".GGPGGGGGGGGPGG.",
+            ".GGGGGGGGGGGGGG.",
+            ".GGWWWWWWWWWWGG.",
+            ".GGWWWWWWWWWWGG.",
+            "..GWWWWWWWWWWG..",
+            "..GGGGGGGGGGGG..",
+            ".GG..GGGGGG..GG.",
+            ".GG..GG..GG..GG.",
+            ".GG..GG..GG..GG.",
+            ".D....D..D....D.",
+            "................",
+            "................"
+        ],
+        jumpRight: [
+            "....GG.....GG...",
+            "...GWWG...GWWG..",
+            "...GWBG...GWBG..",
+            "..GGGGGGGGGGGG..",
+            ".GGPGGGGGGGGPGG.",
+            ".GGGGGGGGGGGGGG.",
+            ".GGWWWWWWWWWWGG.",
+            "..GWWWWWWWWWWGG.",
+            "..GGGGGGGGGGGG..",
+            "....GG....GG....",
+            "...GG......GG...",
+            "..GG........GG..",
+            ".DD..........DD.",
+            "................",
+            "................",
+            "................"
+        ]
+    },
+
+    // 파리 - 12x10 그리드
+    fly: {
+        colorMap: {
+            'B': '#3d5a80',
+            'W': '#e0f4ff',
+            'R': '#ff4d6d'
+        },
+        frame1: [
+            "..WWW....WWW..",
+            ".WWWWW..WWWWW.",
+            ".WWWWW..WWWWW.",
+            "..RRBBBBBBBB..",
+            ".RRRBBBBBBBB..",
+            ".RRRBBBBBBBB..",
+            "..RRBBBBBBBB..",
+            "....B......B..",
+            "....B......B..",
+            ".............."
+        ],
+        frame2: [
+            "..............",
+            "..WWW....WWW..",
+            ".WWWWW..WWWWW.",
+            "..RRBBBBBBBB..",
+            ".RRRBBBBBBBB..",
+            ".RRRBBBBBBBB..",
+            "..RRBBBBBBBB..",
+            "...B........B.",
+            "...B........B.",
+            ".............."
+        ]
+    },
+
+    // 귀여운 아기 뱀 - 16x8
+    snake: {
+        colorMap: {
+            'G': '#64b49f',
+            'D': '#28584c',
+            'Y': '#fee440',
+            'R': '#ff4d6d'
+        },
+        frame1: [
+            "................",
+            ".....GGGG.......",
+            "...GGYYYYGG...R.",
+            "..GWWYWWYGGRRRR.",
+            ".GWBGYBGGGG.....",
+            ".GGGGGGGG.......",
+            "..DD..DD........",
+            "................"
+        ],
+        frame2: [
+            "................",
+            "......GGGG......",
+            "....GGYYYYGG..R.",
+            "...GWWYWWYGGRRRR",
+            "..GWBGYBGGGG....",
+            "..GGGGGGGG......",
+            "...DD..DD.......",
+            "...DD..DD.......",
+            "................"
+        ]
+    },
+
+    // 귀여운 거미 - 12x12
+    spider: {
+        colorMap: {
+            'K': '#487267',
+            'R': '#ff7675',
+            'E': '#ff007f',
+            'L': '#88b8ac'
+        },
+        frame1: [
+            "..L......L..",
+            "...L....L...",
+            ".L.KKKKKK.L.",
+            "..KERRRREK..",
+            ".LKRRRRRRKL.",
+            "LLKKRRRRKKLL",
+            ".LKFFFFFFKL.",
+            "..KFFFFFFK..",
+            ".L.KKKKKK.L.",
+            "...L....L...",
+            "..L......L..",
+            "............"
+        ],
+        frame2: [
+            ".L........L.",
+            "..L......L..",
+            "..LKKKKKKL..",
+            ".LKERRRREKL.",
+            "LLKRRRRRRKLL",
+            ".KKRRRRRRKK.",
+            ".KKFFFFFFKK.",
+            "LLKFFFFFFKLL",
+            "..LKKKKKKL..",
+            "..L......L..",
+            ".L........L.",
+            "............"
+        ]
+    }
+};
+
+/**
+ * ------------------------------------------------------------------
+ * GAME STATE MANAGEMENT (게임 상태)
+ * ------------------------------------------------------------------
+ */
+const GAME_STATE = {
+    current: 'START', // 'START', 'PLAYING', 'GAMEOVER', 'CLEAR'
+    fliesEaten: 0,
+    lives: CONFIG.PLAYER.MAX_LIVES,
+    
+    init() {
+        this.fliesEaten = 0;
+        this.lives = CONFIG.PLAYER.MAX_LIVES;
+        this.current = 'PLAYING';
+    }
+};
+
+/**
+ * ------------------------------------------------------------------
+ * BACKGROUND DECORATIONS (픽셀 숲 배경 연출)
+ * ------------------------------------------------------------------
+ */
+class BackgroundDecoration {
+    constructor() {
+        this.sparkles = [];
+        this.trees = [];
+        this.sunRays = [];
+
+        for (let i = 0; i < 60; i++) {
+            this.sparkles.push({
+                x: Math.random() * CONFIG.WORLD_WIDTH,
+                y: Math.random() * CONFIG.WORLD_HEIGHT,
+                size: 2 + Math.random() * 3,
+                speed: 0.15 + Math.random() * 0.4,
+                alpha: Math.random()
+            });
+        }
+
+        for (let y = 0; y < CONFIG.WORLD_HEIGHT; y += 380) {
+            this.trees.push({
+                y: y + Math.random() * 50,
+                side: 'LEFT',
+                width: 70 + Math.random() * 40
+            });
+            this.trees.push({
+                y: y + 180 + Math.random() * 50,
+                side: 'RIGHT',
+                width: 70 + Math.random() * 40
+            });
+        }
+
+        for (let i = 0; i < 25; i++) {
+            this.sunRays.push({
+                x: 100 + Math.random() * (CONFIG.WORLD_WIDTH - 200),
+                y: i * 200,
+                width: 40 + Math.random() * 60,
+                height: 180 + Math.random() * 120
+            });
+        }
+    }
+
+    update() {
+        this.sparkles.forEach(s => {
+            s.y -= s.speed;
+            s.alpha += Math.sin(Date.now() * 0.003) * 0.02;
+            if (s.y < 0) s.y = CONFIG.WORLD_HEIGHT;
+        });
+    }
+
+    draw(ctx, cameraY) {
+        this.sunRays.forEach(ray => {
+            const renderY = Math.floor(ray.y - cameraY * 0.4);
+            if (renderY > -200 && renderY < CONFIG.SCREEN_HEIGHT + 200) {
+                ctx.save();
+                ctx.fillStyle = CONFIG.COLORS.SUNRAY;
+                ctx.beginPath();
+                ctx.moveTo(ray.x, renderY);
+                ctx.lineTo(ray.x + ray.width, renderY);
+                ctx.lineTo(ray.x + ray.width + 40, renderY + ray.height);
+                ctx.lineTo(ray.x - 20, renderY + ray.height);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+            }
+        });
+
+        this.trees.forEach(t => {
+            const renderY = Math.floor(t.y - cameraY * 0.5);
+            if (renderY > -300 && renderY < CONFIG.SCREEN_HEIGHT + 300) {
+                ctx.save();
+                ctx.fillStyle = '#1c3a33';
+                const x = (t.side === 'LEFT') ? 0 : CONFIG.WORLD_WIDTH - t.width;
+                ctx.fillRect(x, renderY, t.width, 320);
+
+                ctx.fillStyle = '#142c26';
+                if (t.side === 'LEFT') {
+                    ctx.fillRect(x + t.width, renderY + 220, 20, 100);
+                } else {
+                    ctx.fillRect(x - 20, renderY + 220, 20, 100);
+                }
+
+                ctx.fillStyle = CONFIG.COLORS.LEAF_DARK;
+                ctx.beginPath();
+                ctx.arc(x + (t.side === 'LEFT' ? 40 : t.width - 40), renderY + 40, 90, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = CONFIG.COLORS.LEAF_MID;
+                ctx.beginPath();
+                ctx.arc(x + (t.side === 'LEFT' ? 30 : t.width - 30), renderY + 80, 70, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.restore();
+            }
+        });
+
+        this.sparkles.forEach(s => {
+            const renderY = Math.floor(s.y - cameraY);
+            if (renderY > 0 && renderY < CONFIG.SCREEN_HEIGHT) {
+                ctx.save();
+                ctx.globalAlpha = Math.abs(Math.sin(s.alpha));
+                ctx.fillStyle = '#d6c59b';
+                ctx.fillRect(Math.floor(s.x), renderY, s.size, s.size);
+                ctx.restore();
+            }
+        });
+    }
+}
+
+/**
+ * ------------------------------------------------------------------
+ * EFFECTS (시각 효과)
+ * ------------------------------------------------------------------
+ */
+class Particle {
+    constructor(x, y, color, speedX, speedY, life, size = 3) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.speedX = speedX;
+        this.speedY = speedY;
+        this.life = life;
+        this.maxLife = life;
+        this.size = size;
+    }
+
+    update() {
+        this.x += this.speedX;
+        this.y += this.speedY;
+        this.life--;
+    }
+
+    draw(ctx, cameraY) {
+        if (this.life <= 0) return;
+        ctx.save();
+        ctx.globalAlpha = this.life / this.maxLife;
+        ctx.fillStyle = this.color;
+        ctx.fillRect(Math.floor(this.x), Math.floor(this.y - cameraY), this.size, this.size);
+        ctx.restore();
+    }
+}
+
+const EFFECT_MANAGER = {
+    particles: [],
+
+    addEatEffect(x, y) {
+        const colors = ['#4bd549', '#ffffff', '#64b49f', '#ff85a1'];
+        for (let i = 0; i < 16; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 1.5 + Math.random() * 3.5;
+            this.particles.push(new Particle(
+                x, y,
+                colors[Math.floor(Math.random() * colors.length)],
+                Math.cos(angle) * speed,
+                Math.sin(angle) * speed,
+                22 + Math.random() * 12,
+                4
+            ));
+        }
+    },
+
+    addHitEffect(x, y) {
+        const colors = ['#ff4d6d', '#ff70a6', '#ffffff'];
+        for (let i = 0; i < 14; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 2 + Math.random() * 4;
+            this.particles.push(new Particle(
+                x, y,
+                colors[Math.floor(Math.random() * colors.length)],
+                Math.cos(angle) * speed,
+                Math.sin(angle) * speed,
+                20 + Math.random() * 10,
+                4
+            ));
+        }
+    },
+
+    update() {
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            this.particles[i].update();
+            if (this.particles[i].life <= 0) {
+                this.particles.splice(i, 1);
+            }
+        }
+    },
+
+    draw(ctx, cameraY) {
+        this.particles.forEach(p => p.draw(ctx, cameraY));
+    },
+
+    clear() {
+        this.particles = [];
+    }
+};
+
+/**
+ * ------------------------------------------------------------------
+ * CAMERA SYSTEM (카메라)
+ * ------------------------------------------------------------------
+ */
+const CAMERA = {
+    y: 0,
+    width: CONFIG.SCREEN_WIDTH,
+    height: CONFIG.SCREEN_HEIGHT,
+
+    update(targetY) {
+        let targetCameraY = targetY - this.height * 0.62;
+
+        if (targetCameraY > CONFIG.WORLD_HEIGHT - this.height) {
+            targetCameraY = CONFIG.WORLD_HEIGHT - this.height;
+        }
+        if (targetCameraY < 0) {
+            targetCameraY = 0;
+        }
+
+        this.y += (targetCameraY - this.y) * 0.1;
+    }
+};
+
+/**
+ * ------------------------------------------------------------------
+ * PLAYER CLASS (개구리 플레이어)
+ * ------------------------------------------------------------------
+ */
+class Player {
+    constructor() {
+        this.width = CONFIG.PLAYER.WIDTH;
+        this.height = CONFIG.PLAYER.HEIGHT;
+        this.resetPosition();
+        
+        this.vx = 0;
+        this.vy = 0;
+        this.isGrounded = false;
+        this.facingRight = true;
+        this.invincibleTimer = 0;
+        this.animFrame = 0;
+    }
+
+    resetPosition(x = CONFIG.WORLD_WIDTH / 2 - 16, y = CONFIG.WORLD_HEIGHT - 120) {
+        this.x = x;
+        this.y = y;
+        this.vx = 0;
+        this.vy = 0;
+    }
+
+    update(platforms) {
+        if (this.invincibleTimer > 0) {
+            this.invincibleTimer--;
+        }
+
+        // 1. 좌우 이동
+        if (INPUT.keys.a) {
+            this.vx = -CONFIG.PLAYER.SPEED;
+            this.facingRight = false;
+        } else if (INPUT.keys.d) {
+            this.vx = CONFIG.PLAYER.SPEED;
+            this.facingRight = true;
+        } else {
+            this.vx *= CONFIG.FRICTION;
+        }
+
+        // 2. 점프
+        if ((INPUT.keys.space || INPUT.keys.w) && this.isGrounded) {
+            this.vy = CONFIG.PLAYER.JUMP_FORCE;
+            this.isGrounded = false;
+        }
+
+        // 3. 중력
+        this.vy += CONFIG.GRAVITY;
+
+        // X축 이동 및 테두리 제한
+        this.x += this.vx;
+        if (this.x < 0) this.x = 0;
+        if (this.x + this.width > CONFIG.WORLD_WIDTH) this.x = CONFIG.WORLD_WIDTH - this.width;
+
+        // Y축 이동
+        this.y += this.vy;
+
+        // 4. 발판 착지 처리
+        this.isGrounded = false;
+        for (let plat of platforms) {
+            if (this.vy >= 0 &&
+                this.x + this.width - 6 > plat.x &&
+                this.x + 6 < plat.x + plat.width &&
+                this.y + this.height >= plat.y &&
+                this.y + this.height - this.vy <= plat.y + 12) {
+                
+                this.y = plat.y - this.height;
+                this.vy = 0;
+                this.isGrounded = true;
+                break;
+            }
+        }
+
+        // 연못 바닥
+        if (this.y + this.height >= CONFIG.WORLD_HEIGHT - 30) {
+            this.y = CONFIG.WORLD_HEIGHT - 30 - this.height;
+            this.vy = 0;
+            this.isGrounded = true;
+        }
+
+        this.animFrame++;
+    }
+
+    draw(ctx, cameraY) {
+        if (this.invincibleTimer > 0 && Math.floor(this.invincibleTimer / 4) % 2 === 0) {
+            return;
+        }
+
+        ctx.save();
+        
+        const renderX = Math.floor(this.x);
+        const renderY = Math.floor(this.y - cameraY);
+
+        if (!this.facingRight) {
+            ctx.translate(renderX + this.width, renderY);
+            ctx.scale(-1, 1);
+        } else {
+            ctx.translate(renderX, renderY);
+        }
+
+        const grid = this.isGrounded 
+            ? SPRITES.frog.idleRight 
+            : SPRITES.frog.jumpRight;
+
+        SPRITES.drawPixelGrid(ctx, 0, 0, 2, SPRITES.frog.colorMap, grid);
+
+        ctx.restore();
+    }
+}
+
+/**
+ * ------------------------------------------------------------------
+ * PLATFORM & MAP (보장된 위쪽 등반 경로 배치 시스템)
+ * ------------------------------------------------------------------
+ */
+class Platform {
+    constructor(x, y, width, height, type = 'NORMAL') {
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = height;
+        this.type = type;
+    }
+
+    draw(ctx, cameraY) {
+        const renderY = Math.floor(this.y - cameraY);
+        if (renderY + this.height < -50 || renderY > CONFIG.SCREEN_HEIGHT + 50) return;
+
+        ctx.save();
+        
+        if (this.type === 'GROUND') {
+            ctx.fillStyle = CONFIG.COLORS.DIRT;
+            ctx.fillRect(this.x, renderY, this.width, this.height);
+            ctx.fillStyle = CONFIG.COLORS.GRASS;
+            ctx.fillRect(this.x, renderY, this.width, 10);
+        } else if (this.type === 'LILYPAD') {
+            ctx.fillStyle = CONFIG.COLORS.GRASS;
+            ctx.beginPath();
+            ctx.roundRect(this.x, renderY, this.width, this.height, 8);
+            ctx.fill();
+            
+            ctx.fillStyle = CONFIG.COLORS.LEAF_LIGHT;
+            ctx.fillRect(this.x + 4, renderY + 2, this.width - 8, 3);
+        } else {
+            ctx.fillStyle = CONFIG.COLORS.GRASS;
+            ctx.fillRect(this.x, renderY, this.width, 6);
+            
+            ctx.fillStyle = CONFIG.COLORS.DIRT;
+            ctx.fillRect(this.x, renderY + 6, this.width, this.height - 6);
+
+            ctx.fillStyle = '#8c7752';
+            ctx.fillRect(this.x, renderY + this.height - 3, this.width, 3);
+        }
+
+        ctx.restore();
+    }
+}
+
+const MAP_BUILDER = {
+    generatePlatforms() {
+        const platforms = [];
+        const worldH = CONFIG.WORLD_HEIGHT;
+
+        // 1. 최하단 넓은 시작 바닥
+        platforms.push(new Platform(0, worldH - 40, CONFIG.WORLD_WIDTH, 40, 'GROUND'));
+
+        let currentY = worldH - 110;
+        
+        // 2. 반드시 점프로 이어지는 메인 등반 경로 생성
+        let mainX = CONFIG.WORLD_WIDTH / 2 - 75;
+        let mainWidth = 150;
+        
+        const firstPlat = new Platform(Math.floor(mainX), Math.floor(currentY), mainWidth, 18, 'NORMAL');
+        platforms.push(firstPlat);
+
+        let direction = Math.random() < 0.5 ? -1 : 1;
+
+        while (currentY > 160) {
+            const gapY = 52 + Math.random() * 15;
+            currentY -= gapY;
+
+            const offsetX = (80 + Math.random() * 60) * direction;
+            
+            mainWidth = 130 + Math.random() * 40;
+            mainX = mainX + offsetX;
+
+            if (mainX < 40) {
+                mainX = 40 + Math.random() * 30;
+                direction = 1;
+            } else if (mainX + mainWidth > CONFIG.WORLD_WIDTH - 40) {
+                mainX = CONFIG.WORLD_WIDTH - 40 - mainWidth - Math.random() * 30;
+                direction = -1;
+            } else {
+                if (Math.random() < 0.45) direction *= -1;
+            }
+
+            const type = (currentY > worldH - 600 && Math.random() < 0.35) ? 'LILYPAD' : 'NORMAL';
+            const mainPlat = new Platform(Math.floor(mainX), Math.floor(currentY), Math.floor(mainWidth), 18, type);
+            platforms.push(mainPlat);
+
+            if (Math.random() < 0.6) {
+                const subWidth = 110 + Math.random() * 40;
+                let subX;
+                
+                if (mainX > CONFIG.WORLD_WIDTH / 2) {
+                    subX = 40 + Math.random() * (mainX - subWidth - 60);
+                } else {
+                    subX = mainX + mainWidth + 60 + Math.random() * (CONFIG.WORLD_WIDTH - (mainX + mainWidth) - subWidth - 100);
+                }
+
+                if (subX > 30 && subX + subWidth < CONFIG.WORLD_WIDTH - 30) {
+                    platforms.push(new Platform(Math.floor(subX), Math.floor(currentY + (Math.random() * 20 - 10)), Math.floor(subWidth), 18, 'NORMAL'));
+                }
+            }
+        }
+
+        // 4. 최상단 목표 플랫폼
+        platforms.push(new Platform(CONFIG.WORLD_WIDTH / 2 - 150, 100, 300, 22, 'NORMAL'));
+
+        return platforms;
+    }
+};
+
+/**
+ * ------------------------------------------------------------------
+ * FLIES (파리 아이템)
+ * ------------------------------------------------------------------
+ */
+class Fly {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.baseY = y;
+        this.width = 28;
+        this.height = 24;
+        this.eaten = false;
+        this.animTimer = Math.random() * 100;
+    }
+
+    update() {
+        if (this.eaten) return;
+        this.animTimer += 0.08;
+        this.y = this.baseY + Math.sin(this.animTimer) * 6;
+    }
+
+    draw(ctx, cameraY) {
+        if (this.eaten) return;
+
+        const renderY = Math.floor(this.y - cameraY);
+        if (renderY < -30 || renderY > CONFIG.SCREEN_HEIGHT + 30) return;
+
+        ctx.save();
+        const frame = Math.floor(this.animTimer * 2) % 2 === 0 
+            ? SPRITES.fly.frame1 
+            : SPRITES.fly.frame2;
+
+        SPRITES.drawPixelGrid(ctx, Math.floor(this.x), renderY, 2.2, SPRITES.fly.colorMap, frame);
+        ctx.restore();
+    }
+}
+
+/**
+ * ------------------------------------------------------------------
+ * ENEMIES (적 생물: 뱀 & 거미)
+ * ------------------------------------------------------------------
+ */
+class Enemy {
+    constructor(x, y, type, platform = null) {
+        this.x = x;
+        this.y = y;
+        this.type = type;
+        this.platform = platform;
+        
+        if (type === 'SNAKE') {
+            this.width = 32;
+            this.height = 16;
+            this.speed = CONFIG.SNAKE_SPEED;
+            this.dir = Math.random() < 0.5 ? 1 : -1;
+        } else {
+            this.width = 24;
+            this.height = 24;
+            this.speed = CONFIG.SPIDER_SPEED;
+            this.dir = Math.random() < 0.5 ? 1 : -1;
+            this.startY = y;
+            this.threadLength = 50 + Math.random() * 40;
+        }
+
+        this.animFrame = 0;
+    }
+
+    update() {
+        this.animFrame += 0.08;
+
+        if (this.type === 'SNAKE') {
+            this.x += this.speed * this.dir;
+
+            if (this.platform) {
+                if (this.x <= this.platform.x || this.x + this.width >= this.platform.x + this.platform.width) {
+                    this.dir *= -1;
+                }
+            } else {
+                if (this.x <= 20 || this.x + this.width >= CONFIG.WORLD_WIDTH - 20) {
+                    this.dir *= -1;
+                }
+            }
+        } else if (this.type === 'SPIDER') {
+            this.y += this.speed * this.dir;
+            if (this.y > this.startY + this.threadLength || this.y < this.startY) {
+                this.dir *= -1;
+            }
+        }
+    }
+
+    draw(ctx, cameraY) {
+        const renderX = Math.floor(this.x);
+        const renderY = Math.floor(this.y - cameraY);
+
+        if (renderY < -40 || renderY > CONFIG.SCREEN_HEIGHT + 40) return;
+
+        ctx.save();
+
+        if (this.type === 'SNAKE') {
+            const frame = Math.floor(this.animFrame) % 2 === 0 
+                ? SPRITES.snake.frame1 
+                : SPRITES.snake.frame2;
+
+            if (this.dir < 0) {
+                ctx.translate(renderX + this.width, renderY);
+                ctx.scale(-1, 1);
+                SPRITES.drawPixelGrid(ctx, 0, 0, 2, SPRITES.snake.colorMap, frame);
+            } else {
+                SPRITES.drawPixelGrid(ctx, renderX, renderY, 2, SPRITES.snake.colorMap, frame);
+            }
+        } else if (this.type === 'SPIDER') {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(renderX + this.width / 2, Math.floor(this.startY - cameraY));
+            ctx.lineTo(renderX + this.width / 2, renderY);
+            ctx.stroke();
+
+            const frame = Math.floor(this.animFrame) % 2 === 0 
+                ? SPRITES.spider.frame1 
+                : SPRITES.spider.frame2;
+
+            SPRITES.drawPixelGrid(ctx, renderX, renderY, 2, SPRITES.spider.colorMap, frame);
+        }
+
+        ctx.restore();
+    }
+}
+
+/**
+ * ------------------------------------------------------------------
+ * USER INTERFACE (상단 UI 및 오버레이)
+ * ------------------------------------------------------------------
+ */
+const UI = {
+    draw(ctx) {
+        ctx.save();
+
+        // 1. 상단 HUD 배경 바
+        ctx.fillStyle = CONFIG.COLORS.UI_BG;
+        ctx.beginPath();
+        ctx.roundRect(16, 16, 270, 48, 14);
+        ctx.fill();
+        ctx.strokeStyle = CONFIG.COLORS.UI_BORDER;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        // 2. 파리 개수 표시 (클리어에 필요한 파리 수: 10개)
+        ctx.font = 'bold 16px "Courier New", monospace';
+        ctx.fillStyle = CONFIG.COLORS.UI_TEXT;
+        ctx.textAlign = 'left';
+        ctx.fillText(`파리: ${GAME_STATE.fliesEaten} / ${CONFIG.TARGET_FLIES}`, 32, 45);
+
+        // 3. 목숨 표시
+        ctx.fillText('목숨:', 168, 45);
+        ctx.fillStyle = CONFIG.COLORS.HEART;
+        let heartsStr = '';
+        for (let i = 0; i < GAME_STATE.lives; i++) {
+            heartsStr += '♥ ';
+        }
+        ctx.fillText(heartsStr, 222, 45);
+
+        // 4. 게임 오버 / 클리어 화면 오버레이
+        if (GAME_STATE.current === 'GAMEOVER') {
+            this.drawOverlay(ctx, 'GAME OVER', '개구리가 기력을 다했습니다...', '#ff4d6d');
+        } else if (GAME_STATE.current === 'CLEAR') {
+            this.drawOverlay(ctx, 'STAGE CLEAR!', '파리 10마리를 모두 잡았습니다!', '#52a28d');
+        } else if (GAME_STATE.current === 'START') {
+            this.drawOverlay(ctx, '개구리의 숲속 파리 사냥', 'WASD/방향키: 이동 | Space: 점프', '#e0f8cf', '시작하려면 [Space] 또는 [R]키를 누르세요');
+        }
+
+        ctx.restore();
+    },
+
+    drawOverlay(ctx, title, subText, titleColor, customInstruction = '재시작하려면 [R] 키를 누르세요') {
+        ctx.fillStyle = 'rgba(20, 44, 38, 0.92)';
+        ctx.fillRect(0, 0, CONFIG.SCREEN_WIDTH, CONFIG.SCREEN_HEIGHT);
+
+        ctx.textAlign = 'center';
+        
+        ctx.font = 'bold 36px "Courier New", monospace';
+        ctx.fillStyle = titleColor;
+        ctx.fillText(title, CONFIG.SCREEN_WIDTH / 2, CONFIG.SCREEN_HEIGHT / 2 - 40);
+
+        ctx.font = 'bold 18px "Courier New", monospace';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(subText, CONFIG.SCREEN_WIDTH / 2, CONFIG.SCREEN_HEIGHT / 2 + 10);
+
+        ctx.font = '16px "Courier New", monospace';
+        ctx.fillStyle = '#64b49f';
+        ctx.fillText(customInstruction, CONFIG.SCREEN_WIDTH / 2, CONFIG.SCREEN_HEIGHT / 2 + 70);
+    }
+};
+
+/**
+ * ------------------------------------------------------------------
+ * MAIN GAME ENGINE
+ * ------------------------------------------------------------------
+ */
+class Game {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        
+        this.canvas.width = CONFIG.SCREEN_WIDTH;
+        this.canvas.height = CONFIG.SCREEN_HEIGHT;
+
+        this.player = new Player();
+        this.bgDecorations = new BackgroundDecoration();
+        this.platforms = [];
+        this.flies = [];
+        this.enemies = [];
+
+        INPUT.init();
+        this.resetGame();
+    }
+
+    resetGame() {
+        GAME_STATE.init();
+        EFFECT_MANAGER.clear();
+
+        this.platforms = MAP_BUILDER.generatePlatforms();
+        this.player.resetPosition();
+        
+        this.spawnFlies();
+        this.spawnEnemies();
+
+        CAMERA.y = CONFIG.WORLD_HEIGHT - CONFIG.SCREEN_HEIGHT;
+    }
+
+    spawnFlies() {
+        this.flies = [];
+        const totalFlies = CONFIG.TOTAL_FLIES; // 총 15마리 배치
+        
+        for (let i = 0; i < totalFlies; i++) {
+            const targetY = (CONFIG.WORLD_HEIGHT - 250) - (i * ((CONFIG.WORLD_HEIGHT - 450) / totalFlies));
+            const x = 70 + Math.random() * (CONFIG.WORLD_WIDTH - 140);
+            const y = targetY + (Math.random() * 30 - 15);
+
+            this.flies.push(new Fly(Math.floor(x), Math.floor(y)));
+        }
+    }
+
+    spawnEnemies() {
+        this.enemies = [];
+        
+        // 적 생성 확률 대폭 축소 (4층마다 가끔씩 스폰)
+        this.platforms.forEach((plat, index) => {
+            if (index === 0 || plat.y < 300 || index % 4 !== 0) return;
+
+            const rand = Math.random();
+            if (plat.width >= 130 && rand < 0.08) {
+                this.enemies.push(new Enemy(plat.x + 10, plat.y - 16, 'SNAKE', plat));
+            } else if (rand > 0.92) {
+                this.enemies.push(new Enemy(plat.x + plat.width / 2 - 12, plat.y + 20, 'SPIDER'));
+            }
+        });
+    }
+
+    checkCollisions() {
+        if (GAME_STATE.current !== 'PLAYING') return;
+
+        // 1. 개구리와 파리 충돌 체크
+        for (let i = this.flies.length - 1; i >= 0; i--) {
+            const fly = this.flies[i];
+            if (!fly.eaten &&
+                this.player.x < fly.x + fly.width &&
+                this.player.x + this.player.width > fly.x &&
+                this.player.y < fly.y + fly.height &&
+                this.player.y + this.player.height > fly.y) {
+                
+                fly.eaten = true;
+                GAME_STATE.fliesEaten++;
+                
+                EFFECT_MANAGER.addEatEffect(fly.x + 12, fly.y + 12);
+
+                this.flies.splice(i, 1);
+
+                if (GAME_STATE.fliesEaten >= CONFIG.TARGET_FLIES) {
+                    GAME_STATE.current = 'CLEAR';
+                }
+            }
+        }
+
+        // 2. 개구리와 적 충돌 체크
+        if (this.player.invincibleTimer === 0) {
+            this.enemies.forEach(enemy => {
+                const padding = 5;
+                if (this.player.x + padding < enemy.x + enemy.width &&
+                    this.player.x + this.player.width - padding > enemy.x &&
+                    this.player.y + padding < enemy.y + enemy.height &&
+                    this.player.y + this.player.height - padding > enemy.y) {
+                    
+                    GAME_STATE.lives--;
+                    EFFECT_MANAGER.addHitEffect(this.player.x + 16, this.player.y + 16);
+
+                    if (GAME_STATE.lives <= 0) {
+                        GAME_STATE.current = 'GAMEOVER';
+                    } else {
+                        this.player.invincibleTimer = CONFIG.PLAYER.INVINCIBLE_TIME;
+                        this.player.vy = -5;
+                    }
+                }
+            });
+        }
+    }
+
+    update() {
+        if (INPUT.keys.r) {
+            this.resetGame();
+            GAME_STATE.current = 'PLAYING';
+            return;
+        }
+
+        if (GAME_STATE.current === 'START') {
+            if (INPUT.keys.space) {
+                GAME_STATE.current = 'PLAYING';
+            }
+            return;
+        }
+
+        if (GAME_STATE.current !== 'PLAYING') return;
+
+        this.player.update(this.platforms);
+        CAMERA.update(this.player.y);
+
+        this.bgDecorations.update();
+        this.flies.forEach(fly => fly.update());
+        this.enemies.forEach(enemy => enemy.update());
+        EFFECT_MANAGER.update();
+
+        this.checkCollisions();
+    }
+
+    drawBackground() {
+        const ctx = this.ctx;
+        const camY = CAMERA.y;
+
+        const gradient = ctx.createLinearGradient(0, 0, 0, CONFIG.SCREEN_HEIGHT);
+        gradient.addColorStop(0, CONFIG.COLORS.FOREST_DARK);
+        gradient.addColorStop(0.5, CONFIG.COLORS.FOREST_MID);
+        gradient.addColorStop(1, CONFIG.COLORS.FOREST_LIGHT);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, CONFIG.SCREEN_WIDTH, CONFIG.SCREEN_HEIGHT);
+
+        this.bgDecorations.draw(ctx, camY);
+
+        const waterY = Math.floor(CONFIG.WORLD_HEIGHT - 60 - camY);
+        if (waterY < CONFIG.SCREEN_HEIGHT) {
+            ctx.fillStyle = '#2e6b5c';
+            ctx.fillRect(0, waterY, CONFIG.SCREEN_WIDTH, CONFIG.WORLD_HEIGHT - waterY);
+            ctx.fillStyle = '#64b49f';
+            ctx.fillRect(0, waterY, CONFIG.SCREEN_WIDTH, 4);
+        }
+    }
+
+    draw() {
+        this.drawBackground();
+
+        const camY = CAMERA.y;
+
+        this.platforms.forEach(plat => plat.draw(this.ctx, camY));
+        this.flies.forEach(fly => fly.draw(this.ctx, camY));
+        this.enemies.forEach(enemy => enemy.draw(this.ctx, camY));
+        this.player.draw(this.ctx, camY);
+        EFFECT_MANAGER.draw(this.ctx, camY);
+        UI.draw(this.ctx);
+    }
+
+    start() {
+        const loop = () => {
+            this.update();
+            this.draw();
+            requestAnimationFrame(loop);
+        };
+        requestAnimationFrame(loop);
+    }
+}
+
+window.onload = () => {
+    const game = new Game();
+    game.start();
+};
+</script>
+</body>
+</html>
