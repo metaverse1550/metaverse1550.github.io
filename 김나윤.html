@@ -1,0 +1,1728 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TVA Chrono Investigator - Nexus Variant Case</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        tva: {
+                            orange: '#e65c00',
+                            amber: '#ff9900',
+                            gold: '#cc7a00',
+                            bronze: '#2b1d0c',
+                            dark: '#120c06',
+                            terminal: '#ffb366',
+                            danger: '#ff3333',
+                            success: '#33cc66'
+                        }
+                    },
+                    fontFamily: {
+                        mono: ['"Share Tech Mono"', 'monospace'],
+                        sans: ['Inter', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0d0804;
+            font-family: 'Inter', sans-serif;
+            user-select: none;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* Scanline CRT overlay effect for TVA vintage sci-fi look */
+        .crt-overlay {
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+            background-size: 100% 3px, 6px 100%;
+            pointer-events: none;
+        }
+
+        /* Custom Crosshair */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 12px;
+            height: 12px;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 20;
+            transition: all 0.15s ease;
+        }
+
+        #crosshair::before {
+            content: '';
+            position: absolute;
+            top: 5px;
+            left: 0;
+            width: 12px;
+            height: 2px;
+            background-color: rgba(255, 153, 0, 0.8);
+            box-shadow: 0 0 6px rgba(255, 153, 0, 0.9);
+        }
+
+        #crosshair::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 5px;
+            width: 2px;
+            height: 12px;
+            background-color: rgba(255, 153, 0, 0.8);
+            box-shadow: 0 0 6px rgba(255, 153, 0, 0.9);
+        }
+
+        #crosshair.active::before, #crosshair.active::after {
+            background-color: #ff3333;
+            box-shadow: 0 0 10px #ff3333;
+        }
+
+        /* Glassmorphism Panel */
+        .tva-panel {
+            background: rgba(20, 12, 6, 0.88);
+            border: 2px solid #cc7a00;
+            box-shadow: 0 0 15px rgba(230, 92, 0, 0.3), inset 0 0 10px rgba(230, 92, 0, 0.15);
+        }
+
+        .tva-btn {
+            background: linear-gradient(135deg, #e65c00 0%, #993d00 100%);
+            border: 1px solid #ff9900;
+            color: #ffffff;
+            transition: all 0.2s ease;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+        }
+
+        .tva-btn:hover {
+            background: linear-gradient(135deg, #ff771a 0%, #b34700 100%);
+            box-shadow: 0 0 12px rgba(255, 153, 0, 0.6);
+            transform: translateY(-1px);
+        }
+
+        .tva-btn:active {
+            transform: translateY(1px);
+        }
+
+        /* Pulse Animations */
+        @keyframes warningPulse {
+            0% { opacity: 0.3; }
+            50% { opacity: 0.8; }
+            100% { opacity: 0.3; }
+        }
+
+        .warning-glow {
+            animation: warningPulse 1.2s infinite;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1a0f05;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #e65c00;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="text-gray-100 select-none">
+
+    <!-- 3D Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- CRT Scanline Overlay -->
+    <div class="crt-overlay absolute inset-0 z-10"></div>
+
+    <!-- UI Crosshair -->
+    <div id="crosshair"></div>
+
+    <!-- Top Alert Banner -->
+    <div id="alert-banner" class="hidden absolute top-6 left-1/2 -translate-x-1/2 z-50 bg-red-900/90 border-2 border-red-500 text-red-100 px-6 py-3 rounded-lg font-mono text-center shadow-lg shadow-red-950/80 transition-all duration-300">
+        <i class="fa-solid fa-triangle-exclamation mr-2 animate-bounce"></i>
+        <span id="alert-banner-text">잘못된 시간선 좌표입니다!</span>
+    </div>
+
+    <!-- HUD Overlay -->
+    <div id="hud" class="absolute inset-0 z-20 pointer-events-none flex flex-col justify-between p-4">
+        <!-- Top Row HUD -->
+        <div class="flex justify-between items-start">
+            <!-- Left Info Panel -->
+            <div class="tva-panel p-3 rounded-lg font-mono text-xs text-tva-terminal space-y-1">
+                <div class="flex items-center space-x-2 border-b border-tva-gold/40 pb-1 mb-1">
+                    <i class="fa-solid fa-id-badge text-tva-amber"></i>
+                    <span class="font-bold text-sm tracking-wider">TVA FIELD AGENT: MOBIUS</span>
+                </div>
+                <div>CURRENT LOC: <span id="hud-location" class="text-white font-bold">TVA HEADQUARTERS</span></div>
+                <div>OBJECTIVE: <span id="hud-objective" class="text-tva-amber">Check Chrono Monitor Terminal</span></div>
+                <div class="text-yellow-400 font-bold border-t border-tva-gold/30 pt-1 mt-1">CASE PROGRESS: <span id="hud-round-display" class="text-white">1 / 5</span></div>
+            </div>
+
+            <!-- Right Mini Chrono Monitor HUD -->
+            <div id="hud-chrono-panel" class="tva-panel p-3 rounded-lg font-mono text-xs w-64 transition-all duration-300">
+                <div class="flex justify-between items-center border-b border-tva-gold/40 pb-1 mb-2">
+                    <span class="text-tva-amber font-bold flex items-center gap-1.5">
+                        <span id="hud-status-dot" class="w-2 h-2 rounded-full bg-green-500"></span>
+                        <span id="hud-status-title">TEMPORAL NORMAL</span>
+                    </span>
+                    <span id="hud-timer" class="text-white font-bold">00:00</span>
+                </div>
+                
+                <div class="space-y-1.5">
+                    <div class="flex justify-between text-[11px]">
+                        <span>NEXUS DIVERGENCE:</span>
+                        <span id="hud-danger-val" class="text-green-400 font-bold">0%</span>
+                    </div>
+                    <!-- Red Line Gauge -->
+                    <div class="w-full h-3 bg-black/60 rounded border border-tva-gold/40 relative overflow-hidden">
+                        <div id="hud-gauge-bar" class="h-full bg-gradient-to-r from-yellow-500 via-orange-500 to-red-600 transition-all duration-300" style="width: 0%;"></div>
+                        <div class="absolute right-0 top-0 bottom-0 w-0.5 bg-red-500 shadow-[0_0_8px_#ff0000]"></div>
+                    </div>
+                    <div id="hud-threshold-label" class="text-[10px] text-gray-400 text-right">STABLE TIMELINE</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Action Bar & Interaction Prompt -->
+        <div class="flex flex-col items-center gap-3">
+            <!-- Center Interaction Prompt -->
+            <div id="interaction-prompt" class="hidden tva-panel px-5 py-2 rounded-full font-mono text-sm text-tva-terminal animate-pulse shadow-lg flex items-center gap-2">
+                <kbd class="bg-tva-amber/30 border border-tva-amber px-2 py-0.5 rounded text-white font-bold">E</kbd>
+                <span id="prompt-text">상호작용</span>
+            </div>
+
+            <!-- Controls Quick Guide -->
+            <div class="tva-panel px-4 py-1.5 rounded-lg font-mono text-[11px] text-gray-300 flex gap-4 opacity-80">
+                <span><b class="text-tva-amber">WASD</b> 이동</span>
+                <span><b class="text-tva-amber">SHIFT</b> 달리기</span>
+                <span><b class="text-tva-amber">MOUSE</b> 시점</span>
+                <span><b class="text-tva-amber">E</b> 상호작용</span>
+                <span><b class="text-tva-amber">TAB / I</b> 인벤토리</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- UI MODAL 1: CHRONO MONITOR TERMINAL -->
+    <div id="modal-chrono" class="hidden absolute inset-0 z-30 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="tva-panel w-full max-w-4xl rounded-xl p-6 font-mono text-tva-terminal flex flex-col gap-4 max-h-[90vh]">
+            <!-- Header -->
+            <div class="flex justify-between items-center border-b border-tva-gold/50 pb-3">
+                <div class="flex items-center gap-3">
+                    <i class="fa-solid fa-[#000] fa-desktop text-2xl text-tva-amber"></i>
+                    <div>
+                        <h2 class="text-xl font-bold text-white tracking-wide">TVA CHRONO MONITOR V7.4</h2>
+                        <p class="text-xs text-tva-amber">SACRED TIMELINE BRANCH MONITORING SYSTEM</p>
+                    </div>
+                </div>
+                <button onclick="closeModals()" class="text-gray-400 hover:text-white text-xl p-1"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 my-2">
+                <!-- Left: Timeline Visualizer Canvas -->
+                <div class="md:col-span-2 bg-black/90 rounded-lg p-3 border border-tva-gold/30 flex flex-col gap-2">
+                    <div class="flex justify-between text-xs text-tva-amber border-b border-gray-800 pb-1">
+                        <span>TEMPORAL OSCILLOSCOPE</span>
+                        <span id="chrono-status-text" class="text-green-400 font-bold">STATUS: SACRED TIMELINE STABLE</span>
+                    </div>
+                    <canvas id="chrono-graph-canvas" width="500" height="240" class="w-full h-52 bg-black/80 rounded border border-tva-gold/20 cursor-crosshair"></canvas>
+                    
+                    <div class="bg-tva-bronze/60 border border-tva-amber/80 p-2.5 rounded-lg text-center shadow-[0_0_15px_rgba(255,153,0,0.2)]">
+                        <span class="text-xs text-tva-terminal block font-bold mb-0.5">⚡ 감지된 분기 시간선 고유 식별 코드</span>
+                        <span id="detected-code-display" class="text-3xl font-extrabold text-yellow-300 font-mono tracking-widest drop-shadow-[0_0_10px_rgba(255,204,0,0.9)]">---</span>
+                    </div>
+                </div>
+
+                <!-- Right: Sequence Input Panel -->
+                <div class="flex flex-col justify-between bg-tva-bronze/40 p-4 rounded-lg border border-tva-gold/30">
+                    <div>
+                        <h3 class="text-sm font-bold text-white border-b border-tva-gold/30 pb-2 mb-3">TEMPORAL COORDINATES</h3>
+                        
+                        <div class="space-y-3">
+                            <div>
+                                <label class="text-xs text-gray-300 block mb-1">TARGET TIMELINE ID (3 Digits)</label>
+                                <input type="text" id="timeline-code-input" maxlength="3" placeholder="000" class="w-full bg-black/80 border-2 border-tva-gold text-tva-amber font-mono text-2xl tracking-[0.5em] text-center py-2 rounded focus:outline-none focus:border-tva-amber">
+                            </div>
+
+                            <div id="chrono-target-info" class="p-3 bg-black/50 rounded border border-tva-gold/20 text-xs space-y-1">
+                                <div>LOCATION: <span id="target-loc-name" class="text-white">Earth-616 Park</span></div>
+                                <div>STABILITY: <span id="target-stability" class="text-green-400 font-bold">STABLE (100%)</span></div>
+                                <div>NEXUS EVENT: <span id="target-nexus-event" class="text-green-400 font-bold">NONE DETECTED</span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-2 mt-4">
+                        <button onclick="submitTimelineCode()" class="w-full tva-btn py-2.5 rounded font-bold text-sm tracking-wider flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-key"></i> COORDINATE VERIFY
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer status -->
+            <div class="text-xs text-center text-gray-400 border-t border-tva-gold/30 pt-2">
+                "FOR ALL TIME. ALWAYS." — TIME VARIANCE AUTHORITY
+            </div>
+        </div>
+    </div>
+
+    <!-- UI MODAL 2: INTERROGATION & DIALOGUE -->
+    <div id="modal-dialogue" class="hidden absolute bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-3xl px-4 pointer-events-auto">
+        <div class="tva-panel p-5 rounded-xl font-mono text-tva-terminal shadow-2xl flex flex-col gap-3">
+            <div class="flex justify-between items-center border-b border-tva-gold/40 pb-2">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-user-gear text-tva-amber text-lg"></i>
+                    <span id="npc-dialogue-title" class="font-bold text-white text-base">SUSPECT INVESTIGATION</span>
+                </div>
+                <button onclick="closeDialogue()" class="text-xs text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+
+            <!-- Dialogue History & Response Area -->
+            <div id="dialogue-box" class="bg-black/80 p-4 rounded-lg border border-tva-gold/20 min-h-[100px] text-sm text-gray-200 leading-relaxed font-sans">
+                "무슨 일이죠, 요원님? 저는 그냥 평범하게 할 일을 하고 있었을 뿐입니다."
+            </div>
+
+            <!-- Action Options -->
+            <div id="dialogue-options" class="grid grid-cols-2 md:grid-cols-4 gap-2 pt-1 font-mono text-xs">
+                <!-- Dynamically generated buttons -->
+            </div>
+        </div>
+    </div>
+
+    <!-- UI MODAL 3: INVENTORY & GUIDELINE BOOK -->
+    <div id="modal-inventory" class="hidden absolute inset-0 z-30 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="tva-panel w-full max-w-4xl rounded-xl p-6 font-mono text-tva-terminal flex flex-col gap-4 max-h-[90vh]">
+            <div class="flex justify-between items-center border-b border-tva-gold/50 pb-3">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-briefcase text-xl text-tva-amber"></i>
+                    <h2 class="text-lg font-bold text-white">TVA AGENT EQUIPMENT & DOSSIER</h2>
+                </div>
+                <button onclick="toggleInventory()" class="text-gray-400 hover:text-white text-xl"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 h-[460px]">
+                <!-- Inventory Items List -->
+                <div class="space-y-2 border-r border-tva-gold/30 pr-4">
+                    <div class="text-xs font-bold text-tva-amber mb-2">EQUIPPED GEAR</div>
+                    
+                    <div onclick="selectInvItem('guideline')" id="inv-item-guideline" class="p-3 bg-tva-bronze/60 border border-tva-gold rounded-lg cursor-pointer hover:bg-tva-amber/20 transition flex items-center gap-3">
+                        <i class="fa-solid fa-book-bookmark text-2xl text-tva-amber"></i>
+                        <div>
+                            <div class="text-sm font-bold text-white">시간선 가이드라인</div>
+                            <div class="text-[11px] text-gray-400">신성한 시간선 표준 정보</div>
+                        </div>
+                    </div>
+
+                    <div onclick="selectInvItem('tempad')" id="inv-item-tempad" class="p-3 bg-tva-bronze/30 border border-tva-gold/30 rounded-lg cursor-pointer hover:bg-tva-amber/20 transition flex items-center gap-3">
+                        <i class="fa-solid fa-[#000] fa-calculator text-2xl text-tva-amber"></i>
+                        <div>
+                            <div class="text-sm font-bold text-white">템패드 (TEMPAD)</div>
+                            <div class="text-[11px] text-gray-400">시공간 시프팅 포탈 장치</div>
+                        </div>
+                    </div>
+
+                    <div onclick="selectInvItem('pruner')" id="inv-item-pruner" class="p-3 bg-tva-bronze/30 border border-tva-gold/30 rounded-lg cursor-pointer hover:bg-tva-amber/20 transition flex items-center gap-3">
+                        <i class="fa-solid fa-wand-magic-sparkles text-2xl text-tva-amber"></i>
+                        <div>
+                            <div class="text-sm font-bold text-white">해체봉 (PRUNING STICK)</div>
+                            <div class="text-[11px] text-gray-400">변종 제압 및 즉각 삭제</div>
+                        </div>
+                    </div>
+
+                    <div onclick="selectInvItem('reset_charge')" id="inv-item-reset_charge" class="p-3 bg-tva-bronze/30 border border-tva-gold/30 rounded-lg cursor-pointer hover:bg-tva-amber/20 transition flex items-center gap-3">
+                        <i class="fa-solid fa-atom text-2xl text-tva-amber"></i>
+                        <div>
+                            <div class="text-sm font-bold text-white">리셋 차지 (RESET CHARGE)</div>
+                            <div class="text-[11px] text-gray-400">시간선 넥서스 정화 장치</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Item Detail View -->
+                <div class="md:col-span-2 bg-black/60 p-4 rounded-lg border border-tva-gold/20 overflow-y-auto">
+                    <!-- Detail: Guideline -->
+                    <div id="inv-detail-guideline" class="space-y-4 font-sans">
+                        <div class="border-b border-tva-gold/40 pb-2 font-mono">
+                            <h3 class="text-base font-bold text-tva-amber">📜 신성한 시간선 표준 관찰 가이드라인</h3>
+                            <p class="text-xs text-gray-400">본 가이드라인에 기록된 인물 외형과 행동 특성만이 규정된 정사(Canon)입니다.</p>
+                        </div>
+                        <div id="guideline-content" class="space-y-3 text-xs text-gray-200">
+                            <!-- Procedurally generated guideline items -->
+                        </div>
+                    </div>
+
+                    <!-- Detail: Tempad -->
+                    <div id="inv-detail-tempad" class="hidden space-y-3 font-mono">
+                        <h3 class="text-base font-bold text-tva-amber border-b border-tva-gold/40 pb-2">📟 TEMPAD CONTROLLER</h3>
+                        <p class="text-xs text-gray-300 leading-relaxed">
+                            크로노 모니터에서 3자리 시간선 코드를 승인받은 후 포탈을 개설하여 선택한 시간선으로 즉시 이동합니다.
+                        </p>
+                        <div id="tempad-portal-status" class="p-4 bg-tva-bronze/50 rounded border border-tva-gold/40 text-xs space-y-2">
+                            <div>PORTAL STATUS: <span id="tempad-status-text" class="text-yellow-400 font-bold">READY / LOBBY</span></div>
+                            <div>TARGET COORDINATES: <span id="tempad-target-text" class="text-white">NONE</span></div>
+                        </div>
+                    </div>
+
+                    <!-- Detail: Pruner Stick -->
+                    <div id="inv-detail-pruner" class="hidden space-y-3 font-mono">
+                        <h3 class="text-base font-bold text-tva-amber border-b border-tva-gold/40 pb-2">⚡ TIME PRUNING STICK</h3>
+                        <p class="text-xs text-gray-300">
+                            변종(Variant)을 타격하여 허공 영역(The Void)으로 즉시 가지치기(Prune)합니다.<br>
+                            <b>사용법:</b> [장착하기] 버튼 클릭 후 조준점으로 의심되는 대상 NPC를 왼쪽 클릭.
+                        </p>
+                        <button onclick="equipPrunerTool()" id="btn-equip-pruner" class="tva-btn px-4 py-2 rounded text-xs font-bold">
+                            해체봉 장착하기
+                        </button>
+                    </div>
+
+                    <!-- Detail: Reset Charge -->
+                    <div id="inv-detail-reset_charge" class="hidden space-y-3 font-mono">
+                        <h3 class="text-base font-bold text-tva-amber border-b border-tva-gold/40 pb-2">💣 RESET CHARGE</h3>
+                        <p class="text-xs text-gray-300">
+                            변종 체포 완료 후, 분기 시간선의 중앙 넥서스 지점에 설치하여 시간선을 정화하고 분기를 닫습니다.
+                        </p>
+                        <div class="p-3 bg-black/40 border border-tva-gold/20 rounded text-xs">
+                            REQUIREMENT: <span id="reset-charge-req" class="text-red-400">올바른 변종 체포 필요</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- UI MODAL 4: FINAL MISSION REPORT -->
+    <div id="modal-result" class="hidden absolute inset-0 z-40 bg-black/90 backdrop-blur-lg flex items-center justify-center p-4">
+        <div class="tva-panel w-full max-w-2xl rounded-xl p-8 font-mono text-tva-terminal flex flex-col gap-6 border-2 shadow-[0_0_50px_rgba(230,92,0,0.4)]">
+            <div class="text-center border-b border-tva-gold/50 pb-4">
+                <i class="fa-solid fa-file-invoice text-4xl text-tva-amber mb-2"></i>
+                <h2 class="text-2xl font-bold tracking-widest text-white">TVA MISSION DEBRIEFING REPORT</h2>
+                <p class="text-xs text-tva-amber mt-1">TIME VARIANCE AUTHORITY ARCHIVE LOG</p>
+            </div>
+
+            <!-- Stats Grid -->
+            <div class="grid grid-cols-2 gap-4 text-xs font-mono">
+                <div class="bg-black/60 p-3 rounded border border-tva-gold/20">
+                    <span class="text-gray-400 block mb-1">CORRECT VARIANT ARRESTED</span>
+                    <span id="res-correct-count" class="text-xl font-bold text-tva-success">1</span>
+                </div>
+                <div class="bg-black/60 p-3 rounded border border-tva-gold/20">
+                    <span class="text-gray-400 block mb-1">INNOCENTS INJURED/PRUNED</span>
+                    <span id="res-innocent-count" class="text-xl font-bold text-tva-danger">0</span>
+                </div>
+                <div class="bg-black/60 p-3 rounded border border-tva-gold/20">
+                    <span class="text-gray-400 block mb-1">INVESTIGATION TIME</span>
+                    <span id="res-elapsed-time" class="text-xl font-bold text-white">02:45</span>
+                </div>
+                <div class="bg-black/60 p-3 rounded border border-tva-gold/20">
+                    <span class="text-gray-400 block mb-1">TIMELINE PRESERVED</span>
+                    <span id="res-timeline-status" class="text-xl font-bold text-tva-amber">YES</span>
+                </div>
+            </div>
+
+            <!-- Discovered Clues Summary -->
+            <div class="bg-black/80 p-4 rounded border border-tva-gold/30 text-xs font-sans space-y-1">
+                <div class="font-mono text-tva-amber font-bold mb-1">📋 주요 조사 기록 & 단서:</div>
+                <ul id="res-clues-list" class="list-disc pl-4 text-gray-300 space-y-1">
+                    <!-- Clues filled dynamically -->
+                </ul>
+            </div>
+
+            <!-- Final Big Verdict Text -->
+            <div class="text-center my-2 py-4 rounded-lg bg-black/90 border-2" id="verdict-container">
+                <h1 id="res-final-verdict" class="text-4xl font-extrabold tracking-widest">MISSION SUCCESSFUL</h1>
+                <p id="res-final-subtext" class="text-xs mt-1">The Sacred Timeline has been restored.</p>
+            </div>
+
+            <!-- Action Button -->
+            <button onclick="restartGameCase()" class="tva-btn py-3 rounded-lg font-bold text-sm tracking-wider w-full text-center">
+                <i class="fa-solid fa-rotate-right mr-2"></i> NEXT NEXUS CASE (새 사건 조사하기)
+            </button>
+        </div>
+    </div>
+
+    <!-- MAIN JAVASCRIPT GAME ENGINE -->
+    <script>
+        
+        // CONFIG & CONSTANTS
+        const CONFIG = {
+            PLAYER_SPEED: 7.5,
+            RUN_MULTIPLIER: 1.6,
+            MOUSE_SENSITIVITY: 0.0022,
+            INTERACTION_DIST: 4.5,
+            MAX_DIVERGENCE_TIME: 150, // 2.5 minutes limit before Red Line collapse
+        };
+
+        // GLOBAL GAME STATE
+        const GAME_STATE = {
+            currentZone: 'LOBBY', // 'LOBBY', 'SACRED_TIMELINE', 'BRANCHED_NEXUS'
+            pointerLocked: false,
+            inventoryOpen: false,
+            prunerEquipped: false,
+            resetChargeInstalled: false,
+            resetDomeActive: false,
+            resetDomeRadius: 0.5,
+            variantCaptured: false,
+            targetTimelineId: Math.floor(100 + Math.random() * 900).toString(),
+            enteredTimelineId: null,
+            branchDetected: false,
+            branchSpawnTimer: 0,
+            divergencePercent: 0,
+            elapsedSeconds: 0,
+            innocentPrunedCount: 0,
+            correctPrunedCount: 0,
+            currentRound: 1,
+            totalRounds: 5,
+            discoveredClues: [],
+            guidelines: [],
+            npcs: [],
+            variantIndex: -1,
+            variantAnomalyType: 'HAT', // 'HAT', 'ADDRESS', 'FAVORITE'
+            gameEnded: false
+        };
+
+        // WEB AUDIO SYNTHESIZER (For sound effects without external audio files)
+        const AudioFX = {
+            ctx: null,
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            },
+            beep(freq = 440, type = 'sine', duration = 0.15) {
+                if (!this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                    gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + duration);
+                } catch(e){}
+            },
+            pruneSound() {
+                if (!this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 0.4);
+                    gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                    gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.4);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + 0.4);
+                }catch(e){}
+            },
+            portalSound() {
+                if (!this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(200, this.ctx.currentTime);
+                    osc.frequency.linearRampToValueAtTime(600, this.ctx.currentTime + 0.5);
+                    gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                    gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.5);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + 0.5);
+                }catch(e){}
+            }
+        };
+
+
+        // THREE.JS SETUP
+        let scene, camera, renderer;
+        let playerObj;
+        let controls = { moveFwd: false, moveBwd: false, moveLft: false, moveRgt: false, isRunning: false };
+        let moveVector = new THREE.Vector3();
+        let euler = new THREE.Euler(0, 0, 0, 'YXZ');
+
+        // Interactive Objects Array
+        let interactables = [];
+        let resetChargeMesh = null;
+        let resetDomeMesh = null;
+        let prunerStickMesh = null;
+        let chronoScreenMesh = null;
+
+        function initThreeScene() {
+            const container = document.getElementById('canvas-container');
+            
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0e0804);
+            scene.fog = new THREE.FogExp2(0x0e0804, 0.025);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // Lighting Setup
+            const ambientLight = new THREE.AmbientLight(0xffd699, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffa64d, 0.8);
+            dirLight.position.set(20, 40, 20);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 1024;
+            dirLight.shadow.mapSize.height = 1024;
+            scene.add(dirLight);
+
+            // Player Pivot
+            playerObj = new THREE.Object3D();
+            playerObj.position.set(0, 1.7, 5);
+            scene.add(playerObj);
+            playerObj.add(camera);
+
+            // Create 1st Person Pruning Stick Tool model attached to camera
+            create1stPersonPruner();
+
+            // Build Initial World Map (TVA Lobby)
+            buildTVALobbyMap();
+
+            // Window Resize listener
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function create1stPersonPruner() {
+            const group = new THREE.Group();
+            
+            // Stick rod
+            const rodGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.8, 8);
+            const rodMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.8, roughness: 0.2 });
+            const rod = new THREE.Mesh(rodGeo, rodMat);
+            rod.rotation.x = Math.PI / 3;
+            group.add(rod);
+
+            // Glowing tip
+            const tipGeo = new THREE.SphereGeometry(0.05, 16, 16);
+            const tipMat = new THREE.MeshBasicMaterial({ color: 0xff6600 });
+            const tip = new THREE.Mesh(tipGeo, tipMat);
+            tip.position.set(0, 0.35, -0.2);
+            group.add(tip);
+
+            group.position.set(0.3, -0.3, -0.5);
+            group.visible = false;
+            camera.add(group);
+            prunerStickMesh = group;
+        }
+
+
+        function buildTVALobbyMap() {
+            clearSceneWorld();
+            GAME_STATE.currentZone = 'LOBBY';
+            document.getElementById('hud-location').innerText = 'TVA HEADQUARTERS (LOBBY)';
+            document.getElementById('hud-objective').innerText = 'Check Chrono Monitor Terminal or Sacred Portal';
+
+            scene.background = new THREE.Color(0x140c06);
+            scene.fog = new THREE.FogExp2(0x140c06, 0.03);
+
+            // Floor - Polished TVA Bronze Tiles
+            const floorGeo = new THREE.PlaneGeometry(40, 40);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x3d2612, roughness: 0.3, metalness: 0.4 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            // Walls
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x24150a, roughness: 0.7 });
+            const backWall = new THREE.Mesh(new THREE.BoxGeometry(40, 10, 1), wallMat);
+            backWall.position.set(0, 5, -20);
+            scene.add(backWall);
+
+            // Chrono Monitor Desk Console
+            const deskGeo = new THREE.BoxGeometry(4, 1.2, 2);
+            const deskMat = new THREE.MeshStandardMaterial({ color: 0x593719, roughness: 0.4 });
+            const desk = new THREE.Mesh(deskGeo, deskMat);
+            desk.position.set(0, 0.6, -6);
+            scene.add(desk);
+
+            // Glowing Screen Monitor
+            const screenGeo = new THREE.BoxGeometry(2, 1.2, 0.2);
+            const screenMat = new THREE.MeshBasicMaterial({ color: 0x33cc66 });
+            const screen = new THREE.Mesh(screenGeo, screenMat);
+            screen.position.set(0, 1.8, -6);
+            screen.userData = { type: 'CHRONO_CONSOLE', prompt: '크로노 모니터 단말기 확인 (E)' };
+            scene.add(screen);
+            interactables.push(screen);
+            chronoScreenMesh = screen;
+
+            // Portal Archway for Sacred Timeline Teleport
+            createPortalArchway(-8, 0, -10, 'SACRED_PORTAL', '신성한 시간선 직접 관찰 이동 (E)');
+
+            // Portal Archway for Branch Nexus Teleport
+            createPortalArchway(8, 0, -10, 'NEXUS_PORTAL', '분기 시간선(Nexus Branch) 이동 (E)');
+
+            playerObj.position.set(0, 1.7, 5);
+        }
+
+        function createPortalArchway(x, y, z, portalType, promptText) {
+            const archGroup = new THREE.Group();
+            
+            const ringGeo = new THREE.TorusGeometry(2, 0.15, 16, 32);
+            const ringMat = new THREE.MeshStandardMaterial({ color: 0xcc7a00, metalness: 0.8 });
+            const ring = new THREE.Mesh(ringGeo, ringMat);
+            ring.position.y = 2.2;
+            archGroup.add(ring);
+
+            // Glowing Portal Center
+            const centerGeo = new THREE.CircleGeometry(1.9, 32);
+            const centerMat = new THREE.MeshBasicMaterial({ color: portalType === 'SACRED_PORTAL' ? 0xffaa00 : 0xff3300, side: THREE.DoubleSide });
+            const center = new THREE.Mesh(centerGeo, centerMat);
+            center.position.y = 2.2;
+            center.userData = { type: portalType, prompt: promptText };
+            archGroup.add(center);
+            interactables.push(center);
+
+            archGroup.position.set(x, y, z);
+            scene.add(archGroup);
+        }
+
+        function buildSacredTimelineZone() {
+            clearSceneWorld();
+            GAME_STATE.currentZone = 'SACRED_TIMELINE';
+            document.getElementById('hud-location').innerText = 'SACRED TIMELINE (EARTH-616 PARK)';
+            document.getElementById('hud-objective').innerText = 'Observe normal citizens according to guidelines';
+
+            scene.background = new THREE.Color(0x87ceeb); // Bright daylight
+            scene.fog = new THREE.FogExp2(0x87ceeb, 0.015);
+
+            // Park Grass
+            const grassGeo = new THREE.PlaneGeometry(50, 50);
+            const grassMat = new THREE.MeshStandardMaterial({ color: 0x4caf50, roughness: 0.8 });
+            const grass = new THREE.Mesh(grassGeo, grassMat);
+            grass.rotation.x = -Math.PI / 2;
+            grass.receiveShadow = true;
+            scene.add(grass);
+
+            // Return Portal
+            createPortalArchway(0, 0, 18, 'RETURN_LOBBY', 'TVA 본부로 복귀 (E)');
+
+            // Spawn Normal Guideline Compliant NPCs
+            spawnProceduralNPCs(false);
+
+            playerObj.position.set(0, 1.7, 12);
+        }
+
+        function buildBranchedNexusZone() {
+            clearSceneWorld();
+            GAME_STATE.currentZone = 'BRANCHED_NEXUS';
+            document.getElementById('hud-location').innerText = `BRANCHED TIMELINE (#${GAME_STATE.enteredTimelineId})`;
+            
+            const isVisualOnly = GAME_STATE.variantAnomalyType === 'HAT';
+            document.getElementById('hud-objective').innerText = isVisualOnly 
+                ? '인상착의 육안 식별 후 변종 제압' 
+                : 'NPC 심문(주소/취향)을 통해 변종 식별 (심문 전용 여유시간 적용됨)';
+
+            scene.background = new THREE.Color(0x2b1d28); // Eerie sunset/anomaly tint
+            scene.fog = new THREE.FogExp2(0x2b1d28, 0.02);
+
+            // Ground
+            const groundGeo = new THREE.PlaneGeometry(50, 50);
+            const groundMat = new THREE.MeshStandardMaterial({ color: 0x4a3b47, roughness: 0.9 });
+            const ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // Return Portal
+            createPortalArchway(0, 0, 18, 'RETURN_LOBBY', 'TVA 본부로 복귀 (E)');
+
+            // Reset Charge Deployment Pedestal Anchor in Center
+            const anchorGeo = new THREE.CylinderGeometry(0.8, 1, 0.3, 16);
+            const anchorMat = new THREE.MeshStandardMaterial({ color: 0xcc7a00, metalness: 0.8 });
+            const anchor = new THREE.Mesh(anchorGeo, anchorMat);
+            anchor.position.set(0, 0.15, 0);
+            anchor.userData = { type: 'RESET_CHARGE_ANCHOR', prompt: '리셋 차지 설치 지점 (E)' };
+            scene.add(anchor);
+            interactables.push(anchor);
+
+            // Spawn NPCs with 1 Anomaly Variant
+            spawnProceduralNPCs(true);
+
+            playerObj.position.set(0, 1.7, 12);
+        }
+
+        function clearSceneWorld() {
+            interactables = [];
+            resetChargeMesh = null;
+            resetDomeMesh = null;
+            // Remove non-player objects
+            for(let i = scene.children.length - 1; i >= 0; i--) {
+                const child = scene.children[i];
+                if(child !== playerObj && child.type !== 'AmbientLight' && child.type !== 'DirectionalLight') {
+                    scene.remove(child);
+                }
+            }
+        }
+
+
+        const NPC_TEMPLATES = [
+            { 
+                name: "닥터 윌리엄", 
+                normalHat: "파란 모자", normalShirtColor: 0x2196f3, 
+                normalAddress: "퀸즈 42번가 101호", fakeAddress: "스카로 행성 9구역",
+                normalFavorite: "클래식 음악 감상", fakeFavorite: "시간선 붕괴 조작",
+                anomalyMsg: "시간선... 보존? 아니 난 내 운명을 직접 선택하겠어!" 
+            },
+            { 
+                name: "리사 앤", 
+                normalHat: "노란 모자", normalShirtColor: 0xffeb3b, 
+                normalAddress: "글렌데일 15번지", fakeAddress: "보이드 차원 중앙 거지",
+                normalFavorite: "정원 화초 가꾸기", fakeFavorite: "TVA 감시 장치 무력화",
+                anomalyMsg: "제가 왜 TVA가 만든 가이드라인에 맞춰 살아야 하죠?" 
+            },
+            { 
+                name: "상인 밥", 
+                normalHat: "갈색 모자", normalShirtColor: 0x795548, 
+                normalAddress: "브루클린 88번가", fakeAddress: "시간의 정점 0번지",
+                normalFavorite: "빈티지 시계 수리", fakeFavorite: "멀티버스 암거래",
+                anomalyMsg: "신성한 시간선 따위는 거짓이야! 내 상품이 훨씬 진짜라고!" 
+            },
+            { 
+                name: "시민 토미", 
+                normalHat: "초록 모자", normalShirtColor: 0x4caf50, 
+                normalAddress: "하트포드 104호", fakeAddress: "퀀텀 아레나 7지구",
+                normalFavorite: "공원 체스 경기", fakeFavorite: "넥서스 파동 증폭",
+                anomalyMsg: "TVA 헌병대 따위 두렵지 않다! 정해진 시간선은 파괴될 것이다!" 
+            }
+        ];
+
+        function generateCaseData() {
+            // 게임/사건 리셋마다 3자리 무작위 시간선 번호 생성
+            GAME_STATE.targetTimelineId = Math.floor(100 + Math.random() * 900).toString();
+            GAME_STATE.variantIndex = Math.floor(Math.random() * NPC_TEMPLATES.length);
+            
+            // 10초 이내 무작위 시간에 분기선 발생 (3초 ~ 8초 사이)
+            GAME_STATE.branchDetected = false;
+            GAME_STATE.branchSpawnTimer = 3 + Math.random() * 5;
+            GAME_STATE.divergencePercent = 0;
+
+            // Random Anomaly Type: 'HAT' (Appearance), 'ADDRESS' (Residence), or 'FAVORITE' (Hobby/Preferences)
+            const anomalyTypes = ['HAT', 'ADDRESS', 'FAVORITE'];
+            GAME_STATE.variantAnomalyType = anomalyTypes[Math.floor(Math.random() * anomalyTypes.length)];
+
+            GAME_STATE.guidelines = [];
+
+            NPC_TEMPLATES.forEach((tmpl, idx) => {
+                GAME_STATE.guidelines.push({
+                    name: tmpl.name,
+                    hat: tmpl.normalHat,
+                    shirtColorName: idx === 0 ? "파란색" : idx === 1 ? "노란색" : idx === 2 ? "갈색" : "초록색",
+                    address: tmpl.normalAddress,
+                    favorite: tmpl.normalFavorite
+                });
+            });
+
+            // Update Guideline UI Book Text
+            const guidelineBox = document.getElementById('guideline-content');
+            guidelineBox.innerHTML = GAME_STATE.guidelines.map(g => `
+                <div class="p-2.5 bg-black/50 rounded border border-tva-gold/20">
+                    <div class="font-bold text-tva-amber text-xs">[인물 규정] ${g.name}</div>
+                    <div class="text-[11px] text-gray-300 space-y-0.5 mt-1">
+                        <div>• 착용 모자: <span class="text-white font-bold">${g.hat}</span> (${g.shirtColorName} 상의)</div>
+                        <div>• 등록 주소: <span class="text-white font-bold">${g.address}</span></div>
+                        <div>• 지정 취향: <span class="text-white font-bold">${g.favorite}</span></div>
+                    </div>
+                </div>
+            `).join('');
+
+            // HUD Round Text Update
+            const roundDisplay = document.getElementById('hud-round-display');
+            if (roundDisplay) {
+                roundDisplay.innerText = `${GAME_STATE.currentRound} / ${GAME_STATE.totalRounds}`;
+            }
+        }
+
+        function spawnProceduralNPCs(isNexusBranch) {
+            GAME_STATE.npcs = [];
+            const positions = [
+                { x: -6, z: 2 },
+                { x: 6, z: 2 },
+                { x: -5, z: -6 },
+                { x: 5, z: -6 }
+            ];
+
+            NPC_TEMPLATES.forEach((tmpl, idx) => {
+                const isVariant = isNexusBranch && (idx === GAME_STATE.variantIndex);
+                
+                // Anomaly application based on variantAnomalyType
+                const hasHatAnomaly = isVariant && (GAME_STATE.variantAnomalyType === 'HAT');
+                const currentAddress = (isVariant && GAME_STATE.variantAnomalyType === 'ADDRESS') ? tmpl.fakeAddress : tmpl.normalAddress;
+                const currentFavorite = (isVariant && GAME_STATE.variantAnomalyType === 'FAVORITE') ? tmpl.fakeFavorite : tmpl.normalFavorite;
+
+                // Group
+                const npcGroup = new THREE.Group();
+
+                // Body
+                const bodyGeo = new THREE.CylinderGeometry(0.35, 0.35, 1.4, 16);
+                const bodyMat = new THREE.MeshStandardMaterial({ color: tmpl.normalShirtColor });
+                const body = new THREE.Mesh(bodyGeo, bodyMat);
+                body.position.y = 0.7;
+                npcGroup.add(body);
+
+                // Head
+                const headGeo = new THREE.SphereGeometry(0.25, 16, 16);
+                const headMat = new THREE.MeshStandardMaterial({ color: 0xffdbac });
+                const head = new THREE.Mesh(headGeo, headMat);
+                head.position.y = 1.65;
+                npcGroup.add(head);
+
+                // Hat (If variant with HAT anomaly, hat color is wrong!)
+                const hatGeo = new THREE.ConeGeometry(0.3, 0.3, 16);
+                const hatColor = hasHatAnomaly ? 0xff0055 : tmpl.normalShirtColor;
+                const hatMat = new THREE.MeshStandardMaterial({ color: hatColor });
+                const hat = new THREE.Mesh(hatGeo, hatMat);
+                hat.position.y = 1.95;
+                npcGroup.add(hat);
+
+                // Position
+                const pos = positions[idx];
+                npcGroup.position.set(pos.x, 0, pos.z);
+
+                // User data & Interaction
+                npcGroup.userData = {
+                    type: 'NPC',
+                    npcId: idx,
+                    name: tmpl.name,
+                    isVariant: isVariant,
+                    address: currentAddress,
+                    favorite: currentFavorite,
+                    anomalyMsg: tmpl.anomalyMsg,
+                    prompt: `${tmpl.name} 조사 및 대화 (E)`
+                };
+
+                // Add bounding interaction box
+                const clickBoxGeo = new THREE.BoxGeometry(1, 2, 1);
+                const clickBoxMat = new THREE.MeshBasicMaterial({ visible: false });
+                const clickBox = new THREE.Mesh(clickBoxGeo, clickBoxMat);
+                clickBox.position.y = 1;
+                clickBox.userData = npcGroup.userData;
+                npcGroup.add(clickBox);
+
+                scene.add(npcGroup);
+                interactables.push(clickBox);
+
+                // Store NPC wandering movement data
+                GAME_STATE.npcs.push({ 
+                    group: npcGroup, 
+                    data: npcGroup.userData,
+                    startX: pos.x,
+                    startZ: pos.z,
+                    targetX: pos.x + (Math.random() * 4 - 2),
+                    targetZ: pos.z + (Math.random() * 4 - 2),
+                    moveTimer: Math.random() * 3
+                });
+            });
+        }
+
+        function updateNPCMovement(delta) {
+            // 대화창 등 모달 창이 열려 있을 때는 NPC 이동을 정지시킴
+            if (isAnyModalOpen()) return;
+
+            GAME_STATE.npcs.forEach(npc => {
+                if (!npc.group || !npc.group.parent) return;
+
+                npc.moveTimer -= delta;
+                if (npc.moveTimer <= 0) {
+                    // Pick new random target near origin
+                    npc.targetX = npc.startX + (Math.random() * 6 - 3);
+                    npc.targetZ = npc.startZ + (Math.random() * 6 - 3);
+                    npc.moveTimer = 3 + Math.random() * 4;
+                }
+
+                // Move towards target position
+                const currentPos = npc.group.position;
+                const dx = npc.targetX - currentPos.x;
+                const dz = npc.targetZ - currentPos.z;
+                const dist = Math.sqrt(dx * dx + dz * dz);
+
+                if (dist > 0.1) {
+                    const walkSpeed = 1.2 * delta;
+                    currentPos.x += (dx / dist) * walkSpeed;
+                    currentPos.z += (dz / dist) * walkSpeed;
+                    
+                    // Face movement direction
+                    npc.group.rotation.y = Math.atan2(dx, dz);
+
+                    // Walking bobbing effect
+                    npc.group.position.y = Math.abs(Math.sin(Date.now() * 0.008)) * 0.1;
+                } else {
+                    npc.group.position.y = 0;
+                }
+            });
+        }
+
+
+        // CONTROLS & INPUT SYSTEM
+        function setupInputListeners() {
+            document.addEventListener('keydown', (e) => {
+                if (GAME_STATE.gameEnded) return;
+                switch (e.code) {
+                    case 'KeyW': controls.moveFwd = true; break;
+                    case 'KeyS': controls.moveBwd = true; break;
+                    case 'KeyA': controls.moveLft = true; break;
+                    case 'KeyD': controls.moveRgt = true; break;
+                    case 'ShiftLeft': controls.isRunning = true; break;
+                    case 'KeyE': interactWithTarget(); break;
+                    case 'KeyI':
+                    case 'Tab':
+                        e.preventDefault();
+                        toggleInventory();
+                        break;
+                }
+            });
+
+            document.addEventListener('keyup', (e) => {
+                switch (e.code) {
+                    case 'KeyW': controls.moveFwd = false; break;
+                    case 'KeyS': controls.moveBwd = false; break;
+                    case 'KeyA': controls.moveLft = false; break;
+                    case 'KeyD': controls.moveRgt = false; break;
+                    case 'ShiftLeft': controls.isRunning = false; break;
+                }
+            });
+
+            document.addEventListener('pointerlockchange', () => {
+                GAME_STATE.pointerLocked = (document.pointerLockElement === renderer.domElement);
+            });
+
+            renderer.domElement.addEventListener('click', (e) => {
+                AudioFX.init();
+                if (!GAME_STATE.pointerLocked && !isAnyModalOpen()) {
+                    renderer.domElement.requestPointerLock();
+                } else if (GAME_STATE.pointerLocked && GAME_STATE.prunerEquipped) {
+                    // Attack / Prune action with Pruning Stick
+                    attemptPruneTarget();
+                }
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!GAME_STATE.pointerLocked) return;
+                euler.setFromQuaternion(camera.quaternion);
+                euler.y -= e.movementX * CONFIG.MOUSE_SENSITIVITY;
+                euler.x -= e.movementY * CONFIG.MOUSE_SENSITIVITY;
+                euler.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, euler.x));
+                camera.quaternion.setFromEuler(euler);
+            });
+        }
+
+        function updatePlayerMovement(delta) {
+            if (!GAME_STATE.pointerLocked || isAnyModalOpen()) return;
+
+            const speed = CONFIG.PLAYER_SPEED * (controls.isRunning ? CONFIG.RUN_MULTIPLIER : 1) * delta;
+            moveVector.set(0, 0, 0);
+
+            if (controls.moveFwd) moveVector.z -= 1;
+            if (controls.moveBwd) moveVector.z += 1;
+            if (controls.moveLft) moveVector.x -= 1;
+            if (controls.moveRgt) moveVector.x += 1;
+
+            moveVector.normalize();
+            moveVector.applyQuaternion(camera.quaternion);
+            moveVector.y = 0; // Lock to ground plane
+
+            playerObj.position.addScaledVector(moveVector, speed);
+
+            // Map Bounds
+            playerObj.position.x = Math.max(-18, Math.min(18, playerObj.position.x));
+            playerObj.position.z = Math.max(-18, Math.min(18, playerObj.position.z));
+        }
+
+
+        const raycaster = new THREE.Raycaster();
+        let hoveredObject = null;
+
+        function updateRaycastInteraction() {
+            if (isAnyModalOpen()) {
+                document.getElementById('interaction-prompt').classList.add('hidden');
+                document.getElementById('crosshair').classList.remove('active');
+                return;
+            }
+
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const intersects = raycaster.intersectObjects(interactables, true);
+
+            if (intersects.length > 0 && intersects[0].distance <= CONFIG.INTERACTION_DIST) {
+                hoveredObject = intersects[0].object.userData.type ? intersects[0].object : intersects[0].object.parent;
+                const promptText = hoveredObject.userData.prompt || '상호작용 (E)';
+                document.getElementById('prompt-text').innerText = promptText;
+                document.getElementById('interaction-prompt').classList.remove('hidden');
+                document.getElementById('crosshair').classList.add('active');
+            } else {
+                hoveredObject = null;
+                document.getElementById('interaction-prompt').classList.add('hidden');
+                document.getElementById('crosshair').classList.remove('active');
+            }
+        }
+
+        function interactWithTarget() {
+            if (!hoveredObject || isAnyModalOpen()) return;
+
+            AudioFX.beep(600, 'sine', 0.1);
+            const type = hoveredObject.userData.type;
+
+            if (type === 'CHRONO_CONSOLE') {
+                document.exitPointerLock();
+                openChronoMonitor();
+            } else if (type === 'SACRED_PORTAL') {
+                AudioFX.portalSound();
+                buildSacredTimelineZone();
+            } else if (type === 'NEXUS_PORTAL') {
+                if (GAME_STATE.enteredTimelineId === GAME_STATE.targetTimelineId) {
+                    AudioFX.portalSound();
+                    buildBranchedNexusZone();
+                } else {
+                    showAlertBanner("⚠ 템패드 포탈 미인증! 크로노 모니터에서 시간선을 확인하십시오.");
+                }
+            } else if (type === 'RETURN_LOBBY') {
+                AudioFX.portalSound();
+                buildTVALobbyMap();
+            } else if (type === 'NPC') {
+                document.exitPointerLock();
+                openDialogueModal(hoveredObject.userData);
+            } else if (type === 'RESET_CHARGE_ANCHOR') {
+                deployResetCharge();
+            }
+        }
+
+
+        let chronoCanvas, chronoCtx;
+
+        function openChronoMonitor() {
+            document.getElementById('modal-chrono').classList.remove('hidden');
+            document.getElementById('timeline-code-input').value = "";
+            
+            const warningText = document.getElementById('chrono-status-text');
+            const targetStability = document.getElementById('target-stability');
+            const targetNexusEvent = document.getElementById('target-nexus-event');
+            const codeDisplay = document.getElementById('detected-code-display');
+
+            // 넥서스 이벤트 분기 감지 여부에 따라 모니터 UI 텍스트 및 상태 동적 업데이트
+            if (GAME_STATE.branchDetected) {
+                if (warningText) {
+                    warningText.innerText = "WARNING: DIVERGENCE DETECTED";
+                    warningText.className = "text-red-400 animate-pulse font-bold";
+                }
+                if (targetStability) {
+                    targetStability.innerText = "CRITICAL";
+                    targetStability.className = "text-red-400 font-bold";
+                }
+                if (targetNexusEvent) {
+                    targetNexusEvent.innerText = "VARIANT DETECTED";
+                    targetNexusEvent.className = "text-red-400 font-bold";
+                }
+                if (codeDisplay) {
+                    codeDisplay.innerText = '#' + GAME_STATE.targetTimelineId;
+                }
+            } else {
+                if (warningText) {
+                    warningText.innerText = "STATUS: SACRED TIMELINE STABLE";
+                    warningText.className = "text-green-400 font-bold";
+                }
+                if (targetStability) {
+                    targetStability.innerText = "STABLE (100%)";
+                    targetStability.className = "text-green-400 font-bold";
+                }
+                if (targetNexusEvent) {
+                    targetNexusEvent.innerText = "NONE DETECTED";
+                    targetNexusEvent.className = "text-green-400 font-bold";
+                }
+                if (codeDisplay) {
+                    codeDisplay.innerText = "---";
+                }
+            }
+
+            drawChronoGraph();
+        }
+
+        function drawChronoGraph() {
+            chronoCanvas = document.getElementById('chrono-graph-canvas');
+            chronoCtx = chronoCanvas.getContext('2d');
+            
+            const w = chronoCanvas.width;
+            const h = chronoCanvas.height;
+
+            chronoCtx.fillStyle = '#050302';
+            chronoCtx.fillRect(0, 0, w, h);
+
+            // Grid
+            chronoCtx.strokeStyle = 'rgba(230, 92, 0, 0.15)';
+            chronoCtx.lineWidth = 1;
+            for(let x=0; x<w; x+=30) { chronoCtx.beginPath(); chronoCtx.moveTo(x,0); chronoCtx.lineTo(x,h); chronoCtx.stroke(); }
+            for(let y=0; y<h; y+=30) { chronoCtx.beginPath(); chronoCtx.moveTo(0,y); chronoCtx.lineTo(w,y); chronoCtx.stroke(); }
+
+            // Sacred Timeline Baseline (Golden Line)
+            chronoCtx.strokeStyle = '#ff9900';
+            chronoCtx.lineWidth = 3;
+            chronoCtx.beginPath();
+            chronoCtx.moveTo(0, h/2);
+            for(let x=0; x<w; x+=10) {
+                chronoCtx.lineTo(x, h/2 + Math.sin(x*0.05 + Date.now()*0.003)*5);
+            }
+            chronoCtx.stroke();
+
+            // 넥서스 이벤트 분기(branchDetected)가 발생했을 때만 빨간색 분기선과 목표 코드 표시
+            if (GAME_STATE.branchDetected) {
+                // Nexus Divergence Red Line Threshold
+                const redLineY = 30;
+                chronoCtx.strokeStyle = '#ff3333';
+                chronoCtx.setLineDash([5, 5]);
+                chronoCtx.beginPath();
+                chronoCtx.moveTo(0, redLineY);
+                chronoCtx.lineTo(w, redLineY);
+                chronoCtx.stroke();
+                chronoCtx.setLineDash([]);
+
+                // Branch Line spiking towards Red Line
+                const branchY = (h/2) - (GAME_STATE.divergencePercent / 100) * (h/2 - redLineY);
+                chronoCtx.strokeStyle = '#ff0055';
+                chronoCtx.lineWidth = 2.5;
+                chronoCtx.beginPath();
+                chronoCtx.moveTo(150, h/2);
+                chronoCtx.quadraticCurveTo(w/2, branchY + 10, w - 40, branchY);
+                chronoCtx.stroke();
+
+                // Target Point Node
+                chronoCtx.fillStyle = '#ff0055';
+                chronoCtx.beginPath();
+                chronoCtx.arc(w - 40, branchY, 8, 0, Math.PI*2);
+                chronoCtx.fill();
+
+                // Background box for canvas label readability
+                const labelX = w - 185;
+                const labelY = Math.max(12, branchY - 40);
+                chronoCtx.fillStyle = 'rgba(10, 5, 0, 0.92)';
+                chronoCtx.fillRect(labelX, labelY, 180, 36);
+                chronoCtx.strokeStyle = '#ff9900';
+                chronoCtx.lineWidth = 1.5;
+                chronoCtx.strokeRect(labelX, labelY, 180, 36);
+
+                // Large, high-contrast timeline code label
+                chronoCtx.fillStyle = '#ffff00';
+                chronoCtx.font = 'bold 20px "Share Tech Mono"';
+                chronoCtx.fillText(`BRANCH #${GAME_STATE.targetTimelineId}`, labelX + 8, labelY + 25);
+            }
+        }
+
+        function submitTimelineCode() {
+            const inputElem = document.getElementById('timeline-code-input');
+            const inputVal = inputElem ? inputElem.value.trim() : '';
+
+            if (!inputVal) {
+                showAlertBanner("⚠ 좌표 코드를 입력하십시오.");
+                AudioFX.beep(300, 'sawtooth', 0.2);
+                return;
+            }
+
+            if (inputVal === GAME_STATE.targetTimelineId) {
+                GAME_STATE.enteredTimelineId = inputVal;
+                
+                // Update Tempad UI
+                const statusElem = document.getElementById('tempad-status-text');
+                if (statusElem) {
+                    statusElem.innerText = 'AUTHORIZED / PORTAL OPEN';
+                    statusElem.className = 'text-green-400 font-bold';
+                }
+                const targetElem = document.getElementById('tempad-target-text');
+                if (targetElem) {
+                    targetElem.innerText = `#${inputVal}`;
+                }
+
+                AudioFX.beep(880, 'sine', 0.2);
+                showAlertBanner(`✅ 좌표 #${inputVal} 검증 완료! 분기 포탈(Nexus Portal)로 이동 가능합니다.`);
+                closeModals();
+            } else {
+                AudioFX.beep(200, 'sawtooth', 0.3);
+                showAlertBanner("❌ 잘못된 시간선 좌표입니다! 감지된 분기 코드를 확인하십시오.");
+            }
+        }
+
+
+        let currentDialogueNpc = null;
+
+        function openDialogueModal(npcData) {
+            currentDialogueNpc = npcData;
+            document.getElementById('npc-dialogue-title').innerText = `INVESTIGATING: ${npcData.name}`;
+            document.getElementById('dialogue-box').innerText = `"안녕하세요, 요원님. 신성한 시간선의 시민으로서 성실히 협조하겠습니다."`;
+            
+            const optionsBox = document.getElementById('dialogue-options');
+            optionsBox.innerHTML = `
+                <button onclick="askQuestion(1)" class="tva-btn p-2 rounded text-left">1. 복장 및 신원 확인</button>
+                <button onclick="askQuestion(2)" class="tva-btn p-2 rounded text-left">2. 거주지 주소 질문</button>
+                <button onclick="askQuestion(3)" class="tva-btn p-2 rounded text-left">3. 좋아하는 취향 질문</button>
+                <button onclick="askQuestion(4)" class="tva-btn p-2 rounded text-left">4. 이상 반응 심문</button>
+            `;
+
+            document.getElementById('modal-dialogue').classList.remove('hidden');
+        }
+
+        function askQuestion(qId) {
+            AudioFX.beep(550, 'sine', 0.1);
+            const box = document.getElementById('dialogue-box');
+
+            if (qId === 1) {
+                const hasHatAnomaly = currentDialogueNpc.isVariant && (GAME_STATE.variantAnomalyType === 'HAT');
+                box.innerText = hasHatAnomaly 
+                    ? `"제 모자가 가이드라인과 다르다고요? 그건 제 개성입니다. 가이드라인 따위 신경 안 써요!"`
+                    : `"제 복장은 가이드라인 규정대로 정갈하게 착용하고 있습니다."`;
+                addClueRecord(`${currentDialogueNpc.name} 신원 및 외형 확인`);
+            } else if (qId === 2) {
+                const isAddressWrong = currentDialogueNpc.isVariant && (GAME_STATE.variantAnomalyType === 'ADDRESS');
+                box.innerText = `"제 주소요? 저는 [${currentDialogueNpc.address}]에 살고 있습니다."`;
+                if (isAddressWrong) {
+                    addClueRecord(`🚨 단서 획득: ${currentDialogueNpc.name}의 주소([${currentDialogueNpc.address}])가 가이드라인과 일치하지 않음!`);
+                } else {
+                    addClueRecord(`${currentDialogueNpc.name} 주소 확인`);
+                }
+            } else if (qId === 3) {
+                const isFavoriteWrong = currentDialogueNpc.isVariant && (GAME_STATE.variantAnomalyType === 'FAVORITE');
+                box.innerText = `"제가 제일 좋아하는 건 바로 [${currentDialogueNpc.favorite}]입니다."`;
+                if (isFavoriteWrong) {
+                    addClueRecord(`🚨 단서 획득: ${currentDialogueNpc.name}의 좋아하는 취향([${currentDialogueNpc.favorite}])이 가이드라인 규정과 상충됨!`);
+                } else {
+                    addClueRecord(`${currentDialogueNpc.name} 좋아하는 취향 확인`);
+                }
+            } else if (qId === 4) {
+                box.innerText = currentDialogueNpc.isVariant
+                    ? `"${currentDialogueNpc.anomalyMsg}"`
+                    : `"이상이라니요? 저는 지극히 정상적인 시민입니다."`;
+                if(currentDialogueNpc.isVariant) {
+                    addClueRecord(`🚨 단서 획득: ${currentDialogueNpc.name}의 비정상적인 발언 감지!`);
+                }
+            }
+        }
+
+        function closeDialogue() {
+            document.getElementById('modal-dialogue').classList.add('hidden');
+        }
+
+        function addClueRecord(text) {
+            if (!GAME_STATE.discoveredClues.includes(text)) {
+                GAME_STATE.discoveredClues.push(text);
+            }
+        }
+
+
+        function toggleInventory() {
+            const modal = document.getElementById('modal-inventory');
+            if (modal.classList.contains('hidden')) {
+                document.exitPointerLock();
+                modal.classList.remove('hidden');
+                GAME_STATE.inventoryOpen = true;
+                selectInvItem('guideline');
+            } else {
+                closeModals();
+            }
+        }
+
+        function selectInvItem(itemId) {
+            AudioFX.beep(700, 'sine', 0.08);
+            ['guideline', 'tempad', 'pruner', 'reset_charge'].forEach(id => {
+                document.getElementById(`inv-item-${id}`).classList.remove('bg-tva-amber/20', 'border-tva-amber');
+                document.getElementById(`inv-detail-${id}`).classList.add('hidden');
+            });
+
+            document.getElementById(`inv-item-${itemId}`).classList.add('bg-tva-amber/20', 'border-tva-amber');
+            document.getElementById(`inv-detail-${itemId}`).classList.remove('hidden');
+        }
+
+        function equipPrunerTool() {
+            GAME_STATE.prunerEquipped = true;
+            prunerStickMesh.visible = true;
+            closeModals();
+            showAlertBanner("⚡ 해체봉(Pruning Stick)을 장착했습니다. 조준 후 클릭 시 제압합니다.");
+        }
+
+        function attemptPruneTarget() {
+            if (!hoveredObject || hoveredObject.userData.type !== 'NPC') return;
+
+            const npcData = hoveredObject.userData;
+            AudioFX.pruneSound();
+
+            // Disappear target NPC with visual scale down effect
+            const npcGroup = hoveredObject.parent || hoveredObject;
+            scene.remove(npcGroup);
+
+            if (npcData.isVariant) {
+                GAME_STATE.variantCaptured = true;
+                GAME_STATE.correctPrunedCount++;
+                showAlertBanner("⚡ 올바른 변종(Variant)을 가지치기 제압했습니다! 리셋 차지를 설치하십시오.");
+                document.getElementById('reset-charge-req').innerText = '설치 가능 (REQUIREMENT MET)';
+                document.getElementById('reset-charge-req').className = 'text-green-400 font-bold';
+            } else {
+                GAME_STATE.innocentPrunedCount++;
+                showAlertBanner("⚠ 경고: 무고한 시간선 시민을 가지치기했습니다! (잘못된 체포 기록 +1)");
+            }
+        }
+
+        function deployResetCharge() {
+            if (!GAME_STATE.variantCaptured) {
+                showAlertBanner("⚠ 변종을 먼저 체포해야 리셋 차지를 작동할 수 있습니다!");
+                return;
+            }
+
+            if (GAME_STATE.resetChargeInstalled) return;
+
+            AudioFX.beep(900, 'sine', 0.3);
+            GAME_STATE.resetChargeInstalled = true;
+
+            // Spawn 3D Reset Charge Mesh on ground
+            const chargeGeo = new THREE.SphereGeometry(0.5, 16, 16);
+            const chargeMat = new THREE.MeshStandardMaterial({ color: 0xff6600, emissive: 0xff3300 });
+            resetChargeMesh = new THREE.Mesh(chargeGeo, chargeMat);
+            resetChargeMesh.position.set(0, 0.5, 0);
+            scene.add(resetChargeMesh);
+
+            // Create Expanding Reset Dome Mesh (half-sphere)
+            const domeGeo = new THREE.SphereGeometry(1, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+            const domeMat = new THREE.MeshStandardMaterial({
+                color: 0xff3300,
+                emissive: 0xff1100,
+                transparent: true,
+                opacity: 0.5,
+                side: THREE.DoubleSide,
+                wireframe: false
+            });
+            resetDomeMesh = new THREE.Mesh(domeGeo, domeMat);
+            resetDomeMesh.position.set(0, 0, 0);
+            resetDomeMesh.scale.set(0.5, 0.5, 0.5);
+            scene.add(resetDomeMesh);
+
+            GAME_STATE.resetDomeActive = true;
+            GAME_STATE.resetDomeRadius = 0.5;
+
+            showAlertBanner("💣 리셋 차지가 가동되었습니다! 정화 장막에 닿기 전에 포탈(E)로 탈출하십시오!");
+        }
+
+        function advanceToNextRound() {
+            GAME_STATE.currentRound++;
+            GAME_STATE.divergencePercent = 10;
+            GAME_STATE.variantCaptured = false;
+            GAME_STATE.resetChargeInstalled = false;
+            GAME_STATE.resetDomeActive = false;
+            GAME_STATE.resetDomeRadius = 0.5;
+            GAME_STATE.prunerEquipped = false;
+            GAME_STATE.enteredTimelineId = null;
+            if (prunerStickMesh) prunerStickMesh.visible = false;
+
+            showAlertBanner(`🎉 케이스 ${GAME_STATE.currentRound - 1}/${GAME_STATE.totalRounds} 해결! 제 ${GAME_STATE.currentRound} 사건으로 진행합니다.`);
+            
+            generateCaseData();
+            buildTVALobbyMap();
+        }
+
+
+        function updateGameLoopTimer(delta) {
+            if (GAME_STATE.gameEnded) return;
+
+            GAME_STATE.elapsedSeconds += delta;
+
+            // 10초 이내 분기선 발생 체크
+            if (!GAME_STATE.branchDetected) {
+                GAME_STATE.branchSpawnTimer -= delta;
+                if (GAME_STATE.branchSpawnTimer <= 0) {
+                    GAME_STATE.branchDetected = true;
+                    GAME_STATE.divergencePercent = 12;
+                    
+                    AudioFX.beep(880, 'sawtooth', 0.35);
+                    showAlertBanner("🚨 넥서스 이벤트 발생! 우측 상단 모니터 및 실물 단말기가 빨간색으로 경고합니다!");
+
+                    // 우측 상단 HUD 패널 경고 모드로 전환
+                    const hudPanel = document.getElementById('hud-chrono-panel');
+                    const statusDot = document.getElementById('hud-status-dot');
+                    const statusTitle = document.getElementById('hud-status-title');
+                    const threshLabel = document.getElementById('hud-threshold-label');
+
+                    if (hudPanel) {
+                        hudPanel.classList.add('border-red-500', 'shadow-[0_0_20px_rgba(255,0,0,0.5)]', 'animate-pulse');
+                    }
+                    if (statusDot) {
+                        statusDot.className = 'w-2 h-2 rounded-full bg-red-500 animate-ping';
+                    }
+                    if (statusTitle) {
+                        statusTitle.innerText = 'NEXUS DETECTED';
+                        statusTitle.className = 'text-red-400 font-bold';
+                    }
+                    if (threshLabel) {
+                        threshLabel.innerText = 'RED LINE THRESHOLD';
+                        threshLabel.className = 'text-[10px] text-red-400 font-bold text-right';
+                    }
+                }
+            }
+            
+            // Increment divergence in branched timeline
+            if (GAME_STATE.branchDetected && GAME_STATE.currentZone === 'BRANCHED_NEXUS' && !GAME_STATE.resetChargeInstalled) {
+                // 인상착의(HAT) 이외의 심문 필요 케이스(주소, 취향)는 제한시간을 2배 여유있게 부여 (속도 감축)
+                const divergenceRate = (GAME_STATE.variantAnomalyType === 'HAT') ? 0.9 : 0.45;
+                GAME_STATE.divergencePercent += delta * divergenceRate;
+            }
+
+            // Divergence Cap & Red Line Failure Check
+            if (GAME_STATE.divergencePercent >= 100) {
+                GAME_STATE.divergencePercent = 100;
+                triggerMissionFailure("RED LINE COLLAPSE - TIME BRANCH CRITICAL OVERLOAD");
+            }
+
+            // Update HUD
+            const mins = Math.floor(GAME_STATE.elapsedSeconds / 60).toString().padStart(2, '0');
+            const secs = Math.floor(GAME_STATE.elapsedSeconds % 60).toString().padStart(2, '0');
+            document.getElementById('hud-timer').innerText = `${mins}:${secs}`;
+            
+            const divPct = Math.floor(GAME_STATE.divergencePercent);
+            const dangerVal = document.getElementById('hud-danger-val');
+            dangerVal.innerText = `${divPct}%`;
+            dangerVal.className = GAME_STATE.branchDetected ? "text-red-400 font-bold" : "text-green-400 font-bold";
+            document.getElementById('hud-gauge-bar').style.width = `${divPct}%`;
+        }
+
+        function triggerMissionSuccess() {
+            GAME_STATE.gameEnded = true;
+            document.exitPointerLock();
+
+            showDebriefingReport(true, "MISSION SUCCESSFUL", "총 5개의 넥서스 사건을 모두 해결하고 신성한 시간선을 보존했습니다.");
+        }
+
+        function triggerMissionFailure(reason) {
+            GAME_STATE.gameEnded = true;
+            document.exitPointerLock();
+
+            showDebriefingReport(false, "MISSION FAILED", reason || "시간선 붕괴로 넥서스 사건을 막지 못했습니다.");
+        }
+
+        function showDebriefingReport(isSuccess, title, subtext) {
+            const resultModal = document.getElementById('modal-result');
+            
+            document.getElementById('res-correct-count').innerText = `${GAME_STATE.correctPrunedCount} / ${GAME_STATE.totalRounds}`;
+            document.getElementById('res-innocent-count').innerText = GAME_STATE.innocentPrunedCount;
+            
+            const mins = Math.floor(GAME_STATE.elapsedSeconds / 60).toString().padStart(2, '0');
+            const secs = Math.floor(GAME_STATE.elapsedSeconds % 60).toString().padStart(2, '0');
+            document.getElementById('res-elapsed-time').innerText = `${mins}:${secs}`;
+            
+            document.getElementById('res-timeline-status').innerText = isSuccess ? 'PRESERVED' : 'PRUNED / BROKEN';
+            document.getElementById('res-timeline-status').className = isSuccess ? 'text-xl font-bold text-tva-success' : 'text-xl font-bold text-tva-danger';
+
+            const cluesList = document.getElementById('res-clues-list');
+            if (GAME_STATE.discoveredClues.length > 0) {
+                cluesList.innerHTML = GAME_STATE.discoveredClues.map(c => `<li>${c}</li>`).join('');
+            } else {
+                cluesList.innerHTML = `<li>발견된 특별 단서 없음</li>`;
+            }
+
+            const verdictHeader = document.getElementById('res-final-verdict');
+            const verdictContainer = document.getElementById('verdict-container');
+            verdictHeader.innerText = title;
+            document.getElementById('res-final-subtext').innerText = subtext;
+
+            if (isSuccess) {
+                verdictHeader.className = 'text-4xl font-extrabold tracking-widest text-tva-success';
+                verdictContainer.className = 'text-center my-2 py-4 rounded-lg bg-black/90 border-2 border-tva-success shadow-[0_0_20px_rgba(51,204,102,0.3)]';
+            } else {
+                verdictHeader.className = 'text-4xl font-extrabold tracking-widest text-tva-danger';
+                verdictContainer.className = 'text-center my-2 py-4 rounded-lg bg-black/90 border-2 border-tva-danger shadow-[0_0_20px_rgba(255,51,51,0.3)]';
+            }
+
+            resultModal.classList.remove('hidden');
+        }
+
+        function restartGameCase() {
+            GAME_STATE.gameEnded = false;
+            GAME_STATE.divergencePercent = 0;
+            GAME_STATE.branchDetected = false;
+            GAME_STATE.branchSpawnTimer = 3 + Math.random() * 5;
+            GAME_STATE.elapsedSeconds = 0;
+            GAME_STATE.innocentPrunedCount = 0;
+            GAME_STATE.correctPrunedCount = 0;
+            GAME_STATE.currentRound = 1;
+            GAME_STATE.discoveredClues = [];
+            GAME_STATE.variantCaptured = false;
+            GAME_STATE.resetChargeInstalled = false;
+            GAME_STATE.resetDomeActive = false;
+            GAME_STATE.resetDomeRadius = 0.5;
+            GAME_STATE.prunerEquipped = false;
+            GAME_STATE.enteredTimelineId = null;
+            if (prunerStickMesh) prunerStickMesh.visible = false;
+
+            // HUD UI 경고 스타일 초기화
+            const hudPanel = document.getElementById('hud-chrono-panel');
+            const statusDot = document.getElementById('hud-status-dot');
+            const statusTitle = document.getElementById('hud-status-title');
+            const threshLabel = document.getElementById('hud-threshold-label');
+
+            if (hudPanel) {
+                hudPanel.className = 'tva-panel p-3 rounded-lg font-mono text-xs w-64 transition-all duration-300';
+            }
+            if (statusDot) {
+                statusDot.className = 'w-2 h-2 rounded-full bg-green-500';
+            }
+            if (statusTitle) {
+                statusTitle.innerText = 'TEMPORAL NORMAL';
+                statusTitle.className = '';
+            }
+            if (threshLabel) {
+                threshLabel.innerText = 'STABLE TIMELINE';
+                threshLabel.className = 'text-[10px] text-gray-400 text-right';
+            }
+
+            // 좌표 입력창 및 템패드 포탈 상태 초기화
+            const inputElem = document.getElementById('timeline-code-input');
+            if (inputElem) inputElem.value = "";
+            const statusElem = document.getElementById('tempad-status-text');
+            if (statusElem) {
+                statusElem.innerText = 'READY / LOBBY';
+                statusElem.className = 'text-yellow-400 font-bold';
+            }
+            const targetElem = document.getElementById('tempad-target-text');
+            if (targetElem) targetElem.innerText = 'NONE';
+
+            closeModals();
+            generateCaseData();
+            buildTVALobbyMap();
+        }
+
+
+        function showAlertBanner(msg) {
+            const banner = document.getElementById('alert-banner');
+            document.getElementById('alert-banner-text').innerText = msg;
+            banner.classList.remove('hidden');
+            setTimeout(() => {
+                banner.classList.add('hidden');
+            }, 3200);
+        }
+
+        function closeModals() {
+            document.getElementById('modal-chrono').classList.add('hidden');
+            document.getElementById('modal-inventory').classList.add('hidden');
+            document.getElementById('modal-dialogue').classList.add('hidden');
+            document.getElementById('modal-result').classList.add('hidden');
+            GAME_STATE.inventoryOpen = false;
+        }
+
+        function isAnyModalOpen() {
+            return !document.getElementById('modal-chrono').classList.contains('hidden') ||
+                   !document.getElementById('modal-inventory').classList.contains('hidden') ||
+                   !document.getElementById('modal-dialogue').classList.contains('hidden') ||
+                   !document.getElementById('modal-result').classList.contains('hidden');
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+
+        let lastTime = performance.now();
+
+        function gameLoop(now) {
+            requestAnimationFrame(gameLoop);
+
+            const delta = Math.min((now - lastTime) / 1000, 0.1);
+            lastTime = now;
+
+            updatePlayerMovement(delta);
+            updateNPCMovement(delta);
+            updateRaycastInteraction();
+            updateGameLoopTimer(delta);
+
+            // 실물 크로노 모니터 3D 메쉬 깜빡임 효과
+            if (chronoScreenMesh) {
+                if (GAME_STATE.branchDetected) {
+                    // 빨간색 경고 깜빡임
+                    const blink = (Math.sin(now * 0.012) + 1) / 2;
+                    chronoScreenMesh.material.color.setRGB(0.3 + blink * 0.7, 0, 0);
+                } else {
+                    // 정상 안정 상태 (녹색)
+                    chronoScreenMesh.material.color.setHex(0x33cc66);
+                }
+            }
+
+            if (GAME_STATE.resetDomeActive && resetDomeMesh) {
+                // 리셋 차지 확장 속도를 기존 7.0에서 3.0으로 하향 조정하여 여유있게 탈출 가능
+                GAME_STATE.resetDomeRadius += delta * 3.0;
+                resetDomeMesh.scale.set(GAME_STATE.resetDomeRadius, GAME_STATE.resetDomeRadius, GAME_STATE.resetDomeRadius);
+                
+                if (resetChargeMesh) {
+                    resetChargeMesh.rotation.y += delta * 4;
+                }
+
+                // Check collision if player is still inside the branched nexus zone
+                if (GAME_STATE.currentZone === 'BRANCHED_NEXUS') {
+                    const distToPlayer = playerObj.position.distanceTo(new THREE.Vector3(0, 1.7, 0));
+                    if (distToPlayer <= GAME_STATE.resetDomeRadius) {
+                        AudioFX.pruneSound();
+                        GAME_STATE.resetDomeActive = false;
+                        triggerMissionFailure("리셋 차지의 시공간 정화 장막에 감식되어 요원이 소멸되었습니다!");
+                    }
+                } else if (GAME_STATE.currentZone === 'LOBBY') {
+                    // Player successfully escaped to TVA Lobby
+                    if (GAME_STATE.resetDomeRadius >= 32.0) {
+                        GAME_STATE.resetDomeActive = false;
+                        if (GAME_STATE.currentRound < GAME_STATE.totalRounds) {
+                            advanceToNextRound();
+                        } else {
+                            triggerMissionSuccess();
+                        }
+                    }
+                }
+            } else if (resetChargeMesh) {
+                resetChargeMesh.rotation.y += delta * 3;
+                const scale = 1 + Math.sin(now * 0.01) * 0.2;
+                resetChargeMesh.scale.set(scale, scale, scale);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // ENTRY POINT ON WINDOW LOAD
+        window.onload = function() {
+            initThreeScene();
+            setupInputListeners();
+            generateCaseData();
+            requestAnimationFrame(gameLoop);
+        };
+    </script>
+</body>
+</html>
