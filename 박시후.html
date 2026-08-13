@@ -1,0 +1,1490 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Deep Space Isolation - SF 2.5D 생존 탈출</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800;900&family=Share+Tech+Mono&display=swap');
+
+        body {
+            background-color: #030712;
+            color: #f3f4f6;
+            font-family: 'Share Tech Mono', monospace;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .font-orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        /* Glassmorphism UI styling */
+        .hud-panel {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.8), inset 0 0 10px rgba(56, 189, 248, 0.05);
+        }
+
+        .hud-warning {
+            border-color: rgba(239, 68, 68, 0.4);
+            box-shadow: 0 0 15px rgba(239, 68, 68, 0.2);
+        }
+
+        /* Custom CRT overlay effect for horror ambience */
+        .crt-overlay {
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.25) 50%
+            ), linear-gradient(
+                90deg,
+                rgba(255, 0, 0, 0.03),
+                rgba(0, 255, 0, 0.01),
+                rgba(0, 0, 255, 0.03)
+            );
+            background-size: 100% 3px, 6px 100%;
+            pointer-events: none;
+        }
+
+        /* Glowing text & border animations */
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 0.8; filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.8)); }
+            50% { opacity: 0.3; filter: drop-shadow(0 0 1px rgba(239, 68, 68, 0.2)); }
+        }
+
+        .danger-alarm {
+            animation: pulse-glow 1.5s infinite ease-in-out;
+        }
+
+        /* Canvas container canvas alignment */
+        #gameCanvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            cursor: crosshair;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(56, 189, 248, 0.3);
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body class="w-screen h-screen relative bg-black select-none">
+
+    <!-- Main 2.5D Graphics Canvas -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- CRT Visual Atmosphere Overlay -->
+    <div class="crt-overlay absolute inset-0 z-10"></div>
+
+    <!-- MAIN HUD UI OVERLAY -->
+    <div id="hudUI" class="absolute inset-0 pointer-events-none z-20 flex flex-col justify-between p-4 sm:p-6">
+        
+        <!-- Top Row: Status, Objectives, Minimap -->
+        <div class="flex justify-between items-start w-full gap-4">
+            
+            <!-- Player Status Panel -->
+            <div class="hud-panel p-4 rounded-lg w-64 sm:w-80 pointer-events-auto">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="font-orbitron text-xs tracking-widest text-cyan-400 font-bold uppercase">우주비행사 상태</span>
+                    <span id="playerStateBadge" class="text-xs px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">정상</span>
+                </div>
+                
+                <!-- Health Bar -->
+                <div class="mb-3">
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-slate-400">생체 체력</span>
+                        <span id="healthVal" class="text-emerald-400 font-bold">100%</span>
+                    </div>
+                    <div class="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden p-0.5 border border-slate-700">
+                        <div id="healthBar" class="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-all duration-300" style="width: 100%;"></div>
+                    </div>
+                </div>
+
+                <!-- Stamina Bar -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-slate-400">이동 지구력</span>
+                        <span id="staminaVal" class="text-cyan-400 font-bold">100%</span>
+                    </div>
+                    <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden p-0.5 border border-slate-700">
+                        <div id="staminaBar" class="bg-cyan-500 h-full rounded-full transition-all duration-150" style="width: 100%;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Current Objective Tracker Panel -->
+            <div class="hud-panel p-4 rounded-lg flex-1 max-w-md hidden md:block">
+                <div class="flex items-center gap-2 mb-1">
+                    <div class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></div>
+                    <span class="font-orbitron text-xs tracking-wider text-amber-400 font-bold uppercase">현재 미션 목표</span>
+                </div>
+                <div id="objectiveText" class="text-sm font-semibold text-slate-200">
+                    우주선 내부를 수색하여 승무원 구역의 녹색 카드키를 찾으세요.
+                </div>
+                <div id="subObjectiveText" class="text-xs text-slate-400 mt-1">
+                    [방향키]: 이동 | [마우스 클릭]: 상호작용
+                </div>
+            </div>
+
+            <!-- Minimap Container -->
+            <div class="hud-panel p-2 rounded-lg w-36 h-36 sm:w-44 sm:h-44 flex flex-col items-center justify-center relative">
+                <div class="font-orbitron text-[10px] text-slate-400 absolute top-1 left-2">SHIP RADAR</div>
+                <canvas id="minimapCanvas" class="w-full h-full rounded bg-slate-950 border border-slate-800"></canvas>
+            </div>
+        </div>
+
+        <!-- Center Notification Toast -->
+        <div class="flex flex-col items-center pointer-events-none my-auto">
+            <div id="interactionHint" class="hidden hud-panel px-6 py-2 rounded-full text-sm font-bold text-cyan-300 border border-cyan-500/50 shadow-lg animate-bounce pointer-events-auto cursor-pointer">
+                [마우스 클릭] 상호작용
+            </div>
+            <div id="alertToast" class="hidden mt-2 px-4 py-2 rounded bg-red-950/90 border border-red-500 text-red-200 text-xs font-bold text-center danger-alarm">
+                경고: 적대적 생명체 근접!
+            </div>
+        </div>
+
+        <!-- Bottom Row: Inventory, Tools, Controls -->
+        <div class="flex justify-between items-end w-full gap-4">
+            
+            <!-- Inventory Quickbar -->
+            <div class="hud-panel p-3 rounded-lg pointer-events-auto">
+                <div class="font-orbitron text-[10px] text-slate-400 mb-2 uppercase tracking-wider">소지품 & 키카드</div>
+                <div id="inventoryContainer" class="flex gap-2">
+                    <!-- Inventory slots dynamically generated -->
+                </div>
+            </div>
+
+            <!-- Action Tools & Stun Flares -->
+            <div class="hud-panel p-3 rounded-lg flex items-center gap-4 pointer-events-auto">
+                <div class="text-right">
+                    <div class="font-orbitron text-xs text-slate-300 font-bold">섬광 방해 장치</div>
+                    <div id="flareCount" class="text-xs text-amber-400 font-semibold">남은 횟수: 3/3</div>
+                </div>
+                <button id="useFlareBtn" class="bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-black font-bold font-orbitron px-4 py-2.5 rounded shadow-lg text-xs transition active:scale-95 disabled:opacity-50">
+                    [Space / 클릭] 섬광 투척
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- START SCREEN MODAL -->
+    <div id="startModal" class="absolute inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="max-w-xl w-full hud-panel p-8 rounded-xl border border-cyan-500/30 text-center space-y-6">
+            <div class="space-y-2">
+                <span class="text-xs font-orbitron tracking-widest text-red-500 uppercase font-bold">DEEP SPACE SURVIVAL HORROR</span>
+                <h1 class="text-4xl sm:text-5xl font-black font-orbitron text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-sky-200 to-teal-400 tracking-wider">
+                    DEEP SPACE ISOLATION
+                </h1>
+                <p class="text-slate-400 text-sm italic">"우주선 '에레보스호'의 시스템이 붕괴되었습니다. 정체불명의 괴물이 배회하고 있습니다..."</p>
+            </div>
+
+            <div class="bg-slate-900/80 p-4 rounded-lg border border-slate-800 text-left text-xs text-slate-300 space-y-2 font-mono">
+                <div class="text-cyan-400 font-bold font-orbitron mb-1">🎮 조작 가이드</div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>• <span class="text-white font-bold">방향키 (▲ ▼ ◄ ►)</span>: 이동</div>
+                    <div>• <span class="text-white font-bold">마우스 클릭</span>: 오브젝트 상호작용</div>
+                    <div>• <span class="text-white font-bold">Space 키</span>: 섬광 방해 장치 사용</div>
+                    <div>• <span class="text-white font-bold">캐비닛/환풍구</span>: 괴물 피해 숨기</div>
+                </div>
+            </div>
+
+            <div class="space-y-3">
+                <button id="startGameBtn" class="w-full py-4 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black font-orbitron text-lg tracking-widest rounded-lg transition transform hover:scale-[1.02] active:scale-95 shadow-lg shadow-cyan-500/20">
+                    탐사 및 탈출 시작
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PUZZLE MODAL (Wire Reconnect / System Repair) -->
+    <div id="puzzleModal" class="hidden absolute inset-0 z-40 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="hud-panel p-6 rounded-xl max-w-md w-full border border-cyan-500/50 space-y-4">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+                <h3 class="font-orbitron text-cyan-400 font-bold text-base" id="puzzleTitle">통제실 전력 바이패스 패널</h3>
+                <button id="closePuzzleBtn" class="text-slate-400 hover:text-white font-bold text-lg">✕</button>
+            </div>
+            <p id="puzzleDesc" class="text-xs text-slate-300">동일한 색상의 전선을 연결하여 전원 회로를 복구하세요.</p>
+            
+            <div id="puzzleBoard" class="bg-slate-950 p-4 rounded-lg border border-slate-800 relative h-64 flex flex-col justify-between">
+                <!-- Dynamic Puzzle Elements injected here -->
+            </div>
+
+            <div class="flex justify-end gap-2">
+                <button id="puzzleSubmitBtn" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold font-orbitron text-xs rounded transition">
+                    시스템 복구 실행
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- GAME OVER MODAL -->
+    <div id="gameOverModal" class="hidden absolute inset-0 z-50 bg-red-950/90 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="hud-panel hud-warning p-8 rounded-xl max-w-lg w-full text-center space-y-6">
+            <div class="space-y-2">
+                <h2 class="text-4xl font-black font-orbitron text-red-500 tracking-wider danger-alarm">신호 끊김</h2>
+                <p class="text-slate-300 text-sm">외계 생명체에 의해 생체 신호가 정지되었습니다.</p>
+            </div>
+            <div id="deathReason" class="text-xs text-red-300 bg-red-900/30 p-3 rounded border border-red-800 font-mono">
+                우주선 수색 중 괴물에게 포획됨.
+            </div>
+            <button id="restartGameBtn" class="w-full py-3 bg-red-600 hover:bg-red-500 text-white font-bold font-orbitron text-base rounded-lg transition active:scale-95 shadow-lg shadow-red-600/30">
+                시점 재시작 (TRY AGAIN)
+            </button>
+        </div>
+    </div>
+
+    <!-- VICTORY MODAL -->
+    <div id="victoryModal" class="hidden absolute inset-0 z-50 bg-emerald-950/90 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="hud-panel p-8 rounded-xl max-w-lg w-full text-center space-y-6 border border-emerald-500/50">
+            <div class="space-y-2">
+                <span class="text-xs font-orbitron tracking-widest text-emerald-400 uppercase font-bold">MISSION ACCOMPLISHED</span>
+                <h2 class="text-4xl font-black font-orbitron text-emerald-300 tracking-wider">탈출 성공!</h2>
+                <p class="text-slate-300 text-sm">구조 신호를 발송하고 탈출 포드를 사출시켰습니다. 당신은 생존했습니다.</p>
+            </div>
+            <div class="bg-emerald-900/30 p-4 rounded border border-emerald-800/50 text-left text-xs text-emerald-200 space-y-1 font-mono">
+                <div>• 우주선 수리 완료: <span class="text-white">100%</span></div>
+                <div>• 구조 신호 송신: <span class="text-white">성공</span></div>
+                <div>• 탈출 포드 사출: <span class="text-white">완료</span></div>
+            </div>
+            <button id="victoryRestartBtn" class="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black font-orbitron text-base rounded-lg transition active:scale-95 shadow-lg shadow-emerald-500/30">
+                메인 화면으로 이동
+            </button>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * DEEP SPACE ISOLATION - GAME ARCHITECTURE
+         * Configured according to single-file prototype specifications.
+         */
+
+        // ==========================================
+        // 1. CONFIGURATION (Game Constants & Tweakables)
+        // ==========================================
+        const CONFIG = {
+            // Player Settings
+            PLAYER_SPEED: 2.8,
+            PLAYER_RUN_SPEED: 4.2,
+            PLAYER_RADIUS: 14,
+            PLAYER_MAX_HEALTH: 100,
+            PLAYER_MAX_STAMINA: 100,
+            STAMINA_REGEN: 0.35,
+            STAMINA_DRAIN: 0.7,
+            INTERACT_RANGE: 60,
+
+            // Enemy Settings
+            ENEMY_PATROL_SPEED: 1.6,
+            ENEMY_CHASE_SPEED: 3.4,
+            ENEMY_SIGHT_RANGE: 220,
+            ENEMY_KILL_RANGE: 22,
+            ENEMY_STUN_DURATION: 3000, // ms
+            ENEMY_REST_DURATION: 30000, // 30초 휴식 시간 (ms)
+            ENEMY_ACTIVE_DURATION: 60000, // 1분 활동 시간 (ms)
+
+            // Lighting & Atmosphere (Adjusted for brighter illumination)
+            FLASHLIGHT_ANGLE: Math.PI / 3.2,
+            FLASHLIGHT_DIST: 340,
+            AMBIENT_LIGHT: 0.32,
+
+            // Audio Frequency Defaults
+            AUDIO_ENABLED: true
+        };
+
+        // ==========================================
+        // 2. WEB AUDIO SYNTHESIZER (No External Files)
+        // ==========================================
+        class SoundEngine {
+            constructor() {
+                this.ctx = null;
+                this.isInit = false;
+            }
+
+            init() {
+                if (this.isInit) return;
+                try {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioCtx();
+                    this.isInit = true;
+                } catch (e) {
+                    console.warn("Audio Context init failed", e);
+                }
+            }
+
+            playTone(freq, type, duration, vol = 0.1) {
+                if (!this.isInit || !this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                    gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + duration);
+                } catch (e) {}
+            }
+
+            playFootstep() {
+                if (!this.isInit) return;
+                this.playTone(100 + Math.random() * 40, 'triangle', 0.08, 0.03);
+            }
+
+            playItemPickup() {
+                if (!this.isInit) return;
+                this.playTone(523.25, 'sine', 0.1, 0.1); // C5
+                setTimeout(() => this.playTone(659.25, 'sine', 0.15, 0.1), 80); // E5
+            }
+
+            playDoorOpen() {
+                if (!this.isInit) return;
+                this.playTone(150, 'sawtooth', 0.3, 0.08);
+            }
+
+            playScream() {
+                if (!this.isInit) return;
+                this.playTone(800, 'sawtooth', 0.5, 0.2);
+                setTimeout(() => this.playTone(300, 'sawtooth', 0.4, 0.25), 100);
+            }
+
+            playFlare() {
+                if (!this.isInit) return;
+                this.playTone(600, 'square', 0.4, 0.2);
+            }
+        }
+
+        const sound = new SoundEngine();
+
+        // ==========================================
+        // 3. MAP DATA & ROOM STRUCTURE
+        // ==========================================
+        // Map Grid dimensions (24x18 grid rooms)
+        const TILE_SIZE = 48;
+        
+        // Rooms definition layout
+        const ROOMS = {
+            CREW: { name: "승무원 구역", x: 100, y: 100, w: 400, h: 300, color: "#1e293b" },
+            MED: { name: "의료 구역", x: 550, y: 100, w: 350, h: 300, color: "#0f272a" },
+            ENGINE: { name: "기관실", x: 100, y: 450, w: 400, h: 350, color: "#2b1810" },
+            CARGO: { name: "화물 구역", x: 550, y: 450, w: 350, h: 350, color: "#1e1b2e" },
+            CONTROL: { name: "통제실", x: 950, y: 100, w: 350, h: 300, color: "#112233" },
+            POD: { name: "탈출선 구역", x: 950, y: 450, w: 350, h: 350, color: "#0a2918" }
+        };
+
+        // Static Walls boundary arrays
+        const WALLS = [
+            // Outer Boundaries
+            { x: 80, y: 80, w: 1240, h: 20 },
+            { x: 80, y: 800, w: 1240, h: 20 },
+            { x: 80, y: 80, w: 20, h: 740 },
+            { x: 1300, y: 80, w: 20, h: 740 },
+
+            // Internal Dividers with door cutouts
+            { x: 500, y: 80, w: 20, h: 120 }, { x: 500, y: 260, w: 20, h: 160 }, // Crew-Med Divider
+            { x: 900, y: 80, w: 20, h: 120 }, { x: 900, y: 260, w: 20, h: 160 }, // Med-Control Divider
+            { x: 80, y: 420, w: 180, h: 20 }, { x: 320, y: 420, w: 600, h: 20 }, { x: 980, y: 420, w: 340, h: 20 }, // North-South Corridor Divider
+            { x: 500, y: 420, w: 20, h: 150 }, { x: 500, y: 650, w: 20, h: 170 }, // Engine-Cargo Divider
+            { x: 900, y: 420, w: 20, h: 150 }, { x: 900, y: 650, w: 20, h: 170 }  // Cargo-Pod Divider
+        ];
+
+        // Doors connecting rooms
+        const DOORS = [
+            { id: "door_med", x: 500, y: 200, w: 20, h: 60, reqKey: "green_keycard", isOpen: false, name: "의료 구역 보안문" },
+            { id: "door_engine", x: 260, y: 420, w: 60, h: 20, reqKey: "blue_keycard", isOpen: false, name: "기관실 보안 격벽" },
+            { id: "door_control", x: 900, y: 200, w: 20, h: 60, reqKey: "red_keycard", isOpen: false, name: "통제실 메인 게이트" },
+            { id: "door_pod", x: 900, y: 570, w: 20, h: 80, reqKey: "master_keycard", isOpen: false, name: "탈출 포드 격리도어" }
+        ];
+
+        // Interactive Objects & Items
+        let INTERACTABLES = [
+            // Keycards
+            { id: "green_keycard", type: "item", name: "녹색 키카드", x: 250, y: 220, r: 15, color: "#10b981", picked: false, desc: "의료 구역을 해제할 수 있습니다." },
+            { id: "blue_keycard", type: "item", name: "청색 키카드", x: 720, y: 220, r: 15, color: "#3b82f6", picked: false, desc: "기관실 해제용 키카드입니다." },
+            { id: "red_keycard", type: "item", name: "적색 키카드", x: 750, y: 620, r: 15, color: "#ef4444", picked: false, desc: "통제실 접속 권한이 있습니다." },
+            { id: "master_keycard", type: "item", name: "마스터 마스터키", x: 1100, y: 220, r: 15, color: "#f59e0b", picked: false, desc: "탈출선 구역 최종 보안 해제 키." },
+
+            // Repair Parts
+            { id: "wiring_kit", type: "item", name: "배선 복구 키트", x: 680, y: 300, r: 15, color: "#a855f7", picked: false, desc: "고장 난 발전기를 수리할 수 있습니다." },
+            { id: "power_cell", type: "item", name: "고성능 파워 셀", x: 220, y: 650, r: 15, color: "#eab308", picked: false, desc: "우주선 주 전력원에 공급할 셀입니다." },
+
+            // Hiding Spots
+            { id: "locker_crew", type: "hiding", name: "보관용 캐비닛", x: 150, y: 140, w: 40, h: 40 },
+            { id: "locker_med", type: "hiding", name: "의료용 환풍구", x: 820, y: 140, w: 40, h: 40 },
+            { id: "locker_cargo", type: "hiding", name: "화물 컨테이너 숨기", x: 620, y: 700, w: 50, h: 50 },
+
+            // Machinery / Terminals
+            { id: "generator_machinery", type: "terminal", name: "주 발전기 콘솔", x: 300, y: 550, w: 50, h: 50, fixed: false, desc: "배선 키트와 파워 셀이 필요합니다." },
+            { id: "distress_terminal", type: "terminal", name: "구조 신호 통신기", x: 1120, y: 140, w: 50, h: 50, fixed: false, desc: "발전기 수리 후 구조 신호를 송신하세요." },
+            { id: "escape_pod_console", type: "escape", name: "탈출 포드 발사대", x: 1150, y: 620, w: 60, h: 60, desc: "모든 시스템 복구 후 사출 가능." }
+        ];
+
+        // ==========================================
+        // 4. GAME STATE MANAGEMENT
+        // ==========================================
+        const state = {
+            gameRunning: false,
+            isPaused: false,
+            isHiding: false,
+            currentHidingSpot: null,
+            
+            // Player Object
+            player: {
+                x: 200,
+                y: 200,
+                vx: 0,
+                vy: 0,
+                angle: 0,
+                health: CONFIG.PLAYER_MAX_HEALTH,
+                stamina: CONFIG.PLAYER_MAX_STAMINA,
+                inventory: [],
+                flares: 3,
+                flareCooldown: false
+            },
+
+            // Alien Monster Object
+            enemy: {
+                x: 750,
+                y: 550,
+                vx: 0,
+                vy: 0,
+                angle: 0,
+                aiState: "PATROL", // RESTING, PATROL, CHASE, SEARCH, STUNNED
+                stunTimer: 0,
+                restTimer: 0,
+                activeTimer: 0,
+                patrolWaypoints: [
+                    { x: 750, y: 550 },
+                    { x: 750, y: 220 },
+                    { x: 300, y: 600 },
+                    { x: 1100, y: 220 },
+                    { x: 1100, y: 650 }
+                ],
+                currentWaypoint: 0,
+                lastSeenPos: null
+            },
+
+            // Objectives Progress Tracking
+            objectives: {
+                generatorRepaired: false,
+                distressSignalSent: false,
+                podPrepared: false
+            },
+
+            // Input States
+            keys: {
+                ArrowUp: false,
+                ArrowDown: false,
+                ArrowLeft: false,
+                ArrowRight: false,
+                Space: false
+            },
+            mouse: { x: 0, y: 0, worldX: 0, worldY: 0, isDown: false },
+
+            // Particles & Flare entities
+            particles: [],
+            flaresOnGround: [],
+            screenShake: 0
+        };
+
+        // ==========================================
+        // 5. INPUT HANDLERS
+        // ==========================================
+        window.addEventListener("keydown", (e) => {
+            if (e.code === "ArrowUp" || e.code === "KeyW") state.keys.ArrowUp = true;
+            if (e.code === "ArrowDown" || e.code === "KeyS") state.keys.ArrowDown = true;
+            if (e.code === "ArrowLeft" || e.code === "KeyA") state.keys.ArrowLeft = true;
+            if (e.code === "ArrowRight" || e.code === "KeyD") state.keys.ArrowRight = true;
+            
+            if (e.code === "Space") {
+                e.preventDefault();
+                useFlare();
+            }
+        });
+
+        window.addEventListener("keyup", (e) => {
+            if (e.code === "ArrowUp" || e.code === "KeyW") state.keys.ArrowUp = false;
+            if (e.code === "ArrowDown" || e.code === "KeyS") state.keys.ArrowDown = false;
+            if (e.code === "ArrowLeft" || e.code === "KeyA") state.keys.ArrowLeft = false;
+            if (e.code === "ArrowRight" || e.code === "KeyD") state.keys.ArrowRight = false;
+        });
+
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+
+        function updateMousePos(e) {
+            const rect = canvas.getBoundingClientRect();
+            state.mouse.x = e.clientX - rect.left;
+            state.mouse.y = e.clientY - rect.top;
+            
+            // Transform screen coords to world coords (taking camera into account)
+            const camX = state.player.x - canvas.width / 2;
+            const camY = state.player.y - canvas.height / 2;
+            state.mouse.worldX = state.mouse.x + camX;
+            state.mouse.worldY = state.mouse.y + camY;
+        }
+
+        canvas.addEventListener("mousemove", updateMousePos);
+        canvas.addEventListener("click", (e) => {
+            sound.init();
+            handleWorldClick();
+        });
+
+        // ==========================================
+        // 6. GAMEPLAY UTILITIES & MECHANICS
+        // ==========================================
+        function distance(x1, y1, x2, y2) {
+            return Math.hypot(x2 - x1, y2 - y1);
+        }
+
+        function checkRectOverlap(r1, r2) {
+            return !(r2.x > r1.x + r1.w || 
+                     r2.x + r2.w < r1.x || 
+                     r2.y > r1.y + r1.h || 
+                     r2.y + r2.h < r1.y);
+        }
+
+        function checkWallCollision(newX, newY, radius) {
+            const pRect = { x: newX - radius, y: newY - radius, w: radius * 2, h: radius * 2 };
+            
+            // Check solid walls
+            for (let w of WALLS) {
+                if (checkRectOverlap(pRect, w)) return true;
+            }
+
+            // Check locked doors
+            for (let d of DOORS) {
+                if (!d.isOpen && checkRectOverlap(pRect, d)) return true;
+            }
+
+            return false;
+        }
+
+        function useFlare() {
+            if (state.player.flares <= 0 || state.player.flareCooldown) return;
+            if (state.isHiding) return;
+
+            state.player.flares--;
+            state.player.flareCooldown = true;
+            sound.playFlare();
+
+            // Spawn flare on ground
+            state.flaresOnGround.push({
+                x: state.player.x,
+                y: state.player.y,
+                life: 200, // frames
+                maxLife: 200
+            });
+
+            // If enemy is close, stun enemy!
+            const distToEnemy = distance(state.player.x, state.player.y, state.enemy.x, state.enemy.y);
+            if (distToEnemy < 250) {
+                state.enemy.aiState = "STUNNED";
+                state.enemy.stunTimer = Date.now() + CONFIG.ENEMY_STUN_DURATION;
+                createParticles(state.enemy.x, state.enemy.y, "#f59e0b", 25);
+                showToast("괴물이 섬광에 맞아 마비되었습니다!");
+            }
+
+            setTimeout(() => { state.player.flareCooldown = false; }, 1000);
+            updateHUD();
+        }
+
+        function handleWorldClick() {
+            if (!state.gameRunning || state.isPaused) return;
+
+            // If player is hiding, click to unhide
+            if (state.isHiding) {
+                state.isHiding = false;
+                state.currentHidingSpot = null;
+                showToast("은신처에서 나왔습니다.");
+                updateHUD();
+                return;
+            }
+
+            // Check interactables within range
+            for (let item of INTERACTABLES) {
+                if (item.picked) continue;
+
+                let itemX = item.x + (item.w ? item.w / 2 : 0);
+                let itemY = item.y + (item.h ? item.h / 2 : 0);
+                let dist = distance(state.player.x, state.player.y, itemX, itemY);
+
+                if (dist <= CONFIG.INTERACT_RANGE + 20) {
+                    // Check click close to item
+                    let clickDist = distance(state.mouse.worldX, state.mouse.worldY, itemX, itemY);
+                    if (clickDist < 40) {
+                        interactWithObject(item);
+                        return;
+                    }
+                }
+            }
+
+            // Check doors interaction
+            for (let door of DOORS) {
+                let doorCX = door.x + door.w / 2;
+                let doorCY = door.y + door.h / 2;
+                let dist = distance(state.player.x, state.player.y, doorCX, doorCY);
+
+                if (dist <= CONFIG.INTERACT_RANGE + 30) {
+                    let clickDist = distance(state.mouse.worldX, state.mouse.worldY, doorCX, doorCY);
+                    if (clickDist < 40) {
+                        interactWithDoor(door);
+                        return;
+                    }
+                }
+            }
+        }
+
+        function interactWithObject(obj) {
+            if (obj.type === "item") {
+                obj.picked = true;
+                state.player.inventory.push(obj);
+                sound.playItemPickup();
+                showToast(`${obj.name} 획득!`);
+                createParticles(obj.x, obj.y, obj.color, 15);
+                updateObjectives();
+                updateHUD();
+            } else if (obj.type === "hiding") {
+                state.isHiding = true;
+                state.currentHidingSpot = obj;
+                showToast(`${obj.name} 내부로 은신했습니다.`);
+                updateHUD();
+            } else if (obj.type === "terminal") {
+                if (obj.id === "generator_machinery") {
+                    handleGeneratorTerminal();
+                } else if (obj.id === "distress_terminal") {
+                    handleDistressTerminal();
+                }
+            } else if (obj.type === "escape") {
+                handleEscapePodConsole();
+            }
+        }
+
+        function interactWithDoor(door) {
+            if (door.isOpen) return;
+
+            const hasKey = state.player.inventory.some(i => i.id === door.reqKey);
+            if (hasKey) {
+                door.isOpen = true;
+                sound.playDoorOpen();
+                showToast(`${door.name}가 열렸습니다.`);
+                createParticles(door.x, door.y, "#38bdf8", 12);
+            } else {
+                showToast(`잠겨있음! [필요: ${getRequiredKeyName(door.reqKey)}]`);
+            }
+        }
+
+        function getRequiredKeyName(keyId) {
+            switch(keyId) {
+                case "green_keycard": return "녹색 키카드";
+                case "blue_keycard": return "청색 키카드";
+                case "red_keycard": return "적색 키카드";
+                case "master_keycard": return "마스터 키카드";
+                default: return "보안 키카드";
+            }
+        }
+
+        // ==========================================
+        // 7. PUZZLES & MISSION PROGRESSION
+        // ==========================================
+        function handleGeneratorTerminal() {
+            if (state.objectives.generatorRepaired) {
+                showToast("발전기가 이미 정상 작동 중입니다.");
+                return;
+            }
+
+            const hasKit = state.player.inventory.some(i => i.id === "wiring_kit");
+            const hasCell = state.player.inventory.some(i => i.id === "power_cell");
+
+            if (!hasKit || !hasCell) {
+                showToast("수리 부품 부족: 배선 복구 키트 및 파워 셀 필요!");
+                return;
+            }
+
+            // Launch Wiring Wire Puzzle Modal
+            openPuzzleModal("발전기 회로 바이패스", "동일한 색상의 회로 노드를 클릭하여 접속을 완료하세요.", () => {
+                state.objectives.generatorRepaired = true;
+                showToast("발전기 수리 완료! 우주선 주 전력이 복구되었습니다.");
+                updateObjectives();
+            });
+        }
+
+        function handleDistressTerminal() {
+            if (!state.objectives.generatorRepaired) {
+                showToast("전력 부족: 먼저 기관실 발전기를 수리하세요!");
+                return;
+            }
+
+            if (state.objectives.distressSignalSent) {
+                showToast("구조 신호가 이미 송신되었습니다.");
+                return;
+            }
+
+            openPuzzleModal("비상 구조 신호 송신기", "통신 주파수 락을 해제하고 시그널을 발송하세요.", () => {
+                state.objectives.distressSignalSent = true;
+                showToast("구조 신호 송신 성공! 탈출선 구역 마스터 키카드 획득!");
+                // Grant Master keycard automatically
+                state.player.inventory.push({
+                    id: "master_keycard", name: "마스터 키카드", color: "#f59e0b"
+                });
+                updateObjectives();
+                updateHUD();
+            });
+        }
+
+        function handleEscapePodConsole() {
+            if (!state.objectives.distressSignalSent) {
+                showToast("보안 승인 필요: 통제실에서 구조 신호를 먼지 발송해야 합니다.");
+                return;
+            }
+
+            // VICTORY CONDITION TRIGGERED
+            triggerVictory();
+        }
+
+        function openPuzzleModal(title, desc, onSuccess) {
+            state.isPaused = true;
+            const modal = document.getElementById("puzzleModal");
+            document.getElementById("puzzleTitle").innerText = title;
+            document.getElementById("puzzleDesc").innerText = desc;
+            modal.classList.remove("hidden");
+
+            const board = document.getElementById("puzzleBoard");
+            board.innerHTML = `
+                <div class="flex flex-col items-center justify-center h-full space-y-4">
+                    <div class="text-cyan-400 text-sm font-mono animate-pulse">회로 동기화 중...</div>
+                    <div class="grid grid-cols-3 gap-3">
+                        <button class="wire-btn p-3 bg-cyan-900 border border-cyan-500 rounded text-xs font-bold hover:bg-cyan-700">노드 A</button>
+                        <button class="wire-btn p-3 bg-amber-900 border border-amber-500 rounded text-xs font-bold hover:bg-amber-700">노드 B</button>
+                        <button class="wire-btn p-3 bg-emerald-900 border border-emerald-500 rounded text-xs font-bold hover:bg-emerald-700">노드 C</button>
+                    </div>
+                </div>
+            `;
+
+            let clicked = 0;
+            const btns = board.querySelectorAll(".wire-btn");
+            btns.forEach(btn => {
+                btn.onclick = () => {
+                    btn.classList.add("bg-teal-500", "text-black");
+                    btn.disabled = true;
+                    clicked++;
+                    sound.playTone(400 + clicked * 200, "sine", 0.1);
+                    if (clicked >= 3) {
+                        setTimeout(() => {
+                            closePuzzleModal();
+                            onSuccess();
+                        }, 300);
+                    }
+                };
+            });
+
+            document.getElementById("closePuzzleBtn").onclick = closePuzzleModal;
+            document.getElementById("puzzleSubmitBtn").onclick = closePuzzleModal;
+        }
+
+        function closePuzzleModal() {
+            document.getElementById("puzzleModal").classList.add("hidden");
+            state.isPaused = false;
+        }
+
+        function updateObjectives() {
+            const objText = document.getElementById("objectiveText");
+            const subText = document.getElementById("subObjectiveText");
+
+            const hasGreen = state.player.inventory.some(i => i.id === "green_keycard");
+            const hasBlue = state.player.inventory.some(i => i.id === "blue_keycard");
+            const hasRed = state.player.inventory.some(i => i.id === "red_keycard");
+
+            if (!hasGreen) {
+                objText.innerText = "1. 승무원 구역에서 [녹색 키카드]를 확보하여 의료 구역을 여세요.";
+                subText.innerText = "괴물의 순찰 경로를 피해서 수색하세요.";
+            } else if (!hasBlue) {
+                objText.innerText = "2. 의료 구역에서 [청색 키카드] 및 [배선 키트]를 탐색하세요.";
+                subText.innerText = "필요시 은신처(환풍구)에 숨으세요.";
+            } else if (!state.objectives.generatorRepaired) {
+                objText.innerText = "3. 기관실 발전기로 이동하여 파워 셀과 배선 키트로 발전기를 수리하세요.";
+                subText.innerText = "화물 구역과 기관실을 조사하세요.";
+            } else if (!hasRed) {
+                objText.innerText = "4. 화물 구역에서 통제실 해제용 [적색 키카드]를 찾으세요.";
+                subText.innerText = "발전기 수리로 일부 조명이 복구되었습니다.";
+            } else if (!state.objectives.distressSignalSent) {
+                objText.innerText = "5. 통제실 콘솔에서 [비상 구조 신호]를 발송하세요.";
+                subText.innerText = "신호 발송 후 탈출선 마스터 키카드가 발급됩니다.";
+            } else {
+                objText.innerText = "6. [탈출선 구역]으로 이동하여 탈출 포드를 사출시키세요!";
+                subText.innerText = "최종 탈출선 격리도어를 해제하고 탑승하세요.";
+            }
+        }
+
+        // ==========================================
+        // 8. ENEMY AI & UPDATE LOOP
+        // ==========================================
+        function updateEnemy() {
+            const e = state.enemy;
+            const p = state.player;
+
+            // Handle Resting Status
+            if (e.aiState === "RESTING") {
+                if (Date.now() > e.restTimer) {
+                    e.aiState = "PATROL";
+                    e.activeTimer = Date.now() + CONFIG.ENEMY_ACTIVE_DURATION;
+                    document.getElementById("alertToast").classList.add("hidden");
+                    showToast("⚠️ 경고: 괴물이 다시 활동을 시작했습니다! (1분간 활동)");
+                }
+                return;
+            }
+
+            // Handle Active Timer Expiration -> Switch to RESTING
+            if (e.aiState !== "STUNNED" && Date.now() > e.activeTimer) {
+                e.aiState = "RESTING";
+                e.restTimer = Date.now() + CONFIG.ENEMY_REST_DURATION;
+                showToast("💤 괴물이 지쳐서 30초 동안 휴식에 들어갑니다.");
+                return;
+            }
+
+            // Handle Stunned Status
+            if (e.aiState === "STUNNED") {
+                if (Date.now() > e.stunTimer) {
+                    e.aiState = "SEARCH";
+                }
+                return;
+            }
+
+            const distToPlayer = distance(e.x, e.y, p.x, p.y);
+
+            // Detection Check
+            if (!state.isHiding && distToPlayer < CONFIG.ENEMY_SIGHT_RANGE) {
+                e.aiState = "CHASE";
+                e.lastSeenPos = { x: p.x, y: p.y };
+            } else if (state.isHiding && e.aiState === "CHASE") {
+                e.aiState = "SEARCH";
+            }
+
+            // AI State Machine Behavior
+            if (e.aiState === "PATROL") {
+                let target = e.patrolWaypoints[e.currentWaypoint];
+                let distToWP = distance(e.x, e.y, target.x, target.y);
+
+                if (distToWP < 20) {
+                    e.currentWaypoint = (e.currentWaypoint + 1) % e.patrolWaypoints.length;
+                } else {
+                    moveTowards(e, target.x, target.y, CONFIG.ENEMY_PATROL_SPEED);
+                }
+            } else if (e.aiState === "CHASE") {
+                moveTowards(e, p.x, p.y, CONFIG.ENEMY_CHASE_SPEED);
+
+                // Show danger alert toast
+                document.getElementById("alertToast").classList.remove("hidden");
+
+                // Catch Player Condition
+                if (distToPlayer < CONFIG.ENEMY_KILL_RANGE) {
+                    triggerGameOver("외계 괴물에게 포획되어 비명 속에 목숨을 잃었습니다.");
+                }
+            } else if (e.aiState === "SEARCH") {
+                if (e.lastSeenPos) {
+                    moveTowards(e, e.lastSeenPos.x, e.lastSeenPos.y, CONFIG.ENEMY_PATROL_SPEED);
+                    if (distance(e.x, e.y, e.lastSeenPos.x, e.lastSeenPos.y) < 20) {
+                        e.lastSeenPos = null;
+                        e.aiState = "PATROL";
+                    }
+                } else {
+                    e.aiState = "PATROL";
+                }
+            }
+        }
+
+        function moveTowards(entity, targetX, targetY, speed) {
+            let angle = Math.atan2(targetY - entity.y, targetX - entity.x);
+            entity.angle = angle;
+            
+            let nextX = entity.x + Math.cos(angle) * speed;
+            let nextY = entity.y + Math.sin(angle) * speed;
+
+            // Simple wall collision check for enemy
+            if (!checkWallCollision(nextX, nextY, 16)) {
+                entity.x = nextX;
+                entity.y = nextY;
+            } else {
+                // Adjust vector around corners
+                if (!checkWallCollision(nextX, entity.y, 16)) entity.x = nextX;
+                else if (!checkWallCollision(entity.x, nextY, 16)) entity.y = nextY;
+            }
+        }
+
+        function createParticles(x, y, color, count = 10) {
+            for (let i = 0; i < count; i++) {
+                state.particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 4,
+                    vy: (Math.random() - 0.5) * 4,
+                    life: 30 + Math.random() * 20,
+                    maxLife: 50,
+                    color: color,
+                    size: 2 + Math.random() * 3
+                });
+            }
+        }
+
+        function updateParticles() {
+            for (let i = state.particles.length - 1; i >= 0; i--) {
+                let p = state.particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life--;
+                if (p.life <= 0) {
+                    state.particles.splice(i, 1);
+                }
+            }
+        }
+
+        // ==========================================
+        // 9. MAIN UPDATE & RENDER PIPELINE
+        // ==========================================
+        function update() {
+            if (!state.gameRunning || state.isPaused) return;
+
+            const p = state.player;
+
+            // Movement Calculation
+            if (!state.isHiding) {
+                let moveX = 0;
+                let moveY = 0;
+
+                if (state.keys.ArrowUp) moveY -= 1;
+                if (state.keys.ArrowDown) moveY += 1;
+                if (state.keys.ArrowLeft) moveX -= 1;
+                if (state.keys.ArrowRight) moveX += 1;
+
+                if (moveX !== 0 || moveY !== 0) {
+                    // Normalize vector
+                    let len = Math.hypot(moveX, moveY);
+                    moveX /= len;
+                    moveY /= len;
+
+                    let speed = CONFIG.PLAYER_SPEED;
+                    let nextX = p.x + moveX * speed;
+                    let nextY = p.y + moveY * speed;
+
+                    if (!checkWallCollision(nextX, p.y, CONFIG.PLAYER_RADIUS)) p.x = nextX;
+                    if (!checkWallCollision(p.x, nextY, CONFIG.PLAYER_RADIUS)) p.y = nextY;
+
+                    p.angle = Math.atan2(state.mouse.worldY - p.y, state.mouse.worldX - p.x);
+
+                    if (Math.random() < 0.08) sound.playFootstep();
+                } else {
+                    p.angle = Math.atan2(state.mouse.worldY - p.y, state.mouse.worldX - p.x);
+                }
+            }
+
+            // Update Enemy State
+            updateEnemy();
+
+            // Update Particles
+            updateParticles();
+
+            // Screen Shake Decay
+            if (state.screenShake > 0) state.screenShake *= 0.9;
+
+            // Check nearby interaction hints
+            checkInteractionPrompt();
+        }
+
+        function checkInteractionPrompt() {
+            const hint = document.getElementById("interactionHint");
+            if (state.isHiding) {
+                hint.classList.remove("hidden");
+                hint.innerText = "[클릭] 은신처에서 나가기";
+                return;
+            }
+
+            let foundNear = false;
+            for (let item of INTERACTABLES) {
+                if (item.picked) continue;
+                let itemX = item.x + (item.w ? item.w / 2 : 0);
+                let itemY = item.y + (item.h ? item.h / 2 : 0);
+                if (distance(state.player.x, state.player.y, itemX, itemY) <= CONFIG.INTERACT_RANGE + 15) {
+                    hint.classList.remove("hidden");
+                    hint.innerText = `[클릭] ${item.name} 상호작용`;
+                    foundNear = true;
+                    break;
+                }
+            }
+
+            if (!foundNear) {
+                for (let door of DOORS) {
+                    if (door.isOpen) continue;
+                    let doorCX = door.x + door.w / 2;
+                    let doorCY = door.y + door.h / 2;
+                    if (distance(state.player.x, state.player.y, doorCX, doorCY) <= CONFIG.INTERACT_RANGE + 20) {
+                        hint.classList.remove("hidden");
+                        hint.innerText = `[클릭] ${door.name} 열기`;
+                        foundNear = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!foundNear) hint.classList.add("hidden");
+        }
+
+        function render() {
+            // Adjust canvas size dynamically
+            if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            }
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            ctx.save();
+            
+            // Camera Translation centered on Player
+            let camX = canvas.width / 2 - state.player.x;
+            let camY = canvas.height / 2 - state.player.y;
+
+            if (state.screenShake > 0) {
+                camX += (Math.random() - 0.5) * state.screenShake;
+                camY += (Math.random() - 0.5) * state.screenShake;
+            }
+
+            ctx.translate(camX, camY);
+
+            // --- 1. RENDER ROOM FLOORS ---
+            for (let rKey in ROOMS) {
+                let r = ROOMS[rKey];
+                ctx.fillStyle = r.color;
+                ctx.fillRect(r.x, r.y, r.w, r.h);
+
+                // Grid Pattern on Floor for Sci-Fi vibe
+                ctx.strokeStyle = "rgba(255, 255, 255, 0.03)";
+                ctx.lineWidth = 1;
+                for (let x = r.x; x < r.x + r.w; x += TILE_SIZE) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, r.y);
+                    ctx.lineTo(x, r.y + r.h);
+                    ctx.stroke();
+                }
+                for (let y = r.y; y < r.y + r.h; y += TILE_SIZE) {
+                    ctx.beginPath();
+                    ctx.moveTo(r.x, y);
+                    ctx.lineTo(r.x + r.w, y);
+                    ctx.stroke();
+                }
+
+                // Room Title on Floor
+                ctx.fillStyle = "rgba(255, 255, 255, 0.06)";
+                ctx.font = "bold 24px Orbitron";
+                ctx.fillText(r.name, r.x + 20, r.y + 40);
+            }
+
+            // --- 2. RENDER INTERACTABLES & ITEMS ---
+            for (let item of INTERACTABLES) {
+                if (item.picked) continue;
+
+                if (item.type === "item") {
+                    // Pulsing glow item circle
+                    ctx.shadowColor = item.color;
+                    ctx.shadowBlur = 12;
+                    ctx.fillStyle = item.color;
+                    ctx.beginPath();
+                    ctx.arc(item.x, item.y, item.r, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+
+                    ctx.fillStyle = "#ffffff";
+                    ctx.font = "10px Share Tech Mono";
+                    ctx.fillText(item.name, item.x - 20, item.y - 12);
+                } else if (item.type === "hiding") {
+                    ctx.fillStyle = "#334155";
+                    ctx.strokeStyle = "#64748b";
+                    ctx.lineWidth = 2;
+                    ctx.fillRect(item.x, item.y, item.w, item.h);
+                    ctx.strokeRect(item.x, item.y, item.w, item.h);
+                    
+                    ctx.fillStyle = "#94a3b8";
+                    ctx.font = "10px Orbitron";
+                    ctx.fillText("은신처", item.x + 4, item.y + 24);
+                } else if (item.type === "terminal" || item.type === "escape") {
+                    ctx.fillStyle = item.fixed ? "#10b981" : "#f59e0b";
+                    ctx.fillRect(item.x, item.y, item.w, item.h);
+                    ctx.strokeStyle = "#fef08a";
+                    ctx.strokeRect(item.x, item.y, item.w, item.h);
+
+                    ctx.fillStyle = "#ffffff";
+                    ctx.font = "10px Orbitron";
+                    ctx.fillText(item.name, item.x - 10, item.y - 8);
+                }
+            }
+
+            // --- 3. RENDER FLARES ON GROUND ---
+            for (let flare of state.flaresOnGround) {
+                ctx.fillStyle = "#fbbf24";
+                ctx.shadowColor = "#f59e0b";
+                ctx.shadowBlur = 20;
+                ctx.beginPath();
+                ctx.arc(flare.x, flare.y, 8, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            }
+
+            // --- 4. RENDER 2.5D WALLS WITH DEPTH/EXTRUSION ---
+            for (let w of WALLS) {
+                // Wall Base
+                ctx.fillStyle = "#0f172a";
+                ctx.fillRect(w.x, w.y, w.w, w.h);
+
+                // 2.5D Height Extrusion Top Rim
+                ctx.fillStyle = "#334155";
+                ctx.fillRect(w.x, w.y - 6, w.w, 6);
+
+                ctx.strokeStyle = "#475569";
+                ctx.lineWidth = 1;
+                ctx.strokeRect(w.x, w.y - 6, w.w, w.h + 6);
+            }
+
+            // --- 5. RENDER DOORS ---
+            for (let d of DOORS) {
+                if (d.isOpen) {
+                    ctx.fillStyle = "rgba(16, 185, 129, 0.2)";
+                    ctx.fillRect(d.x, d.y, d.w, d.h);
+                } else {
+                    ctx.fillStyle = "#ef4444";
+                    ctx.fillRect(d.x, d.y, d.w, d.h);
+                    ctx.strokeStyle = "#f87171";
+                    ctx.strokeRect(d.x, d.y, d.w, d.h);
+                }
+            }
+
+            // --- 6. RENDER ENEMY (ALIEN) ---
+            const e = state.enemy;
+            ctx.save();
+            ctx.translate(e.x, e.y);
+            ctx.rotate(e.angle);
+
+            // Alien Creature Body
+            if (e.aiState === "RESTING") {
+                ctx.fillStyle = "#6366f1"; // Soft indigo when resting
+                ctx.shadowColor = "#818cf8";
+            } else if (e.aiState === "STUNNED") {
+                ctx.fillStyle = "#fbbf24";
+                ctx.shadowColor = "#f59e0b";
+            } else {
+                ctx.fillStyle = "#dc2626";
+                ctx.shadowColor = "#ef4444";
+            }
+            ctx.shadowBlur = 15;
+            ctx.beginPath();
+            ctx.arc(0, 0, 16, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // Alien Glowing Red Eyes / Claws
+            ctx.fillStyle = e.aiState === "RESTING" ? "#a5b4fc" : "#ffffff";
+            ctx.fillRect(8, -6, 6, 3);
+            ctx.fillRect(8, 3, 6, 3);
+
+            ctx.restore();
+
+            // Resting Zzz Indicator text above enemy
+            if (e.aiState === "RESTING") {
+                const remainSec = Math.max(0, Math.ceil((e.restTimer - Date.now()) / 1000));
+                ctx.fillStyle = "#a5b4fc";
+                ctx.font = "bold 12px Share Tech Mono";
+                ctx.fillText(`💤 Zzz (${remainSec}s)`, e.x - 24, e.y - 22);
+            }
+
+            // --- 7. RENDER PLAYER (ASTRONAUT) ---
+            if (!state.isHiding) {
+                const p = state.player;
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                ctx.rotate(p.angle);
+
+                // Astronaut Helmet & Suit
+                ctx.fillStyle = "#0284c7";
+                ctx.beginPath();
+                ctx.arc(0, 0, CONFIG.PLAYER_RADIUS, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Visor Shine
+                ctx.fillStyle = "#38bdf8";
+                ctx.beginPath();
+                ctx.arc(4, 0, 8, -Math.PI / 2, Math.PI / 2);
+                ctx.fill();
+
+                ctx.restore();
+            }
+
+            // --- 8. RENDER PARTICLES ---
+            for (let particle of state.particles) {
+                ctx.fillStyle = particle.color;
+                ctx.beginPath();
+                ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            ctx.restore(); // Restore camera translation
+
+            // --- 9. ATMOSPHERIC DARKNESS & FLASHLIGHT CONE ---
+            renderDynamicLighting();
+
+            // --- 10. RENDER MINIMAP ---
+            renderMinimap();
+        }
+
+        function renderDynamicLighting() {
+            let camX = canvas.width / 2 - state.player.x;
+            let camY = canvas.height / 2 - state.player.y;
+
+            // Create Dark Mask Overlay
+            ctx.save();
+            ctx.fillStyle = `rgba(3, 7, 18, ${1 - CONFIG.AMBIENT_LIGHT})`;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (!state.isHiding) {
+                // Flashlight Cone Light Mask Cutout
+                ctx.globalCompositeOperation = "destination-out";
+
+                let pScreenX = canvas.width / 2;
+                let pScreenY = canvas.height / 2;
+
+                let grad = ctx.createRadialGradient(
+                    pScreenX, pScreenY, 20,
+                    pScreenX, pScreenY, CONFIG.FLASHLIGHT_DIST
+                );
+                grad.addColorStop(0, "rgba(0, 0, 0, 1)");
+                grad.addColorStop(0.8, "rgba(0, 0, 0, 0.8)");
+                grad.addColorStop(1, "rgba(0, 0, 0, 0)");
+
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.moveTo(pScreenX, pScreenY);
+                ctx.arc(
+                    pScreenX, pScreenY, CONFIG.FLASHLIGHT_DIST,
+                    state.player.angle - CONFIG.FLASHLIGHT_ANGLE / 2,
+                    state.player.angle + CONFIG.FLASHLIGHT_ANGLE / 2
+                );
+                ctx.closePath();
+                ctx.fill();
+
+                // Ambient Radial Light Around Player
+                let pGrad = ctx.createRadialGradient(pScreenX, pScreenY, 5, pScreenX, pScreenY, 110);
+                pGrad.addColorStop(0, "rgba(0,0,0,1)");
+                pGrad.addColorStop(1, "rgba(0,0,0,0)");
+                ctx.fillStyle = pGrad;
+                ctx.beginPath();
+                ctx.arc(pScreenX, pScreenY, 110, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Flares Ambient Light
+                for (let flare of state.flaresOnGround) {
+                    let flareSX = flare.x + camX;
+                    let flareSY = flare.y + camY;
+                    let fGrad = ctx.createRadialGradient(flareSX, flareSY, 10, flareSX, flareSY, 180);
+                    fGrad.addColorStop(0, "rgba(0,0,0,1)");
+                    fGrad.addColorStop(1, "rgba(0,0,0,0)");
+                    ctx.fillStyle = fGrad;
+                    ctx.beginPath();
+                    ctx.arc(flareSX, flareSY, 180, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            ctx.restore();
+        }
+
+        function renderMinimap() {
+            const miniCanvas = document.getElementById("minimapCanvas");
+            const mctx = miniCanvas.getContext("2d");
+            miniCanvas.width = 160;
+            miniCanvas.height = 160;
+
+            mctx.clearRect(0, 0, 160, 160);
+            
+            // Map scale factor (World coordinates ~1400x900 to 160x160)
+            const scaleX = 160 / 1400;
+            const scaleY = 160 / 900;
+
+            // Draw Rooms
+            for (let rKey in ROOMS) {
+                let r = ROOMS[rKey];
+                mctx.fillStyle = "#334155";
+                mctx.fillRect(r.x * scaleX, r.y * scaleY, r.w * scaleX, r.h * scaleY);
+            }
+
+            // Draw Doors
+            for (let d of DOORS) {
+                mctx.fillStyle = d.isOpen ? "#10b981" : "#ef4444";
+                mctx.fillRect(d.x * scaleX, d.y * scaleY, Math.max(d.w * scaleX, 3), Math.max(d.h * scaleY, 3));
+            }
+
+            // Draw Player Marker
+            mctx.fillStyle = "#38bdf8";
+            mctx.beginPath();
+            mctx.arc(state.player.x * scaleX, state.player.y * scaleY, 4, 0, Math.PI * 2);
+            mctx.fill();
+
+            // Draw Enemy Marker (Only if near or chasing)
+            if (state.enemy.aiState === "CHASE") {
+                mctx.fillStyle = "#ef4444";
+                mctx.beginPath();
+                mctx.arc(state.enemy.x * scaleX, state.enemy.y * scaleY, 3, 0, Math.PI * 2);
+                mctx.fill();
+            }
+        }
+
+        function updateHUD() {
+            // Player state badge
+            const badge = document.getElementById("playerStateBadge");
+            if (state.isHiding) {
+                badge.innerText = "은신 중";
+                badge.className = "text-xs px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800";
+            } else {
+                badge.innerText = "탐색 중";
+                badge.className = "text-xs px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800";
+            }
+
+            // Monster status indicator on alert toast
+            const alertToast = document.getElementById("alertToast");
+            if (state.enemy.aiState === "RESTING") {
+                const remainSec = Math.max(0, Math.ceil((state.enemy.restTimer - Date.now()) / 1000));
+                alertToast.classList.remove("hidden");
+                alertToast.innerText = `💤 괴물 휴식 중 (남은 시간: ${remainSec}초)`;
+                alertToast.className = "mt-2 px-4 py-2 rounded bg-indigo-950/90 border border-indigo-500 text-indigo-200 text-xs font-bold text-center";
+            } else if (state.enemy.aiState === "PATROL" || state.enemy.aiState === "SEARCH") {
+                const remainActive = Math.max(0, Math.ceil((state.enemy.activeTimer - Date.now()) / 1000));
+                alertToast.classList.remove("hidden");
+                alertToast.innerText = `👾 괴물 활동 중 (휴식까지: ${remainActive}초)`;
+                alertToast.className = "mt-2 px-4 py-2 rounded bg-slate-900/80 border border-slate-700 text-slate-300 text-xs font-bold text-center";
+            } else if (state.enemy.aiState === "CHASE") {
+                alertToast.classList.remove("hidden");
+                alertToast.innerText = "경고: 적대적 생명체 근접!";
+                alertToast.className = "mt-2 px-4 py-2 rounded bg-red-950/90 border border-red-500 text-red-200 text-xs font-bold text-center danger-alarm";
+            }
+
+            // Flares count
+            document.getElementById("flareCount").innerText = `남은 횟수: ${state.player.flares}/3`;
+
+            // Inventory icons rendering
+            const invContainer = document.getElementById("inventoryContainer");
+            invContainer.innerHTML = "";
+
+            if (state.player.inventory.length === 0) {
+                invContainer.innerHTML = `<span class="text-xs text-slate-500 italic">비어 있음</span>`;
+            } else {
+                state.player.inventory.forEach(item => {
+                    const slot = document.createElement("div");
+                    slot.className = "w-8 h-8 rounded border flex items-center justify-center font-bold text-xs shadow";
+                    slot.style.borderColor = item.color || "#38bdf8";
+                    slot.style.backgroundColor = "rgba(15, 23, 42, 0.8)";
+                    slot.style.color = item.color || "#ffffff";
+                    slot.title = item.name;
+                    slot.innerText = item.name.substring(0, 1);
+                    invContainer.appendChild(slot);
+                });
+            }
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById("alertToast");
+            toast.innerText = msg;
+            toast.classList.remove("hidden");
+            setTimeout(() => {
+                toast.classList.add("hidden");
+            }, 3000);
+        }
+
+        function triggerGameOver(reason) {
+            state.gameRunning = false;
+            sound.playScream();
+            document.getElementById("deathReason").innerText = reason;
+            document.getElementById("gameOverModal").classList.remove("hidden");
+        }
+
+        function triggerVictory() {
+            state.gameRunning = false;
+            document.getElementById("victoryModal").classList.remove("hidden");
+        }
+
+        // ==========================================
+        // 10. GAME LOOP & INITIALIZATION
+        // ==========================================
+        function gameLoop() {
+            update();
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function resetGame() {
+            state.gameRunning = true;
+            state.isPaused = false;
+            state.isHiding = false;
+            state.currentHidingSpot = null;
+
+            state.player.x = 200;
+            state.player.y = 200;
+            state.player.health = CONFIG.PLAYER_MAX_HEALTH;
+            state.player.stamina = CONFIG.PLAYER_MAX_STAMINA;
+            state.player.inventory = [];
+            state.player.flares = 3;
+
+            state.enemy.x = 750;
+            state.enemy.y = 550;
+            state.enemy.aiState = "PATROL";
+            state.enemy.activeTimer = Date.now() + CONFIG.ENEMY_ACTIVE_DURATION;
+            state.enemy.restTimer = 0;
+
+            state.objectives.generatorRepaired = false;
+            state.objectives.distressSignalSent = false;
+            state.objectives.podPrepared = false;
+
+            // Reset Doors & Interactables
+            DOORS.forEach(d => d.isOpen = false);
+            INTERACTABLES.forEach(i => i.picked = false);
+
+            document.getElementById("startModal").classList.add("hidden");
+            document.getElementById("gameOverModal").classList.add("hidden");
+            document.getElementById("victoryModal").classList.add("hidden");
+
+            updateObjectives();
+            updateHUD();
+        }
+
+        // Event Listeners for UI Buttons
+        document.getElementById("startGameBtn").onclick = () => {
+            sound.init();
+            resetGame();
+        };
+
+        document.getElementById("restartGameBtn").onclick = () => {
+            resetGame();
+        };
+
+        document.getElementById("victoryRestartBtn").onclick = () => {
+            document.getElementById("victoryModal").classList.add("hidden");
+            document.getElementById("startModal").classList.remove("hidden");
+        };
+
+        document.getElementById("useFlareBtn").onclick = () => {
+            useFlare();
+        };
+
+        // Start animation frame loop on window load
+        window.onload = function() {
+            updateObjectives();
+            updateHUD();
+            gameLoop();
+        };
+    </script>
+</body>
+</html>
