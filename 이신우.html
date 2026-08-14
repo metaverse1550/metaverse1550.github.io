@@ -1,0 +1,2223 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>생존자: 야구부의 옥상 돌파기 (Zombie High School: Roguelike)</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;700;900&display=swap');
+        
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background-color: #050508;
+            color: #e2e8f0;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .font-title {
+            font-family: 'Black Han Sans', sans-serif;
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1a1a24;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #e11d48;
+            border-radius: 3px;
+        }
+
+        .scanlines {
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.3) 50%
+            ), linear-gradient(
+                90deg,
+                rgba(255, 0, 0, 0.03),
+                rgba(0, 255, 0, 0.01),
+                rgba(0, 0, 255, 0.03)
+            );
+            background-size: 100% 4px, 6px 100%;
+            pointer-events: none;
+        }
+
+        .vignette {
+            box-shadow: inset 0 0 140px rgba(0,0,0,0.92);
+            pointer-events: none;
+        }
+
+        .btn-card {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .btn-card:hover {
+            transform: translateY(-4px) scale(1.02);
+            box-shadow: 0 10px 25px -5px rgba(225, 29, 72, 0.4);
+        }
+
+        /* 픽셀아트 룩: 캔버스가 CSS로 확대될 때도 블러 없이 선명한 도트 유지 */
+        #gameCanvas {
+            image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+        }
+    </style>
+</head>
+<body class="w-screen h-screen flex flex-col justify-center items-center relative overflow-hidden bg-black">
+
+    <!-- Main Game Canvas Container -->
+    <div id="gameContainer" class="relative w-full h-full flex justify-center items-center">
+        <canvas id="gameCanvas" class="block w-full h-full bg-slate-950"></canvas>
+        
+        <!-- Post Processing Visual Overlays -->
+        <div class="absolute inset-0 scanlines z-10"></div>
+        <div class="absolute inset-0 vignette z-10"></div>
+
+        <!-- In-Game UI Layer -->
+        <div id="uiLayer" class="absolute inset-0 z-20 pointer-events-none flex flex-col justify-between p-4 md:p-6">
+            
+            <!-- Top Bar: Player Info & Minimap -->
+            <div class="flex justify-between items-start w-full">
+                <!-- Left: Health, Shield, Floor, Gold -->
+                <div class="flex flex-col gap-2 bg-slate-900/85 backdrop-blur border border-slate-700/60 p-4 rounded-xl shadow-2xl min-w-[300px]">
+                    <div class="flex items-center justify-between gap-4 mb-1">
+                        <span class="font-title text-xl text-rose-500 tracking-wider flex items-center gap-2">
+                            <i class="fa-solid fa-baseball-bat-ball"></i> <span id="hudFloor">1층 - 교실 복도</span>
+                        </span>
+                        <div class="flex gap-3">
+                            <span id="hudEnemiesCount" class="text-rose-400 font-bold text-sm flex items-center gap-1">
+                                <i class="fa-solid fa-skull"></i> 남은 좀비: 0
+                            </span>
+                            <span id="hudGold" class="text-amber-400 font-bold text-sm flex items-center gap-1">
+                                <i class="fa-solid fa-coins"></i> 0 Gold
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Health Bar -->
+                    <div class="w-full bg-slate-950 rounded-full h-5 border border-slate-700 relative overflow-hidden">
+                        <div id="hudHpBar" class="bg-gradient-to-r from-red-600 to-rose-500 h-full w-full transition-all duration-300"></div>
+                        <span id="hudHpText" class="absolute inset-0 flex items-center justify-center text-xs font-black text-white drop-shadow">100 / 100 HP</span>
+                    </div>
+
+                    <!-- Shield Bar (If active) -->
+                    <div id="hudShieldContainer" class="w-full bg-slate-950 rounded-full h-2 border border-slate-800 relative overflow-hidden hidden">
+                        <div id="hudShieldBar" class="bg-gradient-to-r from-cyan-500 to-blue-400 h-full w-0 transition-all duration-200"></div>
+                    </div>
+
+                    <!-- Stats & Active Weapon -->
+                    <div class="flex items-center justify-between text-xs text-slate-400 mt-1 font-mono">
+                        <span id="hudWeaponName" class="text-amber-400 font-bold">무기: 야구부 알루미늄 배트</span>
+                        <span id="hudStats">공격력: 25 | 속도: 3.8</span>
+                    </div>
+                </div>
+
+                <!-- Right: Minimap & Traits Active -->
+                <div class="flex flex-col items-end gap-3">
+                    <div class="bg-slate-900/85 backdrop-blur border border-slate-700/60 p-2 rounded-xl shadow-2xl">
+                        <canvas id="minimapCanvas" width="130" height="130" class="rounded-lg bg-slate-950 border border-slate-800"></canvas>
+                    </div>
+                    <!-- Traits Icons Container -->
+                    <div id="hudTraitsList" class="flex flex-wrap max-w-[240px] justify-end gap-1.5"></div>
+                </div>
+            </div>
+
+            <!-- Boss HP Bar (Visible during Boss Battles) -->
+            <div id="bossHpContainer" class="self-center w-full max-w-2xl bg-slate-900/90 border border-red-900/80 p-3 rounded-2xl shadow-2xl backdrop-blur flex flex-col gap-1 hidden">
+                <div class="flex justify-between items-center px-1">
+                    <span id="bossName" class="font-title text-red-500 text-lg tracking-wide flex items-center gap-2">
+                        <i class="fa-solid fa-skull"></i> 층별 보스
+                    </span>
+                    <span id="bossHpText" class="text-xs font-mono font-bold text-red-300">1000 / 1000</span>
+                </div>
+                <div class="w-full bg-slate-950 h-4 rounded-full border border-red-950 overflow-hidden relative">
+                    <div id="bossHpBar" class="bg-gradient-to-r from-red-700 via-rose-600 to-amber-600 h-full w-full transition-all duration-150"></div>
+                </div>
+            </div>
+
+            <!-- Bottom Quick Controls Hint -->
+            <div class="flex justify-between items-end w-full">
+                <div class="text-xs text-slate-400 bg-slate-900/80 p-2 px-3 rounded-lg border border-slate-800 font-mono flex gap-4 backdrop-blur">
+                    <span><b class="text-white">WASD</b> 이동</span>
+                    <span><b class="text-white">마우스</b> 조준/배트 스윙</span>
+                    <span><b class="text-white">SPACE</b> 슬라이딩 대시</span>
+                </div>
+                <div id="hudItemsList" class="flex gap-2 bg-slate-900/80 p-2 rounded-xl border border-slate-700/60 backdrop-blur"></div>
+            </div>
+        </div>
+
+        <!-- START / MAIN MENU SCREEN -->
+        <div id="menuModal" class="absolute inset-0 z-30 flex flex-col justify-center items-center bg-slate-950/90 backdrop-blur-md p-6">
+            <div class="max-w-xl w-full text-center space-y-6">
+                <div class="space-y-2">
+                    <span class="px-3 py-1 bg-red-950 border border-red-700 text-red-400 text-xs font-bold rounded-full tracking-widest uppercase">Zombie High School Survival Roguelike</span>
+                    <h1 class="text-5xl md:text-6xl font-title text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-rose-400 to-amber-500 drop-shadow-lg">
+                        DARK OUTBREAK
+                    </h1>
+                    <p class="text-slate-400 text-sm md:text-base">
+                        갑작스러운 바이러스로 지옥이 된 고등학교. 야구부 남학생이 되어 배트 하나로 옥상까지 좀비를 뚫고 탈출하라!
+                    </p>
+                </div>
+
+                <div class="bg-slate-900/90 p-4 rounded-xl border border-slate-800 text-left text-xs text-slate-300 space-y-2 font-mono">
+                    <p class="text-amber-400 font-bold border-b border-slate-800 pb-1">🕹️ 생존 규칙:</p>
+                    <p>• <b>WASD</b>: 이동 | <b>마우스 클릭</b>: 야구 배트 공격 및 조준</p>
+                    <p>• <b>스페이스바</b>: 무적 회피 슬라이딩</p>
+                    <p>• <b>학교 고증 맵</b>: 교실, 도서관, 과학실, 방송실, 매점 등 다양한 방 탐험</p>
+                    <p>• <b>방 클리어</b>: 좀비를 전멸시키고 특성을 조합하여 나만의 빌드 완성</p>
+                </div>
+
+                <button id="btnStartGame" class="w-full py-4 bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 font-title text-2xl text-white rounded-xl shadow-xl transition-all hover:scale-105 active:scale-95 flex items-center justify-center gap-3">
+                    <i class="fa-solid fa-play"></i> 탈출 개시 (START)
+                </button>
+            </div>
+        </div>
+
+        <!-- TRAIT SELECT MODAL -->
+        <div id="traitModal" class="absolute inset-0 z-40 flex flex-col justify-center items-center bg-slate-950/95 backdrop-blur-md p-6 hidden">
+            <div class="max-w-4xl w-full space-y-6 text-center">
+                <div>
+                    <span class="text-xs font-bold tracking-widest text-emerald-400 uppercase">ROOM CLEAR REWARD</span>
+                    <h2 class="text-3xl md:text-4xl font-title text-white">특성 선택 (TRAIT SELECTION)</h2>
+                    <p class="text-slate-400 text-sm mt-1">특성을 선택하여 능력을 강화하고 야구 배트 스킬을 진화시키세요.</p>
+                </div>
+
+                <div id="traitCardsContainer" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
+            </div>
+        </div>
+
+        <!-- SHOP MODAL -->
+        <div id="shopModal" class="absolute inset-0 z-40 flex flex-col justify-center items-center bg-slate-950/95 backdrop-blur-md p-6 hidden">
+            <div class="max-w-3xl w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-4">
+                    <div>
+                        <h2 class="text-2xl font-title text-amber-400 flex items-center gap-2">
+                            <i class="fa-solid fa-store"></i> 학교 매점 (안전 구역)
+                        </h2>
+                        <p class="text-slate-400 text-xs mt-1">획득한 골드로 구급상자와 능력치 보충제를 구입하세요.</p>
+                    </div>
+                    <button id="btnCloseShop" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold text-sm">
+                        닫기
+                    </button>
+                </div>
+
+                <div id="shopItemsContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+            </div>
+        </div>
+
+        <!-- GAME OVER MODAL -->
+        <div id="gameOverModal" class="absolute inset-0 z-50 flex flex-col justify-center items-center bg-red-950/90 backdrop-blur-md p-6 hidden">
+            <div class="max-w-md w-full text-center space-y-6 bg-slate-900/90 border border-red-800/80 p-8 rounded-2xl shadow-2xl">
+                <div class="inline-block p-4 bg-red-900/50 rounded-full text-red-500 mb-2">
+                    <i class="fa-solid fa-skull-crossbones text-5xl"></i>
+                </div>
+                <h2 class="text-4xl font-title text-red-500">사망하셨습니다</h2>
+                <div id="gameOverStats" class="text-slate-300 text-sm font-mono bg-slate-950 p-4 rounded-xl border border-slate-800 text-left space-y-1"></div>
+                <button id="btnRestart" class="w-full py-3 bg-red-600 hover:bg-red-500 text-white font-title text-xl rounded-xl transition hover:scale-105">
+                    처음부터 다시 시도
+                </button>
+            </div>
+        </div>
+
+        <!-- STORY MODAL -->
+        <div id="storyModal" class="absolute inset-0 z-50 flex flex-col justify-center items-center bg-slate-950/98 backdrop-blur-lg p-6 hidden">
+            <div class="max-w-2xl w-full bg-slate-900 border border-amber-500/50 p-8 rounded-2xl shadow-2xl space-y-6 text-slate-200">
+                <h2 id="storyTitle" class="text-3xl font-title text-amber-400 text-center">진실의 순간</h2>
+                <div id="storyContent" class="text-sm leading-relaxed space-y-4 font-mono text-slate-300 bg-slate-950 p-6 rounded-xl border border-slate-800 max-h-[350px] overflow-y-auto"></div>
+                <button id="btnContinueStory" class="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white font-title text-lg rounded-xl">
+                    확인 및 진행
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Web Audio Synthesizer for rich SFX without external assets
+        class SoundSystem {
+            constructor() {
+                this.ctx = null;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+
+            playSwing() {
+                if (!this.ctx) return;
+                let osc = this.ctx.createOscillator();
+                let gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(180, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.12);
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.12);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.12);
+            }
+
+            playHit() {
+                if (!this.ctx) return;
+                let osc = this.ctx.createOscillator();
+                let gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.15);
+                gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.15);
+            }
+
+            playCoin() {
+                if (!this.ctx) return;
+                let osc = this.ctx.createOscillator();
+                let gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+                osc.frequency.setValueAtTime(1200, this.ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.2);
+            }
+
+            playExplosion() {
+                if (!this.ctx) return;
+                let osc = this.ctx.createOscillator();
+                let gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(100, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(20, this.ctx.currentTime + 0.3);
+                gain.gain.setValueAtTime(0.5, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.3);
+            }
+        }
+
+        const sfx = new SoundSystem();
+
+        const CONFIG = {
+            CANVAS_WIDTH: 1280,
+            CANVAS_HEIGHT: 720,
+            
+            FLOORS: [
+                { name: "1층: 본관 교실 복도", bg: "#1e1b18", wallColor: "#3e2e23" },
+                { name: "2층: 도서관 & 과학실", bg: "#131924", wallColor: "#223147" },
+                { name: "3층: 방송부 & 교무실", bg: "#18181b", wallColor: "#323238" },
+                { name: "4층: 이사장실 앞 복도", bg: "#1c1917", wallColor: "#443e38" },
+                { name: "옥상: 최종 결전의 장", bg: "#1a080c", wallColor: "#501217" }
+            ],
+
+            TRAITS: [
+                {
+                    id: "magic_fireball",
+                    name: "화염 스윙",
+                    category: "magic",
+                    desc: "배트를 휘두를 때 전방으로 적을 관통하는 화염 구체를 발사합니다.",
+                    icon: "fa-fire",
+                    color: "text-orange-500",
+                    synergy: "마법",
+                    apply: (p) => { p.traits.fireball = true; }
+                },
+                {
+                    id: "magic_lightning",
+                    name: "전뇌 배트",
+                    category: "magic",
+                    desc: "공격 시 35% 확률로 근처 좀비에게 낙뢰를 내리칩니다.",
+                    icon: "fa-bolt",
+                    color: "text-yellow-400",
+                    synergy: "마법/치명타",
+                    apply: (p) => { p.traits.lightning = true; }
+                },
+                {
+                    id: "brawler_shockwave",
+                    name: "홈런 충격파",
+                    category: "brawler",
+                    desc: "배트 휘두르기 시 충격파가 넓게 퍼지며 강력한 넉백을 부여합니다.",
+                    icon: "fa-hand-fist",
+                    color: "text-amber-600",
+                    synergy: "격투",
+                    apply: (p) => { p.attackRangeMult += 0.4; p.knockbackMult += 0.9; }
+                },
+                {
+                    id: "brawler_dash_impact",
+                    name: "슬라이딩 태클",
+                    category: "brawler",
+                    desc: "스페이스바 대시 시 적을 관통하여 강한 충돌 피해를 입힙니다.",
+                    icon: "fa-person-running",
+                    color: "text-emerald-500",
+                    synergy: "격투/속도",
+                    apply: (p) => { p.traits.dashImpact = true; }
+                },
+                {
+                    id: "alchemy_poison_cloud",
+                    name: "독성 연막탄",
+                    category: "alchemy",
+                    desc: "공격에 맞은 좀비 위치에 독성 연막이 피어올라 지속 피해를 줍니다.",
+                    icon: "fa-flask",
+                    color: "text-green-400",
+                    synergy: "연금술사",
+                    apply: (p) => { p.traits.poisonCloud = true; }
+                },
+                {
+                    id: "alchemy_explosive_bat",
+                    name: "화약 도포 배트",
+                    category: "alchemy",
+                    desc: "적 처치 시 시체가 폭발하여 주위 좀비들에게 연쇄 피해를 줍니다.",
+                    icon: "fa-burst",
+                    color: "text-red-500",
+                    synergy: "연금술사",
+                    apply: (p) => { p.traits.corpseExplode = true; }
+                },
+                {
+                    id: "weapon_giant",
+                    name: "거대화 알루미늄 배트",
+                    category: "weapon",
+                    desc: "배트 크기와 사거리가 70% 증가하며 기본 공격력이 +12 상승합니다.",
+                    icon: "fa-ruler-combined",
+                    color: "text-purple-400",
+                    synergy: "무기 강화",
+                    apply: (p) => { p.weaponSizeMult += 0.7; p.damage += 12; }
+                },
+                {
+                    id: "weapon_vampire",
+                    name: "흡혈 그립 테이프",
+                    category: "weapon",
+                    desc: "타격 시 25% 확률로 체력을 3 회복합니다.",
+                    icon: "fa-droplet",
+                    color: "text-rose-600",
+                    synergy: "생존",
+                    apply: (p) => { p.traits.lifesteal = true; }
+                },
+                {
+                    id: "crit_sharp_eye",
+                    name: "타자의 동체시력",
+                    category: "crit",
+                    desc: "치명타 확률 +25%, 치명타 피해 +60% 상승합니다.",
+                    icon: "fa-eye",
+                    color: "text-pink-400",
+                    synergy: "치명타",
+                    apply: (p) => { p.critChance += 0.25; p.critMult += 0.6; }
+                },
+                {
+                    id: "speed_lightweight",
+                    name: "경량 풋워크",
+                    category: "speed",
+                    desc: "이동 속도가 +25% 증가하고 대시 쿨타임이 감소합니다.",
+                    icon: "fa-shoe-prints",
+                    color: "text-sky-400",
+                    synergy: "속도",
+                    apply: (p) => { p.speed *= 1.25; p.dashCooldownMax *= 0.7; }
+                },
+                {
+                    id: "defense_shield",
+                    name: "야구 포수 보호장구",
+                    category: "defense",
+                    desc: "최대 체력 +40 및 50 방어 보호막을 즉시 획득합니다.",
+                    icon: "fa-shield-halved",
+                    color: "text-blue-400",
+                    synergy: "방어",
+                    apply: (p) => { p.maxHp += 40; p.hp += 40; p.shield += 50; p.maxShield += 50; }
+                }
+            ],
+
+            ITEMS: [
+                { id: "hp_potion", name: "보건실 구급상자", cost: 30, icon: "fa-kit-medical", desc: "체력 50 회복", apply: (p) => { p.hp = Math.min(p.maxHp, p.hp + 50); } },
+                { id: "atk_up", name: "단백질 보충제", cost: 45, icon: "fa-dumbbell", desc: "공격력 +8 영구 증가", apply: (p) => { p.damage += 8; } },
+                { id: "speed_up", name: "에너지 드링크", cost: 35, icon: "fa-bolt-lightning", desc: "이동속도 +10% 영구 증가", apply: (p) => { p.speed *= 1.1; } }
+            ]
+        };
+
+        class Room {
+            constructor(x, y, type = "NORMAL") {
+                this.gridX = x;
+                this.gridY = y;
+                this.type = type;
+                this.cleared = false; // 시작 방도 좀비가 습격하도록 설정
+                this.doors = { N: false, S: false, E: false, W: false };
+                this.enemies = [];
+                this.projectiles = [];
+                this.particles = [];
+                this.bloodStains = []; // Persistent blood splatters
+                this.impactStars = []; // 타격 임팩트 스타 이펙트
+                this.visited = false;
+                this.name = this.getRoomName(type);
+                this.props = this.generateSchoolProps(type);
+                this.waveTimer = 0;
+                this.totalWaves = (type === "START") ? 1 : 2 + Math.floor(Math.random() * 2);
+                this.currentWave = 0;
+            }
+
+            getRoomName(type) {
+                switch(type) {
+                    case "START": return "안전 구역 (시작 교실)";
+                    case "CLASSROOM": return "3학년 교실";
+                    case "LIBRARY": return "중앙 도서관";
+                    case "LAB": return "과학 실습실";
+                    case "BROADCAST": return "방송부실";
+                    case "TEACHER_ROOM": return "교무실";
+                    case "SHOP": return "학교 매점";
+                    case "BOSS": return "층별 보스 격투장";
+                    default: return "동아리실";
+                }
+            }
+
+            // Generate authentic high school props for rendering
+            generateSchoolProps(type) {
+                let props = [];
+                let cw = CONFIG.CANVAS_WIDTH;
+                let ch = CONFIG.CANVAS_HEIGHT;
+
+                if (type === "CLASSROOM" || type === "START") {
+                    // Desks & Chairs grid
+                    for (let row = 0; row < 3; row++) {
+                        for (let col = 0; col < 4; col++) {
+                            props.push({
+                                kind: "DESK",
+                                x: 300 + col * 180,
+                                y: 220 + row * 130,
+                                w: 60, h: 40
+                            });
+                        }
+                    }
+                    // Teacher's podium
+                    props.push({ kind: "PODIUM", x: cw / 2 - 40, y: 110, w: 80, h: 40 });
+                } else if (type === "LIBRARY") {
+                    // Bookshelves
+                    props.push({ kind: "BOOKSHELF", x: 180, y: 120, w: 200, h: 50 });
+                    props.push({ kind: "BOOKSHELF", x: cw - 380, y: 120, w: 200, h: 50 });
+                    props.push({ kind: "BOOKSHELF", x: 180, y: 350, w: 200, h: 50 });
+                    props.push({ kind: "BOOKSHELF", x: cw - 380, y: 350, w: 200, h: 50 });
+                } else if (type === "LAB") {
+                    // Lab tables
+                    props.push({ kind: "LAB_TABLE", x: 250, y: 200, w: 220, h: 70 });
+                    props.push({ kind: "LAB_TABLE", x: cw - 470, y: 200, w: 220, h: 70 });
+                    props.push({ kind: "LAB_TABLE", x: 250, y: 420, w: 220, h: 70 });
+                    props.push({ kind: "LAB_TABLE", x: cw - 470, y: 420, w: 220, h: 70 });
+                } else if (type === "BROADCAST") {
+                    props.push({ kind: "AUDIO_RACK", x: 200, y: 120, w: 180, h: 60 });
+                    props.push({ kind: "AUDIO_RACK", x: cw - 380, y: 120, w: 180, h: 60 });
+                } else if (type === "SHOP") {
+                    props.push({ kind: "VENDING", x: 200, y: 100, w: 70, h: 45 });
+                    props.push({ kind: "VENDING", x: 290, y: 100, w: 70, h: 45 });
+                    props.push({ kind: "SNACK_SHELF", x: cw / 2 - 100, y: 250, w: 200, h: 60 });
+                }
+                return props;
+            }
+        }
+
+        class MapFloor {
+            constructor(floorIndex) {
+                this.floorIndex = floorIndex;
+                this.grid = Array(5).fill(null).map(() => Array(5).fill(null));
+                this.generateFloor();
+            }
+
+            generateFloor() {
+                const startX = 2, startY = 4;
+                this.grid[startY][startX] = new Room(startX, startY, "START");
+
+                let roomCount = 6 + this.floorIndex * 2;
+                let activeRooms = [{x: startX, y: startY}];
+
+                const dirs = [
+                    {dx: 0, dy: -1, door: 'N', opp: 'S'},
+                    {dx: 0, dy: 1, door: 'S', opp: 'N'},
+                    {dx: 1, dy: 0, door: 'E', opp: 'W'},
+                    {dx: -1, dy: 0, door: 'W', opp: 'E'}
+                ];
+
+                let types = ["CLASSROOM", "LIBRARY", "LAB", "BROADCAST", "TEACHER_ROOM"];
+
+                while (activeRooms.length < roomCount) {
+                    let current = activeRooms[Math.floor(Math.random() * activeRooms.length)];
+                    let dir = dirs[Math.floor(Math.random() * dirs.length)];
+                    let nx = current.x + dir.dx;
+                    let ny = current.y + dir.dy;
+
+                    if (nx >= 0 && nx < 5 && ny >= 0 && ny < 5 && !this.grid[ny][nx]) {
+                        let roomType = types[Math.floor(Math.random() * types.length)];
+                        if (activeRooms.length === 2) roomType = "SHOP";
+                        
+                        let newRoom = new Room(nx, ny, roomType);
+                        this.grid[ny][nx] = newRoom;
+                        
+                        this.grid[current.y][current.x].doors[dir.door] = true;
+                        newRoom.doors[dir.opp] = true;
+
+                        activeRooms.push({x: nx, y: ny});
+                    }
+                }
+
+                let furthest = activeRooms[activeRooms.length - 1];
+                let bossRoom = new Room(furthest.x, furthest.y, "BOSS");
+                
+                for (let d of dirs) {
+                    let px = furthest.x - d.dx;
+                    let py = furthest.y - d.dy;
+                    if (px >= 0 && px < 5 && py >= 0 && py < 5 && this.grid[py][px]) {
+                        bossRoom.doors[d.opp] = true;
+                        this.grid[py][px].doors[d.door] = true;
+                        break;
+                    }
+                }
+                this.grid[furthest.y][furthest.x] = bossRoom;
+            }
+        }
+
+        class Player {
+            constructor() {
+                this.x = 0;
+                this.y = 0;
+                this.radius = 18;
+                this.speed = 3.8;
+                
+                this.maxHp = 100;
+                this.hp = 100;
+                this.shield = 0;
+                this.maxShield = 0;
+                this.damage = 25;
+                this.critChance = 0.1;
+                this.critMult = 1.5;
+                
+                this.weaponSizeMult = 1.0;
+                this.attackRangeMult = 1.0;
+                this.knockbackMult = 1.0;
+                this.attackCooldown = 0;
+                this.attackCooldownMax = 20;
+                
+                this.isAttacking = false;
+                this.swingProgress = 0;
+                this.aimAngle = 0;
+
+                this.isDashing = false;
+                this.dashTimer = 0;
+                this.dashCooldown = 0;
+                this.dashCooldownMax = 50;
+                this.dashAngle = 0;
+
+                this.walkTimer = 0;
+                this.isMoving = false;
+
+                // Scarf Tail Physics Points
+                this.scarfNodes = [
+                    {x: 0, y: 0},
+                    {x: 0, y: 0},
+                    {x: 0, y: 0},
+                    {x: 0, y: 0}
+                ];
+
+                this.gold = 0;
+                this.activeTraits = [];
+                this.traits = {
+                    fireball: false,
+                    lightning: false,
+                    dashImpact: false,
+                    poisonCloud: false,
+                    corpseExplode: false,
+                    lifesteal: false
+                };
+            }
+
+            resetPos(x, y) {
+                this.x = x;
+                this.y = y;
+                this.scarfNodes.forEach(node => {
+                    node.x = x;
+                    node.y = y;
+                });
+            }
+
+            update(keys, mouse, bounds) {
+                if (this.attackCooldown > 0) this.attackCooldown--;
+                if (this.dashCooldown > 0) this.dashCooldown--;
+
+                this.isMoving = false;
+
+                let dx = 0, dy = 0;
+                if (this.isDashing) {
+                    this.dashTimer--;
+                    dx = Math.cos(this.dashAngle) * (this.speed * 2.6);
+                    dy = Math.sin(this.dashAngle) * (this.speed * 2.6);
+                    this.x += dx;
+                    this.y += dy;
+                    if (this.dashTimer <= 0) this.isDashing = false;
+                } else {
+                    if (keys['w'] || keys['W'] || keys['ArrowUp']) dy -= 1;
+                    if (keys['s'] || keys['S'] || keys['ArrowDown']) dy += 1;
+                    if (keys['a'] || keys['A'] || keys['ArrowLeft']) dx -= 1;
+                    if (keys['d'] || keys['D'] || keys['ArrowRight']) dx += 1;
+
+                    if (dx !== 0 || dy !== 0) {
+                        this.isMoving = true;
+                        this.walkTimer += 0.28;
+                    }
+
+                    if (dx !== 0 && dy !== 0) {
+                        dx *= 0.7071;
+                        dy *= 0.7071;
+                    }
+
+                    this.x += dx * this.speed;
+                    this.y += dy * this.speed;
+
+                    if (keys[' '] && this.dashCooldown <= 0 && (dx !== 0 || dy !== 0)) {
+                        this.isDashing = true;
+                        this.dashTimer = 12;
+                        this.dashCooldown = this.dashCooldownMax;
+                        this.dashAngle = Math.atan2(dy, dx);
+                        sfx.playSwing();
+                    }
+                }
+
+                this.x = Math.max(bounds.minX + this.radius, Math.min(bounds.maxX - this.radius, this.x));
+                this.y = Math.max(bounds.minY + this.radius, Math.min(bounds.maxY - this.radius, this.y));
+
+                this.aimAngle = Math.atan2(mouse.y - this.y, mouse.x - this.x);
+
+                if (this.isAttacking) {
+                    this.swingProgress += 0.18;
+                    if (this.swingProgress >= 1) {
+                        this.isAttacking = false;
+                        this.swingProgress = 0;
+                    }
+                }
+
+                // Update Trailing Red Scarf Physics (Opposite to Aim/Move)
+                let scarfTargetAngle = this.aimAngle + Math.PI + Math.sin(this.walkTimer * 1.2) * 0.35;
+                let neckX = this.x - Math.cos(this.aimAngle) * 6;
+                let neckY = this.y - Math.sin(this.aimAngle) * 6;
+
+                this.scarfNodes[0].x = neckX;
+                this.scarfNodes[0].y = neckY;
+
+                for (let i = 1; i < this.scarfNodes.length; i++) {
+                    let prev = this.scarfNodes[i - 1];
+                    let curr = this.scarfNodes[i];
+                    let targetX = prev.x + Math.cos(scarfTargetAngle + (i * 0.2)) * (9 + i * 2);
+                    let targetY = prev.y + Math.sin(scarfTargetAngle + (i * 0.2)) * (9 + i * 2);
+
+                    curr.x += (targetX - curr.x) * 0.35;
+                    curr.y += (targetY - curr.y) * 0.35;
+                }
+            }
+
+            attack() {
+                if (this.attackCooldown > 0) return false;
+                this.isAttacking = true;
+                this.swingProgress = 0;
+                this.attackCooldown = this.attackCooldownMax;
+                sfx.playSwing();
+                return true;
+            }
+
+            draw(ctx) {
+                ctx.save();
+
+                // 1. Draw Trailing Red Scarf / Ribbon Physics
+                ctx.lineWidth = 10;
+                ctx.strokeStyle = "#881337";
+                ctx.lineCap = "round";
+                ctx.lineJoin = "round";
+                ctx.beginPath();
+                ctx.moveTo(this.scarfNodes[0].x, this.scarfNodes[0].y);
+                for (let i = 1; i < this.scarfNodes.length; i++) {
+                    ctx.lineTo(this.scarfNodes[i].x, this.scarfNodes[i].y);
+                }
+                ctx.stroke();
+
+                ctx.lineWidth = 6;
+                ctx.strokeStyle = "#f43f5e";
+                ctx.beginPath();
+                ctx.moveTo(this.scarfNodes[0].x, this.scarfNodes[0].y);
+                for (let i = 1; i < this.scarfNodes.length; i++) {
+                    ctx.lineTo(this.scarfNodes[i].x, this.scarfNodes[i].y);
+                }
+                ctx.stroke();
+
+                ctx.translate(this.x, this.y);
+
+                // Dashing Ghost Shadow Trail
+                if (this.isDashing) {
+                    ctx.fillStyle = "rgba(225, 29, 72, 0.4)";
+                    ctx.beginPath();
+                    ctx.arc(-Math.cos(this.dashAngle) * 20, -Math.sin(this.dashAngle) * 20, this.radius + 4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // Drop Shadow under character
+                ctx.fillStyle = "rgba(0,0,0,0.55)";
+                ctx.beginPath();
+                ctx.ellipse(0, 14, 18, 9, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Rotate entire character top-down sprite towards aiming angle
+                ctx.rotate(this.aimAngle);
+
+                let walkSwing = this.isMoving ? Math.sin(this.walkTimer * 1.3) * 7 : 0;
+
+                // 2. Sneakers / Feet (Top-Down Walking Shoes)
+                ctx.fillStyle = "#1e293b";
+                ctx.strokeStyle = "#000000";
+                ctx.lineWidth = 2;
+
+                // Left Foot
+                ctx.beginPath();
+                ctx.roundRect(-8, -15 + walkSwing, 10, 6, 2);
+                ctx.fill(); ctx.stroke();
+                // Right Foot
+                ctx.beginPath();
+                ctx.roundRect(-8, 9 - walkSwing, 10, 6, 2);
+                ctx.fill(); ctx.stroke();
+
+                // Red/White Sneaker Accent
+                ctx.fillStyle = "#ef4444";
+                ctx.fillRect(-6, -14 + walkSwing, 5, 4);
+                ctx.fillRect(-6, 10 - walkSwing, 5, 4);
+
+                // 3. Legs & School Uniform Slacks
+                ctx.fillStyle = "#334155";
+                ctx.beginPath();
+                ctx.roundRect(-10, -12, 10, 24, 3);
+                ctx.fill();
+
+                // 4. Torso / High School Baseball Jacket (Navy Blue Body & White Sleeves)
+                ctx.fillStyle = "#1e3a8a";
+                ctx.strokeStyle = "#0f172a";
+                ctx.lineWidth = 2.5;
+
+                ctx.beginPath();
+                ctx.roundRect(-14, -13, 22, 26, 6);
+                ctx.fill();
+                ctx.stroke();
+
+                // White Sleeves / Shoulder Pads
+                ctx.fillStyle = "#f8fafc";
+                ctx.beginPath();
+                ctx.arc(-4, -12, 6, 0, Math.PI * 2);
+                ctx.arc(-4, 12, 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                // Baseball Jersey Crest Emblem 'Z'
+                ctx.fillStyle = "#fbbf24";
+                ctx.font = "bold 10px sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillText("Z", -4, 4);
+
+                // 5. Outstretched Arms Holding Baseball Bat
+                ctx.fillStyle = "#fcd34d"; // Skin Tone arms
+                ctx.strokeStyle = "#78350f";
+                ctx.lineWidth = 1.5;
+
+                // Left Arm reaching to bat handle
+                ctx.beginPath();
+                ctx.roundRect(0, -9, 12, 5, 2);
+                ctx.fill(); ctx.stroke();
+
+                // Right Arm wrapped around upper grip
+                ctx.beginPath();
+                ctx.roundRect(2, 4, 12, 5, 2);
+                ctx.fill(); ctx.stroke();
+
+                // 6. Character Head with Red Baseball Cap (Cap Visor & Hair)
+                ctx.fillStyle = "#fbbf24"; // Hair poking out
+                ctx.beginPath();
+                ctx.arc(0, 0, 11, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Red Baseball Cap Crown
+                ctx.fillStyle = "#dc2626";
+                ctx.beginPath();
+                ctx.arc(-2, 0, 10, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = "#991b1b";
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Cap Visor
+                ctx.fillStyle = "#991b1b";
+                ctx.beginPath();
+                ctx.roundRect(-14, -6, 6, 12, 2);
+                ctx.fill();
+
+                // Face Detail (Skin tone visible)
+                ctx.fillStyle = "#fcd34d";
+                ctx.beginPath();
+                ctx.arc(4, 0, 8, -Math.PI * 0.4, Math.PI * 0.4);
+                ctx.fill();
+
+                // Eyes / Visor Rim
+                ctx.fillStyle = "#0f172a";
+                ctx.fillRect(6, -4, 3, 3);
+                ctx.fillRect(6, 1, 3, 3);
+
+                // 7. Baseball Bat Weapon Render
+                let batLength = 42 * this.weaponSizeMult;
+                let currentAngle = (this.isAttacking) ? (this.swingProgress - 0.5) * Math.PI * 1.1 : 0.2;
+
+                ctx.save();
+                ctx.rotate(currentAngle);
+
+                // Attack Motion Light Arc Trail
+                if (this.isAttacking) {
+                    ctx.fillStyle = "rgba(251, 191, 36, 0.45)";
+                    ctx.beginPath();
+                    ctx.arc(0, 0, batLength + 16, -Math.PI * 0.6, Math.PI * 0.6);
+                    ctx.lineTo(0,0);
+                    ctx.fill();
+                }
+
+                // Aluminum Baseball Bat Body
+                let grad = ctx.createLinearGradient(8, 0, 8 + batLength, 0);
+                grad.addColorStop(0, "#475569"); 
+                grad.addColorStop(0.3, "#e2e8f0"); 
+                grad.addColorStop(0.8, "#ffffff"); 
+                grad.addColorStop(1, "#38bdf8");
+
+                ctx.fillStyle = grad;
+                ctx.strokeStyle = "#0284c7";
+                ctx.lineWidth = 2;
+
+                ctx.beginPath();
+                ctx.moveTo(8, -3);
+                ctx.lineTo(8 + batLength, -8);
+                ctx.lineTo(8 + batLength, 8);
+                ctx.lineTo(8, 3);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+
+                // Red Grip Tape on Bat Handle
+                ctx.fillStyle = "#dc2626";
+                ctx.fillRect(8, -4, 11, 8);
+
+                ctx.restore();
+                ctx.restore();
+            }
+        }
+
+        class Enemy {
+            constructor(x, y, type, floorLevel) {
+                this.x = x;
+                this.y = y;
+                this.type = type;
+                this.radius = 18;
+                this.floorLevel = floorLevel;
+                
+                this.maxHp = 45 + floorLevel * 25;
+                this.hp = this.maxHp;
+                this.damage = 8 + floorLevel * 4;
+                this.speed = 1.7 + Math.random() * 0.7;
+                this.isBoss = false;
+                this.walkAnim = Math.random() * 10;
+
+                this.setupType();
+            }
+
+            setupType() {
+                switch(this.type) {
+                    case "STUDENT":
+                        this.name = "좀비 학생";
+                        this.color = "#16a34a";
+                        break;
+                    case "TEACHER":
+                        this.name = "좀비 선생님";
+                        this.maxHp *= 1.4;
+                        this.speed *= 0.85;
+                        this.damage *= 1.3;
+                        this.radius = 21;
+                        this.color = "#15803d";
+                        break;
+                    case "GUARD":
+                        this.name = "좀비 경비원";
+                        this.maxHp *= 2.2;
+                        this.speed *= 0.65;
+                        this.radius = 24;
+                        this.color = "#047857";
+                        break;
+                    case "SPITTER":
+                        this.name = "독성 침좀비";
+                        this.maxHp *= 0.85;
+                        this.color = "#84cc16";
+                        this.shootCooldown = 110;
+                        break;
+                    case "BOSS":
+                        this.isBoss = true;
+                        this.radius = 38;
+                        this.maxHp = 450 + this.floorLevel * 420;
+                        this.damage = 18 + this.floorLevel * 6;
+                        this.speed = 1.45;
+                        this.name = this.getBossName();
+                        break;
+                }
+                this.hp = this.maxHp;
+            }
+
+            getBossName() {
+                switch(this.floorLevel) {
+                    case 1: return "1층 보스: 광란의 체육교사";
+                    case 2: return "2층 보스: 변이된 과학부장";
+                    case 3: return "3층 보스: 기괴한 방송반장";
+                    case 4: return "4층 보스: 수석 행정실장";
+                    default: return "최종 보스: 이사장 (원흉)";
+                }
+            }
+
+            update(player, room) {
+                let dx = player.x - this.x;
+                let dy = player.y - this.y;
+                let dist = Math.hypot(dx, dy);
+
+                this.walkAnim += 0.15;
+
+                if (dist > 0) {
+                    this.x += (dx / dist) * this.speed;
+                    this.y += (dy / dist) * this.speed;
+                }
+
+                if (this.type === "SPITTER" && dist < 320) {
+                    this.shootCooldown = (this.shootCooldown || 110) - 1;
+                    if (this.shootCooldown <= 0) {
+                        this.shootCooldown = 110;
+                        let angle = Math.atan2(dy, dx);
+                        room.projectiles.push({
+                            x: this.x, y: this.y,
+                            vx: Math.cos(angle) * 4.2, vy: Math.sin(angle) * 4.2,
+                            radius: 7, color: "#84cc16", isHostile: true, damage: 12
+                        });
+                    }
+                }
+
+                if (this.isBoss) {
+                    this.bossActionTimer = (this.bossActionTimer || 160) - 1;
+                    if (this.bossActionTimer <= 0) {
+                        this.bossActionTimer = 160;
+                        for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+                            room.projectiles.push({
+                                x: this.x, y: this.y,
+                                vx: Math.cos(a) * 3.8, vy: Math.sin(a) * 3.8,
+                                radius: 9, color: "#dc2626", isHostile: true, damage: 15
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Draw Detailed 2D Top-Down Humanoid Zombie Sprites
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                // Drop Shadow
+                ctx.fillStyle = "rgba(0,0,0,0.5)";
+                ctx.beginPath();
+                ctx.ellipse(0, this.radius * 0.75, this.radius * 1.1, this.radius * 0.55, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                let walkCycle = Math.sin(this.walkAnim) * 6;
+                let armReach = Math.cos(this.walkAnim * 0.8) * 4;
+
+                if (this.type === "STUDENT") {
+                    // 1. ZOMBIE STUDENT (Torn Uniform, Decay Green Skin, Messy Hair, Reaching Claws)
+                    ctx.fillStyle = "#0f172a";
+                    ctx.fillRect(-8, 12 + walkCycle, 6, 5);
+                    ctx.fillRect(2, 12 - walkCycle, 6, 5);
+
+                    ctx.fillStyle = "#334155";
+                    ctx.beginPath();
+                    ctx.roundRect(-10, 2, 20, 12, 3);
+                    ctx.fill();
+
+                    ctx.fillStyle = "#cbd5e1";
+                    ctx.strokeStyle = "#1e293b";
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.arc(0, -2, this.radius - 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+
+                    // Blood Marks
+                    ctx.fillStyle = "#991b1b";
+                    ctx.beginPath(); ctx.arc(-5, -4, 4, 0, Math.PI * 2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(4, 2, 5, 0, Math.PI * 2); ctx.fill();
+
+                    // Decaying Green Zombie Arms Reaching Forward
+                    ctx.fillStyle = "#4ed164";
+                    ctx.strokeStyle = "#15803d";
+                    ctx.lineWidth = 1.5;
+
+                    ctx.beginPath(); ctx.roundRect(-15, -16 + armReach, 6, 16, 3); ctx.fill(); ctx.stroke();
+                    ctx.beginPath(); ctx.roundRect(9, -16 - armReach, 6, 16, 3); ctx.fill(); ctx.stroke();
+
+                    // Claws / Fingers
+                    ctx.fillStyle = "#bbf7d0";
+                    ctx.fillRect(-15, -19 + armReach, 6, 3);
+                    ctx.fillRect(9, -19 - armReach, 6, 3);
+
+                    // Head & Messy Black Hair
+                    ctx.fillStyle = "#4ed164";
+                    ctx.beginPath(); ctx.arc(0, -4, 11, 0, Math.PI * 2); ctx.fill();
+
+                    ctx.fillStyle = "#1e293b";
+                    ctx.beginPath(); ctx.arc(0, -7, 11, Math.PI * 0.8, Math.PI * 2.2); ctx.fill();
+
+                    // Glowing Red Eyes & Open Maw
+                    ctx.fillStyle = "#ef4444";
+                    ctx.fillRect(-5, -5, 3, 3);
+                    ctx.fillRect(2, -5, 3, 3);
+
+                    ctx.fillStyle = "#450a0a";
+                    ctx.fillRect(-3, -1, 6, 3);
+
+                } else if (this.type === "TEACHER") {
+                    // 2. ZOMBIE TEACHER (Navy Suit, Red Tie, Glasses)
+                    ctx.fillStyle = "#1e1b4b";
+                    ctx.strokeStyle = "#0f172a";
+                    ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+                    // Collar & Tie
+                    ctx.fillStyle = "#f8fafc";
+                    ctx.fillRect(-4, -10, 8, 8);
+                    ctx.fillStyle = "#dc2626";
+                    ctx.beginPath();
+                    ctx.moveTo(-2, -6); ctx.lineTo(2, -6); ctx.lineTo(4, 8); ctx.lineTo(0, 11); ctx.lineTo(-4, 8);
+                    ctx.closePath(); ctx.fill();
+
+                    // Outstretched Pale Green Arms
+                    ctx.fillStyle = "#86efac";
+                    ctx.strokeStyle = "#166534";
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath(); ctx.roundRect(-16, -18 + armReach, 6, 18, 3); ctx.fill(); ctx.stroke();
+                    ctx.beginPath(); ctx.roundRect(10, -18 - armReach, 6, 18, 3); ctx.fill(); ctx.stroke();
+
+                    // Head & Balding Hair
+                    ctx.fillStyle = "#86efac";
+                    ctx.beginPath(); ctx.arc(0, -5, 12, 0, Math.PI * 2); ctx.fill();
+
+                    ctx.fillStyle = "#334155";
+                    ctx.beginPath(); ctx.arc(-8, -5, 5, 0, Math.PI * 2); ctx.arc(8, -5, 5, 0, Math.PI * 2); ctx.fill();
+
+                    // Wire Glasses
+                    ctx.strokeStyle = "#fbbf24";
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(-7, -7, 5, 5);
+                    ctx.strokeRect(2, -7, 5, 5);
+                    ctx.beginPath(); ctx.moveTo(-2, -5); ctx.lineTo(2, -5); ctx.stroke();
+
+                    // Glowing Red Pupil
+                    ctx.fillStyle = "#dc2626";
+                    ctx.fillRect(-5, -6, 2, 2); ctx.fillRect(4, -6, 2, 2);
+
+                } else if (this.type === "GUARD") {
+                    // 3. ZOMBIE SECURITY GUARD (Navy Police Vest, Cap with Golden Badge)
+                    ctx.fillStyle = "#1e3a8a";
+                    ctx.strokeStyle = "#0284c7";
+                    ctx.lineWidth = 2.5;
+                    ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+                    // Epaulets
+                    ctx.fillStyle = "#f59e0b";
+                    ctx.fillRect(-20, -6, 5, 12); ctx.fillRect(15, -6, 5, 12);
+
+                    // Bulky Arms Reaching Out
+                    ctx.fillStyle = "#15803d";
+                    ctx.strokeStyle = "#052e16";
+                    ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.roundRect(-20, -20 + armReach, 7, 20, 3); ctx.fill(); ctx.stroke();
+                    ctx.beginPath(); ctx.roundRect(13, -20 - armReach, 7, 20, 3); ctx.fill(); ctx.stroke();
+
+                    // Head & Guard Cap with Golden Badge
+                    ctx.fillStyle = "#15803d";
+                    ctx.beginPath(); ctx.arc(0, -4, 12, 0, Math.PI * 2); ctx.fill();
+
+                    ctx.fillStyle = "#0f172a";
+                    ctx.beginPath(); ctx.arc(0, -6, 13, Math.PI, Math.PI * 2); ctx.fill();
+                    ctx.fillRect(-13, -8, 26, 5);
+
+                    ctx.fillStyle = "#fbbf24";
+                    ctx.beginPath(); ctx.arc(0, -10, 4, 0, Math.PI * 2); ctx.fill();
+
+                    ctx.fillStyle = "#f43f5e";
+                    ctx.fillRect(-5, -4, 3, 3); ctx.fillRect(2, -4, 3, 3);
+
+                } else if (this.type === "SPITTER") {
+                    // 4. ACID SPITTER ZOMBIE (Swollen Toxic Body & Acid Maw)
+                    ctx.fillStyle = "#65a30d";
+                    ctx.strokeStyle = "#3f6212";
+                    ctx.lineWidth = 3;
+                    ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+                    // Bubbling Pustules
+                    ctx.fillStyle = "#a3e635";
+                    ctx.beginPath(); ctx.arc(-8, -6, 7, 0, Math.PI * 2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(7, 5, 6, 0, Math.PI * 2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(-4, 8, 5, 0, Math.PI * 2); ctx.fill();
+
+                    ctx.fillStyle = "#84cc16";
+                    ctx.beginPath(); ctx.roundRect(-16, -18, 6, 16, 3); ctx.fill();
+                    ctx.beginPath(); ctx.roundRect(10, -18, 6, 16, 3); ctx.fill();
+
+                    ctx.fillStyle = "#1a2e05";
+                    ctx.beginPath(); ctx.arc(0, -2, 8, 0, Math.PI * 2); ctx.fill();
+                    ctx.fillStyle = "#bef264";
+                    ctx.fillRect(-4, -1, 8, 3);
+
+                } else if (this.isBoss) {
+                    // 5. BOSS ZOMBIE (Tyrant with Crimson Cloak, Giant Claws & Energy Waves)
+                    for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+                        let tx = Math.cos(a + this.walkAnim) * (this.radius + 14);
+                        let ty = Math.sin(a + this.walkAnim) * (this.radius + 14);
+                        ctx.strokeStyle = "rgba(225, 29, 72, 0.7)";
+                        ctx.lineWidth = 4;
+                        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(tx, ty); ctx.stroke();
+                    }
+
+                    ctx.fillStyle = "#450a0a";
+                    ctx.strokeStyle = "#dc2626";
+                    ctx.lineWidth = 4;
+                    ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+                    ctx.fillStyle = "#7f1d1d";
+                    ctx.strokeStyle = "#ef4444";
+                    ctx.lineWidth = 2.5;
+                    ctx.beginPath(); ctx.roundRect(-30, -32 + armReach, 12, 32, 5); ctx.fill(); ctx.stroke();
+                    ctx.beginPath(); ctx.roundRect(18, -32 - armReach, 12, 32, 5); ctx.fill(); ctx.stroke();
+
+                    // Claws
+                    ctx.fillStyle = "#f59e0b";
+                    ctx.beginPath();
+                    ctx.moveTo(-30, -32 + armReach); ctx.lineTo(-24, -42 + armReach); ctx.lineTo(-18, -32 + armReach); ctx.fill();
+                    ctx.beginPath();
+                    ctx.moveTo(18, -32 - armReach); ctx.lineTo(24, -42 - armReach); ctx.lineTo(30, -32 - armReach); ctx.fill();
+
+                    ctx.fillStyle = "#18181b";
+                    ctx.beginPath(); ctx.arc(0, -6, 18, 0, Math.PI * 2); ctx.fill();
+
+                    ctx.fillStyle = "#facc15";
+                    ctx.beginPath(); ctx.arc(-8, -8, 5, 0, Math.PI * 2); ctx.arc(8, -8, 5, 0, Math.PI * 2); ctx.fill();
+                    ctx.fillStyle = "#dc2626";
+                    ctx.beginPath(); ctx.arc(-8, -8, 2.5, 0, Math.PI * 2); ctx.arc(8, -8, 2.5, 0, Math.PI * 2); ctx.fill();
+                }
+
+                // Health Bar
+                if (this.hp < this.maxHp) {
+                    ctx.fillStyle = "rgba(0,0,0,0.8)";
+                    ctx.fillRect(-this.radius, -this.radius - 18, this.radius * 2, 6);
+                    ctx.fillStyle = "#ef4444";
+                    ctx.fillRect(-this.radius, -this.radius - 18, (this.radius * 2) * (this.hp / this.maxHp), 6);
+                }
+
+                ctx.restore();
+            }
+        }
+
+        class GameEngine {
+            constructor() {
+                this.canvas = document.getElementById("gameCanvas");
+                this.displayCtx = this.canvas.getContext("2d");
+                this.displayCtx.imageSmoothingEnabled = false;
+
+                // --- 픽셀아트 렌더링 파이프라인 ---
+                // 실제 드로잉은 저해상도 버퍼 캔버스(this.ctx)에서 이루어지고,
+                // 매 프레임 마지막에 이걸 확대해서 화면에 찍어 청키한 도트 느낌을 만든다.
+                this.pixelScale = 2;
+                this.bufferCanvas = document.createElement("canvas");
+                this.bufferCanvas.width = CONFIG.CANVAS_WIDTH / this.pixelScale;
+                this.bufferCanvas.height = CONFIG.CANVAS_HEIGHT / this.pixelScale;
+                this.ctx = this.bufferCanvas.getContext("2d");
+                this.ctx.imageSmoothingEnabled = false;
+                // 이후 모든 draw 코드는 기존처럼 1280x720 좌표계를 그대로 쓰면 되도록 스케일을 걸어둔다.
+                this.ctx.scale(1 / this.pixelScale, 1 / this.pixelScale);
+
+                this.minimapCanvas = document.getElementById("minimapCanvas");
+                this.miniCtx = this.minimapCanvas.getContext("2d");
+
+                this.resizeCanvas();
+                window.addEventListener("resize", () => this.resizeCanvas());
+
+                this.state = "MENU";
+                this.currentFloorIndex = 0;
+                this.mapFloor = null;
+                this.currentRoom = null;
+                this.player = new Player();
+
+                this.floatingTexts = []; // Damage numbers FX
+
+                this.keys = {};
+                this.mouse = { x: 0, y: 0 };
+
+                this.bindInputEvents();
+                this.setupUIEvents();
+
+                // Safely load floor preview for menu background
+                this.loadFloor(0);
+            }
+
+            resizeCanvas() {
+                this.canvas.width = CONFIG.CANVAS_WIDTH;
+                this.canvas.height = CONFIG.CANVAS_HEIGHT;
+                this.displayCtx.imageSmoothingEnabled = false;
+            }
+
+            bindInputEvents() {
+                window.addEventListener("keydown", (e) => this.keys[e.key] = true);
+                window.addEventListener("keyup", (e) => this.keys[e.key] = false);
+
+                this.canvas.addEventListener("mousemove", (e) => {
+                    let rect = this.canvas.getBoundingClientRect();
+                    let scaleX = this.canvas.width / rect.width;
+                    let scaleY = this.canvas.height / rect.height;
+                    this.mouse.x = (e.clientX - rect.left) * scaleX;
+                    this.mouse.y = (e.clientY - rect.top) * scaleY;
+                });
+
+                this.canvas.addEventListener("mousedown", (e) => {
+                    sfx.init();
+                    if (this.state === "PLAYING" && e.button === 0) {
+                        this.handlePlayerAttack();
+                    }
+                });
+            }
+
+            setupUIEvents() {
+                document.getElementById("btnStartGame").onclick = () => this.startNewGame();
+                document.getElementById("btnRestart").onclick = () => this.startNewGame();
+                document.getElementById("btnCloseShop").onclick = () => this.closeShop();
+                document.getElementById("btnContinueStory").onclick = () => {
+                    document.getElementById("storyModal").classList.add("hidden");
+                    if (this.currentFloorIndex >= 4) {
+                        this.state = "MENU";
+                        document.getElementById("menuModal").classList.remove("hidden");
+                    } else {
+                        this.nextFloor();
+                    }
+                };
+            }
+
+            startNewGame() {
+                this.player = new Player();
+                this.currentFloorIndex = 0;
+                this.loadFloor(0);
+                this.state = "PLAYING";
+
+                document.getElementById("menuModal").classList.add("hidden");
+                document.getElementById("gameOverModal").classList.add("hidden");
+                document.getElementById("storyModal").classList.add("hidden");
+                this.updateHUD();
+            }
+
+            loadFloor(floorIdx) {
+                this.currentFloorIndex = floorIdx;
+                this.mapFloor = new MapFloor(floorIdx);
+                this.currentRoom = this.mapFloor.grid[4][2];
+                this.currentRoom.visited = true;
+                this.player.resetPos(CONFIG.CANVAS_WIDTH / 2, CONFIG.CANVAS_HEIGHT / 2);
+                this.spawnRoomEnemies(this.currentRoom);
+            }
+
+            spawnRoomEnemies(room) {
+                if (room.cleared || room.type === "SHOP") return;
+                room.enemies = [];
+
+                if (room.type === "BOSS") {
+                    room.enemies.push(new Enemy(CONFIG.CANVAS_WIDTH / 2, CONFIG.CANVAS_HEIGHT / 3, "BOSS", this.currentFloorIndex + 1));
+                    document.getElementById("bossHpContainer").classList.remove("hidden");
+                    return;
+                }
+
+                // 시작 방 및 일반 방 즉시 좀비 생성
+                let initialCount = (room.type === "START") ? 3 : 5 + this.currentFloorIndex * 2;
+                let types = ["STUDENT", "TEACHER", "GUARD", "SPITTER"];
+
+                for (let i = 0; i < initialCount; i++) {
+                    let side = Math.floor(Math.random() * 4);
+                    let rx = 200, ry = 200;
+                    if (side === 0) { rx = 150 + Math.random() * (CONFIG.CANVAS_WIDTH - 300); ry = 100; }
+                    else if (side === 1) { rx = 150 + Math.random() * (CONFIG.CANVAS_WIDTH - 300); ry = CONFIG.CANVAS_HEIGHT - 100; }
+                    else if (side === 2) { rx = 100; ry = 150 + Math.random() * (CONFIG.CANVAS_HEIGHT - 300); }
+                    else { rx = CONFIG.CANVAS_WIDTH - 100; ry = 150 + Math.random() * (CONFIG.CANVAS_HEIGHT - 300); }
+
+                    let type = (room.type === "START") ? "STUDENT" : types[Math.floor(Math.random() * types.length)];
+                    let enemy = new Enemy(rx, ry, type, this.currentFloorIndex + 1);
+
+                    // 스폰 이펙트 추가
+                    room.particles.push({
+                        x: rx, y: ry, life: 40, color: "rgba(220, 38, 38, 0.7)", radius: 30
+                    });
+
+                    room.enemies.push(enemy);
+                }
+            }
+
+            handlePlayerAttack() {
+                if (!this.player.attack()) return;
+
+                let p = this.player;
+                let r = this.currentRoom;
+
+                let attackRange = 70 * p.attackRangeMult;
+                let hitAngleRange = Math.PI * 0.65;
+
+                r.enemies.forEach((enemy) => {
+                    let dx = enemy.x - p.x;
+                    let dy = enemy.y - p.y;
+                    let dist = Math.hypot(dx, dy);
+                    let angle = Math.atan2(dy, dx);
+                    let angleDiff = Math.abs(angle - p.aimAngle);
+
+                    if (dist <= attackRange + enemy.radius && angleDiff <= hitAngleRange) {
+                        let isCrit = Math.random() < p.critChance;
+                        let dmg = Math.round(p.damage * (isCrit ? p.critMult : 1));
+                        enemy.hp -= dmg;
+
+                        sfx.playHit();
+
+                        // Floating Damage Text
+                        this.floatingTexts.push({
+                            x: enemy.x, y: enemy.y - 15,
+                            text: isCrit ? `CRIT ${dmg}!` : `${dmg}`,
+                            color: isCrit ? "#facc15" : "#ffffff",
+                            life: 30
+                        });
+
+                        // Persistent Blood Stain on Floor
+                        r.bloodStains.push({
+                            x: enemy.x + (Math.random() - 0.5) * 10,
+                            y: enemy.y + (Math.random() - 0.5) * 10,
+                            radius: 8 + Math.random() * 10
+                        });
+
+                        // 타격 임팩트 스타 이펙트 (2~3개, 살짝 랜덤 오프셋)
+                        let starCount = isCrit ? 3 : 2;
+                        for (let s = 0; s < starCount; s++) {
+                            r.impactStars.push({
+                                x: enemy.x + (Math.random() - 0.5) * 26 - 10,
+                                y: enemy.y - 10 + (Math.random() - 0.5) * 26,
+                                size: (isCrit ? 22 : 15) + Math.random() * 6,
+                                rot: Math.random() * Math.PI,
+                                life: 14,
+                                maxLife: 14,
+                                color: isCrit ? "#fde047" : "#ffffff"
+                            });
+                        }
+
+                        let kb = 9 * p.knockbackMult;
+                        enemy.x += Math.cos(angle) * kb;
+                        enemy.y += Math.sin(angle) * kb;
+
+                        if (p.traits.lifesteal && Math.random() < 0.25) {
+                            p.hp = Math.min(p.maxHp, p.hp + 3);
+                        }
+
+                        if (p.traits.poisonCloud) {
+                            r.particles.push({
+                                x: enemy.x, y: enemy.y,
+                                vx: 0, vy: 0, life: 60, color: "rgba(34, 197, 94, 0.4)", radius: 28, isHazard: true
+                            });
+                        }
+                    }
+                });
+
+                if (p.traits.fireball) {
+                    r.projectiles.push({
+                        x: p.x, y: p.y,
+                        vx: Math.cos(p.aimAngle) * 8.5, vy: Math.sin(p.aimAngle) * 8.5,
+                        radius: 9, color: "#f97316", isHostile: false, damage: p.damage * 0.75
+                    });
+                }
+            }
+
+            update() {
+                if (this.state !== "PLAYING") return;
+
+                let bounds = {
+                    minX: 60, maxX: CONFIG.CANVAS_WIDTH - 60,
+                    minY: 60, maxY: CONFIG.CANVAS_HEIGHT - 60
+                };
+
+                this.player.update(this.keys, this.mouse, bounds);
+
+                let r = this.currentRoom;
+                if (!r) return;
+
+                // 파티클 업데이트
+                for (let i = r.particles.length - 1; i >= 0; i--) {
+                    let p = r.particles[i];
+                    p.life--;
+                    if (p.life <= 0) r.particles.splice(i, 1);
+                }
+
+                // 타격 임팩트 스타 업데이트
+                for (let i = r.impactStars.length - 1; i >= 0; i--) {
+                    let st = r.impactStars[i];
+                    st.life--;
+                    if (st.life <= 0) r.impactStars.splice(i, 1);
+                }
+
+                // 추가 구원/웨이브 좀비 지속 스폰
+                if (!r.cleared && r.type !== "SHOP" && r.type !== "BOSS" && r.currentWave < r.totalWaves) {
+                    r.waveTimer++;
+                    if (r.waveTimer > 300 || (r.enemies.length <= 1 && r.waveTimer > 90)) {
+                        r.waveTimer = 0;
+                        r.currentWave++;
+                        let spawnCount = 2 + this.currentFloorIndex;
+                        let types = ["STUDENT", "TEACHER", "GUARD", "SPITTER"];
+                        for (let k = 0; k < spawnCount; k++) {
+                            let rx = 120 + Math.random() * (CONFIG.CANVAS_WIDTH - 240);
+                            let ry = 120 + Math.random() * (CONFIG.CANVAS_HEIGHT - 240);
+                            r.enemies.push(new Enemy(rx, ry, types[Math.floor(Math.random() * types.length)], this.currentFloorIndex + 1));
+                            r.particles.push({ x: rx, y: ry, life: 35, color: "rgba(239, 68, 68, 0.8)", radius: 32 });
+                        }
+                    }
+                }
+
+                // Floating Text animation
+                for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
+                    let ft = this.floatingTexts[i];
+                    ft.y -= 0.8;
+                    ft.life--;
+                    if (ft.life <= 0) this.floatingTexts.splice(i, 1);
+                }
+
+                // Projectiles
+                for (let i = r.projectiles.length - 1; i >= 0; i--) {
+                    let proj = r.projectiles[i];
+                    proj.x += proj.vx;
+                    proj.y += proj.vy;
+
+                    if (proj.x < bounds.minX || proj.x > bounds.maxX || proj.y < bounds.minY || proj.y > bounds.maxY) {
+                        r.projectiles.splice(i, 1);
+                        continue;
+                    }
+
+                    if (proj.isHostile) {
+                        let dist = Math.hypot(proj.x - this.player.x, proj.y - this.player.y);
+                        if (dist < proj.radius + this.player.radius) {
+                            this.damagePlayer(proj.damage);
+                            r.projectiles.splice(i, 1);
+                            continue;
+                        }
+                    } else {
+                        for (let enemy of r.enemies) {
+                            let dist = Math.hypot(proj.x - enemy.x, proj.y - enemy.y);
+                            if (dist < proj.radius + enemy.radius) {
+                                enemy.hp -= proj.damage;
+                                sfx.playHit();
+                                r.projectiles.splice(i, 1);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Enemies
+                for (let i = r.enemies.length - 1; i >= 0; i--) {
+                    let enemy = r.enemies[i];
+                    enemy.update(this.player, r);
+
+                    let dist = Math.hypot(enemy.x - this.player.x, enemy.y - this.player.y);
+                    if (dist < enemy.radius + this.player.radius) {
+                        if (!this.player.isDashing) {
+                            this.damagePlayer(enemy.damage);
+                        } else if (this.player.traits.dashImpact) {
+                            enemy.hp -= 20;
+                        }
+                    }
+
+                    if (enemy.hp <= 0) {
+                        sfx.playCoin();
+                        this.player.gold += enemy.isBoss ? 60 : 8;
+
+                        if (this.player.traits.corpseExplode) {
+                            sfx.playExplosion();
+                            r.enemies.forEach(other => {
+                                if (Math.hypot(other.x - enemy.x, other.y - enemy.y) < 85) {
+                                    other.hp -= 32;
+                                }
+                            });
+                        }
+
+                        r.enemies.splice(i, 1);
+                    }
+                }
+
+                // Room Cleared Check
+                if (!r.cleared && r.enemies.length === 0) {
+                    r.cleared = true;
+                    document.getElementById("bossHpContainer").classList.add("hidden");
+
+                    if (r.type === "BOSS") {
+                        r.hasStairs = true;
+                        this.floatingTexts.push({
+                            x: CONFIG.CANVAS_WIDTH / 2, y: CONFIG.CANVAS_HEIGHT / 2 - 40,
+                            text: "🪜 다음 층으로 통하는 이동 계단이 생성되었습니다!",
+                            color: "#38bdf8",
+                            life: 120
+                        });
+                        this.openTraitSelection();
+                    } else {
+                        this.openTraitSelection();
+                    }
+                }
+
+                if (r.cleared) {
+                    this.checkDoorCollisions(bounds);
+
+                    // 다음 층 이동 계단 통로 감지
+                    if (r.hasStairs) {
+                        let stairsX = CONFIG.CANVAS_WIDTH / 2;
+                        let stairsY = 180;
+                        if (Math.hypot(this.player.x - stairsX, this.player.y - stairsY) < 45) {
+                            r.hasStairs = false;
+                            this.triggerFloorClearStory();
+                        }
+                    }
+                }
+
+                this.updateHUD();
+            }
+
+            damagePlayer(amount) {
+                if (this.player.shield > 0) {
+                    this.player.shield -= amount;
+                    if (this.player.shield < 0) {
+                        this.player.hp += this.player.shield;
+                        this.player.shield = 0;
+                    }
+                } else {
+                    this.player.hp -= amount;
+                }
+
+                sfx.playHit();
+
+                if (this.player.hp <= 0) {
+                    this.triggerGameOver();
+                }
+            }
+
+            checkDoorCollisions(bounds) {
+                let p = this.player;
+                let midX = CONFIG.CANVAS_WIDTH / 2;
+                let midY = CONFIG.CANVAS_HEIGHT / 2;
+                // 플레이어는 (bounds.min + radius) ~ (bounds.max - radius) 범위 안쪽으로만 클램프되므로
+                // 벽 임계값도 반지름을 감안한 여유 구간으로 잡아야 실제로 도달/통과가 가능하다.
+                let edge = p.radius + 14;
+
+                if (this.currentRoom.doors.N && Math.abs(p.x - midX) < 45 && p.y <= bounds.minY + edge) {
+                    this.switchRoom(this.currentRoom.gridX, this.currentRoom.gridY - 1, midX, bounds.maxY - 35);
+                }
+                if (this.currentRoom.doors.S && Math.abs(p.x - midX) < 45 && p.y >= bounds.maxY - edge) {
+                    this.switchRoom(this.currentRoom.gridX, this.currentRoom.gridY + 1, midX, bounds.minY + 35);
+                }
+                if (this.currentRoom.doors.E && Math.abs(p.y - midY) < 45 && p.x >= bounds.maxX - edge) {
+                    this.switchRoom(this.currentRoom.gridX + 1, this.currentRoom.gridY, bounds.minX + 35, midY);
+                }
+                if (this.currentRoom.doors.W && Math.abs(p.y - midY) < 45 && p.x <= bounds.minX + edge) {
+                    this.switchRoom(this.currentRoom.gridX - 1, this.currentRoom.gridY, bounds.maxX - 35, midY);
+                }
+            }
+
+            switchRoom(gx, gy, px, py) {
+                this.currentRoom = this.mapFloor.grid[gy][gx];
+                this.currentRoom.visited = true;
+                this.player.resetPos(px, py);
+
+                if (this.currentRoom.type === "SHOP") {
+                    this.openShop();
+                } else if (!this.currentRoom.cleared) {
+                    this.spawnRoomEnemies(this.currentRoom);
+                }
+            }
+
+            draw() {
+                let r = this.currentRoom;
+                if (!r) return;
+
+                let cw = CONFIG.CANVAS_WIDTH;
+                let ch = CONFIG.CANVAS_HEIGHT;
+
+                // 1. School Floor Textures
+                if (r.type === "CLASSROOM" || r.type === "START") {
+                    // Wooden Parquet Flooring (목재 마루 바닥)
+                    this.ctx.fillStyle = "#2a1b12";
+                    this.ctx.fillRect(0, 0, cw, ch);
+
+                    this.ctx.strokeStyle = "#1a100a";
+                    this.ctx.lineWidth = 1.5;
+                    for (let y = 0; y < ch; y += 32) {
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(0, y);
+                        this.ctx.lineTo(cw, y);
+                        this.ctx.stroke();
+                    }
+                    for (let x = 0; x < cw; x += 64) {
+                        for (let y = 0; y < ch; y += 32) {
+                            let offsetX = (Math.floor(y / 32) % 2 === 0) ? 0 : 32;
+                            this.ctx.beginPath();
+                            this.ctx.moveTo(x + offsetX, y);
+                            this.ctx.lineTo(x + offsetX, y + 32);
+                            this.ctx.stroke();
+                        }
+                    }
+                } else if (r.type === "LIBRARY") {
+                    this.ctx.fillStyle = "#181310";
+                    this.ctx.fillRect(0, 0, cw, ch);
+                } else {
+                    // Marble Hallway Tile Texture
+                    this.ctx.fillStyle = "#0d1322";
+                    this.ctx.fillRect(0, 0, cw, ch);
+
+                    this.ctx.strokeStyle = "#1e293b";
+                    this.ctx.lineWidth = 1;
+                    for (let x = 0; x < cw; x += 40) {
+                        this.ctx.beginPath(); this.ctx.moveTo(x, 0); this.ctx.lineTo(x, ch); this.ctx.stroke();
+                    }
+                    for (let y = 0; y < ch; y += 40) {
+                        this.ctx.beginPath(); this.ctx.moveTo(0, y); this.ctx.lineTo(cw, y); this.ctx.stroke();
+                    }
+                }
+
+                // 2. Persistent Blood Stains on Floor
+                r.bloodStains.forEach(bs => {
+                    this.ctx.fillStyle = "rgba(127, 29, 29, 0.75)";
+                    this.ctx.beginPath();
+                    this.ctx.arc(bs.x, bs.y, bs.radius, 0, Math.PI * 2);
+                    this.ctx.fill();
+                });
+
+                // 3. Walls & Chalkboard (Korean High School Blackboard)
+                let bw = 50;
+                let floorConfig = CONFIG.FLOORS[this.currentFloorIndex] || CONFIG.FLOORS[0];
+                this.ctx.fillStyle = floorConfig.wallColor;
+                this.ctx.fillRect(0, 0, cw, bw);
+                this.ctx.fillRect(0, ch - bw, cw, bw);
+                this.ctx.fillRect(0, 0, bw, ch);
+                this.ctx.fillRect(cw - bw, 0, bw, ch);
+
+                // Blackboard on Top Wall for Classroom
+                if (r.type === "CLASSROOM" || r.type === "START") {
+                    this.ctx.fillStyle = "#064e3b"; // Blackboard Green
+                    this.ctx.fillRect(cw / 2 - 250, 8, 500, 34);
+                    this.ctx.strokeStyle = "#78350f";
+                    this.ctx.lineWidth = 3;
+                    this.ctx.strokeRect(cw / 2 - 250, 8, 500, 34);
+
+                    this.ctx.fillStyle = "#fef08a";
+                    this.ctx.font = "bold 13px 'Noto Sans KR', sans-serif";
+                    this.ctx.textAlign = "center";
+                    this.ctx.fillText("📝 [Emergency Rules] 탈출 지침: 좀비를 퇴치하고 옥상으로 이동하라!", cw / 2, 30);
+                }
+
+                // 4. Render School Furniture Props
+                r.props.forEach(p => {
+                    this.ctx.fillStyle = "rgba(0,0,0,0.3)";
+                    this.ctx.fillRect(p.x + 4, p.y + 4, p.w, p.h); // Shadow
+
+                    if (p.kind === "DESK") {
+                        this.ctx.fillStyle = "#854d0e"; // Wooden Desk
+                        this.ctx.fillRect(p.x, p.y, p.w, p.h);
+                        this.ctx.strokeStyle = "#451a03";
+                        this.ctx.strokeRect(p.x, p.y, p.w, p.h);
+                    } else if (p.kind === "BOOKSHELF") {
+                        this.ctx.fillStyle = "#78350f";
+                        this.ctx.fillRect(p.x, p.y, p.w, p.h);
+                        this.ctx.fillStyle = "#ef4444";
+                        this.ctx.fillRect(p.x + 10, p.y + 5, 30, 10);
+                        this.ctx.fillStyle = "#3b82f6";
+                        this.ctx.fillRect(p.x + 50, p.y + 5, 40, 10);
+                    } else if (p.kind === "PODIUM") {
+                        this.ctx.fillStyle = "#a16207";
+                        this.ctx.fillRect(p.x, p.y, p.w, p.h);
+                    } else {
+                        this.ctx.fillStyle = "#334155";
+                        this.ctx.fillRect(p.x, p.y, p.w, p.h);
+                    }
+                });
+
+                this.drawDoors(bw);
+
+                // Draw Stairs to Next Floor if spawned in Boss room
+                if (r.hasStairs) {
+                    let sx = cw / 2;
+                    let sy = 180;
+
+                    this.ctx.save();
+                    // 계단 주변 푸른 후광 효과
+                    let grad = this.ctx.createRadialGradient(sx, sy, 5, sx, sy, 65);
+                    grad.addColorStop(0, "rgba(56, 189, 248, 0.6)");
+                    grad.addColorStop(1, "rgba(56, 189, 248, 0)");
+                    this.ctx.fillStyle = grad;
+                    this.ctx.beginPath();
+                    this.ctx.arc(sx, sy, 65, 0, Math.PI * 2);
+                    this.ctx.fill();
+
+                    // 계단 구조물 렌더링
+                    this.ctx.fillStyle = "#0f172a";
+                    this.ctx.strokeStyle = "#38bdf8";
+                    this.ctx.lineWidth = 3;
+                    this.ctx.beginPath();
+                    this.ctx.roundRect(sx - 45, sy - 30, 90, 60, 8);
+                    this.ctx.fill();
+                    this.ctx.stroke();
+
+                    // 계단 디딤판 선
+                    this.ctx.strokeStyle = "#0284c7";
+                    this.ctx.lineWidth = 2;
+                    for (let step = -20; step <= 20; step += 10) {
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(sx - 35, sy + step);
+                        this.ctx.lineTo(sx + 35, sy + step);
+                        this.ctx.stroke();
+                    }
+
+                    // 상단 안내 이정표 문구
+                    this.ctx.fillStyle = "#38bdf8";
+                    this.ctx.font = "bold 15px 'Black Han Sans', sans-serif";
+                    this.ctx.textAlign = "center";
+                    let nextLabel = (this.currentFloorIndex === 3) ? "🚨 옥상 연결 통로 (진입)" : `🪜 ${this.currentFloorIndex + 2}층 이동 계단 (진입)`;
+                    this.ctx.fillText(nextLabel, sx, sy - 40);
+
+                    this.ctx.restore();
+                }
+
+                // Guide Messages
+                if (r.type === "START") {
+                    this.ctx.fillStyle = "#fbbf24";
+                    this.ctx.font = "bold 17px 'Black Han Sans', sans-serif";
+                    this.ctx.textAlign = "center";
+                    this.ctx.fillText("⚠️ 상단/좌우의 문으로 이동하여 좀비를 퇴치하고 특성을 선택하세요!", cw / 2, 115);
+                } else if (!r.cleared && r.enemies.length > 0) {
+                    this.ctx.fillStyle = "#ef4444";
+                    this.ctx.font = "bold 17px 'Black Han Sans', sans-serif";
+                    this.ctx.textAlign = "center";
+                    this.ctx.fillText(`🚨 좀비 출몰! 방 안의 좀비 (${r.enemies.length}마리)를 모두 처치하세요!`, cw / 2, 115);
+                }
+
+                // Projectiles
+                r.projectiles.forEach(proj => {
+                    this.ctx.fillStyle = proj.color;
+                    this.ctx.beginPath();
+                    this.ctx.arc(proj.x, proj.y, proj.radius, 0, Math.PI * 2);
+                    this.ctx.fill();
+                });
+
+                // 스폰 붉은 알림 파티클 렌더링
+                r.particles.forEach(p => {
+                    this.ctx.save();
+                    this.ctx.fillStyle = p.color;
+                    this.ctx.beginPath();
+                    this.ctx.arc(p.x, p.y, p.radius * (p.life / 40), 0, Math.PI * 2);
+                    this.ctx.fill();
+                    this.ctx.restore();
+                });
+
+                // Enemies & Player
+                r.enemies.forEach(e => e.draw(this.ctx));
+                this.player.draw(this.ctx);
+
+                // Ambient Radial Light Vignette around Player
+                let lightGrad = this.ctx.createRadialGradient(this.player.x, this.player.y, 80, this.player.x, this.player.y, 550);
+                lightGrad.addColorStop(0, "rgba(0,0,0,0)");
+                lightGrad.addColorStop(1, "rgba(0,0,0,0.65)");
+                this.ctx.fillStyle = lightGrad;
+                this.ctx.fillRect(0, 0, cw, ch);
+
+                // 타격 임팩트 스타 (★) 렌더링
+                r.impactStars.forEach(st => {
+                    let t = st.life / st.maxLife;
+                    this.drawImpactStar(st.x, st.y, st.size * (0.6 + (1 - t) * 0.6), st.rot, st.color, t);
+                });
+
+                // Floating Damage FX
+                this.floatingTexts.forEach(ft => {
+                    this.ctx.fillStyle = ft.color;
+                    this.ctx.font = "bold 16px 'Black Han Sans', sans-serif";
+                    this.ctx.textAlign = "center";
+                    this.ctx.fillText(ft.text, ft.x, ft.y);
+                });
+
+                this.drawMinimap();
+
+                // 저해상도 버퍼를 스무딩 없이 확대 출력 -> 청키한 픽셀아트 룩 완성
+                this.displayCtx.imageSmoothingEnabled = false;
+                this.displayCtx.clearRect(0, 0, cw, ch);
+                this.displayCtx.drawImage(this.bufferCanvas, 0, 0, cw, ch);
+            }
+
+            // 만화적인 4방향 스파이크 별 모양 (타격 임팩트 연출)
+            drawImpactStar(cx, cy, size, rot, color, fadeT) {
+                let ctx = this.ctx;
+                ctx.save();
+                ctx.translate(cx, cy);
+                ctx.rotate(rot);
+                ctx.globalAlpha = Math.max(0, Math.min(1, fadeT * 1.3));
+                ctx.fillStyle = color;
+                ctx.strokeStyle = "#7c1d1d";
+                ctx.lineWidth = 1.5;
+
+                let outer = size;
+                let inner = size * 0.38;
+                let spikes = 4;
+
+                ctx.beginPath();
+                for (let i = 0; i < spikes * 2; i++) {
+                    let r = (i % 2 === 0) ? outer : inner;
+                    let a = (Math.PI / spikes) * i - Math.PI / 2;
+                    let px = Math.cos(a) * r;
+                    let py = Math.sin(a) * r;
+                    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            drawDoors(bw) {
+                let midX = CONFIG.CANVAS_WIDTH / 2;
+                let midY = CONFIG.CANVAS_HEIGHT / 2;
+                let isCleared = this.currentRoom.cleared;
+
+                if (this.currentRoom.doors.N) this.drawDoorPanel(midX - 45, 0, 90, bw, "H", isCleared, "북쪽 문");
+                if (this.currentRoom.doors.S) this.drawDoorPanel(midX - 45, CONFIG.CANVAS_HEIGHT - bw, 90, bw, "H", isCleared, "남쪽 문");
+                if (this.currentRoom.doors.E) this.drawDoorPanel(CONFIG.CANVAS_WIDTH - bw, midY - 45, bw, 90, "V", isCleared, "동쪽 문");
+                if (this.currentRoom.doors.W) this.drawDoorPanel(0, midY - 45, bw, 90, "V", isCleared, "서쪽 문");
+            }
+
+            // 문틀 + 패널 + 작은 창문으로 구성된 도어 렌더링 (잠김: 붉은 패널 / 열림: 초록 패널이 옆으로 살짝 열린 형태)
+            drawDoorPanel(x, y, w, h, axis, isCleared, label) {
+                let ctx = this.ctx;
+                ctx.save();
+
+                // 문틀 (짙은 목재/철제 프레임)
+                ctx.fillStyle = "#20140c";
+                ctx.fillRect(x, y, w, h);
+
+                let pad = 5;
+                let panelColor = isCleared ? "#166534" : "#7f1d1d";
+                let panelStroke = isCleared ? "#22c55e" : "#dc2626";
+
+                if (axis === "H") {
+                    // 좌우 두 짝 문, 열리면 살짝 벌어진 틈을 보여준다
+                    let gap = isCleared ? 10 : 0;
+                    let leafW = (w - pad * 2 - gap) / 2;
+                    ctx.fillStyle = panelColor;
+                    ctx.fillRect(x + pad, y + pad, leafW, h - pad * 2);
+                    ctx.fillRect(x + w - pad - leafW, y + pad, leafW, h - pad * 2);
+                    ctx.strokeStyle = panelStroke;
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x + pad, y + pad, leafW, h - pad * 2);
+                    ctx.strokeRect(x + w - pad - leafW, y + pad, leafW, h - pad * 2);
+                    // 작은 창문
+                    ctx.fillStyle = isCleared ? "rgba(134,239,172,0.55)" : "rgba(0,0,0,0.55)";
+                    ctx.fillRect(x + pad + leafW * 0.3, y + h / 2 - 4, leafW * 0.4, 8);
+                    ctx.fillRect(x + w - pad - leafW * 0.7, y + h / 2 - 4, leafW * 0.4, 8);
+                } else {
+                    let gap = isCleared ? 10 : 0;
+                    let leafH = (h - pad * 2 - gap) / 2;
+                    ctx.fillStyle = panelColor;
+                    ctx.fillRect(x + pad, y + pad, w - pad * 2, leafH);
+                    ctx.fillRect(x + pad, y + h - pad - leafH, w - pad * 2, leafH);
+                    ctx.strokeStyle = panelStroke;
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x + pad, y + pad, w - pad * 2, leafH);
+                    ctx.strokeRect(x + pad, y + h - pad - leafH, w - pad * 2, leafH);
+                    ctx.fillStyle = isCleared ? "rgba(134,239,172,0.55)" : "rgba(0,0,0,0.55)";
+                    ctx.fillRect(x + w / 2 - 4, y + pad + leafH * 0.3, 8, leafH * 0.4);
+                    ctx.fillRect(x + w / 2 - 4, y + h - pad - leafH * 0.7, 8, leafH * 0.4);
+                }
+
+                this.drawDoorText(label, x + w / 2, y + h / 2, isCleared);
+                ctx.restore();
+            }
+
+            drawDoorText(label, x, y, isCleared) {
+                this.ctx.save();
+                this.ctx.fillStyle = "#ffffff";
+                this.ctx.font = "bold 11px sans-serif";
+                this.ctx.textAlign = "center";
+                this.ctx.textBaseline = "middle";
+                this.ctx.strokeStyle = "rgba(0,0,0,0.8)";
+                this.ctx.lineWidth = 3;
+                let text = isCleared ? "열림" : "잠김";
+                this.ctx.strokeText(text, x, y);
+                this.ctx.fillText(text, x, y);
+                this.ctx.restore();
+            }
+
+            drawMinimap() {
+                if (!this.mapFloor) return;
+                
+                let ctx = this.miniCtx;
+                ctx.clearRect(0, 0, 130, 130);
+
+                // Background container
+                ctx.fillStyle = "#030712";
+                ctx.fillRect(0, 0, 130, 130);
+
+                let cell = 20;
+                let offsetX = 15;
+                let offsetY = 15;
+
+                // Draw Door Connections on Minimap first
+                for (let r = 0; r < 5; r++) {
+                    for (let c = 0; c < 5; c++) {
+                        let room = this.mapFloor.grid[r][c];
+                        if (!room || !room.visited) continue;
+
+                        let rx = offsetX + c * cell + cell / 2;
+                        let ry = offsetY + r * cell + cell / 2;
+
+                        ctx.strokeStyle = "#475569";
+                        ctx.lineWidth = 3;
+
+                        if (room.doors.E && c < 4 && this.mapFloor.grid[r][c + 1]?.visited) {
+                            ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx + cell, ry); ctx.stroke();
+                        }
+                        if (room.doors.S && r < 4 && this.mapFloor.grid[r + 1][c]?.visited) {
+                            ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx, ry + cell); ctx.stroke();
+                        }
+                    }
+                }
+
+                // Draw Room Cells
+                for (let r = 0; r < 5; r++) {
+                    for (let c = 0; c < 5; c++) {
+                        let room = this.mapFloor.grid[r][c];
+                        if (!room || !room.visited) continue;
+
+                        let rx = offsetX + c * cell;
+                        let ry = offsetY + r * cell;
+                        let isCurrent = (room === this.currentRoom);
+
+                        // Room Fill Color
+                        if (isCurrent) {
+                            ctx.fillStyle = "#fbbf24"; // Active Room Golden
+                        } else if (room.type === "BOSS") {
+                            ctx.fillStyle = "#991b1b";
+                        } else if (room.type === "SHOP") {
+                            ctx.fillStyle = "#d97706";
+                        } else if (room.cleared) {
+                            ctx.fillStyle = "#15803d"; // Cleared Green
+                        } else {
+                            ctx.fillStyle = "#334155";
+                        }
+
+                        ctx.beginPath();
+                        ctx.roundRect(rx + 1, ry + 1, cell - 3, cell - 3, 3);
+                        ctx.fill();
+
+                        ctx.strokeStyle = isCurrent ? "#ffffff" : "#1e293b";
+                        ctx.lineWidth = isCurrent ? 2 : 1;
+                        ctx.stroke();
+
+                        // Room Icons
+                        ctx.fillStyle = "#ffffff";
+                        ctx.font = "9px sans-serif";
+                        ctx.textAlign = "center";
+                        ctx.textBaseline = "middle";
+
+                        if (room.type === "START") {
+                            ctx.fillText("🏠", rx + cell/2, ry + cell/2);
+                        } else if (room.type === "SHOP") {
+                            ctx.fillText("🛒", rx + cell/2, ry + cell/2);
+                        } else if (room.type === "BOSS") {
+                            ctx.fillText(room.hasStairs ? "🪜" : "💀", rx + cell/2, ry + cell/2);
+                        }
+                    }
+                }
+            }
+
+            openTraitSelection() {
+                this.state = "TRAIT_SELECT";
+                let container = document.getElementById("traitCardsContainer");
+                container.innerHTML = "";
+
+                let shuffled = [...CONFIG.TRAITS].sort(() => 0.5 - Math.random());
+                let options = shuffled.slice(0, 3);
+
+                options.forEach(trait => {
+                    let card = document.createElement("div");
+                    card.className = "btn-card bg-slate-900 border border-slate-700 hover:border-rose-500 p-5 rounded-xl text-left flex flex-col justify-between cursor-pointer";
+                    card.innerHTML = `
+                        <div class="space-y-3">
+                            <div class="flex justify-between items-center">
+                                <span class="font-title text-xl text-white flex items-center gap-2">
+                                    <i class="fa-solid ${trait.icon} ${trait.color}"></i> ${trait.name}
+                                </span>
+                                <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">${trait.synergy}</span>
+                            </div>
+                            <p class="text-xs text-slate-300 leading-relaxed font-mono">${trait.desc}</p>
+                        </div>
+                        <button class="mt-4 w-full py-2 bg-rose-900/60 hover:bg-rose-600 text-white font-bold text-xs rounded-lg transition">특성 선택</button>
+                    `;
+                    card.onclick = () => {
+                        trait.apply(this.player);
+                        this.player.activeTraits.push(trait);
+                        document.getElementById("traitModal").classList.add("hidden");
+                        this.state = "PLAYING";
+                    };
+                    container.appendChild(card);
+                });
+
+                document.getElementById("traitModal").classList.remove("hidden");
+            }
+
+            openShop() {
+                this.state = "SHOP";
+                let container = document.getElementById("shopItemsContainer");
+                container.innerHTML = "";
+
+                CONFIG.ITEMS.forEach(item => {
+                    let elem = document.createElement("div");
+                    elem.className = "bg-slate-950 p-4 rounded-xl border border-slate-800 flex justify-between items-center";
+                    elem.innerHTML = `
+                        <div class="flex items-center gap-3">
+                            <div class="p-3 bg-slate-900 rounded-lg text-amber-400 text-xl"><i class="fa-solid ${item.icon}"></i></div>
+                            <div>
+                                <h4 class="font-bold text-white text-sm">${item.name}</h4>
+                                <p class="text-xs text-slate-400">${item.desc}</p>
+                            </div>
+                        </div>
+                        <button class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-lg flex items-center gap-1">
+                            <i class="fa-solid fa-coins"></i> ${item.cost} G
+                        </button>
+                    `;
+                    elem.querySelector("button").onclick = () => {
+                        if (this.player.gold >= item.cost) {
+                            this.player.gold -= item.cost;
+                            item.apply(this.player);
+                            sfx.playCoin();
+                            this.updateHUD();
+                        }
+                    };
+                    container.appendChild(elem);
+                });
+
+                document.getElementById("shopModal").classList.remove("hidden");
+            }
+
+            closeShop() {
+                document.getElementById("shopModal").classList.add("hidden");
+                this.state = "PLAYING";
+            }
+
+            triggerFloorClearStory() {
+                this.state = "STORY";
+                let modal = document.getElementById("storyModal");
+                let title = document.getElementById("storyTitle");
+                let content = document.getElementById("storyContent");
+
+                let stories = [
+                    { title: "1층 돌파: 교실의 피비린내", text: "교장실 부근에서 발견한 일지에는 '학생들을 대상으로 한 비밀 백신 실험'에 대한 기록이 적혀 있었다. 바이러스는 기침 한 번으로 학교 전체에 번진 것이었다." },
+                    { title: "2층 돌파: 과학실의 기밀문서", text: "과학부장의 연구 노트에서 충격적인 사실을 알아냈다. 이사장이 재단 자금을 유용해 인체 실험 바이러스를 학교 지하에서 연구하고 있었던 것이다." },
+                    { title: "3층 돌파: 방송실의 비명", text: "방송 장비 너머로 옥상에서 구출 헬기가 온다는 방송이 기계음처럼 반복 재생되고 있었다. 그러나 그것은 생존자들을 옥상으로 유인하기 위한 함정이었다." },
+                    { title: "4층 돌파: 옥상 문 앞", text: "모든 교사와 경비원들은 이사장의 통제 하에 괴물로 변해버렸다. 이제 옥상 문을 열고 바이러스의 주범인 이사장과 마지막 승부를 겨뤄야 한다!" },
+                    { title: "최종 클리어: 옥상의 진실", text: "이사장 좀비를 처단하고 옥상 끝에 섰다. 저 멀리 도시 전체가 이미 붉은 화염 속에 휩싸여 있었다. 학교는 단지 실험실 중 하나였을 뿐이다. 야구부 남학생은 배트를 더욱 세게 쥐며 어둠 속으로 발걸음을 옮긴다..." }
+                ];
+
+                let cur = stories[this.currentFloorIndex];
+                title.innerText = cur.title;
+                content.innerText = cur.text;
+                modal.classList.remove("hidden");
+            }
+
+            nextFloor() {
+                this.currentFloorIndex++;
+                if (this.currentFloorIndex <= 4) {
+                    this.loadFloor(this.currentFloorIndex);
+                    this.state = "PLAYING";
+                }
+            }
+
+            triggerGameOver() {
+                this.state = "GAMEOVER";
+                let modal = document.getElementById("gameOverModal");
+                let stats = document.getElementById("gameOverStats");
+                stats.innerHTML = `
+                    <p>• 도달한 층: <b>${CONFIG.FLOORS[this.currentFloorIndex].name}</b></p>
+                    <p>• 보유 특성 개수: <b>${this.player.activeTraits.length}개</b></p>
+                    <p>• 획득한 골드: <b>${this.player.gold} Gold</b></p>
+                `;
+                modal.classList.remove("hidden");
+            }
+
+            updateHUD() {
+                document.getElementById("hudFloor").innerText = `${CONFIG.FLOORS[this.currentFloorIndex].name} - [${this.currentRoom ? this.currentRoom.name : ''}]`;
+                document.getElementById("hudGold").innerHTML = `<i class="fa-solid fa-coins"></i> ${this.player.gold} Gold`;
+                
+                let remainingEnemies = this.currentRoom ? this.currentRoom.enemies.length : 0;
+                let enemyHud = document.getElementById("hudEnemiesCount");
+                if (enemyHud) {
+                    enemyHud.innerHTML = `<i class="fa-solid fa-skull"></i> 남은 좀비: <b class="${remainingEnemies > 0 ? 'text-red-500 animate-pulse' : 'text-emerald-400'}">${remainingEnemies}</b>`;
+                }
+
+                let hpPercent = Math.max(0, (this.player.hp / this.player.maxHp) * 100);
+                document.getElementById("hudHpBar").style.width = `${hpPercent}%`;
+                document.getElementById("hudHpText").innerText = `${Math.ceil(this.player.hp)} / ${this.player.maxHp} HP`;
+
+                let shieldContainer = document.getElementById("hudShieldContainer");
+                if (this.player.maxShield > 0) {
+                    shieldContainer.classList.remove("hidden");
+                    let shieldPercent = Math.max(0, (this.player.shield / this.player.maxShield) * 100);
+                    document.getElementById("hudShieldBar").style.width = `${shieldPercent}%`;
+                }
+
+                document.getElementById("hudStats").innerText = `공격력: ${Math.floor(this.player.damage)} | 속도: ${this.player.speed.toFixed(1)}`;
+
+                let traitListElem = document.getElementById("hudTraitsList");
+                traitListElem.innerHTML = "";
+                this.player.activeTraits.forEach(t => {
+                    let badge = document.createElement("span");
+                    badge.className = "w-7 h-7 rounded-lg bg-slate-900 border border-slate-700 flex items-center justify-center text-xs shadow";
+                    badge.title = `${t.name}: ${t.desc}`;
+                    badge.innerHTML = `<i class="fa-solid ${t.icon} ${t.color}"></i>`;
+                    traitListElem.appendChild(badge);
+                });
+
+                if (this.currentRoom && this.currentRoom.type === "BOSS") {
+                    let boss = this.currentRoom.enemies.find(e => e.isBoss);
+                    if (boss) {
+                        document.getElementById("bossName").innerHTML = `<i class="fa-solid fa-skull"></i> ${boss.name}`;
+                        let bossHpPercent = Math.max(0, (boss.hp / boss.maxHp) * 100);
+                        document.getElementById("bossHpBar").style.width = `${bossHpPercent}%`;
+                        document.getElementById("bossHpText").innerText = `${Math.ceil(boss.hp)} / ${boss.maxHp}`;
+                    }
+                }
+            }
+
+            run() {
+                let loop = () => {
+                    this.update();
+                    this.draw();
+                    requestAnimationFrame(loop);
+                };
+                requestAnimationFrame(loop);
+            }
+        }
+
+        window.onload = () => {
+            const game = new GameEngine();
+            game.run();
+        };
+    </script>
+</body>
+</html>
