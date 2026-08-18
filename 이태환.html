@@ -1,0 +1,1609 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VALOR-X: VCT Esports Tactical 5v5 FPS</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Teko:wght@500;700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            user-select: none;
+            background-color: #050811;
+            color: #ffffff;
+        }
+        .font-teko { font-family: 'Teko', sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        /* Tactical HUD Glass Styling */
+        .hud-glass {
+            background: rgba(8, 14, 26, 0.88);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .agent-card-selected {
+            border-color: #ff4655 !important;
+            box-shadow: 0 0 25px rgba(255, 70, 85, 0.6);
+            background: rgba(255, 70, 85, 0.15);
+        }
+        .crosshair-bar {
+            position: absolute;
+            background-color: rgba(0, 255, 200, 0.95);
+            box-shadow: 0 0 6px rgba(0, 255, 200, 0.8);
+            transition: transform 0.05s ease-out;
+        }
+        .killfeed-item {
+            animation: slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes slideInRight {
+            from { transform: translateX(50px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        /* Custom Scrollbar for Shop */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.4); }
+        ::-webkit-scrollbar-thumb { background: #ff4655; border-radius: 3px; }
+    </style>
+</head>
+<body class="relative w-full h-full overflow-hidden select-none bg-slate-950 text-white">
+
+<!-- UI HUD LAYER -->
+<div id="ui-container" class="absolute inset-0 pointer-events-none z-10 flex flex-col justify-between p-3">
+
+    <!-- TOP VCT BROADCAST SCOREBAR -->
+    <div class="w-full max-w-5xl mx-auto flex items-center justify-between hud-glass rounded-xl px-5 py-2 shadow-2xl relative border-t-2 border-t-red-500">
+        <!-- Attackers Info -->
+        <div class="flex items-center space-x-4">
+            <div id="atk-side-indicator" class="px-3 py-1 text-xs font-black bg-red-600 text-white rounded uppercase tracking-widest shadow-md">ATK</div>
+            <div class="flex flex-col">
+                <span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">RED TEAM</span>
+                <span id="atk-score" class="text-4xl font-teko font-bold text-red-500 leading-none">0</span>
+            </div>
+            <!-- Round Win History Pips ATK -->
+            <div id="atk-round-pips" class="flex space-x-1"></div>
+        </div>
+
+        <!-- Center Match Timer & Spike Status -->
+        <div class="flex flex-col items-center justify-center">
+            <div id="round-phase-title" class="text-[10px] font-black text-amber-400 uppercase tracking-widest mb-0.5">BUY PHASE</div>
+            <div id="timer-display" class="text-3xl font-teko font-bold tracking-wider text-white bg-slate-900/80 px-4 py-0.5 rounded border border-slate-700">00:15</div>
+            <div class="flex items-center space-x-2 mt-1">
+                <div id="spike-status-badge" class="hidden text-[11px] px-2.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/60 font-bold animate-pulse">
+                    ⚠️ SPIKE PLANTED
+                </div>
+                <div id="overtime-badge" class="hidden text-[11px] px-2 py-0.5 rounded bg-purple-600/30 text-purple-300 border border-purple-500/50 font-bold uppercase tracking-wider">
+                    ⚡ OVERTIME
+                </div>
+            </div>
+        </div>
+
+        <!-- Defenders Info -->
+        <div class="flex items-center space-x-4">
+            <!-- Round Win History Pips DEF -->
+            <div id="def-round-pips" class="flex space-x-1"></div>
+            <div class="flex flex-col text-right">
+                <span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">BLUE TEAM</span>
+                <span id="def-score" class="text-4xl font-teko font-bold text-cyan-400 leading-none">0</span>
+            </div>
+            <div id="def-side-indicator" class="px-3 py-1 text-xs font-black bg-cyan-600 text-white rounded uppercase tracking-widest shadow-md">DEF</div>
+        </div>
+    </div>
+
+    <!-- VCT ROSTER PANELS (LEFT & RIGHT EDGES) -->
+    <div class="absolute top-20 left-3 flex flex-col space-y-1.5 w-48 pointer-events-none" id="vct-left-roster"></div>
+    <div class="absolute top-20 right-3 flex flex-col space-y-1.5 w-48 pointer-events-none" id="vct-right-roster"></div>
+
+    <!-- TOP RIGHT KILL FEED LOG -->
+    <div id="kill-feed-container" class="absolute top-20 right-56 flex flex-col space-y-1 items-end pointer-events-none max-h-48 overflow-hidden w-72"></div>
+
+    <!-- CENTER RETICLE, PROMPTS & MESSAGES -->
+    <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <!-- Crosshair -->
+        <div id="crosshair" class="relative w-8 h-8 flex items-center justify-center">
+            <div id="ch-top" class="crosshair-bar h-2 w-0.5 -translate-y-2"></div>
+            <div id="ch-bottom" class="crosshair-bar h-2 w-0.5 translate-y-2"></div>
+            <div id="ch-left" class="crosshair-bar w-2 h-0.5 -translate-x-2"></div>
+            <div id="ch-right" class="crosshair-bar w-2 h-0.5 translate-x-2"></div>
+            <div id="ch-center" class="w-1 h-1 bg-cyan-300 rounded-full"></div>
+        </div>
+
+        <!-- ADS Overlay Frame -->
+        <div id="ads-overlay" class="hidden fixed inset-0 pointer-events-none border-[50px] border-black/85 rounded-[120px] flex items-center justify-center">
+            <div class="w-full h-0.5 bg-cyan-400/40"></div>
+            <div class="h-full w-0.5 bg-cyan-400/40 absolute"></div>
+            <div class="w-48 h-48 border border-cyan-400/30 rounded-full absolute"></div>
+        </div>
+
+        <!-- Spectator Indicator -->
+        <div id="spectator-banner" class="hidden absolute top-[22%] hud-glass px-6 py-2.5 rounded-xl border border-red-500/50 text-center animate-pulse">
+            <div class="text-xs font-bold text-red-400 tracking-widest uppercase">관전 모드 - 아군 AI 시점</div>
+            <div id="spectator-target-name" class="text-2xl font-teko font-bold text-white">ALLY BOT 1</div>
+            <div class="text-[10px] text-slate-400">마우스 좌/우 클릭으로 관전 대상 변경</div>
+        </div>
+
+        <!-- Interaction Prompt (Plant / Defuse) -->
+        <div id="interaction-prompt" class="hidden absolute top-[62%] hud-glass px-5 py-2.5 rounded-xl text-sm font-semibold border border-amber-400 text-amber-300 flex items-center space-x-3 animate-bounce shadow-xl">
+            <span class="bg-amber-500 text-slate-950 px-2.5 py-0.5 rounded font-black text-xs">F 키 유지</span>
+            <span id="interaction-text">스파이크 설치</span>
+        </div>
+
+        <!-- Action Progress Bar -->
+        <div id="progress-bar-box" class="hidden absolute top-[68%] w-72 bg-slate-900/90 p-2 rounded-xl border border-slate-700 shadow-2xl">
+            <div id="progress-bar-label" class="text-xs font-bold text-center mb-1 text-cyan-400 uppercase tracking-wider">스파이크 설치 중...</div>
+            <div class="w-full bg-slate-800 h-3 rounded-full overflow-hidden p-0.5">
+                <div id="progress-bar-fill" class="bg-cyan-400 h-full w-0 rounded-full transition-all duration-75"></div>
+            </div>
+        </div>
+
+        <!-- Kill / Action Feed Banners -->
+        <div id="kill-banner" class="hidden absolute top-[30%] flex flex-col items-center">
+            <span id="kill-banner-text" class="text-4xl font-teko font-black text-red-500 tracking-widest drop-shadow-lg">적 처치 성공</span>
+            <span id="kill-banner-sub" class="text-xs font-bold text-amber-400 uppercase tracking-widest">HEADSHOT</span>
+        </div>
+    </div>
+
+    <!-- BOTTOM HUD BAR -->
+    <div class="w-full max-w-5xl mx-auto flex items-end justify-between pointer-events-none pb-1">
+        <!-- Health & Armor -->
+        <div class="hud-glass p-3 rounded-xl flex items-center space-x-5 min-w-[210px] border-b-2 border-b-emerald-500">
+            <div class="flex flex-col">
+                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">체력 (HP)</span>
+                <span id="hud-hp" class="text-4xl font-teko font-bold text-emerald-400 leading-none">100</span>
+            </div>
+            <div class="h-9 w-px bg-slate-700/60"></div>
+            <div class="flex flex-col">
+                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">방어구 (ARMOR)</span>
+                <span id="hud-armor" class="text-4xl font-teko font-bold text-cyan-400 leading-none">50</span>
+            </div>
+        </div>
+
+        <!-- Agent Skills (C, Q, E, X) & Ult Charges -->
+        <div class="hud-glass p-2.5 rounded-xl flex space-x-3 border-t-2 border-t-cyan-500">
+            <div class="relative flex flex-col items-center justify-center w-14 h-16 bg-slate-900/90 rounded-lg border border-slate-700">
+                <span class="absolute top-1 left-1.5 text-[10px] font-bold text-slate-400">C</span>
+                <span id="skill-c-icon" class="text-lg">🛡️</span>
+                <span id="skill-c-name" class="text-[9px] font-semibold text-slate-300 mt-0.5 truncate max-w-[50px]">장막</span>
+                <div id="skill-c-cd" class="absolute inset-0 bg-slate-950/85 rounded-lg hidden flex items-center justify-center text-xs font-bold text-red-400">0s</div>
+            </div>
+            <div class="relative flex flex-col items-center justify-center w-14 h-16 bg-slate-900/90 rounded-lg border border-slate-700">
+                <span class="absolute top-1 left-1.5 text-[10px] font-bold text-slate-400">Q</span>
+                <span id="skill-q-icon" class="text-lg">🔥</span>
+                <span id="skill-q-name" class="text-[9px] font-semibold text-slate-300 mt-0.5 truncate max-w-[50px]">섬광</span>
+                <div id="skill-q-cd" class="absolute inset-0 bg-slate-950/85 rounded-lg hidden flex items-center justify-center text-xs font-bold text-red-400">0s</div>
+            </div>
+            <div class="relative flex flex-col items-center justify-center w-14 h-16 bg-slate-900/90 rounded-lg border border-cyan-500/60">
+                <span class="absolute top-1 left-1.5 text-[10px] font-bold text-cyan-400">E</span>
+                <span id="skill-e-icon" class="text-lg">💨</span>
+                <span id="skill-e-name" class="text-[9px] font-semibold text-cyan-300 mt-0.5 truncate max-w-[50px]">대시</span>
+                <div id="skill-e-cd" class="absolute inset-0 bg-slate-950/85 rounded-lg hidden flex items-center justify-center text-xs font-bold text-red-400">0s</div>
+            </div>
+            <!-- Ultimate Skill X -->
+            <div class="relative flex flex-col items-center justify-center w-16 h-16 bg-slate-900/90 rounded-lg border-2 border-amber-500 shadow-lg shadow-amber-500/20">
+                <span class="absolute top-1 left-1.5 text-[10px] font-black text-amber-400">X</span>
+                <span id="skill-x-icon" class="text-xl">⚡</span>
+                <span id="skill-x-name" class="text-[9px] font-bold text-amber-300 mt-0.5 truncate max-w-[55px]">궁극기</span>
+                <div id="skill-x-points" class="text-[9px] font-black text-amber-400">6/6</div>
+                <div id="skill-x-cd" class="absolute inset-0 bg-slate-950/85 rounded-lg hidden flex items-center justify-center text-xs font-bold text-red-400">0s</div>
+            </div>
+        </div>
+
+        <!-- Weapon & Ammo & Credits -->
+        <div class="hud-glass p-3 rounded-xl flex items-center space-x-5 min-w-[220px] justify-between border-b-2 border-b-amber-500">
+            <div class="flex flex-col">
+                <span id="hud-credits" class="text-sm font-bold text-amber-400">¤ 800</span>
+                <span id="hud-weapon-name" class="text-xs font-bold text-slate-300 uppercase mt-0.5">CLASSIC</span>
+            </div>
+            <div class="h-9 w-px bg-slate-700/60"></div>
+            <div class="flex items-baseline space-x-1">
+                <span id="hud-ammo-cur" class="text-4xl font-teko font-bold text-white leading-none">12</span>
+                <span class="text-lg text-slate-500 font-bold">/</span>
+                <span id="hud-ammo-reserve" class="text-xl font-teko font-bold text-slate-400">36</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- AGENT SELECTION SCREEN OVERLAY -->
+<div id="agent-select-screen" class="absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/95 backdrop-blur-md p-6">
+    <div class="text-center mb-2">
+        <h1 class="text-6xl font-teko font-bold text-red-500 tracking-widest drop-shadow-lg leading-none">VALOR-X PROTOCOL</h1>
+        <p class="text-slate-400 text-xs uppercase tracking-widest mt-1">VCT 5v5 Tactical Agent Selection</p>
+    </div>
+
+    <!-- AI Difficulty Selector -->
+    <div class="flex items-center space-x-3 mb-5 bg-slate-900/90 px-5 py-2.5 rounded-xl border border-slate-800">
+        <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">상대 AI 난이도:</span>
+        <div class="inline-flex rounded-lg bg-slate-950 p-1 border border-slate-800" id="difficulty-selector">
+            <button type="button" onclick="setDifficulty('EASY')" id="diff-EASY" class="px-3 py-1 text-xs font-bold rounded transition-all text-slate-400 hover:text-white">쉬움</button>
+            <button type="button" onclick="setDifficulty('NORMAL')" id="diff-NORMAL" class="px-3 py-1 text-xs font-bold rounded transition-all bg-red-600 text-white shadow-md">보통</button>
+            <button type="button" onclick="setDifficulty('HARD')" id="diff-HARD" class="px-3 py-1 text-xs font-bold rounded transition-all text-slate-400 hover:text-white">어려움</button>
+            <button type="button" onclick="setDifficulty('EXPERT')" id="diff-EXPERT" class="px-3 py-1 text-xs font-bold rounded transition-all text-slate-400 hover:text-white">전문가</button>
+        </div>
+    </div>
+
+    <!-- 8 Agent Selection Grid -->
+    <div id="agent-grid" class="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl w-full mb-5"></div>
+
+    <!-- Selected Agent Details Card -->
+    <div id="agent-detail-card" class="hud-glass p-5 rounded-xl max-w-3xl w-full flex flex-col md:flex-row items-center justify-between border border-slate-700">
+        <div class="flex items-center space-x-5 mb-4 md:mb-0">
+            <div id="sel-agent-avatar" class="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center text-3xl border border-slate-600 shadow-inner">👤</div>
+            <div>
+                <h3 id="sel-agent-name" class="text-3xl font-teko font-bold text-red-400 leading-none">AGENT</h3>
+                <p id="sel-agent-role" class="text-xs text-slate-400 font-semibold uppercase">DUELIST</p>
+                <p id="sel-agent-desc" class="text-xs text-slate-300 mt-1 max-w-md">Agent skill summary...</p>
+            </div>
+        </div>
+        <button id="btn-confirm-agent" class="px-8 py-3 bg-red-600 hover:bg-red-500 text-white font-black rounded-lg transition-all shadow-lg hover:shadow-red-500/50 uppercase tracking-wider text-sm">
+            LOCK IN AGENT
+        </button>
+    </div>
+</div>
+
+<!-- BUY MENU OVERLAY (Press B) -->
+<div id="buy-menu" class="hidden absolute inset-0 z-40 flex flex-col items-center justify-center bg-slate-950/92 backdrop-blur-md p-6 pointer-events-auto">
+    <div class="w-full max-w-5xl hud-glass p-6 rounded-2xl border border-slate-700 flex flex-col h-[82vh]">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
+            <div>
+                <h2 class="text-4xl font-teko font-bold text-amber-400 tracking-wider leading-none">ARMORY SHOP</h2>
+                <p class="text-xs text-slate-400">'B' 키 또는 ESC로 구매 상점 닫기</p>
+            </div>
+            <div class="flex items-center space-x-6">
+                <div class="text-right">
+                    <span class="text-[10px] text-slate-400 font-bold block uppercase">보유 크레딧</span>
+                    <span id="buy-credits-display" class="text-3xl font-teko font-bold text-amber-400 leading-none">¤ 800</span>
+                </div>
+                <button id="btn-buy-armor" onclick="buyArmor()" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded shadow">
+                    중형 방어구 구매 (¤ 1000)
+                </button>
+                <button id="btn-close-buy" class="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 rounded text-xs font-bold uppercase tracking-wider">준비 완료 (B)</button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-5 flex-1 overflow-y-auto pr-2">
+            <div>
+                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 border-b border-slate-800 pb-1">권총류 (Sidearms)</h4>
+                <div id="shop-sidearms" class="space-y-3"></div>
+            </div>
+            <div>
+                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 border-b border-slate-800 pb-1">기관단총 & 샷건</h4>
+                <div id="shop-cqb" class="space-y-3"></div>
+            </div>
+            <div>
+                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 border-b border-slate-800 pb-1">소총류 (Rifles)</h4>
+                <div id="shop-rifles" class="space-y-3"></div>
+            </div>
+            <div>
+                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 border-b border-slate-800 pb-1">저격총 (Sniper)</h4>
+                <div id="shop-heavy" class="space-y-3"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- TAB VCT SCOREBOARD OVERLAY -->
+<div id="scoreboard-overlay" class="hidden absolute inset-0 z-40 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-6 pointer-events-none">
+    <div class="w-full max-w-5xl hud-glass p-6 rounded-2xl border border-slate-700">
+        <div class="flex justify-between items-center mb-4 border-b border-slate-800 pb-3">
+            <h2 class="text-3xl font-teko font-bold text-white tracking-wider">VCT MATCH SCOREBOARD & ACS</h2>
+            <div class="text-xs font-bold text-amber-400">ACS = Average Combat Score</div>
+        </div>
+        <div class="grid grid-cols-2 gap-6">
+            <!-- Attackers Table -->
+            <div>
+                <h3 class="text-xs font-black text-red-400 uppercase mb-2 border-b border-red-500/40 pb-1 flex justify-between">
+                    <span>공격팀 (ATTACKERS)</span>
+                    <span class="text-slate-400 font-mono">K / D / A | ACS</span>
+                </h3>
+                <div id="tab-atk-list" class="space-y-1.5 text-xs"></div>
+            </div>
+            <!-- Defenders Table -->
+            <div>
+                <h3 class="text-xs font-black text-cyan-400 uppercase mb-2 border-b border-cyan-500/40 pb-1 flex justify-between">
+                    <span>수비팀 (DEFENDERS)</span>
+                    <span class="text-slate-400 font-mono">K / D / A | ACS</span>
+                </h3>
+                <div id="tab-def-list" class="space-y-1.5 text-xs"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MATCH END SCREEN OVERLAY -->
+<div id="match-end-screen" class="hidden absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/95 backdrop-blur-md p-6">
+    <h1 id="match-result-title" class="text-8xl font-teko font-bold text-red-500 tracking-widest mb-1">VICTORY</h1>
+    <p id="match-result-subtitle" class="text-slate-300 text-lg mb-6">팀이 5v5 전술 경기에서 승리하였습니다.</p>
+
+    <!-- MVP Summary -->
+    <div class="hud-glass p-4 rounded-xl border border-amber-500/50 mb-6 flex items-center space-x-6 min-w-[320px]">
+        <div class="text-4xl">🏆</div>
+        <div>
+            <div class="text-xs font-bold text-amber-400 uppercase">MATCH MVP</div>
+            <div id="mvp-name" class="text-2xl font-teko font-bold text-white">PLAYER</div>
+            <div id="mvp-stats" class="text-xs text-slate-300">KDA: 18/4/5 | ACS: 320</div>
+        </div>
+    </div>
+
+    <button id="btn-restart-game" class="px-8 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg transition-all shadow-lg text-sm uppercase tracking-wider">
+        다시 플레이
+    </button>
+</div>
+
+<script>
+/* ==========================================================================
+   CONFIG & GLOBAL GAME CONSTANTS
+   ========================================================================== */
+const CONFIG = {
+    STANDARD_ROUNDS_TO_WIN: 5,
+    ROUNDS_BEFORE_SWAP: 5,
+    OVERTIME_ENABLED: true,
+    BUY_PHASE_DURATION: 15,
+    COMBAT_PHASE_DURATION: 100,
+    SPIKE_PLANT_TIME: 4.0,
+    SPIKE_DEFUSE_TIME: 7.0,
+    SPIKE_DETONATION_TIME: 40.0,
+    START_CREDITS: 800,
+    WIN_CREDITS: 3000,
+    LOSS_CREDITS: 1900,
+    KILL_CREDITS: 300,
+    BOT_COUNT_ALLY: 4,
+    BOT_COUNT_ENEMY: 5,
+    PLAYER_GRAVITY: 18.0,
+    JUMP_FORCE: 7.0,
+    AI_DIFFICULTY: 'NORMAL'
+};
+
+/* AI DIFFICULTY SETTINGS */
+const AI_DIFFICULTIES = {
+    EASY: { name: '쉬움', aimAccuracy: 0.35, reactionDelay: 0.55, fireRateMult: 1.4, skillFreq: 0.002, speedMult: 0.8 },
+    NORMAL: { name: '보통', aimAccuracy: 0.65, reactionDelay: 0.32, fireRateMult: 1.0, skillFreq: 0.006, speedMult: 1.0 },
+    HARD: { name: '어려움', aimAccuracy: 0.88, reactionDelay: 0.16, fireRateMult: 0.8, skillFreq: 0.015, speedMult: 1.2 },
+    EXPERT: { name: '전문가', aimAccuracy: 0.98, reactionDelay: 0.05, fireRateMult: 0.65, skillFreq: 0.03, speedMult: 1.35 }
+};
+
+/* AGENT CATALOG (8 Unique Agents with Distinct Skillsets) */
+const AGENTS = [
+    {
+        id: 'phoenix', name: 'PHOENIX', role: 'Duelist', icon: '🔥',
+        desc: '화염 커튼, 곡선 섬광, 자가 회복 화염구로 전장을 지배하는 연쇄 타격가.',
+        skills: {
+            C: { name: '불꽃 장막', cd: 15, icon: '🧱', desc: '시야를 가리고 피해를 주는 화염 장막' },
+            Q: { name: '커브볼', cd: 10, icon: '💥', desc: '곡선으로 꺾여 시야를 차단하는 섬광' },
+            E: { name: '뜨거운 손', cd: 18, icon: '🔥', desc: '화염 구체를 던져 지대를 장판화' },
+            X: { name: '역천상', cd: 40, maxUlt: 6, icon: '🔄', desc: '사망 시 지정 위치에서 부활' }
+        }
+    },
+    {
+        id: 'jett', name: 'JETT', role: 'Duelist', icon: '💨',
+        desc: '신속한 대시, 수직 상승, 기민한 연막으로 적의 선오더를 차단하는 암살자.',
+        skills: {
+            C: { name: '연막탄', cd: 12, icon: '☁️', desc: '시야를 차단하는 순간 구형 연막' },
+            Q: { name: '순풍', cd: 14, icon: '⬆️', desc: '수직으로 높이 공중 도약' },
+            E: { name: '순풍 대시', cd: 12, icon: '💨', desc: '조준 방향으로 신속하게 이동' },
+            X: { name: '칼날 폭풍', cd: 45, maxUlt: 7, icon: '🗡️', desc: '치명적인 던지기 단검 장착' }
+        }
+    },
+    {
+        id: 'sage', name: 'SAGE', role: 'Sentinel', icon: '🧊',
+        desc: '단단한 빙벽 장막, 감속 구체 및 팀원 치료로 거점을 수호하는 방어 거장.',
+        skills: {
+            C: { name: '장막 구체', cd: 20, icon: '🧱', desc: '견고한 결정체 빙벽 생성' },
+            Q: { name: '둔화 구체', cd: 15, icon: '❄️', desc: '이동 속도를 줄이는 빙판 지대' },
+            E: { name: '회복 구체', cd: 22, icon: '💖', desc: '자신과 아군의 체력 60 회복' },
+            X: { name: '부활', cd: 50, maxUlt: 8, icon: '✨', desc: '아군 요원 부활시키기' }
+        }
+    },
+    {
+        id: 'sova', name: 'SOVA', role: 'Initiator', icon: '🏹',
+        desc: '음파 탐지 화살로 적의 위치를 노출시키고 정찰하는 타격 지원가.',
+        skills: {
+            C: { name: '올빼미 드론', cd: 22, icon: '🛸', desc: '정찰용 정찰 드론 구체' },
+            Q: { name: '충격 화살', cd: 14, icon: '⚡', desc: '범위 전령 폭발 화살 발사' },
+            E: { name: '정찰 화살', cd: 20, icon: '👁️', desc: '주변 적의 위치를 스캔하는 화살' },
+            X: { name: '사냥꾼의 분노', cd: 45, maxUlt: 7, icon: '🏹', desc: '벽을 관통하는 에너지 3연발' }
+        }
+    },
+    {
+        id: 'viper', name: 'VIPER', role: 'Controller', icon: '🐍',
+        desc: '맹독 가스 장막과 산성 지대로 거점을 장악하는 독극물 전략가.',
+        skills: {
+            C: { name: '뱀의 이빨', cd: 15, icon: '🧪', desc: '추가 피해를 주는 산성 취약 지대' },
+            Q: { name: '독성 연막', cd: 18, icon: '🌫️', desc: '독성 가스 방출 구체' },
+            E: { name: '독 장막', cd: 22, icon: '🟢', desc: '긴 선형의 독성 가스 장막' },
+            X: { name: '독의 굴', cd: 50, maxUlt: 8, icon: '☠️', desc: '대형 독성 구역 형성' }
+        }
+    },
+    {
+        id: 'brimstone', name: 'BRIMSTONE', role: 'Controller', icon: '📡',
+        desc: '위성 연막과 궤도 레이저 폭격으로 기지 타격을 명령하는 자원을 소유한 지휘관.',
+        skills: {
+            C: { name: '자극제 신호기', cd: 16, icon: '⚡', desc: '사격 속도를 상승시키는 구역' },
+            Q: { name: '소화탄', cd: 16, icon: '🔥', desc: '화염 소화탄 투척 지대' },
+            E: { name: '공중 연막', cd: 15, icon: '☁️', desc: '위성 타겟 지정 3연발 연막' },
+            X: { name: '궤도 일격', cd: 50, maxUlt: 7, icon: '🚀', desc: '치명적인 궤도 레이저 타격' }
+        }
+    },
+    {
+        id: 'omen', name: 'OMEN', role: 'Controller', icon: '👤',
+        desc: '그림자 순간이동과 시야 차단 환영으로 적의 허점을 찌르는 섀도우 사냥꾼.',
+        skills: {
+            C: { name: '그림자 걸음', cd: 15, icon: '🌀', desc: '단거리 그림자 순간이동' },
+            Q: { name: '망령', cd: 18, icon: '👁️‍🗨️', desc: '시야를 가리는 암흑 투사체' },
+            E: { name: '어둠의 장막', cd: 20, icon: '🌑', desc: '지속시간이 긴 장거리 그림자 구체' },
+            X: { name: '그림자 흔적', cd: 50, maxUlt: 7, icon: '🗺️', desc: '맵 전체 원하는 곳으로 순간이동' }
+        }
+    },
+    {
+        id: 'cypher', name: 'CYPHER', role: 'Sentinel', icon: '🕵️',
+        desc: '트랩와이어와 정찰 카메라로 모든 움직임을 감시하는 정보 수집가.',
+        skills: {
+            C: { name: '함정 와이어', cd: 15, icon: '🕸️', desc: '적을 속박하는 은형 와이어' },
+            Q: { name: '사이버 감옥', cd: 12, icon: '📦', desc: '시야를 가리는 음향 감옥' },
+            E: { name: '스파이캠', cd: 20, icon: '📷', desc: '원격 스캔 카메라 설치' },
+            X: { name: '신경 절도', cd: 45, maxUlt: 6, icon: '🧠', desc: '살아있는 모든 적의 위치 노출' }
+        }
+    }
+];
+
+/* WEAPON CATALOG */
+const WEAPONS = [
+    { id: 'classic', name: '클래식 권총', category: 'sidearm', price: 0, damage: 26, headDamage: 78, rate: 0.22, clip: 12, maxAmmo: 36, recoil: 0.012, spread: 0.01 },
+    { id: 'ghost', name: '고스트 소음 권총', category: 'sidearm', price: 500, damage: 32, headDamage: 105, rate: 0.18, clip: 15, maxAmmo: 45, recoil: 0.008, spread: 0.005 },
+    { id: 'spectre', name: '스펙터 기관단총', category: 'cqb', price: 1600, damage: 22, headDamage: 66, rate: 0.08, clip: 30, maxAmmo: 90, recoil: 0.022, spread: 0.02 },
+    { id: 'judge', name: '저지 샷건', category: 'cqb', price: 1850, damage: 14, headDamage: 28, rate: 0.35, clip: 7, maxAmmo: 21, recoil: 0.05, spread: 0.06 },
+    { id: 'phantom', name: '팬텀 소총', category: 'rifles', price: 2900, damage: 39, headDamage: 140, rate: 0.095, clip: 30, maxAmmo: 90, recoil: 0.018, spread: 0.012 },
+    { id: 'vandal', name: '반달 소총', category: 'rifles', price: 2900, damage: 40, headDamage: 160, rate: 0.105, clip: 25, maxAmmo: 75, recoil: 0.024, spread: 0.01 },
+    { id: 'operator', name: '오퍼레이터 저격총', category: 'heavy', price: 4700, damage: 150, headDamage: 255, rate: 1.25, clip: 5, maxAmmo: 15, recoil: 0.09, spread: 0.002 }
+];
+
+/* ==========================================================================
+   INPUT & CONTROL SYSTEM
+   ========================================================================== */
+class InputManager {
+    constructor() {
+        this.keys = {};
+        this.mouseDeltaX = 0;
+        this.mouseDeltaY = 0;
+        this.mouseDownLeft = false;
+        this.mouseDownRight = false;
+        this.isLocked = false;
+
+        window.addEventListener('keydown', (e) => {
+            this.keys[e.code] = true;
+            if (e.code === 'KeyB') toggleBuyMenu();
+            if (e.code === 'Tab') {
+                e.preventDefault();
+                document.getElementById('scoreboard-overlay').classList.remove('hidden');
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            this.keys[e.code] = false;
+            if (e.code === 'Tab') {
+                document.getElementById('scoreboard-overlay').classList.add('hidden');
+            }
+        });
+
+        window.addEventListener('mousedown', (e) => {
+            if (!this.isLocked) return;
+            if (e.button === 0) {
+                this.mouseDownLeft = true;
+                if (playerEntity && playerEntity.isDead) switchSpectatorTarget(1);
+            }
+            if (e.button === 2) {
+                this.mouseDownRight = true;
+                if (playerEntity && playerEntity.isDead) switchSpectatorTarget(-1);
+            }
+        });
+
+        window.addEventListener('mouseup', (e) => {
+            if (e.button === 0) this.mouseDownLeft = false;
+            if (e.button === 2) this.mouseDownRight = false;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (this.isLocked) {
+                this.mouseDeltaX += e.movementX || 0;
+                this.mouseDeltaY += e.movementY || 0;
+            }
+        });
+
+        document.addEventListener('pointerlockchange', () => {
+            this.isLocked = (document.pointerLockElement === document.body);
+        });
+
+        window.addEventListener('contextmenu', e => e.preventDefault());
+    }
+
+    lockPointer() {
+        document.body.requestPointerLock();
+    }
+
+    consumeMouseDelta() {
+        const delta = { x: this.mouseDeltaX, y: this.mouseDeltaY };
+        this.mouseDeltaX = 0;
+        this.mouseDeltaY = 0;
+        return delta;
+    }
+}
+const input = new InputManager();
+
+/* ==========================================================================
+   THREE.JS WORLD & MAP BUILDER
+   ========================================================================== */
+let scene, camera, renderer;
+const mapObstacles = [];
+const barrierMeshes = [];
+const siteZones = { A: null, B: null };
+const spawnPoints = { ATK: [], DEF: [] };
+
+function initThreeScene() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x070b14);
+    scene.fog = new THREE.FogExp2(0x070b14, 0.009);
+
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.rotation.order = 'YXZ';
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
+
+    // Lights
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    dirLight.position.set(50, 90, 50);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.camera.near = 0.5;
+    dirLight.shadow.camera.far = 250;
+    dirLight.shadow.camera.left = -70;
+    dirLight.shadow.camera.right = 70;
+    dirLight.shadow.camera.top = 70;
+    dirLight.shadow.camera.bottom = -70;
+    scene.add(dirLight);
+
+    buildTacticalMap();
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+}
+
+function buildTacticalMap() {
+    // Floor
+    const floorGeo = new THREE.PlaneGeometry(200, 200);
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // Grid Lines
+    const gridHelper = new THREE.GridHelper(200, 50, 0x38bdf8, 0x1e293b);
+    gridHelper.position.y = 0.01;
+    scene.add(gridHelper);
+
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.4 });
+    const crateMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.5 });
+    const siteMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, transparent: true, opacity: 0.35 });
+
+    function addBox(x, y, z, w, h, d, mat = wallMat) {
+        const geo = new THREE.BoxGeometry(w, h, d);
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(x, y + h / 2, z);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        scene.add(mesh);
+
+        const bbox = new THREE.Box3().setFromObject(mesh);
+        mapObstacles.push(bbox);
+        return mesh;
+    }
+
+    // Outer Walls
+    addBox(0, 0, -95, 190, 14, 2);
+    addBox(0, 0, 95, 190, 14, 2);
+    addBox(-95, 0, 0, 2, 14, 190);
+    addBox(95, 0, 0, 2, 14, 190);
+
+    // Mid Alley Structures
+    addBox(-15, 0, -10, 4, 8, 55);
+    addBox(15, 0, -10, 4, 8, 55);
+    addBox(0, 0, -35, 30, 8, 4);
+
+    // SITE A (West side)
+    addBox(-50, 0, 25, 25, 6, 4);
+    addBox(-65, 0, 45, 4, 6, 30);
+    addBox(-40, 0, 50, 3.5, 3.5, 3.5, crateMat);
+    addBox(-46, 0, 45, 3.5, 3.5, 3.5, crateMat);
+
+    const siteAGeo = new THREE.CylinderGeometry(9, 9, 0.2, 32);
+    const siteAMesh = new THREE.Mesh(siteAGeo, siteMat);
+    siteAMesh.position.set(-50, 0.1, 45);
+    scene.add(siteAMesh);
+    siteZones.A = new THREE.Vector3(-50, 0, 45);
+
+    // SITE B (East side)
+    addBox(50, 0, 25, 25, 6, 4);
+    addBox(65, 0, 45, 4, 6, 30);
+    addBox(40, 0, 50, 3.5, 3.5, 3.5, crateMat);
+    addBox(46, 0, 45, 3.5, 3.5, 3.5, crateMat);
+
+    const siteBMesh = new THREE.Mesh(siteAGeo, siteMat);
+    siteBMesh.position.set(50, 0.1, 45);
+    scene.add(siteBMesh);
+    siteZones.B = new THREE.Vector3(50, 0, 45);
+
+    // Spawns
+    for (let i = -20; i <= 20; i += 10) spawnPoints.ATK.push(new THREE.Vector3(i, 1.6, -75));
+    for (let i = -20; i <= 20; i += 10) spawnPoints.DEF.push(new THREE.Vector3(i, 1.6, 75));
+
+    // Buy Phase Barriers
+    const barrierMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.45, emissive: 0x0284c7 });
+    
+    const b1 = new THREE.Mesh(new THREE.BoxGeometry(190, 10, 1), barrierMat);
+    b1.position.set(0, 5, -45);
+    scene.add(b1);
+    barrierMeshes.push(b1);
+
+    const b2 = new THREE.Mesh(new THREE.BoxGeometry(190, 10, 1), barrierMat);
+    b2.position.set(0, 5, 45);
+    scene.add(b2);
+    barrierMeshes.push(b2);
+}
+
+function setBuyPhaseBarriers(visible) {
+    barrierMeshes.forEach(b => b.visible = visible);
+}
+
+/* ==========================================================================
+   ENTITY & PLAYER MANAGEMENT
+   ========================================================================== */
+class Entity {
+    constructor(id, name, agentData, team, isPlayer = false) {
+        this.id = id;
+        this.name = name;
+        this.agent = agentData;
+        this.team = team; // 'ATK' or 'DEF'
+        this.isPlayer = isPlayer;
+
+        this.hp = 100;
+        this.maxHp = 100;
+        this.armor = 50;
+        this.isDead = false;
+
+        this.kills = 0;
+        this.deaths = 0;
+        this.assists = 0;
+        this.damageDealt = 0;
+        this.acs = 0;
+
+        this.position = new THREE.Vector3();
+        this.rotation = new THREE.Euler(0, 0, 0, 'YXZ');
+        this.velocity = new THREE.Vector3();
+        this.isGrounded = true;
+
+        this.currentWeapon = { ...WEAPONS[0] };
+        this.currentAmmo = this.currentWeapon.clip;
+        this.reserveAmmo = this.currentWeapon.maxAmmo;
+
+        this.credits = CONFIG.START_CREDITS;
+        this.hasSpike = false;
+        this.ultPoints = 0;
+
+        this.cd = { C: 0, Q: 0, E: 0, X: 0 };
+
+        // Entity 3D Mesh
+        const geo = new THREE.CylinderGeometry(0.45, 0.45, 1.6, 12);
+        const matColor = team === 'ATK' ? 0xef4444 : 0x06b6d4;
+        const mat = new THREE.MeshStandardMaterial({ color: matColor });
+        this.mesh = new THREE.Mesh(geo, mat);
+        this.mesh.castShadow = true;
+        if (!isPlayer) scene.add(this.mesh);
+
+        // AI behavior
+        this.aiState = 'PATROL';
+        this.targetPos = new THREE.Vector3();
+        this.shootTimer = 0;
+        this.lastSpottedTime = 0;
+    }
+
+    spawn(spawnVec) {
+        this.position.copy(spawnVec);
+        this.mesh.position.copy(spawnVec);
+        this.velocity.set(0, 0, 0);
+        this.hp = 100;
+        this.armor = 50;
+        this.isDead = false;
+        this.mesh.visible = !this.isPlayer;
+        this.currentAmmo = this.currentWeapon.clip;
+        this.reserveAmmo = this.currentWeapon.maxAmmo;
+    }
+
+    takeDamage(amount, attacker, isHeadshot = false) {
+        if (this.isDead) return;
+        let remaining = amount;
+        if (this.armor > 0) {
+            const absorbed = Math.min(this.armor, remaining * 0.66);
+            this.armor -= absorbed;
+            remaining -= absorbed;
+        }
+        this.hp -= remaining;
+
+        if (attacker) {
+            attacker.damageDealt += amount;
+            attacker.acs += Math.round(amount * 1.5);
+        }
+
+        if (this.hp <= 0) {
+            this.hp = 0;
+            this.isDead = true;
+            this.deaths++;
+            this.mesh.visible = false;
+            if (this.hasSpike) dropSpike(this.position.clone());
+
+            if (attacker) {
+                attacker.kills++;
+                attacker.credits += CONFIG.KILL_CREDITS;
+                attacker.ultPoints = Math.min(this.agent.skills.X.maxUlt, attacker.ultPoints + 1);
+                attacker.acs += 150;
+
+                addKillFeedEntry(attacker, this, isHeadshot);
+
+                if (attacker.isPlayer) {
+                    showKillBanner(isHeadshot ? 'HEADSHOT ELIMINATED' : 'ENEMY ELIMINATED', isHeadshot);
+                }
+            }
+
+            if (this.isPlayer) {
+                activateSpectatorMode();
+            }
+
+            checkRoundEndConditions();
+        }
+    }
+
+    updateSkills(dt) {
+        for (let k in this.cd) {
+            if (this.cd[k] > 0) this.cd[k] = Math.max(0, this.cd[k] - dt);
+        }
+    }
+}
+
+let playerEntity;
+let entities = [];
+let spectatedAllyIndex = 0;
+
+function setupMatchEntities(selectedAgent) {
+    entities = [];
+
+    // Player Entity
+    playerEntity = new Entity('player', 'YOU', selectedAgent, 'ATK', true);
+    entities.push(playerEntity);
+
+    // Ally AI (4)
+    for (let i = 1; i <= CONFIG.BOT_COUNT_ALLY; i++) {
+        const bot = new Entity(`ally_${i}`, `아군 BOT ${i}`, AGENTS[i % AGENTS.length], 'ATK', false);
+        entities.push(bot);
+    }
+
+    // Enemy AI (5)
+    for (let i = 1; i <= CONFIG.BOT_COUNT_ENEMY; i++) {
+        const bot = new Entity(`enemy_${i}`, `적군 BOT ${i}`, AGENTS[(i + 3) % AGENTS.length], 'DEF', false);
+        entities.push(bot);
+    }
+}
+
+/* ==========================================================================
+   ROUND & OVERTIME & BOMB SYSTEM
+   ========================================================================== */
+let gameState = {
+    currentRound: 1,
+    atkScore: 0,
+    defScore: 0,
+    roundHistory: [], // { round: 1, winner: 'ATK', type: 'ELIM' | 'EXPLODE' | 'DEFUSE' }
+    isOvertime: false,
+    phase: 'BUY', // BUY, COMBAT, END
+    phaseTimer: CONFIG.BUY_PHASE_DURATION,
+    playerSide: 'ATK',
+    spikePlanted: false,
+    spikeCarrier: null,
+    spikeMesh: null,
+    spikePos: null,
+    spikeTimer: CONFIG.SPIKE_DETONATION_TIME,
+    actionProgress: 0,
+    isActionActive: false
+};
+
+function createSpikeMesh() {
+    const geo = new THREE.OctahedronGeometry(0.45);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xd97706, roughness: 0.2 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    return mesh;
+}
+
+function assignSpikeToCarrier() {
+    const attackers = entities.filter(e => e.team === 'ATK' && !e.isDead);
+    if (attackers.length > 0) {
+        const carrier = attackers[0];
+        carrier.hasSpike = true;
+        gameState.spikeCarrier = carrier;
+    }
+}
+
+function dropSpike(pos) {
+    gameState.spikePos = pos;
+    if (!gameState.spikeMesh) gameState.spikeMesh = createSpikeMesh();
+    gameState.spikeMesh.position.copy(pos);
+    scene.add(gameState.spikeMesh);
+    if (gameState.spikeCarrier) gameState.spikeCarrier.hasSpike = false;
+    gameState.spikeCarrier = null;
+}
+
+function startRound() {
+    gameState.phase = 'BUY';
+    gameState.phaseTimer = CONFIG.BUY_PHASE_DURATION;
+    gameState.spikePlanted = false;
+    gameState.spikeTimer = CONFIG.SPIKE_DETONATION_TIME;
+    document.getElementById('spectator-banner').classList.add('hidden');
+    document.getElementById('kill-feed-container').innerHTML = '';
+    setBuyPhaseBarriers(true);
+
+    if (gameState.spikeMesh) scene.remove(gameState.spikeMesh);
+
+    // Side Swap Every 5 Rounds
+    if (gameState.currentRound === CONFIG.ROUNDS_BEFORE_SWAP + 1 && gameState.currentRound !== 1) {
+        gameState.playerSide = gameState.playerSide === 'ATK' ? 'DEF' : 'ATK';
+    }
+
+    // Overtime Check
+    if (gameState.atkScore === CONFIG.STANDARD_ROUNDS_TO_WIN - 1 && gameState.defScore === CONFIG.STANDARD_ROUNDS_TO_WIN - 1) {
+        gameState.isOvertime = true;
+        document.getElementById('overtime-badge').classList.remove('hidden');
+    }
+
+    // Respawn all entities
+    let atkIdx = 0, defIdx = 0;
+    entities.forEach(e => {
+        if (gameState.currentRound > 1) {
+            e.team = (e.isPlayer || e.id.startsWith('ally')) ? gameState.playerSide : (gameState.playerSide === 'ATK' ? 'DEF' : 'ATK');
+        }
+        if (e.team === 'ATK') {
+            e.spawn(spawnPoints.ATK[atkIdx++ % spawnPoints.ATK.length]);
+        } else {
+            e.spawn(spawnPoints.DEF[defIdx++ % spawnPoints.DEF.length]);
+        }
+    });
+
+    assignSpikeToCarrier();
+    updateHUD();
+    openBuyMenu();
+}
+
+function checkRoundEndConditions() {
+    if (gameState.phase === 'END') return;
+
+    const atkLiving = entities.filter(e => e.team === 'ATK' && !e.isDead);
+    const defLiving = entities.filter(e => e.team === 'DEF' && !e.isDead);
+
+    if (gameState.spikePlanted) {
+        if (atkLiving.length === 0 && defLiving.length === 0) {
+            endRound('DEF', 'DEFUSE');
+        }
+    } else {
+        if (atkLiving.length === 0) endRound('DEF', 'ELIM');
+        else if (defLiving.length === 0) endRound('ATK', 'ELIM');
+    }
+}
+
+function endRound(winningTeam, winType = 'ELIM') {
+    gameState.phase = 'END';
+    if (winningTeam === 'ATK') gameState.atkScore++;
+    else gameState.defScore++;
+
+    gameState.roundHistory.push({ round: gameState.currentRound, winner: winningTeam, type: winType });
+
+    entities.forEach(e => {
+        e.credits += (e.team === winningTeam) ? CONFIG.WIN_CREDITS : CONFIG.LOSS_CREDITS;
+        e.credits = Math.min(e.credits, 9000);
+    });
+
+    const targetWinScore = gameState.isOvertime ? Math.max(gameState.atkScore, gameState.defScore) + 1 : CONFIG.STANDARD_ROUNDS_TO_WIN;
+
+    if (gameState.atkScore >= targetWinScore || gameState.defScore >= targetWinScore) {
+        setTimeout(() => showMatchEndScreen(winningTeam), 2000);
+    } else {
+        setTimeout(() => {
+            gameState.currentRound++;
+            startRound();
+        }, 3000);
+    }
+}
+
+/* ==========================================================================
+   COMBAT & SKILLS SYSTEM
+   ========================================================================== */
+const raycaster = new THREE.Raycaster();
+
+function fireWeapon(entity) {
+    if (entity.currentAmmo <= 0) return;
+    entity.currentAmmo--;
+
+    let origin = new THREE.Vector3();
+    let dir = new THREE.Vector3();
+
+    if (entity.isPlayer) {
+        camera.getWorldPosition(origin);
+        camera.getWorldDirection(dir);
+        dir.x += (Math.random() - 0.5) * entity.currentWeapon.spread;
+        dir.y += (Math.random() - 0.5) * entity.currentWeapon.recoil;
+    } else {
+        origin.copy(entity.position).add(new THREE.Vector3(0, 0.5, 0));
+        if (entity.targetPos) dir.subVectors(entity.targetPos, origin).normalize();
+    }
+
+    raycaster.set(origin, dir);
+
+    const targets = entities.filter(e => !e.isDead && e.team !== entity.team);
+    const targetMeshes = targets.map(t => t.mesh);
+    const intersects = raycaster.intersectObjects(targetMeshes);
+
+    if (intersects.length > 0) {
+        const hitPoint = intersects[0].point;
+        const hitMesh = intersects[0].object;
+        const hitEntity = targets.find(t => t.mesh === hitMesh);
+
+        if (hitEntity) {
+            // Check Headshot (hit top part of cylinder)
+            const isHeadshot = (hitPoint.y - hitEntity.position.y) > 0.5;
+            const damage = isHeadshot ? entity.currentWeapon.headDamage : entity.currentWeapon.damage;
+
+            hitEntity.takeDamage(damage, entity, isHeadshot);
+            createHitImpact(hitPoint, isHeadshot);
+            hitEntity.lastSpottedTime = performance.now();
+        }
+    }
+
+    createBulletTracer(origin, dir);
+}
+
+function createBulletTracer(from, dir) {
+    const to = from.clone().add(dir.clone().multiplyScalar(70));
+    const points = [from, to];
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    const mat = new THREE.LineBasicMaterial({ color: 0xfde047, transparent: true, opacity: 0.85 });
+    const line = new THREE.Line(geo, mat);
+    scene.add(line);
+    setTimeout(() => scene.remove(line), 40);
+}
+
+function createHitImpact(pos, isHeadshot) {
+    const pGeo = new THREE.SphereGeometry(isHeadshot ? 0.22 : 0.12, 8, 8);
+    const pMat = new THREE.MeshBasicMaterial({ color: isHeadshot ? 0xf59e0b : 0xef4444 });
+    const pMesh = new THREE.Mesh(pGeo, pMat);
+    pMesh.position.copy(pos);
+    scene.add(pMesh);
+    setTimeout(() => scene.remove(pMesh), 150);
+}
+
+function castSkill(entity, skillKey) {
+    if (entity.cd[skillKey] > 0) return;
+
+    // Ultimate Check
+    if (skillKey === 'X' && entity.ultPoints < entity.agent.skills.X.maxUlt) return;
+
+    const skillData = entity.agent.skills[skillKey];
+    entity.cd[skillKey] = skillData.cd;
+
+    if (skillKey === 'X') entity.ultPoints = 0;
+
+    const lookDir = new THREE.Vector3();
+    if (entity.isPlayer) camera.getWorldDirection(lookDir);
+    else lookDir.set(0, 0, 1).applyEuler(entity.rotation);
+
+    switch(skillKey) {
+        case 'C':
+            const wallGeo = new THREE.BoxGeometry(10, 4, 0.5);
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.7 });
+            const wall = new THREE.Mesh(wallGeo, wallMat);
+            wall.position.copy(entity.position).add(lookDir.clone().multiplyScalar(5));
+            wall.rotation.y = entity.rotation.y;
+            scene.add(wall);
+            setTimeout(() => scene.remove(wall), 6000);
+            break;
+
+        case 'Q':
+            const flashGeo = new THREE.SphereGeometry(2, 16, 16);
+            const flashMat = new THREE.MeshBasicMaterial({ color: 0xfef08a, transparent: true, opacity: 0.8 });
+            const flash = new THREE.Mesh(flashGeo, flashMat);
+            flash.position.copy(entity.position).add(lookDir.clone().multiplyScalar(8));
+            scene.add(flash);
+            setTimeout(() => scene.remove(flash), 1200);
+            break;
+
+        case 'E':
+            if (entity.agent.id === 'jett') {
+                entity.velocity.add(lookDir.clone().multiplyScalar(18));
+            } else if (entity.agent.id === 'sage') {
+                entity.hp = Math.min(entity.maxHp, entity.hp + 60);
+            } else {
+                const smokeGeo = new THREE.SphereGeometry(4.5, 16, 16);
+                const smokeMat = new THREE.MeshStandardMaterial({ color: 0x475569, transparent: true, opacity: 0.85 });
+                const smoke = new THREE.Mesh(smokeGeo, smokeMat);
+                smoke.position.copy(entity.position).add(lookDir.clone().multiplyScalar(6));
+                scene.add(smoke);
+                setTimeout(() => scene.remove(smoke), 8000);
+            }
+            break;
+
+        case 'X':
+            const ultGeo = new THREE.CylinderGeometry(6, 6, 12, 16);
+            const ultMat = new THREE.MeshBasicMaterial({ color: 0xd97706, transparent: true, opacity: 0.5 });
+            const ult = new THREE.Mesh(ultGeo, ultMat);
+            ult.position.copy(entity.position).add(lookDir.clone().multiplyScalar(10));
+            scene.add(ult);
+            setTimeout(() => scene.remove(ult), 3500);
+            break;
+    }
+}
+
+/* ==========================================================================
+   AI BOT BEHAVIOR STATE MACHINE
+   ========================================================================== */
+function updateAIBot(bot, dt) {
+    if (bot.isDead) return;
+
+    const diff = AI_DIFFICULTIES[CONFIG.AI_DIFFICULTY] || AI_DIFFICULTIES.NORMAL;
+    const enemies = entities.filter(e => !e.isDead && e.team !== bot.team);
+    let nearestEnemy = null;
+    let minDist = Infinity;
+
+    enemies.forEach(e => {
+        const d = bot.position.distanceTo(e.position);
+        if (d < minDist) {
+            minDist = d;
+            nearestEnemy = e;
+        }
+    });
+
+    if (nearestEnemy && minDist < 45) {
+        bot.aiState = 'ENGAGE';
+        bot.lastSpottedTime = performance.now();
+
+        bot.reactionTimer = (bot.reactionTimer || 0) + dt;
+        if (bot.reactionTimer < diff.reactionDelay) return;
+
+        const targetPos = nearestEnemy.position.clone();
+        const noise = (1 - diff.aimAccuracy) * (minDist * 0.07);
+        targetPos.x += (Math.sin(performance.now() * 0.004) * noise);
+        targetPos.z += (Math.cos(performance.now() * 0.004) * noise);
+
+        bot.targetPos.copy(targetPos);
+        const angle = Math.atan2(targetPos.x - bot.position.x, targetPos.z - bot.position.z);
+        bot.rotation.y = angle;
+
+        bot.shootTimer += dt;
+        if (bot.shootTimer >= bot.currentWeapon.rate * diff.fireRateMult) {
+            bot.shootTimer = 0;
+            fireWeapon(bot);
+        }
+
+        if (Math.random() < diff.skillFreq) castSkill(bot, 'E');
+    } else {
+        bot.aiState = 'PATROL';
+        bot.reactionTimer = 0;
+        const targetSite = (bot.team === 'ATK') ? siteZones.A : siteZones.B;
+        if (targetSite) {
+            const dir = targetSite.clone().sub(bot.position).normalize();
+            bot.position.add(dir.multiplyScalar(3.8 * diff.speedMult * dt));
+            bot.mesh.position.copy(bot.position);
+        }
+    }
+}
+
+function setDifficulty(level) {
+    if (!AI_DIFFICULTIES[level]) return;
+    CONFIG.AI_DIFFICULTY = level;
+
+    document.querySelectorAll('#difficulty-selector button').forEach(btn => {
+        btn.className = 'px-3 py-1 text-xs font-bold rounded transition-all text-slate-400 hover:text-white';
+    });
+
+    const activeBtn = document.getElementById(`diff-${level}`);
+    if (activeBtn) {
+        activeBtn.className = 'px-3 py-1 text-xs font-bold rounded transition-all bg-red-600 text-white shadow-md';
+    }
+}
+
+/* ==========================================================================
+   PLAYER CONTROLLER & SPECTATOR MODE
+   ========================================================================== */
+const pitchEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+
+function updatePlayer(dt) {
+    if (playerEntity.isDead) {
+        updateSpectatorCamera();
+        return;
+    }
+
+    // Mouse Look
+    const mouseDelta = input.consumeMouseDelta();
+    const sensitivity = 0.002;
+
+    pitchEuler.setFromQuaternion(camera.quaternion);
+    pitchEuler.y -= mouseDelta.x * sensitivity;
+    pitchEuler.x -= mouseDelta.y * sensitivity;
+    pitchEuler.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, pitchEuler.x));
+
+    camera.quaternion.setFromEuler(pitchEuler);
+    playerEntity.rotation.copy(pitchEuler);
+
+    // Movement WASD
+    const speed = input.keys['ShiftLeft'] ? 4.0 : 7.0;
+    const moveDir = new THREE.Vector3();
+
+    if (input.keys['KeyW']) moveDir.z -= 1;
+    if (input.keys['KeyS']) moveDir.z += 1;
+    if (input.keys['KeyA']) moveDir.x -= 1;
+    if (input.keys['KeyD']) moveDir.x += 1;
+
+    moveDir.normalize();
+    moveDir.applyQuaternion(camera.quaternion);
+    moveDir.y = 0;
+
+    // Boundary check for buy phase
+    const nextPos = playerEntity.position.clone().add(moveDir.clone().multiplyScalar(speed * dt));
+    if (gameState.phase === 'BUY' && Math.abs(nextPos.z) < 45) {
+        // Restricted by buy barrier
+    } else {
+        playerEntity.position.copy(nextPos);
+    }
+
+    // Jump Physics
+    if (input.keys['Space'] && playerEntity.isGrounded) {
+        playerEntity.velocity.y = CONFIG.JUMP_FORCE;
+        playerEntity.isGrounded = false;
+    }
+
+    if (!playerEntity.isGrounded) {
+        playerEntity.velocity.y -= CONFIG.PLAYER_GRAVITY * dt;
+        playerEntity.position.y += playerEntity.velocity.y * dt;
+
+        if (playerEntity.position.y <= 1.6) {
+            playerEntity.position.y = 1.6;
+            playerEntity.velocity.y = 0;
+            playerEntity.isGrounded = true;
+        }
+    }
+
+    camera.position.copy(playerEntity.position).add(new THREE.Vector3(0, 0.8, 0));
+
+    // ADS Zoom
+    const adsOverlay = document.getElementById('ads-overlay');
+    if (input.mouseDownRight) {
+        camera.fov = 45;
+        adsOverlay.classList.remove('hidden');
+    } else {
+        camera.fov = 75;
+        adsOverlay.classList.add('hidden');
+    }
+    camera.updateProjectionMatrix();
+
+    // Reloading
+    if (input.keys['KeyR'] && playerEntity.currentAmmo < playerEntity.currentWeapon.clip) {
+        playerEntity.currentAmmo = playerEntity.currentWeapon.clip;
+    }
+
+    // Shooting
+    if (input.mouseDownLeft && gameState.phase === 'COMBAT') {
+        if (!playerEntity.shootCooldown) {
+            fireWeapon(playerEntity);
+            playerEntity.shootCooldown = true;
+            setTimeout(() => { playerEntity.shootCooldown = false; }, playerEntity.currentWeapon.rate * 1000);
+        }
+    }
+
+    // Skills
+    if (input.keys['KeyC']) castSkill(playerEntity, 'C');
+    if (input.keys['KeyQ']) castSkill(playerEntity, 'Q');
+    if (input.keys['KeyE']) castSkill(playerEntity, 'E');
+    if (input.keys['KeyX']) castSkill(playerEntity, 'X');
+
+    handleSpikeInteraction(dt);
+}
+
+function activateSpectatorMode() {
+    document.getElementById('spectator-banner').classList.remove('hidden');
+    spectatedAllyIndex = 0;
+}
+
+function switchSpectatorTarget(dir) {
+    const livingAllies = entities.filter(e => !e.isPlayer && e.team === playerEntity.team && !e.isDead);
+    if (livingAllies.length === 0) return;
+    spectatedAllyIndex = (spectatedAllyIndex + dir + livingAllies.length) % livingAllies.length;
+}
+
+function updateSpectatorCamera() {
+    const livingAllies = entities.filter(e => !e.isPlayer && e.team === playerEntity.team && !e.isDead);
+    if (livingAllies.length > 0) {
+        const target = livingAllies[spectatedAllyIndex % livingAllies.length];
+        camera.position.copy(target.position).add(new THREE.Vector3(0, 2.5, -3));
+        camera.lookAt(target.position);
+        document.getElementById('spectator-target-name').innerText = target.name;
+    }
+}
+
+function handleSpikeInteraction(dt) {
+    const promptEl = document.getElementById('interaction-prompt');
+    const promptText = document.getElementById('interaction-text');
+    const progressBox = document.getElementById('progress-bar-box');
+    const progressFill = document.getElementById('progress-bar-fill');
+
+    let nearSite = null;
+    if (playerEntity.position.distanceTo(siteZones.A) < 9) nearSite = 'A';
+    if (playerEntity.position.distanceTo(siteZones.B) < 9) nearSite = 'B';
+
+    if (playerEntity.team === 'ATK' && playerEntity.hasSpike && !gameState.spikePlanted && nearSite) {
+        promptEl.classList.remove('hidden');
+        promptText.innerText = `스파이크 설치하기 (${nearSite} 거점)`;
+
+        if (input.keys['KeyF']) {
+            gameState.isActionActive = true;
+            gameState.actionProgress += dt;
+            progressBox.classList.remove('hidden');
+            progressFill.style.width = `${(gameState.actionProgress / CONFIG.SPIKE_PLANT_TIME) * 100}%`;
+
+            if (gameState.actionProgress >= CONFIG.SPIKE_PLANT_TIME) {
+                gameState.spikePlanted = true;
+                dropSpike(playerEntity.position.clone());
+                playerEntity.ultPoints = Math.min(playerEntity.agent.skills.X.maxUlt, playerEntity.ultPoints + 1);
+                gameState.isActionActive = false;
+                gameState.actionProgress = 0;
+                progressBox.classList.add('hidden');
+            }
+            return;
+        }
+    } else if (playerEntity.team === 'DEF' && gameState.spikePlanted && gameState.spikePos && playerEntity.position.distanceTo(gameState.spikePos) < 3.5) {
+        promptEl.classList.remove('hidden');
+        promptText.innerText = '스파이크 해제하기';
+
+        if (input.keys['KeyF']) {
+            gameState.isActionActive = true;
+            gameState.actionProgress += dt;
+            progressBox.classList.remove('hidden');
+            progressFill.style.width = `${(gameState.actionProgress / CONFIG.SPIKE_DEFUSE_TIME) * 100}%`;
+
+            if (gameState.actionProgress >= CONFIG.SPIKE_DEFUSE_TIME) {
+                playerEntity.ultPoints = Math.min(playerEntity.agent.skills.X.maxUlt, playerEntity.ultPoints + 1);
+                endRound('DEF', 'DEFUSE');
+                gameState.isActionActive = false;
+                gameState.actionProgress = 0;
+                progressBox.classList.add('hidden');
+            }
+            return;
+        }
+    }
+
+    promptEl.classList.add('hidden');
+    progressBox.classList.add('hidden');
+    gameState.actionProgress = 0;
+}
+
+/* ==========================================================================
+   UI & VCT SCOREBOARD
+   ========================================================================== */
+function initUI() {
+    const grid = document.getElementById('agent-grid');
+    grid.innerHTML = '';
+    AGENTS.forEach((agent, idx) => {
+        const card = document.createElement('div');
+        card.className = `hud-glass p-3.5 rounded-xl border cursor-pointer hover:border-red-500 transition-all flex flex-col items-center ${idx === 0 ? 'agent-card-selected' : 'border-slate-800'}`;
+        card.innerHTML = `
+            <div class="text-4xl mb-1.5">${agent.icon}</div>
+            <div class="font-teko text-2xl font-bold text-white tracking-wider leading-none">${agent.name}</div>
+            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">${agent.role}</div>
+        `;
+        card.onclick = () => selectAgentInMenu(agent, card);
+        grid.appendChild(card);
+    });
+
+    selectAgentInMenu(AGENTS[0], grid.children[0]);
+
+    document.getElementById('btn-confirm-agent').onclick = () => {
+        document.getElementById('agent-select-screen').classList.add('hidden');
+        input.lockPointer();
+        startRound();
+    };
+
+    document.getElementById('btn-close-buy').onclick = () => closeBuyMenu();
+    document.getElementById('btn-restart-game').onclick = () => location.reload();
+
+    buildShopItems();
+}
+
+let selectedAgentData = AGENTS[0];
+function selectAgentInMenu(agent, cardEl) {
+    selectedAgentData = agent;
+    document.querySelectorAll('#agent-grid > div').forEach(c => c.classList.remove('agent-card-selected'));
+    if (cardEl) cardEl.classList.add('agent-card-selected');
+
+    document.getElementById('sel-agent-avatar').innerText = agent.icon;
+    document.getElementById('sel-agent-name').innerText = agent.name;
+    document.getElementById('sel-agent-role').innerText = agent.role;
+    document.getElementById('sel-agent-desc').innerText = agent.desc;
+}
+
+function updateHUD() {
+    document.getElementById('atk-score').innerText = gameState.atkScore;
+    document.getElementById('def-score').innerText = gameState.defScore;
+
+    document.getElementById('atk-side-indicator').innerText = gameState.playerSide;
+    document.getElementById('def-side-indicator').innerText = gameState.playerSide === 'ATK' ? 'DEF' : 'ATK';
+
+    // Round Pips
+    const renderPips = (team) => gameState.roundHistory.filter(h => h.winner === team).map(h => {
+        const icon = h.type === 'EXPLODE' ? '💣' : (h.type === 'DEFUSE' ? '✂️' : '💀');
+        return `<span class="text-xs bg-slate-900 border border-slate-700 px-1 py-0.5 rounded">${icon}</span>`;
+    }).join('');
+
+    document.getElementById('atk-round-pips').innerHTML = renderPips('ATK');
+    document.getElementById('def-round-pips').innerHTML = renderPips('DEF');
+
+    // VCT Side Roster
+    renderVCTSideRosters();
+
+    document.getElementById('hud-hp').innerText = Math.ceil(playerEntity.hp);
+    document.getElementById('hud-armor').innerText = Math.ceil(playerEntity.armor);
+    document.getElementById('hud-credits').innerText = `¤ ${playerEntity.credits}`;
+    document.getElementById('hud-weapon-name').innerText = playerEntity.currentWeapon.name;
+    document.getElementById('hud-ammo-cur').innerText = playerEntity.currentAmmo;
+    document.getElementById('hud-ammo-reserve').innerText = playerEntity.reserveAmmo;
+
+    const spikeBadge = document.getElementById('spike-status-badge');
+    if (gameState.spikePlanted) spikeBadge.classList.remove('hidden');
+    else spikeBadge.classList.add('hidden');
+
+    for (let k of ['C', 'Q', 'E', 'X']) {
+        const cdEl = document.getElementById(`skill-${k.toLowerCase()}-cd`);
+        const cdVal = Math.ceil(playerEntity.cd[k]);
+
+        if (k === 'X') {
+            document.getElementById('skill-x-points').innerText = `${playerEntity.ultPoints}/${playerEntity.agent.skills.X.maxUlt}`;
+        }
+
+        if (cdVal > 0) {
+            cdEl.classList.remove('hidden');
+            cdEl.innerText = `${cdVal}s`;
+        } else {
+            cdEl.classList.add('hidden');
+        }
+    }
+
+    updateTabScoreboard();
+}
+
+function renderVCTSideRosters() {
+    const leftContainer = document.getElementById('vct-left-roster');
+    const rightContainer = document.getElementById('vct-right-roster');
+
+    const renderRoster = (team) => entities.filter(e => e.team === team).map(e => `
+        <div class="hud-glass px-2.5 py-1.5 rounded flex items-center justify-between border-l-2 ${e.isDead ? 'border-l-slate-600 opacity-40' : (team === 'ATK' ? 'border-l-red-500' : 'border-l-cyan-400')}">
+            <div class="flex items-center space-x-2">
+                <span class="text-sm">${e.agent.icon}</span>
+                <div class="flex flex-col">
+                    <span class="text-xs font-bold ${e.isDead ? 'line-through text-slate-500' : 'text-white'} truncate max-w-[80px]">${e.name}</span>
+                    <span class="text-[9px] text-amber-400">⚡ ${e.ultPoints}/${e.agent.skills.X.maxUlt}</span>
+                </div>
+            </div>
+            <div class="text-right">
+                <span class="text-xs font-teko font-bold ${e.hp > 50 ? 'text-emerald-400' : 'text-red-400'}">${e.isDead ? '사망' : Math.ceil(e.hp) + 'HP'}</span>
+            </div>
+        </div>
+    `).join('');
+
+    leftContainer.innerHTML = renderRoster('ATK');
+    rightContainer.innerHTML = renderRoster('DEF');
+}
+
+function updateTabScoreboard() {
+    const atkList = document.getElementById('tab-atk-list');
+    const defList = document.getElementById('tab-def-list');
+
+    const renderRows = (team) => entities.filter(e => e.team === team).map(e => `
+        <div class="flex items-center justify-between p-2 rounded bg-slate-900/60 border border-slate-800">
+            <div class="flex items-center space-x-2">
+                <span>${e.agent.icon}</span>
+                <span class="font-bold ${e.isDead ? 'line-through text-slate-500' : 'text-slate-200'}">${e.name}</span>
+            </div>
+            <div class="space-x-3 font-mono">
+                <span class="text-amber-400">¤${e.credits}</span>
+                <span class="text-slate-300">${e.kills} / ${e.deaths} / ${e.assists}</span>
+                <span class="text-cyan-400 font-bold">${e.acs} ACS</span>
+            </div>
+        </div>
+    `).join('');
+
+    atkList.innerHTML = renderRows('ATK');
+    defList.innerHTML = renderRows('DEF');
+}
+
+function addKillFeedEntry(attacker, victim, isHeadshot) {
+    const container = document.getElementById('kill-feed-container');
+    const item = document.createElement('div');
+    item.className = 'killfeed-item hud-glass px-2.5 py-1 rounded text-xs border border-slate-700 flex items-center space-x-2';
+    item.innerHTML = `
+        <span class="font-bold ${attacker.team === 'ATK' ? 'text-red-400' : 'text-cyan-400'}">${attacker.name}</span>
+        <span class="text-[10px] text-slate-400">${isHeadshot ? '🎯' : '🔫'}</span>
+        <span class="font-bold ${victim.team === 'ATK' ? 'text-red-400' : 'text-cyan-400'}">${victim.name}</span>
+    `;
+    container.appendChild(item);
+    setTimeout(() => { if (item.parentNode) item.parentNode.removeChild(item); }, 4500);
+}
+
+function buildShopItems() {
+    const createShopCard = (w) => `
+        <div class="hud-glass p-3 rounded-lg flex items-center justify-between border border-slate-800 hover:border-amber-400/50 transition-all">
+            <div>
+                <div class="font-bold text-sm text-slate-200">${w.name}</div>
+                <div class="text-xs text-amber-400 font-semibold">¤ ${w.price} | 피적 ${w.damage} (헤드 ${w.headDamage})</div>
+            </div>
+            <button onclick="buyWeapon('${w.id}')" class="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded uppercase shadow">구매</button>
+        </div>
+    `;
+
+    document.getElementById('shop-sidearms').innerHTML = WEAPONS.filter(w => w.category === 'sidearm').map(createShopCard).join('');
+    document.getElementById('shop-cqb').innerHTML = WEAPONS.filter(w => w.category === 'cqb').map(createShopCard).join('');
+    document.getElementById('shop-rifles').innerHTML = WEAPONS.filter(w => w.category === 'rifles').map(createShopCard).join('');
+    document.getElementById('shop-heavy').innerHTML = WEAPONS.filter(w => w.category === 'heavy').map(createShopCard).join('');
+}
+
+function buyWeapon(weaponId) {
+    const w = WEAPONS.find(item => item.id === weaponId);
+    if (w && playerEntity.credits >= w.price) {
+        playerEntity.credits -= w.price;
+        playerEntity.currentWeapon = { ...w };
+        playerEntity.currentAmmo = w.clip;
+        playerEntity.reserveAmmo = w.maxAmmo;
+        updateHUD();
+        document.getElementById('buy-credits-display').innerText = `¤ ${playerEntity.credits}`;
+    }
+}
+
+function buyArmor() {
+    if (playerEntity.credits >= 1000 && playerEntity.armor < 50) {
+        playerEntity.credits -= 1000;
+        playerEntity.armor = 50;
+        updateHUD();
+        document.getElementById('buy-credits-display').innerText = `¤ ${playerEntity.credits}`;
+    }
+}
+
+function toggleBuyMenu() {
+    if (gameState.phase !== 'BUY') return;
+    const shop = document.getElementById('buy-menu');
+    if (shop.classList.contains('hidden')) openBuyMenu();
+    else closeBuyMenu();
+}
+
+function openBuyMenu() {
+    document.getElementById('buy-credits-display').innerText = `¤ ${playerEntity.credits}`;
+    document.getElementById('buy-menu').classList.remove('hidden');
+}
+
+function closeBuyMenu() {
+    document.getElementById('buy-menu').classList.add('hidden');
+    input.lockPointer();
+}
+
+function showKillBanner(msg, isHeadshot) {
+    const banner = document.getElementById('kill-banner');
+    document.getElementById('kill-banner-text').innerText = msg;
+    document.getElementById('kill-banner-sub').innerText = isHeadshot ? 'CRITICAL HEADSHOT' : 'ELIMINATED';
+    banner.classList.remove('hidden');
+    setTimeout(() => banner.classList.add('hidden'), 1500);
+}
+
+function showMatchEndScreen(winningTeam) {
+    const screen = document.getElementById('match-end-screen');
+    const title = document.getElementById('match-result-title');
+    const subtitle = document.getElementById('match-result-subtitle');
+
+    screen.classList.remove('hidden');
+    if (winningTeam === playerEntity.team) {
+        title.innerText = 'VICTORY';
+        title.className = 'text-8xl font-teko font-bold text-emerald-400 tracking-widest mb-1';
+        subtitle.innerText = '팀이 전술 경기에서 대승을 거두었습니다.';
+    } else {
+        title.innerText = 'DEFEAT';
+        title.className = 'text-8xl font-teko font-bold text-red-500 tracking-widest mb-1';
+        subtitle.innerText = '상대 팀이 경기를 가져갔습니다.';
+    }
+
+    // Determine MVP
+    const sorted = [...entities].sort((a, b) => b.acs - a.acs);
+    if (sorted.length > 0) {
+        const mvp = sorted[0];
+        document.getElementById('mvp-name').innerText = mvp.name;
+        document.getElementById('mvp-stats').innerText = `KDA: ${mvp.kills}/${mvp.deaths}/${mvp.assists} | ACS: ${mvp.acs}`;
+    }
+}
+
+/* ==========================================================================
+   MAIN GAME LOOP
+   ========================================================================== */
+let lastTime = performance.now();
+
+function gameLoop(time) {
+    requestAnimationFrame(gameLoop);
+
+    const dt = Math.min((time - lastTime) / 1000, 0.1);
+    lastTime = time;
+
+    // Update Round Phase Timers
+    if (gameState.phase === 'BUY' || gameState.phase === 'COMBAT') {
+        gameState.phaseTimer -= dt;
+        document.getElementById('timer-display').innerText = `00:${Math.ceil(gameState.phaseTimer).toString().padStart(2, '0')}`;
+
+        if (gameState.phaseTimer <= 0) {
+            if (gameState.phase === 'BUY') {
+                gameState.phase = 'COMBAT';
+                gameState.phaseTimer = CONFIG.COMBAT_PHASE_DURATION;
+                document.getElementById('round-phase-title').innerText = 'COMBAT PHASE';
+                setBuyPhaseBarriers(false);
+                closeBuyMenu();
+            } else if (gameState.phase === 'COMBAT') {
+                if (!gameState.spikePlanted) {
+                    endRound('DEF', 'ELIM');
+                }
+            }
+        }
+    }
+
+    // Spike Detonation Countdown
+    if (gameState.spikePlanted && gameState.phase === 'COMBAT') {
+        gameState.spikeTimer -= dt;
+        document.getElementById('timer-display').innerText = `SPIKE: ${Math.ceil(gameState.spikeTimer)}s`;
+        if (gameState.spikeTimer <= 0) {
+            endRound('ATK', 'EXPLODE');
+        }
+    }
+
+    // Update Entities & AI
+    if (gameState.phase === 'COMBAT') {
+        updatePlayer(dt);
+        entities.forEach(e => {
+            if (!e.isPlayer) updateAIBot(e, dt);
+            e.updateSkills(dt);
+        });
+    }
+
+    updateHUD();
+    renderer.render(scene, camera);
+}
+
+/* INITIALIZATION ENTRY POINT */
+window.onload = () => {
+    initThreeScene();
+    setupMatchEntities(AGENTS[0]);
+    initUI();
+    requestAnimationFrame(gameLoop);
+};
+</script>
+</body>
+</html>
