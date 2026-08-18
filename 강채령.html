@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>폐교 탈출 (Abandoned School Horror)</title>
+    <!-- Tailwind CSS for UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- FontAwesome icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Nanum+Gothic+Coding:wght@400;700&family=Noto+Sans+KR:wght@300;400;700;900&display=swap');
+        
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            user-select: none;
+            background-color: #050505;
+            font-family: 'Noto Sans KR', sans-serif;
+            color: #ececec;
+        }
+
+        #game-canvas {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+
+        /* Horror Visual Overlay Effects */
+        .vignette {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            background: radial-gradient(circle, transparent 40%, rgba(0,0,0,0.8) 85%, rgba(0,0,0,0.98) 100%);
+            z-index: 10;
+        }
+
+        .static-noise {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            opacity: 0.04;
+            z-index: 11;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+        }
+
+        .glitch-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            background: rgba(180, 0, 0, 0.2);
+            mix-blend-mode: color-dodge;
+            opacity: 0;
+            transition: opacity 0.1s ease;
+            z-index: 12;
+        }
+
+        .crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 6px;
+            height: 6px;
+            background-color: rgba(255, 255, 255, 0.6);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 20;
+            transition: transform 0.15s ease, background-color 0.15s ease;
+        }
+
+        .crosshair.active {
+            transform: translate(-50%, -50%) scale(2.5);
+            background-color: #ff3333;
+            box-shadow: 0 0 10px #ff3333;
+        }
+
+        .font-horror {
+            font-family: 'Nanum Gothic Coding', monospace;
+        }
+
+        @keyframes pulse-red {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 0.8; }
+        }
+
+        .chase-warning {
+            animation: pulse-red 0.8s infinite;
+        }
+    </style>
+</head>
+<body class="bg-black text-white select-none overflow-hidden">
+
+    <!-- Canvas for Three.js -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Visual Horror Effects Overlays -->
+    <div class="vignette"></div>
+    <div class="static-noise"></div>
+    <div id="glitch-screen" class="glitch-overlay"></div>
+    <div id="crosshair" class="crosshair"></div>
+
+    <!-- HUD Overlay -->
+    <div id="hud" class="absolute inset-0 pointer-events-none z-30 hidden flex flex-col justify-between p-6">
+        <!-- Top Info Header -->
+        <div class="flex justify-between items-start">
+            <!-- Objective Info -->
+            <div class="bg-black/80 backdrop-blur-md p-4 rounded-xl border border-red-900/50 shadow-lg max-w-md">
+                <div class="text-xs text-red-500 font-bold uppercase tracking-widest mb-1 flex items-center gap-2">
+                    <i class="fa-solid fa-bullseye"></i> 탈출 목표
+                </div>
+                <div id="objective-text" class="text-sm font-medium text-gray-200 font-horror leading-relaxed">
+                    학교에 갇혔다. 정문을 열 수 있는 열쇠 3개와 정문 레버를 찾아서 탈출하라.
+                </div>
+            </div>
+
+            <!-- Flashlight & Stamina HUD -->
+            <div class="bg-black/80 backdrop-blur-md p-4 rounded-xl border border-gray-800 shadow-lg min-w-[220px]">
+                <!-- Flashlight Battery -->
+                <div class="mb-3">
+                    <div class="flex justify-between text-xs mb-1 text-gray-300 font-semibold">
+                        <span class="flex items-center gap-1.5"><i id="flashlight-icon" class="fa-solid fa-flashlight text-yellow-400"></i> 손전등 (F)</span>
+                        <span id="battery-pct">100%</span>
+                    </div>
+                    <div class="w-full bg-gray-900 h-2.5 rounded-full overflow-hidden border border-gray-700">
+                        <div id="battery-bar" class="bg-yellow-400 h-full w-full transition-all duration-300 shadow-[0_0_8px_rgba(250,204,21,0.6)]"></div>
+                    </div>
+                </div>
+                <!-- Stamina Bar -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1 text-gray-300 font-semibold">
+                        <span class="flex items-center gap-1.5"><i class="fa-solid fa-person-running text-cyan-400"></i> 스태미나 (Shift)</span>
+                    </div>
+                    <div class="w-full bg-gray-900 h-2 rounded-full overflow-hidden border border-gray-700">
+                        <div id="stamina-bar" class="bg-cyan-400 h-full w-full transition-all duration-100"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center Interaction Prompt -->
+        <div id="interaction-prompt" class="self-center bg-black/80 text-white px-6 py-2.5 rounded-full border border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.3)] opacity-0 transition-opacity duration-200 text-sm font-semibold flex items-center gap-2">
+            <span class="bg-yellow-500 text-black px-2 py-0.5 rounded text-xs font-bold">E</span>
+            <span id="interaction-text">상호작용</span>
+        </div>
+
+        <!-- Bottom Inventory & Hiding Status -->
+        <div class="flex justify-between items-end">
+            <!-- Key Items Collected -->
+            <div class="bg-black/80 backdrop-blur-md p-3.5 rounded-xl border border-gray-800 flex gap-3 items-center pointer-events-auto">
+                <span class="text-xs text-gray-400 font-bold mr-1">수집품:</span>
+                <div id="key-1" class="w-10 h-10 rounded-lg border border-gray-700 bg-gray-900/80 flex items-center justify-center text-gray-600 transition-all">
+                    <i class="fa-solid fa-key text-lg"></i>
+                </div>
+                <div id="key-2" class="w-10 h-10 rounded-lg border border-gray-700 bg-gray-900/80 flex items-center justify-center text-gray-600 transition-all">
+                    <i class="fa-solid fa-key text-lg"></i>
+                </div>
+                <div id="key-3" class="w-10 h-10 rounded-lg border border-gray-700 bg-gray-900/80 flex items-center justify-center text-gray-600 transition-all">
+                    <i class="fa-solid fa-key text-lg"></i>
+                </div>
+                <div id="main-handle" class="w-10 h-10 rounded-lg border border-gray-700 bg-gray-900/80 flex items-center justify-center text-gray-600 transition-all">
+                    <i class="fa-solid fa-gears text-lg"></i>
+                </div>
+            </div>
+
+            <!-- Danger / Ghost Warning Status -->
+            <div id="warning-badge" class="hidden bg-red-950/90 text-red-200 border border-red-600 px-4 py-2 rounded-xl text-xs font-bold tracking-widest flex items-center gap-2 chase-warning">
+                <i class="fa-solid fa-triangle-exclamation text-red-500 text-lg animate-bounce"></i> 귀신이 가까이 있습니다! 도망치거나 숨으세요!
+            </div>
+        </div>
+    </div>
+
+    <!-- Directional Control Buttons for Mobile / Mouse Click -->
+    <div id="mobile-controls" class="absolute bottom-6 left-6 z-30 flex flex-col items-center gap-1 opacity-90 hover:opacity-100 transition-opacity">
+        <button id="btn-up" class="w-14 h-14 bg-red-950/80 active:bg-red-600 border-2 border-red-500/60 text-white rounded-xl flex items-center justify-center text-xl shadow-lg touch-none select-none cursor-pointer">▲</button>
+        <div class="flex gap-1">
+            <button id="btn-left" class="w-14 h-14 bg-red-950/80 active:bg-red-600 border-2 border-red-500/60 text-white rounded-xl flex items-center justify-center text-xl shadow-lg touch-none select-none cursor-pointer">◀</button>
+            <button id="btn-down" class="w-14 h-14 bg-red-950/80 active:bg-red-600 border-2 border-red-500/60 text-white rounded-xl flex items-center justify-center text-xl shadow-lg touch-none select-none cursor-pointer">▼</button>
+            <button id="btn-right" class="w-14 h-14 bg-red-950/80 active:bg-red-600 border-2 border-red-500/60 text-white rounded-xl flex items-center justify-center text-xl shadow-lg touch-none select-none cursor-pointer">▶</button>
+        </div>
+    </div>
+
+    <!-- Start Screen -->
+    <div id="screen-start" class="absolute inset-0 bg-black/95 z-50 flex flex-col items-center justify-center p-6 text-center">
+        <div class="max-w-xl">
+            <h1 class="text-5xl md:text-6xl font-extrabold text-red-600 mb-2 font-horror tracking-wider drop-shadow-[0_5px_15px_rgba(220,38,38,0.5)]">
+                폐교 탈출
+            </h1>
+            <p class="text-gray-400 text-sm tracking-widest uppercase mb-6 font-mono">3D Abandoned School Horror</p>
+
+            <!-- Difficulty Settings -->
+            <div class="mb-6 flex justify-center items-center gap-3">
+                <span class="text-xs text-gray-400 font-bold uppercase tracking-wider">난이도 선택:</span>
+                <button id="diff-easy" class="diff-btn px-4 py-1.5 rounded-lg border text-xs font-bold transition border-green-500 bg-green-950/50 text-green-400 shadow-[0_0_10px_rgba(34,197,94,0.3)]">
+                    쉬움 (여유로움)
+                </button>
+                <button id="diff-normal" class="diff-btn px-4 py-1.5 rounded-lg border text-xs font-bold transition border-gray-700 bg-gray-900 text-gray-400">
+                    보통
+                </button>
+                <button id="diff-hard" class="diff-btn px-4 py-1.5 rounded-lg border text-xs font-bold transition border-gray-700 bg-gray-900 text-gray-400">
+                    어려움
+                </button>
+            </div>
+
+            <div class="bg-gray-950/90 border border-gray-800 rounded-2xl p-6 text-left mb-8 shadow-2xl space-y-3 text-sm text-gray-300">
+                <p class="text-red-400 font-semibold mb-2"><i class="fa-solid fa-circle-info"></i> 게임 설명:</p>
+                <p>밤깊은 폐교에 갇힌 당신. 학교 정문은 굳게 닫혀있고, 복도에는 정체불명의 원혼이 떠돌고 있습니다.</p>
+                <p>학교 곳곳(교실, 교무실, 창고)을 탐색하여 <span class="text-yellow-400 font-bold">열쇠 3개</span>와 <span class="text-yellow-400 font-bold">정문 손잡이</span>를 찾아 정문을 열고 무사히 탈출해야 합니다.</p>
+                <hr class="border-gray-800 my-3">
+                <p class="text-gray-400 font-semibold"><i class="fa-solid fa-keyboard"></i> 조작법:</p>
+                <div class="grid grid-cols-2 gap-2 text-xs font-mono text-gray-400 pt-1">
+                    <div><span class="text-white bg-gray-800 px-1.5 py-0.5 rounded">WASD / 방향키</span> : 이동</div>
+                    <div><span class="text-white bg-gray-800 px-1.5 py-0.5 rounded">마우스 드래그</span> : 시점 회전</div>
+                    <div><span class="text-white bg-gray-800 px-1.5 py-0.5 rounded">Shift</span> : 달리기</div>
+                    <div><span class="text-white bg-gray-800 px-1.5 py-0.5 rounded">E</span> : 상호작용 / 숨기</div>
+                    <div><span class="text-white bg-gray-800 px-1.5 py-0.5 rounded">F</span> : 손전등 켜기/끄기</div>
+                    <div><span class="text-white bg-gray-800 px-1.5 py-0.5 rounded">ESC</span> : 일시정지</div>
+                </div>
+            </div>
+
+            <button id="btn-start" class="w-full bg-red-700 hover:bg-red-600 text-white font-bold py-4 px-8 rounded-xl shadow-lg transition duration-200 text-lg border border-red-500/30 flex items-center justify-center gap-3 cursor-pointer">
+                <i class="fa-solid fa-play"></i> 게임 시작하기
+            </button>
+        </div>
+    </div>
+
+    <!-- Pause / Game Menu Screen -->
+    <div id="screen-pause" class="absolute inset-0 bg-black/80 backdrop-blur-md z-40 hidden flex flex-col items-center justify-center">
+        <div class="bg-gray-950 border border-gray-800 p-8 rounded-2xl max-w-sm w-full text-center shadow-2xl">
+            <h2 class="text-2xl font-bold text-gray-200 mb-6 font-horror">일시 정지</h2>
+            <button id="btn-resume" class="w-full bg-gray-800 hover:bg-gray-700 text-white font-semibold py-3 px-6 rounded-xl mb-3 transition border border-gray-700 cursor-pointer">
+                게임을 계속하기
+            </button>
+            <button id="btn-restart-pause" class="w-full bg-red-900/60 hover:bg-red-800/80 text-white font-semibold py-3 px-6 rounded-xl transition border border-red-700/50 cursor-pointer">
+                처음부터 다시 시작
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="screen-gameover" class="absolute inset-0 bg-red-950/90 backdrop-blur-lg z-50 hidden flex flex-col items-center justify-center p-6 text-center">
+        <div class="max-w-md">
+            <i class="fa-solid fa-skull-crossbones text-6xl text-red-600 mb-4 animate-bounce"></i>
+            <h2 class="text-4xl font-extrabold text-red-500 mb-2 font-horror tracking-wider">당신은 잡혔습니다...</h2>
+            <p id="gameover-reason" class="text-gray-300 text-sm mb-8 font-horror">원혼의 차가운 손길이 당신의 목을 죈다.</p>
+            <button id="btn-restart" class="w-full bg-red-700 hover:bg-red-600 text-white font-bold py-3.5 px-8 rounded-xl shadow-lg transition text-base border border-red-500/40 cursor-pointer">
+                다시 시도하기
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Clear Screen -->
+    <div id="screen-clear" class="absolute inset-0 bg-emerald-950/90 backdrop-blur-lg z-50 hidden flex flex-col items-center justify-center p-6 text-center">
+        <div class="max-w-md">
+            <i class="fa-solid fa-door-open text-6xl text-emerald-400 mb-4 animate-pulse"></i>
+            <h2 class="text-4xl font-extrabold text-emerald-400 mb-2 font-horror tracking-wider">탈출 성공!</h2>
+            <p class="text-gray-200 text-sm mb-8 font-horror">모든 열쇠를 찾아 정문을 열고 무사히 폐교를 벗어났습니다.</p>
+            <button id="btn-restart-clear" class="w-full bg-emerald-700 hover:bg-emerald-600 text-white font-bold py-3.5 px-8 rounded-xl shadow-lg transition text-base border border-emerald-500/40 cursor-pointer">
+                다시 플레이하기
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Logic -->
+    <script>
+        // Difficulty Presets (Adjusted for smoother pace)
+        const DIFFICULTY = {
+            EASY: {
+                PLAYER_SPEED: 3.8,
+                PLAYER_RUN_SPEED: 6.2,
+                GHOST_PATROL_SPEED: 1.2,
+                GHOST_CHASE_SPEED: 2.8,
+                GHOST_DETECTION_DIST: 7.0,
+                STAMINA_DRAIN: 15,
+                STAMINA_RECOVERY: 22
+            },
+            NORMAL: {
+                PLAYER_SPEED: 4.0,
+                PLAYER_RUN_SPEED: 6.5,
+                GHOST_PATROL_SPEED: 1.6,
+                GHOST_CHASE_SPEED: 3.6,
+                GHOST_DETECTION_DIST: 8.5,
+                STAMINA_DRAIN: 20,
+                STAMINA_RECOVERY: 18
+            },
+            HARD: {
+                PLAYER_SPEED: 4.2,
+                PLAYER_RUN_SPEED: 6.8,
+                GHOST_PATROL_SPEED: 2.2,
+                GHOST_CHASE_SPEED: 4.6,
+                GHOST_DETECTION_DIST: 10.0,
+                STAMINA_DRAIN: 25,
+                STAMINA_RECOVERY: 15
+            }
+        };
+
+        let selectedDifficulty = 'EASY'; // Default to Easy for smoother play
+
+        const CONFIG = {
+            PLAYER_HEIGHT: 1.6,
+            PLAYER_RADIUS: 0.3,
+            BATTERY_DRAIN: 1.0,
+            BATTERY_PICKUP_AMOUNT: 45,
+            GHOST_KILL_DIST: 1.2,
+            MOUSE_SENSITIVITY: 0.0018, // Reduced mouse look sensitivity
+            FOV: 90
+        };
+
+        // Sound System using Web Audio API
+        class AudioSystem {
+            constructor() {
+                this.ctx = null;
+            }
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+            playTone(freq, duration, type = 'sine', volume = 0.1) {
+                if (!this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                    gain.gain.setValueAtTime(volume, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + duration);
+                } catch(e) {}
+            }
+            playClick() { this.playTone(800, 0.05, 'square', 0.05); }
+            playPickup() {
+                this.playTone(523, 0.1, 'sine', 0.1);
+                setTimeout(() => this.playTone(659, 0.15, 'sine', 0.1), 80);
+            }
+            playHeartbeat() {
+                this.playTone(60, 0.15, 'triangle', 0.3);
+                setTimeout(() => this.playTone(50, 0.2, 'triangle', 0.2), 150);
+            }
+            playJumpscare() {
+                if (!this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(600, this.ctx.currentTime + 0.5);
+                    gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.8);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + 0.8);
+                } catch(e) {}
+            }
+        }
+        const audio = new AudioSystem();
+
+        const TextureGen = {
+            createWallTexture() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 256; canvas.height = 256;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#2b2b32';
+                ctx.fillRect(0, 0, 256, 256);
+                for (let i = 0; i < 1500; i++) {
+                    ctx.fillStyle = Math.random() > 0.5 ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.05)';
+                    ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
+                }
+                const tex = new THREE.CanvasTexture(canvas);
+                tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
+                return tex;
+            },
+            createFloorTexture() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 256; canvas.height = 256;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#1e1e24';
+                ctx.fillRect(0, 0, 256, 256);
+                ctx.strokeStyle = '#111115';
+                ctx.lineWidth = 4;
+                for (let x = 0; x <= 256; x += 64) {
+                    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 256); ctx.stroke();
+                }
+                for (let y = 0; y <= 256; y += 64) {
+                    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(256, y); ctx.stroke();
+                }
+                const tex = new THREE.CanvasTexture(canvas);
+                tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
+                return tex;
+            },
+            createLockerTexture() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 128; canvas.height = 256;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#22303c';
+                ctx.fillRect(0, 0, 128, 256);
+                ctx.strokeStyle = '#0f171e';
+                ctx.lineWidth = 6;
+                ctx.strokeRect(4, 4, 120, 248);
+                ctx.fillStyle = '#0f171e';
+                for (let i = 0; i < 4; i++) {
+                    ctx.fillRect(20 + i * 24, 20, 12, 40);
+                }
+                ctx.fillStyle = '#888';
+                ctx.fillRect(100, 120, 10, 25);
+                return new THREE.CanvasTexture(canvas);
+            }
+        };
+
+        let scene, camera, renderer;
+        let wallMaterial, floorMaterial, lockerMaterial;
+        let colliders = [];
+        let interactables = [];
+        let waypoints = [];
+
+        let gameState = {
+            started: false,
+            paused: false,
+            over: false,
+            cleared: false,
+            keysCollected: 0,
+            hasHandle: false,
+            isHiding: false,
+            currentHidingSpot: null,
+            preHidingPos: new THREE.Vector3()
+        };
+
+        const keysPressed = { w: false, a: false, s: false, d: false, shift: false };
+        let cameraYaw = 0, cameraPitch = 0;
+        let isMouseDown = false, prevMouseX = 0, prevMouseY = 0;
+
+        const player = {
+            position: new THREE.Vector3(0, CONFIG.PLAYER_HEIGHT, 22),
+            velocity: new THREE.Vector3(),
+            stamina: 100,
+            bobTimer: 0
+        };
+
+        let flashlight, flashlightTarget;
+        const flashlightState = {
+            on: true,
+            battery: 100,
+            flickerTimer: 0
+        };
+
+        let ghostMesh, ghostLight;
+        const ghost = {
+            position: new THREE.Vector3(0, 1.2, -20),
+            state: 'PATROL',
+            targetWaypointIdx: 0,
+            chaseTimer: 0,
+            heartbeatTimer: 0
+        };
+
+        function initEngine() {
+            const canvas = document.getElementById('game-canvas');
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x050508);
+            scene.fog = new THREE.FogExp2(0x050508, 0.035);
+
+            camera = new THREE.PerspectiveCamera(CONFIG.FOV, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.copy(player.position);
+            scene.add(camera);
+
+            buildSchoolMap();
+            spawnKeyItems();
+            setupFlashlight();
+            createGhost();
+            setupControls();
+            setupMobileControls();
+            setupDifficultyButtons();
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function setupDifficultyButtons() {
+            const easyBtn = document.getElementById('diff-easy');
+            const normBtn = document.getElementById('diff-normal');
+            const hardBtn = document.getElementById('diff-hard');
+
+            const setDiff = (diff, activeBtn) => {
+                selectedDifficulty = diff;
+                [easyBtn, normBtn, hardBtn].forEach(btn => {
+                    btn.className = 'diff-btn px-4 py-1.5 rounded-lg border text-xs font-bold transition border-gray-700 bg-gray-900 text-gray-400';
+                });
+                if (diff === 'EASY') {
+                    activeBtn.className = 'diff-btn px-4 py-1.5 rounded-lg border text-xs font-bold transition border-green-500 bg-green-950/50 text-green-400 shadow-[0_0_10px_rgba(34,197,94,0.3)]';
+                } else if (diff === 'NORMAL') {
+                    activeBtn.className = 'diff-btn px-4 py-1.5 rounded-lg border text-xs font-bold transition border-yellow-500 bg-yellow-950/50 text-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.3)]';
+                } else {
+                    activeBtn.className = 'diff-btn px-4 py-1.5 rounded-lg border text-xs font-bold transition border-red-500 bg-red-950/50 text-red-400 shadow-[0_0_10px_rgba(239,68,68,0.3)]';
+                }
+            };
+
+            easyBtn.addEventListener('click', () => setDiff('EASY', easyBtn));
+            normBtn.addEventListener('click', () => setDiff('NORMAL', normBtn));
+            hardBtn.addEventListener('click', () => setDiff('HARD', hardBtn));
+        }
+
+        function buildSchoolMap() {
+            wallMaterial = new THREE.MeshStandardMaterial({
+                map: TextureGen.createWallTexture(),
+                roughness: 0.8,
+                metalness: 0.1
+            });
+
+            const floorTex = TextureGen.createFloorTexture();
+            floorTex.repeat.set(12, 12);
+            floorMaterial = new THREE.MeshStandardMaterial({
+                map: floorTex,
+                roughness: 0.6,
+                metalness: 0.2
+            });
+
+            lockerMaterial = new THREE.MeshStandardMaterial({
+                map: TextureGen.createLockerTexture(),
+                roughness: 0.5
+            });
+
+            const ceilingMat = new THREE.MeshStandardMaterial({ color: 0x111113, roughness: 0.9 });
+
+            // Floor & Ceiling
+            const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), floorMaterial);
+            floorMesh.rotation.x = -Math.PI / 2;
+            scene.add(floorMesh);
+
+            const ceilingMesh = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), ceilingMat);
+            ceilingMesh.rotation.x = Math.PI / 2;
+            ceilingMesh.position.y = 3.5;
+            scene.add(ceilingMesh);
+
+            function createWall(x, z, width, depth, height = 3.5) {
+                const wall = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), wallMaterial);
+                wall.position.set(x, height / 2, z);
+                scene.add(wall);
+                colliders.push(new THREE.Box3().setFromObject(wall));
+                return wall;
+            }
+
+            // Outer Perimeter Walls
+            createWall(0, -30, 60, 1);
+            createWall(0, 30, 60, 1);
+            createWall(-30, 0, 1, 60);
+            createWall(30, 0, 1, 60);
+
+            // Corridor & Room Walls with Wide Open Doorways
+            createWall(-18, 14, 20, 1);
+            createWall(-18, -14, 20, 1);
+            createWall(-8, 22, 1, 14);  // Room 1 wall
+            createWall(-8, -22, 1, 14); // Room 2 wall
+
+            createWall(18, 14, 20, 1);
+            createWall(18, -14, 20, 1);
+            createWall(8, 22, 1, 14);   // Room 3 wall
+            createWall(8, -22, 1, 14);  // Room 4 wall
+
+            // Hiding Lockers (E 키로 숨기/나오기 가능)
+            function createHidingLocker(x, z, rotY, id) {
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(1.0, 2.4, 0.9), lockerMaterial);
+                mesh.position.set(x, 1.2, z);
+                mesh.rotation.y = rotY;
+                scene.add(mesh);
+                
+                colliders.push(new THREE.Box3().setFromObject(mesh));
+
+                // 출구 전방 위치 계산
+                const exitOffset = new THREE.Vector3(0, 0, 1.2).applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
+                const exitPos = new THREE.Vector3(x, CONFIG.PLAYER_HEIGHT, z).add(exitOffset);
+
+                interactables.push({
+                    type: 'LOCKER',
+                    id: id,
+                    position: new THREE.Vector3(x, 1.2, z),
+                    exitPosition: exitPos,
+                    mesh: mesh,
+                    interactDist: 2.5,
+                    label: '사물함에 숨기 / 나오기 (E)'
+                });
+            }
+
+            createHidingLocker(-6, -8, Math.PI / 2, 'locker-1');
+            createHidingLocker(-6, 8, Math.PI / 2, 'locker-2');
+            createHidingLocker(6, -5, -Math.PI / 2, 'locker-3');
+            createHidingLocker(6, 12, -Math.PI / 2, 'locker-4');
+
+            // Main Gate Frame
+            const mainGate = new THREE.Mesh(
+                new THREE.BoxGeometry(4.0, 3.2, 0.4),
+                new THREE.MeshStandardMaterial({ color: 0x331111, metalness: 0.8, roughness: 0.2 })
+            );
+            mainGate.position.set(0, 1.6, 29.5);
+            scene.add(mainGate);
+            colliders.push(new THREE.Box3().setFromObject(mainGate));
+
+            interactables.push({
+                type: 'MAIN_GATE',
+                position: new THREE.Vector3(0, 1.5, 28.0),
+                interactDist: 3.0,
+                label: '정문 탈출하기 (열쇠 3개 + 손잡이 필요)'
+            });
+
+            // Ambient Lights
+            const ambient = new THREE.AmbientLight(0x0e0e18, 0.8);
+            scene.add(ambient);
+
+            const pLight1 = new THREE.PointLight(0xff9944, 0.8, 15);
+            pLight1.position.set(0, 3.0, -10);
+            scene.add(pLight1);
+
+            const pLight2 = new THREE.PointLight(0x3366bb, 0.7, 15);
+            pLight2.position.set(0, 3.0, 10);
+            scene.add(pLight2);
+
+            // Ghost Patrol Waypoints
+            waypoints = [
+                new THREE.Vector3(0, 1.2, -20),
+                new THREE.Vector3(-20, 1.2, -20),
+                new THREE.Vector3(-20, 1.2, 20),
+                new THREE.Vector3(0, 1.2, 0),
+                new THREE.Vector3(20, 1.2, 20),
+                new THREE.Vector3(20, 1.2, -20)
+            ];
+        }
+
+        function spawnKeyItems() {
+            function createPickupItem(type, x, z, name, label) {
+                const group = new THREE.Group();
+                let geo, mat, lightColor;
+
+                if (type.startsWith('KEY')) {
+                    geo = new THREE.TorusGeometry(0.22, 0.07, 12, 24);
+                    mat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.9, roughness: 0.1, emissive: 0x886600 });
+                    lightColor = 0xffd700;
+                } else if (type === 'HANDLE') {
+                    geo = new THREE.CylinderGeometry(0.12, 0.12, 0.6, 16);
+                    mat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, metalness: 0.8, emissive: 0x0284c7 });
+                    lightColor = 0x38bdf8;
+                } else { // BATTERY
+                    geo = new THREE.BoxGeometry(0.2, 0.35, 0.2);
+                    mat = new THREE.MeshStandardMaterial({ color: 0x22c55e, emissive: 0x15803d });
+                    lightColor = 0x22c55e;
+                }
+
+                const mesh = new THREE.Mesh(geo, mat);
+                group.add(mesh);
+
+                // 아이템 시각적 광원
+                const itemLight = new THREE.PointLight(lightColor, 2.5, 6.0);
+                itemLight.position.set(0, 0.3, 0);
+                group.add(itemLight);
+
+                // 받침대
+                const pedestal = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.3, 0.35, 0.5, 12),
+                    new THREE.MeshStandardMaterial({ color: 0x222228, roughness: 0.8 })
+                );
+                pedestal.position.set(0, -0.4, 0);
+                group.add(pedestal);
+
+                group.position.set(x, 1.0, z);
+                scene.add(group);
+
+                interactables.push({
+                    type: type,
+                    name: name,
+                    position: new THREE.Vector3(x, 1.0, z),
+                    group: group,
+                    mesh: mesh,
+                    interactDist: 2.8,
+                    label: label
+                });
+            }
+
+            // 확실히 도달 가능한 구역에 열쇠 및 손잡이 배치
+            createPickupItem('KEY_1', -20, 20, '교실 열쇠 1', '첫 번째 열쇠 줍기 (E)');
+            createPickupItem('KEY_2', 20, -20, '교무실 열쇠 2', '두 번째 열쇠 줍기 (E)');
+            createPickupItem('KEY_3', -20, -20, '창고 열쇠 3', '세 번째 열쇠 줍기 (E)');
+            createPickupItem('HANDLE', 20, 20, '정문 레버', '정문 작동 손잡이 줍기 (E)');
+
+            createPickupItem('BATTERY', 0, -22, '배터리', '손전등 배터리 충전 (E)');
+            createPickupItem('BATTERY', -20, 0, '배터리', '손전등 배터리 충전 (E)');
+            createPickupItem('BATTERY', 20, 0, '배터리', '손전등 배터리 충전 (E)');
+        }
+
+        function setupFlashlight() {
+            flashlight = new THREE.SpotLight(0xfff5ea, 3.5, 35, Math.PI / 4, 0.4, 1.0);
+            flashlightTarget = new THREE.Object3D();
+            scene.add(flashlightTarget);
+            flashlight.target = flashlightTarget;
+            camera.add(flashlight);
+            flashlight.position.set(0.2, -0.2, 0);
+        }
+
+        function createGhost() {
+            const group = new THREE.Group();
+            const bodyGeo = new THREE.CylinderGeometry(0.4, 0.1, 2.2, 16);
+            const bodyMat = new THREE.MeshBasicMaterial({ color: 0x050505, wireframe: true });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 1.1;
+            group.add(body);
+
+            // Red glowing eyes
+            const eyeGeo = new THREE.SphereGeometry(0.08, 8, 8);
+            const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            const eye1 = new THREE.Mesh(eyeGeo, eyeMat);
+            eye1.position.set(-0.15, 1.8, 0.35);
+            const eye2 = new THREE.Mesh(eyeGeo, eyeMat);
+            eye2.position.set(0.15, 1.8, 0.35);
+            group.add(eye1); group.add(eye2);
+
+            ghostLight = new THREE.PointLight(0xff0000, 2.0, 8.0);
+            ghostLight.position.set(0, 1.5, 0);
+            group.add(ghostLight);
+
+            ghostMesh = group;
+            ghostMesh.position.copy(ghost.position);
+            scene.add(ghostMesh);
+        }
+
+        function setupControls() {
+            window.addEventListener('keydown', (e) => {
+                if (!gameState.started || gameState.over || gameState.cleared) return;
+                
+                const code = e.code;
+                if (code === 'KeyW' || code === 'ArrowUp') keysPressed.w = true;
+                if (code === 'KeyS' || code === 'ArrowDown') keysPressed.s = true;
+                if (code === 'KeyA' || code === 'ArrowLeft') keysPressed.a = true;
+                if (code === 'KeyD' || code === 'ArrowRight') keysPressed.d = true;
+                if (code === 'ShiftLeft' || code === 'ShiftRight') keysPressed.shift = true;
+
+                if (code === 'KeyE') handleInteraction();
+                if (code === 'KeyF') toggleFlashlight();
+                if (code === 'Escape') togglePause();
+            });
+
+            window.addEventListener('keyup', (e) => {
+                const code = e.code;
+                if (code === 'KeyW' || code === 'ArrowUp') keysPressed.w = false;
+                if (code === 'KeyS' || code === 'ArrowDown') keysPressed.s = false;
+                if (code === 'KeyA' || code === 'ArrowLeft') keysPressed.a = false;
+                if (code === 'KeyD' || code === 'ArrowRight') keysPressed.d = false;
+                if (code === 'ShiftLeft' || code === 'ShiftRight') keysPressed.shift = false;
+            });
+
+            // Drag Mouse Look with smoother sensitivity
+            window.addEventListener('mousedown', (e) => {
+                if (e.target.tagName === 'BUTTON' || e.target.classList.contains('diff-btn')) return;
+                isMouseDown = true;
+                prevMouseX = e.clientX;
+                prevMouseY = e.clientY;
+            });
+
+            window.addEventListener('mouseup', () => { isMouseDown = false; });
+            window.addEventListener('mousemove', (e) => {
+                if (!isMouseDown || gameState.paused || !gameState.started) return;
+                const deltaX = e.clientX - prevMouseX;
+                const deltaY = e.clientY - prevMouseY;
+                prevMouseX = e.clientX;
+                prevMouseY = e.clientY;
+
+                cameraYaw -= deltaX * CONFIG.MOUSE_SENSITIVITY;
+                cameraPitch -= deltaY * CONFIG.MOUSE_SENSITIVITY;
+                cameraPitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, cameraPitch));
+            });
+        }
+
+        function setupMobileControls() {
+            const bindBtn = (id, key) => {
+                const btn = document.getElementById(id);
+                if (!btn) return;
+                const start = (e) => { e.preventDefault(); keysPressed[key] = true; };
+                const end = (e) => { e.preventDefault(); keysPressed[key] = false; };
+                btn.addEventListener('mousedown', start);
+                btn.addEventListener('mouseup', end);
+                btn.addEventListener('touchstart', start);
+                btn.addEventListener('touchend', end);
+            };
+            bindBtn('btn-up', 'w');
+            bindBtn('btn-down', 's');
+            bindBtn('btn-left', 'a');
+            bindBtn('btn-right', 'd');
+        }
+
+        function handleInteraction() {
+            audio.init();
+
+            if (gameState.isHiding) {
+                // 사물함에서 나올 때: 충돌체 밖의 안전한 위치(exitPosition)로 복귀
+                gameState.isHiding = false;
+                if (gameState.currentHidingSpot && gameState.currentHidingSpot.exitPosition) {
+                    player.position.copy(gameState.currentHidingSpot.exitPosition);
+                } else {
+                    player.position.copy(gameState.preHidingPos);
+                }
+                player.velocity.set(0, 0, 0);
+                gameState.currentHidingSpot = null;
+                audio.playClick();
+                return;
+            }
+
+            const pPos = player.position;
+            for (let i = interactables.length - 1; i >= 0; i--) {
+                const item = interactables[i];
+                if (pPos.distanceTo(item.position) <= item.interactDist) {
+                    audio.playPickup();
+
+                    if (item.type === 'LOCKER') {
+                        gameState.preHidingPos.copy(player.position);
+                        gameState.isHiding = true;
+                        gameState.currentHidingSpot = item;
+                        player.position.copy(item.position);
+                    } else if (item.type.startsWith('KEY')) {
+                        gameState.keysCollected++;
+                        if (item.group) scene.remove(item.group);
+                        interactables.splice(i, 1);
+                        updateInventoryUI();
+                    } else if (item.type === 'HANDLE') {
+                        gameState.hasHandle = true;
+                        if (item.group) scene.remove(item.group);
+                        interactables.splice(i, 1);
+                        updateInventoryUI();
+                    } else if (item.type === 'BATTERY') {
+                        flashlightState.battery = Math.min(100, flashlightState.battery + CONFIG.BATTERY_PICKUP_AMOUNT);
+                        if (item.group) scene.remove(item.group);
+                        interactables.splice(i, 1);
+                    } else if (item.type === 'MAIN_GATE') {
+                        if (gameState.keysCollected >= 3 && gameState.hasHandle) {
+                            triggerGameClear();
+                        } else {
+                            document.getElementById('objective-text').textContent = '열쇠 3개와 정문 레버가 모두 필요합니다! 학교 내부를 탐색하세요.';
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        function toggleFlashlight() {
+            flashlightState.on = !flashlightState.on;
+            flashlight.visible = flashlightState.on;
+            audio.playClick();
+        }
+
+        function updateInventoryUI() {
+            if (gameState.keysCollected >= 1) document.getElementById('key-1').className = 'w-10 h-10 rounded-lg border border-yellow-500 bg-yellow-900/50 flex items-center justify-center text-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.5)]';
+            if (gameState.keysCollected >= 2) document.getElementById('key-2').className = 'w-10 h-10 rounded-lg border border-yellow-500 bg-yellow-900/50 flex items-center justify-center text-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.5)]';
+            if (gameState.keysCollected >= 3) document.getElementById('key-3').className = 'w-10 h-10 rounded-lg border border-yellow-500 bg-yellow-900/50 flex items-center justify-center text-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.5)]';
+            if (gameState.hasHandle) document.getElementById('main-handle').className = 'w-10 h-10 rounded-lg border border-sky-500 bg-sky-900/50 flex items-center justify-center text-sky-400 shadow-[0_0_10px_rgba(56,189,248,0.5)]';
+        }
+
+        function updatePlayer(delta) {
+            const diff = DIFFICULTY[selectedDifficulty];
+
+            if (gameState.isHiding) {
+                // 숨어있을 때는 위치 고정
+                camera.position.copy(player.position);
+                camera.rotation.set(cameraPitch, cameraYaw, 0, 'YXZ');
+                return;
+            }
+
+            // Stamina Management
+            let speed = diff.PLAYER_SPEED;
+            if (keysPressed.shift && (keysPressed.w || keysPressed.s || keysPressed.a || keysPressed.d) && player.stamina > 0) {
+                speed = diff.PLAYER_RUN_SPEED;
+                player.stamina = Math.max(0, player.stamina - diff.STAMINA_DRAIN * delta);
+            } else {
+                player.stamina = Math.min(100, player.stamina + diff.STAMINA_RECOVERY * delta);
+            }
+            document.getElementById('stamina-bar').style.width = player.stamina + '%';
+
+            // Movement Vectors
+            const moveDir = new THREE.Vector3();
+            if (keysPressed.w) moveDir.z -= 1;
+            if (keysPressed.s) moveDir.z += 1;
+            if (keysPressed.a) moveDir.x -= 1;
+            if (keysPressed.d) moveDir.x += 1;
+
+            if (moveDir.lengthSq() > 0) {
+                moveDir.normalize();
+                moveDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), cameraYaw);
+
+                const moveStep = moveDir.multiplyScalar(speed * delta);
+
+                // Sliding Collision Detection (X, Z 축 독립 이동)
+                const nextPosX = player.position.x + moveStep.x;
+                if (!checkCollisionAt(nextPosX, player.position.z)) {
+                    player.position.x = nextPosX;
+                }
+                const nextPosZ = player.position.z + moveStep.z;
+                if (!checkCollisionAt(player.position.x, nextPosZ)) {
+                    player.position.z = nextPosZ;
+                }
+
+                // Head Bobbing
+                player.bobTimer += delta * speed * 2.0;
+                camera.position.y = CONFIG.PLAYER_HEIGHT + Math.sin(player.bobTimer) * 0.04;
+            } else {
+                camera.position.y = CONFIG.PLAYER_HEIGHT;
+            }
+
+            camera.position.x = player.position.x;
+            camera.position.z = player.position.z;
+            camera.rotation.set(cameraPitch, cameraYaw, 0, 'YXZ');
+
+            // Flashlight Battery Drain
+            if (flashlightState.on) {
+                flashlightState.battery = Math.max(0, flashlightState.battery - CONFIG.BATTERY_DRAIN * delta);
+                if (flashlightState.battery < 20) {
+                    flashlightState.flickerTimer += delta * 15;
+                    flashlight.intensity = Math.sin(flashlightState.flickerTimer) > 0 ? 3.5 : 0.5;
+                } else {
+                    flashlight.intensity = 3.5;
+                }
+            } else {
+                flashlight.intensity = 0;
+            }
+
+            document.getElementById('battery-pct').textContent = Math.round(flashlightState.battery) + '%';
+            document.getElementById('battery-bar').style.width = flashlightState.battery + '%';
+
+            // Target Update for SpotLight
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            flashlightTarget.position.copy(camera.position).add(forward.multiplyScalar(10));
+        }
+
+        function checkCollisionAt(x, z) {
+            const playerBox = new THREE.Box3(
+                new THREE.Vector3(x - CONFIG.PLAYER_RADIUS, 0, z - CONFIG.PLAYER_RADIUS),
+                new THREE.Vector3(x + CONFIG.PLAYER_RADIUS, 3.0, z + CONFIG.PLAYER_RADIUS)
+            );
+            for (const box of colliders) {
+                if (playerBox.intersectsBox(box)) return true;
+            }
+            return false;
+        }
+
+        function checkInteractionProximity() {
+            const prompt = document.getElementById('interaction-prompt');
+            const promptText = document.getElementById('interaction-text');
+            const crosshair = document.getElementById('crosshair');
+
+            if (gameState.isHiding) {
+                promptText.textContent = '사물함에서 나오기 (E)';
+                prompt.style.opacity = '1';
+                crosshair.classList.add('active');
+                return;
+            }
+
+            let found = false;
+            for (const item of interactables) {
+                if (player.position.distanceTo(item.position) <= item.interactDist) {
+                    promptText.textContent = item.label;
+                    prompt.style.opacity = '1';
+                    crosshair.classList.add('active');
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                prompt.style.opacity = '0';
+                crosshair.classList.remove('active');
+            }
+        }
+
+        function updateGhostAI(delta) {
+            const diff = DIFFICULTY[selectedDifficulty];
+            const distToPlayer = ghostMesh.position.distanceTo(player.position);
+            const warningBadge = document.getElementById('warning-badge');
+            const glitchScreen = document.getElementById('glitch-screen');
+
+            if (distToPlayer < 12) {
+                glitchScreen.style.opacity = (1 - distToPlayer / 12) * 0.5;
+                warningBadge.classList.remove('hidden');
+
+                ghost.heartbeatTimer += delta;
+                if (ghost.heartbeatTimer > 0.9) {
+                    audio.playHeartbeat();
+                    ghost.heartbeatTimer = 0;
+                }
+            } else {
+                glitchScreen.style.opacity = '0';
+                warningBadge.classList.add('hidden');
+            }
+
+            // Ghost AI State
+            if (!gameState.isHiding && distToPlayer <= diff.GHOST_DETECTION_DIST) {
+                ghost.state = 'CHASE';
+            } else if (gameState.isHiding) {
+                ghost.state = 'PATROL';
+            }
+
+            let moveSpeed = ghost.state === 'CHASE' ? diff.GHOST_CHASE_SPEED : diff.GHOST_PATROL_SPEED;
+            let targetPos;
+
+            if (ghost.state === 'CHASE') {
+                targetPos = player.position.clone();
+            } else {
+                targetPos = waypoints[ghost.targetWaypointIdx];
+                if (ghostMesh.position.distanceTo(targetPos) < 1.5) {
+                    ghost.targetWaypointIdx = (ghost.targetWaypointIdx + 1) % waypoints.length;
+                }
+            }
+
+            const dir = targetPos.sub(ghostMesh.position);
+            dir.y = 0;
+            if (dir.lengthSq() > 0) {
+                dir.normalize();
+                ghostMesh.position.add(dir.multiplyScalar(moveSpeed * delta));
+                ghostMesh.lookAt(ghostMesh.position.clone().add(dir));
+            }
+
+            // Kill trigger
+            if (!gameState.isHiding && distToPlayer <= CONFIG.GHOST_KILL_DIST) {
+                triggerGameOver('원혼이 당신을 찾아내었습니다...');
+            }
+        }
+
+        function togglePause() {
+            gameState.paused = !gameState.paused;
+            document.getElementById('screen-pause').classList.toggle('hidden', !gameState.paused);
+        }
+
+        function triggerGameOver(reason) {
+            gameState.over = true;
+            audio.playJumpscare();
+            document.getElementById('gameover-reason').textContent = reason;
+            document.getElementById('screen-gameover').classList.remove('hidden');
+            document.getElementById('hud').classList.add('hidden');
+        }
+
+        function triggerGameClear() {
+            gameState.cleared = true;
+            document.getElementById('screen-clear').classList.remove('hidden');
+            document.getElementById('hud').classList.add('hidden');
+        }
+
+        function resetGame() {
+            gameState.started = true;
+            gameState.paused = false;
+            gameState.over = false;
+            gameState.cleared = false;
+            gameState.keysCollected = 0;
+            gameState.hasHandle = false;
+            gameState.isHiding = false;
+
+            player.position.set(0, CONFIG.PLAYER_HEIGHT, 22);
+            player.stamina = 100;
+            flashlightState.battery = 100;
+            flashlightState.on = true;
+
+            ghostMesh.position.set(0, 1.2, -20);
+            ghost.state = 'PATROL';
+
+            document.getElementById('screen-start').classList.add('hidden');
+            document.getElementById('screen-pause').classList.add('hidden');
+            document.getElementById('screen-gameover').classList.add('hidden');
+            document.getElementById('screen-clear').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+
+            document.getElementById('key-1').className = 'w-10 h-10 rounded-lg border border-gray-700 bg-gray-900/80 flex items-center justify-center text-gray-600 transition-all';
+            document.getElementById('key-2').className = 'w-10 h-10 rounded-lg border border-gray-700 bg-gray-900/80 flex items-center justify-center text-gray-600 transition-all';
+            document.getElementById('key-3').className = 'w-10 h-10 rounded-lg border border-gray-700 bg-gray-900/80 flex items-center justify-center text-gray-600 transition-all';
+            document.getElementById('main-handle').className = 'w-10 h-10 rounded-lg border border-gray-700 bg-gray-900/80 flex items-center justify-center text-gray-600 transition-all';
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        let clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = Math.min(clock.getDelta(), 0.1);
+            const time = clock.getElapsedTime();
+
+            // Item Animation
+            for (const item of interactables) {
+                if (item.mesh && item.type !== 'LOCKER' && item.type !== 'MAIN_GATE') {
+                    item.mesh.rotation.y = time * 2.0;
+                    item.mesh.position.y = Math.sin(time * 3.0) * 0.08;
+                }
+            }
+
+            if (gameState.started && !gameState.paused && !gameState.over && !gameState.cleared) {
+                updatePlayer(delta);
+                updateGhostAI(delta);
+                checkInteractionProximity();
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.onload = function() {
+            initEngine();
+            animate();
+
+            const startBtn = document.getElementById('btn-start');
+            const startHandler = (e) => {
+                if (e) e.preventDefault();
+                audio.init();
+                resetGame();
+            };
+            startBtn.addEventListener('click', startHandler);
+            startBtn.addEventListener('touchstart', startHandler);
+
+            document.getElementById('btn-resume').addEventListener('click', () => togglePause());
+            document.getElementById('btn-restart-pause').addEventListener('click', () => resetGame());
+            document.getElementById('btn-restart').addEventListener('click', () => resetGame());
+            document.getElementById('btn-restart-clear').addEventListener('click', () => resetGame());
+        };
+    </script>
+</body>
+</html>
