@@ -1,0 +1,2128 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CYBER-BREACH: SF Tactical FPS/TPS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@500;600;700&display=swap');
+
+        body {
+            font-family: 'Rajdhani', sans-serif;
+            background-color: #030712;
+            color: #f3f4f6;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .font-orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        /* Glassmorphism & Cyberpunk style borders */
+        .cyber-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(6, 182, 212, 0.35);
+            box-shadow: 0 0 20px rgba(6, 182, 212, 0.15);
+        }
+
+        .cyber-border-red {
+            border-color: rgba(239, 68, 68, 0.6);
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.25);
+        }
+
+        /* Hit marker animation */
+        @keyframes hitmarker-fade {
+            0% { opacity: 1; transform: translate(-50%, -50%) scale(1.25); }
+            100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+        }
+
+        .hit-active {
+            animation: hitmarker-fade 0.22s forwards ease-out;
+        }
+
+        /* Scanline Overlay & CRT Vignette */
+        .scanline {
+            background: linear-gradient(
+                to bottom,
+                rgba(255,255,255,0),
+                rgba(255,255,255,0) 50%,
+                rgba(0, 0, 0, 0.35) 50%,
+                rgba(0, 0, 0, 0.35)
+            );
+            background-size: 100% 4px;
+        }
+
+        .vignette {
+            box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.85);
+        }
+    </style>
+</head>
+<body class="w-screen h-screen relative flex items-center justify-center bg-gray-950">
+
+    <!-- Main Game Viewport Canvas Wrapper -->
+    <div id="game-container" class="relative w-full h-full max-w-[1920px] max-h-[1080px] overflow-hidden flex items-center justify-center">
+        <!-- Render Canvas -->
+        <canvas id="fps-canvas" class="w-full h-full block bg-black cursor-crosshair"></canvas>
+
+        <!-- Visual Filters: Scanline & Screen Flash -->
+        <div class="pointer-events-none absolute inset-0 scanline opacity-40"></div>
+        <div class="pointer-events-none absolute inset-0 vignette"></div>
+        <div id="damage-flash" class="pointer-events-none absolute inset-0 bg-red-600/0 transition-all duration-75"></div>
+
+        <!-- HUD: Top Mission Status & Objectives -->
+        <div id="hud-top" class="absolute top-4 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5 w-11/12 max-w-xl pointer-events-none">
+            <div class="cyber-panel px-6 py-2.5 rounded-xl flex items-center justify-between w-full border-t-2 border-t-cyan-400">
+                <div class="flex items-center gap-3">
+                    <span id="sector-badge" class="bg-cyan-950 text-cyan-400 font-orbitron font-bold text-xs px-2.5 py-1 rounded border border-cyan-500/50 tracking-wider">SECTOR 1</span>
+                    <span id="mission-title" class="font-bold text-base md:text-lg text-gray-100 tracking-wide">전진 진입 구역</span>
+                </div>
+                <div id="objective-progress" class="text-cyan-400 font-orbitron font-semibold text-sm">
+                    적 처치: <span id="obj-count" class="text-white">0 / 4</span>
+                </div>
+            </div>
+            
+            <!-- Dynamic Terminal / Sub-Objective Bar -->
+            <div id="sub-objective-bar" class="w-full cyber-panel px-4 py-2 rounded-lg text-xs text-cyan-300 flex justify-between items-center hidden border-cyan-500/40">
+                <span id="sub-obj-text" class="font-mono font-semibold">데이터 해킹 진행 중...</span>
+                <div class="w-36 bg-gray-900 h-2.5 rounded-full overflow-hidden border border-cyan-500/40 p-0.5">
+                    <div id="sub-obj-progress-fill" class="bg-gradient-to-r from-cyan-500 to-blue-400 h-full w-0 rounded-full transition-all duration-100"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- HUD: Minimap Radar (Top Right) -->
+        <div class="absolute top-4 right-4 cyber-panel p-2 rounded-xl pointer-events-none hidden sm:block border-r-2 border-r-cyan-400">
+            <div class="relative w-36 h-36 rounded-lg overflow-hidden border border-cyan-500/30 bg-gray-950/90">
+                <canvas id="minimap-canvas" width="144" height="144"></canvas>
+            </div>
+        </div>
+
+        <!-- HUD: Center Dynamic Crosshair & Hitmarker -->
+        <div id="crosshair-container" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+            <div id="crosshair" class="relative w-8 h-8 flex items-center justify-center">
+                <div id="ch-top" class="absolute w-0.5 h-2 bg-cyan-400 -translate-y-2.5 transition-all duration-75"></div>
+                <div id="ch-bottom" class="absolute w-0.5 h-2 bg-cyan-400 translate-y-2.5 transition-all duration-75"></div>
+                <div id="ch-left" class="absolute h-0.5 w-2 bg-cyan-400 -translate-x-2.5 transition-all duration-75"></div>
+                <div id="ch-right" class="absolute h-0.5 w-2 bg-cyan-400 translate-x-2.5 transition-all duration-75"></div>
+                <div id="ch-dot" class="w-1 h-1 bg-cyan-300 rounded-full"></div>
+            </div>
+            
+            <!-- Hitmarker FX -->
+            <div id="hitmarker" class="absolute top-1/2 left-1/2 w-6 h-6 -translate-x-1/2 -translate-y-1/2 opacity-0 pointer-events-none">
+                <div class="absolute w-3 h-0.5 bg-red-500 rotate-45 top-1 left-1"></div>
+                <div class="absolute w-3 h-0.5 bg-red-500 -rotate-45 top-1 right-1"></div>
+                <div class="absolute w-3 h-0.5 bg-red-500 -rotate-45 bottom-1 left-1"></div>
+                <div class="absolute w-3 h-0.5 bg-red-500 rotate-45 bottom-1 right-1"></div>
+            </div>
+        </div>
+
+        <!-- HUD: Interactive Action Prompt -->
+        <div id="interaction-prompt" class="absolute bottom-28 left-1/2 -translate-x-1/2 cyber-panel px-4 py-2 rounded-lg text-cyan-300 font-orbitron text-sm hidden flex items-center gap-2 border-cyan-400 animate-pulse pointer-events-none">
+            <span id="prompt-key" class="bg-cyan-500 text-black px-2 py-0.5 rounded font-black text-xs">E</span>
+            <span id="prompt-text">보안 터미널 해킹</span>
+        </div>
+
+        <!-- HUD: Bottom Left Player Health, Shield & View Status -->
+        <div class="absolute bottom-4 left-4 cyber-panel p-4 rounded-xl flex flex-col gap-2.5 w-64 md:w-72 pointer-events-none border-l-2 border-l-cyan-400">
+            <div class="flex justify-between items-center text-xs font-orbitron font-bold">
+                <span class="text-cyan-400 tracking-wider">SPEC-OPS STATUS</span>
+                <div class="flex items-center gap-1.5">
+                    <span id="camera-view-badge" class="bg-cyan-950 text-cyan-300 px-2 py-0.5 rounded border border-cyan-600 text-[10px]">1인칭 [V]</span>
+                    <span id="crouch-indicator" class="text-xs text-amber-400 font-mono hidden">[엄폐]</span>
+                </div>
+            </div>
+
+            <!-- Shield Bar -->
+            <div>
+                <div class="flex justify-between text-xs mb-1 font-orbitron">
+                    <span class="text-cyan-300">SHIELD</span>
+                    <span id="shield-val" class="font-mono text-cyan-300">100 / 100</span>
+                </div>
+                <div class="w-full bg-gray-900 h-2 rounded-full overflow-hidden border border-cyan-900/60 p-0.5">
+                    <div id="shield-bar" class="bg-gradient-to-r from-cyan-500 to-blue-400 h-full w-full rounded-full transition-all duration-150"></div>
+                </div>
+            </div>
+
+            <!-- Health Bar -->
+            <div>
+                <div class="flex justify-between text-xs mb-1 font-orbitron">
+                    <span class="text-emerald-400">HEALTH</span>
+                    <span id="health-val" class="font-mono text-emerald-400">100 / 100</span>
+                </div>
+                <div class="w-full bg-gray-900 h-3 rounded-full overflow-hidden border border-emerald-900/60 p-0.5">
+                    <div id="health-bar" class="bg-gradient-to-r from-emerald-500 to-green-400 h-full w-full rounded-full transition-all duration-150"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- HUD: Bottom Right Weapons, Ammo & Resources -->
+        <div class="absolute bottom-4 right-4 cyber-panel p-4 rounded-xl flex flex-col items-end gap-2 w-64 md:w-72 pointer-events-none border-r-2 border-r-cyan-400">
+            <div class="flex items-center gap-2">
+                <span id="weapon-type-badge" class="bg-cyan-950 text-cyan-400 font-orbitron text-xs font-bold px-2 py-0.5 rounded border border-cyan-700">PRIMARY</span>
+                <span id="weapon-name" class="font-orbitron font-bold text-base md:text-lg text-white">펄스 라이플</span>
+            </div>
+
+            <div class="flex items-baseline gap-2 my-0.5">
+                <span id="ammo-clip" class="font-orbitron font-black text-3xl md:text-4xl text-cyan-400">30</span>
+                <span class="text-gray-500 text-xl font-bold">/</span>
+                <span id="ammo-reserve" class="font-orbitron font-semibold text-lg text-gray-400">180</span>
+            </div>
+
+            <!-- Grenade & Credits HUD -->
+            <div class="flex justify-between w-full pt-2 border-t border-gray-800 text-xs">
+                <div class="flex items-center gap-1.5">
+                    <span class="bg-amber-950/80 text-amber-400 px-1.5 py-0.5 rounded border border-amber-600/50 font-mono font-bold">[G] 플라즈마 수류탄</span>
+                    <span id="grenade-count" class="font-orbitron text-amber-300 font-bold">x3</span>
+                </div>
+                <div class="flex items-center gap-1 font-orbitron text-amber-400">
+                    <span>자원:</span>
+                    <span id="credits-val" class="font-bold">0 CR</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- OVERLAY: START SCREEN -->
+        <div id="start-overlay" class="absolute inset-0 bg-gray-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-50">
+            <div class="max-w-xl cyber-panel p-8 rounded-2xl border-2 border-cyan-500/50 flex flex-col items-center gap-6">
+                <h1 class="font-orbitron text-4xl md:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-teal-300 to-blue-500 tracking-wider">
+                    CYBER-BREACH
+                </h1>
+                <div class="bg-cyan-950/80 border border-cyan-500 px-3 py-1 rounded text-cyan-300 text-xs font-bold font-mono">
+                    ✨ Easy Mode (쉬운 난이도) 적용 완료
+                </div>
+                <p class="text-cyan-200/80 text-xs md:text-sm leading-relaxed">
+                    적 군사 실내 시설에 침투하여 핵심 통제 구역을 순차적으로 확보하십시오.<br>
+                    강화된 체력과 강력한 무기로 손쉽게 적을 제압할 수 있습니다.
+                </p>
+
+                <!-- Controls Info Grid -->
+                <div class="grid grid-cols-2 gap-2.5 text-xs text-left w-full bg-gray-900/80 p-4 rounded-xl border border-gray-800 font-mono">
+                    <div><span class="text-cyan-400 font-bold">WASD</span> : 이동</div>
+                    <div><span class="text-cyan-400 font-bold">마우스</span> : 시점 조작</div>
+                    <div><span class="text-cyan-400 font-bold">좌클릭</span> : 사격</div>
+                    <div><span class="text-cyan-400 font-bold">우클릭</span> : 조준 확대 (ADS)</div>
+                    <div><span class="text-cyan-400 font-bold">V</span> : 시점 전환 (1인칭/3인칭)</div>
+                    <div><span class="text-cyan-400 font-bold">1 / 2</span> : 무기 전환</div>
+                    <div><span class="text-cyan-400 font-bold">R</span> : 재장전</div>
+                    <div><span class="text-cyan-400 font-bold">G</span> : 수류탄 투척</div>
+                    <div><span class="text-cyan-400 font-bold">Ctrl / C</span> : 앉기 (엄폐)</div>
+                    <div><span class="text-cyan-400 font-bold">E</span> : 상호작용 (문/터미널)</div>
+                </div>
+
+                <button id="btn-start" class="w-full py-4 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-orbitron font-black text-xl rounded-xl transition-all shadow-lg shadow-cyan-500/30 active:scale-98">
+                    작전 개시 (클릭하여 시작)
+                </button>
+            </div>
+        </div>
+
+        <!-- OVERLAY: PAUSE MENU -->
+        <div id="pause-overlay" class="absolute inset-0 bg-gray-950/85 backdrop-blur-md flex flex-col items-center justify-center p-6 hidden z-50">
+            <div class="max-w-md w-full cyber-panel p-8 rounded-2xl border-2 border-cyan-500/50 flex flex-col items-center text-center gap-6">
+                <h2 class="font-orbitron text-3xl font-black text-cyan-400 tracking-wider">작전 일시 중지</h2>
+                <div class="w-full bg-gray-900/90 p-4 rounded-xl border border-gray-800 text-xs font-mono text-left space-y-1.5 text-gray-300">
+                    <div>- <span class="text-cyan-400">ESC</span> 키를 눌러 게임을 재개할 수 있습니다.</div>
+                    <div>- <span class="text-cyan-400">V</span> 키를 눌러 1인칭/3인칭 시점을 언제든 전환하십시오.</div>
+                    <div>- 적의 화력이 강한 구역에서는 엄폐물[Ctrl]을 적극 활용하십시오.</div>
+                </div>
+                <div class="flex flex-col gap-3 w-full">
+                    <button id="btn-resume" class="w-full py-3 bg-cyan-600 hover:bg-cyan-500 text-white font-orbitron font-bold text-base rounded-xl transition-all">
+                        작전 재개
+                    </button>
+                    <button id="btn-pause-restart" class="w-full py-3 bg-red-900/60 hover:bg-red-800 text-red-200 font-orbitron font-bold text-base rounded-xl transition-all border border-red-700/50">
+                        미션 재시작
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- OVERLAY: UPGRADE SHOP / INTERMISSION -->
+        <div id="upgrade-overlay" class="absolute inset-0 bg-gray-950/95 backdrop-blur-md flex flex-col items-center justify-center p-6 hidden z-40">
+            <div class="max-w-2xl w-full cyber-panel p-8 rounded-2xl border-2 border-cyan-500/50 flex flex-col gap-6">
+                <div class="flex justify-between items-center border-b border-gray-800 pb-4">
+                    <div>
+                        <h2 class="font-orbitron text-2xl font-bold text-cyan-400">구역 클리어 - 전술 장비 강화</h2>
+                        <p id="upgrade-subtitle" class="text-xs text-gray-400 mt-1">획득한 자원으로 전술 수트 및 무기 성능을 강화하십시오.</p>
+                    </div>
+                    <div class="font-orbitron text-xl text-amber-400 font-bold">
+                        보유 자원: <span id="shop-credits">0</span> CR
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- Upgrade 1: Damage -->
+                    <div class="bg-gray-900/80 p-4 rounded-xl border border-gray-800 flex justify-between items-center">
+                        <div>
+                            <div class="font-bold text-gray-200 text-sm">화력 강화</div>
+                            <div class="text-xs text-gray-400">모든 무기 피해량 +20%</div>
+                            <div id="upg-dmg-lvl" class="text-xs text-cyan-400 mt-1">Lv. 0</div>
+                        </div>
+                        <button id="btn-upg-dmg" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 font-bold text-xs rounded-lg transition-colors text-white">
+                            100 CR
+                        </button>
+                    </div>
+
+                    <!-- Upgrade 2: Shield / Health -->
+                    <div class="bg-gray-900/80 p-4 rounded-xl border border-gray-800 flex justify-between items-center">
+                        <div>
+                            <div class="font-bold text-gray-200 text-sm">실드/내구도 증대</div>
+                            <div class="text-xs text-gray-400">최대 실드 및 체력 +25</div>
+                            <div id="upg-hp-lvl" class="text-xs text-cyan-400 mt-1">Lv. 0</div>
+                        </div>
+                        <button id="btn-upg-hp" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 font-bold text-xs rounded-lg transition-colors text-white">
+                            100 CR
+                        </button>
+                    </div>
+
+                    <!-- Upgrade 3: Reload Speed -->
+                    <div class="bg-gray-900/80 p-4 rounded-xl border border-gray-800 flex justify-between items-center">
+                        <div>
+                            <div class="font-bold text-gray-200 text-sm">고속 재장전</div>
+                            <div class="text-xs text-gray-400">재장전 속도 25% 상승</div>
+                            <div id="upg-reload-lvl" class="text-xs text-cyan-400 mt-1">Lv. 0</div>
+                        </div>
+                        <button id="btn-upg-reload" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 font-bold text-xs rounded-lg transition-colors text-white">
+                            120 CR
+                        </button>
+                    </div>
+
+                    <!-- Upgrade 4: Grenade Pack -->
+                    <div class="bg-gray-900/80 p-4 rounded-xl border border-gray-800 flex justify-between items-center">
+                        <div>
+                            <div class="font-bold text-gray-200 text-sm">수류탄 보급</div>
+                            <div class="text-xs text-gray-400">수류탄 +2 개 충전</div>
+                            <div id="upg-grenade-lvl" class="text-xs text-cyan-400 mt-1">보급품</div>
+                        </div>
+                        <button id="btn-upg-grenade" class="px-4 py-2 bg-amber-600 hover:bg-amber-500 font-bold text-xs rounded-lg transition-colors text-white">
+                            80 CR
+                        </button>
+                    </div>
+                </div>
+
+                <button id="btn-next-sector" class="w-full py-3.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-black font-orbitron font-black text-lg rounded-xl transition-all shadow-lg shadow-emerald-500/20">
+                    다음 구역 진입
+                </button>
+            </div>
+        </div>
+
+        <!-- OVERLAY: GAME OVER / VICTORY -->
+        <div id="end-overlay" class="absolute inset-0 bg-gray-950/95 backdrop-blur-md flex flex-col items-center justify-center p-6 hidden z-50">
+            <div id="end-modal" class="max-w-md w-full cyber-panel p-8 rounded-2xl border-2 border-red-500/50 flex flex-col items-center text-center gap-6">
+                <h2 id="end-title" class="font-orbitron text-3xl font-black text-red-500 tracking-wider">작전 실패</h2>
+                <p id="end-desc" class="text-gray-300 text-sm">요원이 전사하였거나 임무 목표가 파기되었습니다.</p>
+
+                <div class="w-full bg-gray-900/90 p-4 rounded-xl border border-gray-800 flex flex-col gap-2 font-mono text-sm">
+                    <div class="flex justify-between"><span>도달 구역:</span><span id="stat-sector" class="text-cyan-400">SECTOR 1</span></div>
+                    <div class="flex justify-between"><span>처치한 적:</span><span id="stat-kills" class="text-cyan-400">0</span></div>
+                    <div class="flex justify-between"><span>획득 자원:</span><span id="stat-credits" class="text-amber-400">0 CR</span></div>
+                </div>
+
+                <button id="btn-restart" class="w-full py-4 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-orbitron font-bold text-lg rounded-xl transition-all shadow-lg">
+                    미션 재시작
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // AUDIO SYNTHESIZER ENGINE (Web Audio API)
+        // ==========================================
+        class SoundEngine {
+            constructor() {
+                this.ctx = null;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContext();
+                }
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            playShoot(isSecondary = false) {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                if (!isSecondary) {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(500, now);
+                    osc.frequency.exponentialRampToValueAtTime(70, now + 0.08);
+
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+                } else {
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(700, now);
+                    osc.frequency.exponentialRampToValueAtTime(35, now + 0.18);
+
+                    gain.gain.setValueAtTime(0.4, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+                }
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + (isSecondary ? 0.18 : 0.08));
+            }
+
+            playHitmarker() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(1200, now);
+                osc.frequency.setValueAtTime(2400, now + 0.03);
+
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.06);
+            }
+
+            playExplosion() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                
+                const bufferSize = this.ctx.sampleRate * 0.6;
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(900, now);
+                filter.frequency.linearRampToValueAtTime(40, now + 0.6);
+
+                const gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(0.7, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                noise.start(now);
+                noise.stop(now + 0.6);
+            }
+
+            playReload() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(320, now);
+                osc.frequency.setValueAtTime(640, now + 0.06);
+
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.14);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.14);
+            }
+
+            playEnemyShoot() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(240, now);
+                osc.frequency.exponentialRampToValueAtTime(50, now + 0.1);
+
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            }
+
+            playDoor() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.linearRampToValueAtTime(300, now + 0.2);
+
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.25);
+            }
+        }
+
+        const audio = new SoundEngine();
+
+        // ==========================================
+        // CONFIG & ENGINE CONSTANTS
+        // ==========================================
+        const CONFIG = {
+            FOV: Math.PI / 3, // 60 degrees FOV
+            RAY_COUNT: 320,   // Raycasting resolution
+            MAX_DEPTH: 20.0,
+            PLAYER_SPEED: 3.4,
+            PLAYER_CROUCH_SPEED: 1.8,
+            ROTATION_SPEED: 0.0022,
+            MAP_SIZE: 16,
+            CELL_SIZE: 1.0,
+            TPS_CAMERA_DIST: 1.8 // Camera setback distance in TPS mode
+        };
+
+        // Weapon Stats Database
+        const WEAPONS = {
+            PRIMARY: {
+                name: '펄스 소총',
+                type: 'PRIMARY',
+                damage: 48,
+                fireRate: 100,
+                magSize: 60,
+                reloadTime: 900,
+                spread: 0.015,
+                recoil: 0.015
+            },
+            SECONDARY: {
+                name: '플라즈마 매그넘',
+                type: 'SECONDARY',
+                damage: 110,
+                fireRate: 220,
+                magSize: 20,
+                reloadTime: 800,
+                spread: 0.005,
+                recoil: 0.03
+            }
+        };
+
+        // ==========================================
+        // INPUT CONTROLLER
+        // ==========================================
+        const INPUT = {
+            keys: {},
+            mouseDx: 0,
+            mouseDy: 0,
+            isMouseDown: false,
+            isRightMouseDown: false,
+            pointerLocked: false,
+
+            init(canvas) {
+                window.addEventListener('keydown', (e) => {
+                    this.keys[e.code] = true;
+                    
+                    if (e.code === 'KeyR' && GAME.state === 'PLAYING') PLAYER.reload();
+                    if (e.code === 'KeyG' && GAME.state === 'PLAYING') PLAYER.throwGrenade();
+                    if (e.code === 'KeyV' && GAME.state === 'PLAYING') PLAYER.toggleCameraMode();
+                    if (e.code === 'Digit1') PLAYER.switchWeapon('PRIMARY');
+                    if (e.code === 'Digit2') PLAYER.switchWeapon('SECONDARY');
+                    if (e.code === 'KeyE') PLAYER.interact();
+                    
+                    if (e.code === 'Escape') {
+                        if (GAME.state === 'PLAYING') GAME.pauseGame();
+                        else if (GAME.state === 'PAUSED') GAME.resumeGame();
+                    }
+                });
+
+                window.addEventListener('keyup', (e) => {
+                    this.keys[e.code] = false;
+                });
+
+                canvas.addEventListener('mousedown', (e) => {
+                    if (e.button === 0) this.isMouseDown = true;
+                    if (e.button === 2) this.isRightMouseDown = true;
+                });
+
+                canvas.addEventListener('mouseup', (e) => {
+                    if (e.button === 0) this.isMouseDown = false;
+                    if (e.button === 2) this.isRightMouseDown = false;
+                });
+
+                canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+                document.addEventListener('mousemove', (e) => {
+                    if (this.pointerLocked) {
+                        this.mouseDx += e.movementX;
+                        this.mouseDy += e.movementY;
+                    }
+                });
+
+                document.addEventListener('pointerlockchange', () => {
+                    this.pointerLocked = (document.pointerLockElement === canvas);
+                });
+            },
+
+            clearMouse() {
+                this.mouseDx = 0;
+                this.mouseDy = 0;
+            }
+        };
+
+        // ==========================================
+        // SECTOR MAP DEFINITIONS (16x16 Grid Maps)
+        // ==========================================
+        const SECTOR_MAPS = [
+            {
+                name: "SECTOR 1: 격납고 침투 구역",
+                objective: "구역 내 정찰 드론 부대 전멸",
+                targetKills: 4,
+                hasTerminal: false,
+                grid: [
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                    [1,0,0,0,0,4,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,4,0,0,4,0,4,4,0,0,4,4,1,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,4,0,0,0,1],
+                    [1,4,5,4,4,4,4,0,4,4,0,4,0,4,4,1],
+                    [1,0,0,0,0,0,4,0,0,4,0,0,0,0,0,1],
+                    [1,0,4,4,0,0,4,0,0,4,0,4,4,0,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,4,0,4,4,4,0,4,4,0,4,4,4,0,4,1],
+                    [1,0,0,0,0,4,0,0,0,0,4,0,0,0,0,1],
+                    [1,0,4,0,0,4,0,4,4,0,4,0,4,0,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,4,4,0,4,4,4,5,4,4,4,0,4,4,4,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+                ],
+                startPos: { x: 2.5, y: 2.5 },
+                enemySpawns: [
+                    { x: 8.5, y: 2.5, type: 'SCOUT' },
+                    { x: 13.5, y: 3.5, type: 'ENFORCER' },
+                    { x: 3.5, y: 10.5, type: 'SCOUT' },
+                    { x: 12.5, y: 11.5, type: 'ENFORCER' }
+                ]
+            },
+            {
+                name: "SECTOR 2: 보안 제어 센터",
+                objective: "보안 터미널 데이터 다운로드 완료",
+                targetKills: 6,
+                hasTerminal: true,
+                terminalPos: { x: 8.5, y: 8.5 },
+                grid: [
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                    [1,0,0,0,0,0,4,0,0,4,0,0,0,0,0,1],
+                    [1,0,4,4,0,0,4,0,0,4,0,0,4,4,0,1],
+                    [1,0,4,4,0,0,0,0,0,0,0,0,4,4,0,1],
+                    [1,0,0,0,0,4,4,5,5,4,4,0,0,0,0,1],
+                    [1,4,0,4,4,4,0,0,0,0,4,4,4,0,4,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,0,0,0,2,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,4,0,4,4,4,0,0,0,0,4,4,4,0,4,1],
+                    [1,0,0,0,0,4,4,5,5,4,4,0,0,0,0,1],
+                    [1,0,4,4,0,0,0,0,0,0,0,0,4,4,0,1],
+                    [1,0,4,4,0,0,4,0,0,4,0,0,4,4,0,1],
+                    [1,0,0,0,0,0,4,0,0,4,0,0,0,0,0,1],
+                    [1,0,0,0,0,0,4,0,0,4,0,0,0,0,0,1],
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+                ],
+                startPos: { x: 2.5, y: 13.5 },
+                enemySpawns: [
+                    { x: 13.5, y: 2.5, type: 'ENFORCER' },
+                    { x: 2.5, y: 2.5, type: 'SCOUT' },
+                    { x: 13.5, y: 13.5, type: 'HEAVY' },
+                    { x: 8.5, y: 3.5, type: 'SNIPER' },
+                    { x: 3.5, y: 7.5, type: 'SCOUT' },
+                    { x: 12.5, y: 7.5, type: 'ENFORCER' }
+                ]
+            },
+            {
+                name: "SECTOR 3: 코어 반응로 통제실",
+                objective: "중갑 센투리온 및 반응로 방어선 전멸",
+                targetKills: 8,
+                hasTerminal: false,
+                grid: [
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                    [1,0,0,0,0,0,0,4,4,0,0,0,0,0,0,1],
+                    [1,0,3,0,0,4,0,0,0,0,4,0,0,3,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,4,4,0,4,4,4,4,0,4,4,0,0,1],
+                    [1,0,0,4,0,0,0,0,0,0,0,0,4,0,0,1],
+                    [1,0,4,0,0,0,4,0,0,4,0,0,0,4,0,1],
+                    [1,4,0,0,0,0,0,0,0,0,0,0,0,0,4,1],
+                    [1,4,0,0,0,0,0,0,0,0,0,0,0,0,4,1],
+                    [1,0,4,0,0,0,4,0,0,4,0,0,0,4,0,1],
+                    [1,0,0,4,0,0,0,0,0,0,0,0,4,0,0,1],
+                    [1,0,0,4,4,0,4,4,4,4,0,4,4,0,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,3,0,0,4,0,0,0,0,4,0,0,3,0,1],
+                    [1,0,0,0,0,0,0,4,4,0,0,0,0,0,0,1],
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+                ],
+                startPos: { x: 8.5, y: 13.5 },
+                enemySpawns: [
+                    { x: 3.5, y: 3.5, type: 'HEAVY' },
+                    { x: 12.5, y: 3.5, type: 'HEAVY' },
+                    { x: 3.5, y: 12.5, type: 'SNIPER' },
+                    { x: 12.5, y: 12.5, type: 'SNIPER' },
+                    { x: 8.5, y: 2.5, type: 'SCOUT' },
+                    { x: 8.5, y: 7.5, type: 'SCOUT' },
+                    { x: 2.5, y: 8.5, type: 'ENFORCER' },
+                    { x: 13.5, y: 8.5, type: 'HEAVY' }
+                ]
+            }
+        ];
+
+        // ==========================================
+        // PLAYER OBJECT
+        // ==========================================
+        const PLAYER = {
+            x: 2.5,
+            y: 2.5,
+            dirX: 1,
+            dirY: 0,
+            planeX: 0,
+            planeY: 0.66,
+            pitch: 0,
+            crouchOffset: 0,
+            
+            cameraMode: 'FPS', // 'FPS' (1st Person) or 'TPS' (3rd Person)
+            
+            maxHealth: 200,
+            health: 200,
+            maxShield: 200,
+            shield: 200,
+            shieldRegenTimer: 0,
+
+            isCrouching: false,
+            isADS: false,
+            activeWeaponKey: 'PRIMARY',
+            
+            ammo: {
+                PRIMARY: { clip: 60, reserve: 300 },
+                SECONDARY: { clip: 20, reserve: 120 }
+            },
+            grenades: 5,
+            credits: 200,
+            kills: 0,
+
+            lastShotTime: 0,
+            isReloading: false,
+            recoilOffset: 0,
+
+            upgrades: {
+                damageMult: 1.0,
+                hpBonus: 0,
+                reloadSpeedMult: 1.0
+            },
+
+            init() {
+                this.planeX = 0;
+                this.planeY = 0.66;
+                this.dirX = 1;
+                this.dirY = 0;
+                this.pitch = 0;
+                this.crouchOffset = 0;
+                this.health = this.maxHealth;
+                this.shield = this.maxShield;
+                this.ammo.PRIMARY.clip = WEAPONS.PRIMARY.magSize;
+                this.ammo.SECONDARY.clip = WEAPONS.SECONDARY.magSize;
+            },
+
+            toggleCameraMode() {
+                this.cameraMode = (this.cameraMode === 'FPS') ? 'TPS' : 'FPS';
+            },
+
+            update(dt) {
+                if (GAME.state !== 'PLAYING') return;
+
+                // Shield Regeneration (빠른 자동 회복)
+                this.shieldRegenTimer += dt;
+                if (this.shieldRegenTimer > 1.0 && this.shield < this.maxShield) {
+                    this.shield = Math.min(this.maxShield, this.shield + dt * 60);
+                }
+
+                // Crouch & ADS state
+                this.isCrouching = INPUT.keys['ControlLeft'] || INPUT.keys['KeyC'];
+                this.isADS = INPUT.isRightMouseDown;
+
+                // Smooth Crouch Camera Lerp
+                const targetCrouch = this.isCrouching ? 45 : 0;
+                this.crouchOffset += (targetCrouch - this.crouchOffset) * dt * 12;
+
+                // Mouse View Yaw Rotation
+                if (INPUT.mouseDx !== 0) {
+                    const rotSpeed = CONFIG.ROTATION_SPEED * (this.isADS ? 0.45 : 1.0);
+                    const angle = -INPUT.mouseDx * rotSpeed;
+                    
+                    const oldDirX = this.dirX;
+                    this.dirX = this.dirX * Math.cos(angle) - this.dirY * Math.sin(angle);
+                    this.dirY = oldDirX * Math.sin(angle) + this.dirY * Math.cos(angle);
+
+                    const oldPlaneX = this.planeX;
+                    this.planeX = this.planeX * Math.cos(angle) - this.planeY * Math.sin(angle);
+                    this.planeY = oldPlaneX * Math.sin(angle) + this.planeY * Math.cos(angle);
+                }
+
+                // Mouse View Pitch Rotation
+                if (INPUT.mouseDy !== 0) {
+                    this.pitch -= INPUT.mouseDy * 0.8;
+                    this.pitch = Math.max(-180, Math.min(180, this.pitch));
+                }
+
+                // WASD Movement
+                const moveSpeed = (this.isCrouching ? CONFIG.PLAYER_CROUCH_SPEED : CONFIG.PLAYER_SPEED) * dt;
+                let moveX = 0;
+                let moveY = 0;
+
+                if (INPUT.keys['KeyW']) { moveX += this.dirX; moveY += this.dirY; }
+                if (INPUT.keys['KeyS']) { moveX -= this.dirX; moveY -= this.dirY; }
+                if (INPUT.keys['KeyA']) { moveX -= this.planeX; moveY -= this.planeY; }
+                if (INPUT.keys['KeyD']) { moveX += this.planeX; moveY += this.planeY; }
+
+                if (moveX !== 0 || moveY !== 0) {
+                    const len = Math.hypot(moveX, moveY);
+                    moveX = (moveX / len) * moveSpeed;
+                    moveY = (moveY / len) * moveSpeed;
+
+                    const newX = this.x + moveX;
+                    const newY = this.y + moveY;
+                    const r = 0.28;
+
+                    if (!this.isSolidWall(newX + Math.sign(moveX) * r, this.y)) this.x = newX;
+                    if (!this.isSolidWall(this.x, newY + Math.sign(moveY) * r)) this.y = newY;
+                }
+
+                if (INPUT.isMouseDown) {
+                    this.shoot();
+                }
+
+                this.recoilOffset *= Math.pow(0.01, dt);
+
+                INPUT.clearMouse();
+            },
+
+            isSolidWall(x, y) {
+                const mapX = Math.floor(x);
+                const mapY = Math.floor(y);
+                if (mapX < 0 || mapX >= CONFIG.MAP_SIZE || mapY < 0 || mapY >= CONFIG.MAP_SIZE) return true;
+                const cell = GAME.currentMap.grid[mapY][mapX];
+                return cell === 1 || cell === 3 || cell === 5;
+            },
+
+            shoot() {
+                const now = performance.now();
+                const weapon = WEAPONS[this.activeWeaponKey];
+
+                if (this.isReloading || now - this.lastShotTime < weapon.fireRate) return;
+
+                const currentAmmo = this.ammo[this.activeWeaponKey];
+                if (currentAmmo.clip <= 0) {
+                    this.reload();
+                    return;
+                }
+
+                currentAmmo.clip--;
+                this.lastShotTime = now;
+                this.recoilOffset += weapon.recoil;
+
+                audio.playShoot(this.activeWeaponKey === 'SECONDARY');
+
+                const spread = weapon.spread * (this.isADS ? 0.35 : 1.0) * (this.isCrouching ? 0.55 : 1.0);
+                const angleOffset = (Math.random() - 0.5) * spread;
+
+                const bDirX = this.dirX + this.planeX * angleOffset;
+                const bDirY = this.dirY + this.planeY * angleOffset;
+
+                let hitEnemy = null;
+                let minDist = 999;
+                const baseDamage = weapon.damage * this.upgrades.damageMult;
+
+                ENEMIES.forEach(enemy => {
+                    if (enemy.hp <= 0) return;
+                    const dx = enemy.x - this.x;
+                    const dy = enemy.y - this.y;
+                    const dist = Math.hypot(dx, dy);
+
+                    const dot = (dx * bDirX + dy * bDirY) / dist;
+                    // 보정 범위 확대 (dot > 0.94로 약간만 조준해도 자동 판정)
+                    if (dot > 0.94 && dist < minDist) {
+                        if (!this.checkWallBlock(this.x, this.y, enemy.x, enemy.y)) {
+                            minDist = dist;
+                            hitEnemy = enemy;
+                        }
+                    }
+                });
+
+                if (hitEnemy) {
+                    let finalDmg = baseDamage;
+                    if (hitEnemy.inCover) finalDmg *= 0.5;
+
+                    hitEnemy.takeDamage(finalDmg);
+                    UI.triggerHitmarker();
+                    audio.playHitmarker();
+                    EFFECTS.addSpark(hitEnemy.x, hitEnemy.y, '#06b6d4');
+                    EFFECTS.addDamageText(hitEnemy.x, hitEnemy.y, finalDmg, false, hitEnemy.inCover);
+                }
+
+                EFFECTS.addShellCasing();
+            },
+
+            checkWallBlock(x1, y1, x2, y2) {
+                const steps = 25;
+                for (let i = 0; i <= steps; i++) {
+                    const t = i / steps;
+                    const px = x1 + (x2 - x1) * t;
+                    const py = y1 + (y2 - y1) * t;
+                    if (this.isSolidWall(px, py)) return true;
+                }
+                return false;
+            },
+
+            reload() {
+                const ammo = this.ammo[this.activeWeaponKey];
+                const weapon = WEAPONS[this.activeWeaponKey];
+
+                if (this.isReloading || ammo.clip >= weapon.magSize || ammo.reserve <= 0) return;
+
+                this.isReloading = true;
+                audio.playReload();
+
+                const actualReloadTime = weapon.reloadTime / this.upgrades.reloadSpeedMult;
+
+                setTimeout(() => {
+                    const needed = weapon.magSize - ammo.clip;
+                    const toAdd = Math.min(needed, ammo.reserve);
+                    ammo.clip += toAdd;
+                    ammo.reserve -= toAdd;
+                    this.isReloading = false;
+                }, actualReloadTime);
+            },
+
+            switchWeapon(typeKey) {
+                if (this.activeWeaponKey === typeKey || this.isReloading) return;
+                this.activeWeaponKey = typeKey;
+            },
+
+            throwGrenade() {
+                if (this.grenades <= 0 || GAME.state !== 'PLAYING') return;
+                this.grenades--;
+
+                const throwDist = 4.8;
+                const targetX = this.x + this.dirX * throwDist;
+                const targetY = this.y + this.dirY * throwDist;
+
+                EFFECTS.addGrenade(this.x, this.y, targetX, targetY);
+            },
+
+            takeDamage(amount) {
+                const currentCellX = Math.floor(this.x);
+                const currentCellY = Math.floor(this.y);
+                if (this.isCrouching && GAME.currentMap.grid[currentCellY]?.[currentCellX] === 4) {
+                    amount *= 0.45;
+                }
+
+                this.shieldRegenTimer = 0;
+                
+                if (this.shield > 0) {
+                    if (this.shield >= amount) {
+                        this.shield -= amount;
+                        amount = 0;
+                    } else {
+                        amount -= this.shield;
+                        this.shield = 0;
+                    }
+                }
+
+                if (amount > 0) {
+                    this.health -= amount;
+                    UI.triggerDamageFlash();
+                    EFFECTS.addScreenShake(6);
+                    if (this.health <= 0) {
+                        this.health = 0;
+                        GAME.gameOver(false);
+                    }
+                }
+            },
+
+            interact() {
+                const frontX = Math.floor(this.x + this.dirX * 1.2);
+                const frontY = Math.floor(this.y + this.dirY * 1.2);
+                const grid = GAME.currentMap.grid;
+
+                if (frontY >= 0 && frontY < CONFIG.MAP_SIZE && frontX >= 0 && frontX < CONFIG.MAP_SIZE) {
+                    const cell = grid[frontY][frontX];
+                    if (cell === 5) {
+                        grid[frontY][frontX] = 0;
+                        audio.playDoor();
+                        return;
+                    }
+                }
+
+                if (GAME.currentMap.hasTerminal) {
+                    const term = GAME.currentMap.terminalPos;
+                    const dist = Math.hypot(this.x - term.x, this.y - term.y);
+                    if (dist < 2.0) {
+                        MISSION.startTerminalHack();
+                    }
+                }
+            }
+        };
+
+        // ==========================================
+        // ENEMY AI ENGINE
+        // ==========================================
+        class Enemy {
+            constructor(x, y, type) {
+                this.x = x;
+                this.y = y;
+                this.type = type;
+                
+                if (type === 'SCOUT') {
+                    this.maxHp = 40;
+                    this.speed = 2.2;
+                    this.damage = 5;
+                    this.fireInterval = 850;
+                    this.color = '#00f0ff';
+                } else if (type === 'ENFORCER') {
+                    this.maxHp = 80;
+                    this.speed = 1.4;
+                    this.damage = 9;
+                    this.fireInterval = 1200;
+                    this.color = '#ffcc00';
+                } else if (type === 'SNIPER') {
+                    this.maxHp = 50;
+                    this.speed = 1.1;
+                    this.damage = 22;
+                    this.fireInterval = 2200;
+                    this.color = '#a855f7';
+                } else { // HEAVY / DREADNOUGHT
+                    this.maxHp = 160;
+                    this.speed = 0.85;
+                    this.damage = 16;
+                    this.fireInterval = 1700;
+                    this.color = '#ff0055';
+                }
+
+                this.hp = this.maxHp;
+                this.lastShot = 0;
+                this.inCover = false;
+                this.flankDir = Math.random() < 0.5 ? 1 : -1;
+            }
+
+            update(dt) {
+                if (this.hp <= 0) return;
+
+                const dx = PLAYER.x - this.x;
+                const dy = PLAYER.y - this.y;
+                const distToPlayer = Math.hypot(dx, dy);
+
+                const hasLOS = !PLAYER.checkWallBlock(this.x, this.y, PLAYER.x, PLAYER.y);
+
+                if (hasLOS) {
+                    const cX = Math.floor(this.x);
+                    const cY = Math.floor(this.y);
+                    this.inCover = (GAME.currentMap.grid[cY]?.[cX] === 4);
+
+                    const isLowHp = (this.hp / this.maxHp) < 0.3;
+
+                    if (distToPlayer > (isLowHp ? 1.5 : 3.2)) {
+                        const moveX = (dx / distToPlayer) * this.speed * dt;
+                        const moveY = (dy / distToPlayer) * this.speed * dt;
+                        
+                        const strafeX = (-dy / distToPlayer) * this.speed * 0.45 * this.flankDir * dt;
+                        const strafeY = (dx / distToPlayer) * this.speed * 0.45 * this.flankDir * dt;
+
+                        if (!PLAYER.isSolidWall(this.x + moveX + strafeX, this.y)) this.x += moveX + strafeX;
+                        if (!PLAYER.isSolidWall(this.x, this.y + moveY + strafeY)) this.y += moveY + strafeY;
+                    }
+
+                    const now = performance.now();
+                    if (now - this.lastShot > this.fireInterval) {
+                        this.lastShot = now;
+                        PLAYER.takeDamage(this.damage);
+                        audio.playEnemyShoot();
+                        EFFECTS.addSpark(PLAYER.x, PLAYER.y, '#ef4444');
+                    }
+                } else {
+                    this.inCover = false;
+                    const moveX = (dx / distToPlayer) * this.speed * 0.85 * dt;
+                    const moveY = (dy / distToPlayer) * this.speed * 0.85 * dt;
+                    if (!PLAYER.isSolidWall(this.x + moveX, this.y)) this.x += moveX;
+                    if (!PLAYER.isSolidWall(this.x, this.y + moveY)) this.y += moveY;
+                }
+            }
+
+            takeDamage(amount) {
+                this.hp -= amount;
+                if (this.hp <= 0) {
+                    this.hp = 0;
+                    PLAYER.kills++;
+                    const reward = this.type === 'HEAVY' ? 90 : (this.type === 'ENFORCER' ? 55 : (this.type === 'SNIPER' ? 70 : 35));
+                    PLAYER.credits += reward;
+                    MISSION.onEnemyKilled();
+                }
+            }
+        }
+
+        let ENEMIES = [];
+
+        // ==========================================
+        // VISUAL EFFECTS ENGINE
+        // ==========================================
+        const EFFECTS = {
+            sparks: [],
+            grenades: [],
+            damageTexts: [],
+            screenShake: 0,
+
+            addSpark(x, y, color = '#38bdf8') {
+                for (let i = 0; i < 5; i++) {
+                    this.sparks.push({
+                        x, y,
+                        vx: (Math.random() - 0.5) * 3,
+                        vy: (Math.random() - 0.5) * 3,
+                        life: 0.2,
+                        color
+                    });
+                }
+            },
+
+            addDamageText(x, y, amount, isGrenade = false, inCover = false) {
+                this.damageTexts.push({
+                    x: x + (Math.random() - 0.5) * 0.3,
+                    y: y + (Math.random() - 0.5) * 0.3,
+                    amount: Math.round(amount),
+                    life: 0.65,
+                    maxLife: 0.65,
+                    isGrenade,
+                    inCover
+                });
+            },
+
+            addShellCasing() {},
+
+            addGrenade(sx, sy, tx, ty) {
+                this.grenades.push({
+                    x: sx, y: sy,
+                    targetX: tx, targetY: ty,
+                    progress: 0
+                });
+            },
+
+            addScreenShake(intensity) {
+                this.screenShake = Math.max(this.screenShake, intensity);
+            },
+
+            update(dt) {
+                if (this.screenShake > 0) {
+                    this.screenShake -= dt * 20;
+                    if (this.screenShake < 0) this.screenShake = 0;
+                }
+
+                for (let i = this.sparks.length - 1; i >= 0; i--) {
+                    const s = this.sparks[i];
+                    s.x += s.vx * dt;
+                    s.y += s.vy * dt;
+                    s.life -= dt;
+                    if (s.life <= 0) this.sparks.splice(i, 1);
+                }
+
+                for (let i = this.damageTexts.length - 1; i >= 0; i--) {
+                    const dtText = this.damageTexts[i];
+                    dtText.life -= dt;
+                    if (dtText.life <= 0) this.damageTexts.splice(i, 1);
+                }
+
+                for (let i = this.grenades.length - 1; i >= 0; i--) {
+                    const g = this.grenades[i];
+                    g.progress += dt * 2.8;
+                    g.x = g.x + (g.targetX - g.x) * dt * 4.5;
+                    g.y = g.y + (g.targetY - g.y) * dt * 4.5;
+
+                    if (g.progress >= 1.0) {
+                        audio.playExplosion();
+                        this.addScreenShake(14);
+                        
+                        ENEMIES.forEach(e => {
+                            if (e.hp <= 0) return;
+                            const dist = Math.hypot(e.x - g.targetX, e.y - g.targetY);
+                            if (dist < 3.8) {
+                                const dmg = (1 - dist / 3.8) * 200;
+                                e.takeDamage(dmg);
+                                this.addDamageText(e.x, e.y, dmg, true);
+                            }
+                        });
+
+                        this.grenades.splice(i, 1);
+                    }
+                }
+            }
+        };
+
+        // ==========================================
+        // 2.5D RAYCASTING RENDERER ENGINE (FPS / TPS)
+        // ==========================================
+        class Renderer {
+            constructor(canvas) {
+                this.canvas = canvas;
+                this.ctx = canvas.getContext('2d');
+                this.resize();
+                window.addEventListener('resize', () => this.resize());
+            }
+
+            resize() {
+                this.canvas.width = this.canvas.parentElement.clientWidth;
+                this.canvas.height = this.canvas.parentElement.clientHeight;
+            }
+
+            // Calculates TPS camera position with wall collision detection
+            getEffectiveCameraPos() {
+                if (PLAYER.cameraMode === 'FPS') {
+                    return { x: PLAYER.x, y: PLAYER.y };
+                }
+
+                // TPS Mode: Position camera behind player
+                const targetDist = CONFIG.TPS_CAMERA_DIST;
+                const steps = 15;
+                let actualDist = targetDist;
+
+                for (let i = 1; i <= steps; i++) {
+                    const testDist = (targetDist * i) / steps;
+                    const testX = PLAYER.x - PLAYER.dirX * testDist;
+                    const testY = PLAYER.y - PLAYER.dirY * testDist;
+
+                    if (PLAYER.isSolidWall(testX, testY)) {
+                        actualDist = Math.max(0.2, testDist - 0.25);
+                        break;
+                    }
+                }
+
+                return {
+                    x: PLAYER.x - PLAYER.dirX * actualDist,
+                    y: PLAYER.y - PLAYER.dirY * actualDist
+                };
+            }
+
+            render() {
+                const ctx = this.ctx;
+                const width = this.canvas.width;
+                const height = this.canvas.height;
+
+                const shakeX = (Math.random() - 0.5) * EFFECTS.screenShake;
+                const shakeY = (Math.random() - 0.5) * EFFECTS.screenShake;
+
+                ctx.save();
+                ctx.translate(shakeX, shakeY);
+
+                ctx.fillStyle = '#030712';
+                ctx.fillRect(0, 0, width, height);
+
+                const horizon = height / 2 + PLAYER.pitch - PLAYER.crouchOffset;
+
+                // Ceiling Gradient
+                const ceilGrad = ctx.createLinearGradient(0, 0, 0, horizon);
+                ceilGrad.addColorStop(0, '#020617');
+                ceilGrad.addColorStop(1, '#0f172a');
+                ctx.fillStyle = ceilGrad;
+                ctx.fillRect(0, 0, width, Math.max(0, horizon));
+
+                // Floor Gradient
+                const floorGrad = ctx.createLinearGradient(0, horizon, 0, height);
+                floorGrad.addColorStop(0, '#0f172a');
+                floorGrad.addColorStop(1, '#020617');
+                ctx.fillStyle = floorGrad;
+                ctx.fillRect(0, Math.max(0, horizon), width, Math.max(0, height - horizon));
+
+                // Calculate Camera Position
+                const cam = this.getEffectiveCameraPos();
+
+                // Z-buffer for Depth Sorting Sprites
+                const zBuffer = new Array(CONFIG.RAY_COUNT).fill(CONFIG.MAX_DEPTH);
+                const rayWidth = width / CONFIG.RAY_COUNT;
+
+                // DDA RAYCASTING
+                for (let i = 0; i < CONFIG.RAY_COUNT; i++) {
+                    const cameraX = 2 * i / CONFIG.RAY_COUNT - 1;
+                    const rayDirX = PLAYER.dirX + PLAYER.planeX * cameraX;
+                    const rayDirY = PLAYER.dirY + PLAYER.planeY * cameraX;
+
+                    let mapX = Math.floor(cam.x);
+                    let mapY = Math.floor(cam.y);
+
+                    const deltaDistX = Math.abs(1 / rayDirX);
+                    const deltaDistY = Math.abs(1 / rayDirY);
+
+                    let stepX, stepY;
+                    let sideDistX, sideDistY;
+
+                    if (rayDirX < 0) {
+                        stepX = -1;
+                        sideDistX = (cam.x - mapX) * deltaDistX;
+                    } else {
+                        stepX = 1;
+                        sideDistX = (mapX + 1.0 - cam.x) * deltaDistX;
+                    }
+
+                    if (rayDirY < 0) {
+                        stepY = -1;
+                        sideDistY = (cam.y - mapY) * deltaDistY;
+                    } else {
+                        stepY = 1;
+                        sideDistY = (mapY + 1.0 - cam.y) * deltaDistY;
+                    }
+
+                    let hit = false;
+                    let side = 0;
+                    let cellType = 1;
+
+                    while (!hit) {
+                        if (sideDistX < sideDistY) {
+                            sideDistX += deltaDistX;
+                            mapX += stepX;
+                            side = 0;
+                        } else {
+                            sideDistY += deltaDistY;
+                            mapY += stepY;
+                            side = 1;
+                        }
+
+                        if (mapX < 0 || mapX >= CONFIG.MAP_SIZE || mapY < 0 || mapY >= CONFIG.MAP_SIZE) {
+                            hit = true;
+                            break;
+                        }
+
+                        cellType = GAME.currentMap.grid[mapY][mapX];
+                        if (cellType > 0) hit = true;
+                    }
+
+                    let perpWallDist;
+                    if (side === 0) perpWallDist = (mapX - cam.x + (1 - stepX) / 2) / rayDirX;
+                    else perpWallDist = (mapY - cam.y + (1 - stepY) / 2) / rayDirY;
+
+                    if (perpWallDist <= 0) perpWallDist = 0.1;
+                    zBuffer[i] = perpWallDist;
+
+                    let wallHeight = Math.floor(height / perpWallDist);
+                    let wallScale = 1.0;
+
+                    if (cellType === 4) wallScale = 0.45; // Low Barricade
+
+                    const drawStart = Math.max(0, -wallHeight * wallScale / 2 + horizon);
+                    const drawEnd = Math.min(height, wallHeight * wallScale / 2 + horizon);
+
+                    let wallColor = '#1e293b';
+                    if (cellType === 2) wallColor = '#0284c7';
+                    if (cellType === 3) wallColor = '#dc2626';
+                    if (cellType === 4) wallColor = '#334155';
+                    if (cellType === 5) wallColor = '#d97706';
+
+                    const shade = Math.max(0.25, 1 / (1 + perpWallDist * 0.12));
+
+                    ctx.fillStyle = wallColor;
+                    ctx.globalAlpha = side === 1 ? 0.75 * shade : 1.0 * shade;
+                    ctx.fillRect(i * rayWidth, drawStart, rayWidth + 1, drawEnd - drawStart);
+                    ctx.globalAlpha = 1.0;
+
+                    if (cellType === 1 || cellType === 2 || cellType === 4) {
+                        ctx.fillStyle = cellType === 4 ? '#f59e0b' : (cellType === 2 ? '#38bdf8' : '#06b6d4');
+                        ctx.fillRect(i * rayWidth, drawStart, rayWidth + 1, cellType === 4 ? 3 : 2);
+                    }
+                }
+
+                // SPRITE RENDERER (Enemies & Player in TPS Mode)
+                this.renderSprites(ctx, width, height, horizon, zBuffer, cam);
+
+                this.renderDamageTexts(ctx, width, height, horizon, cam);
+
+                // Render Weapon overlay (1st person) or Targeting Laser Sight (3rd person)
+                if (PLAYER.cameraMode === 'FPS') {
+                    this.renderWeapon(ctx, width, height);
+                } else {
+                    this.renderTPSLaserSight(ctx, width, height, horizon);
+                }
+
+                ctx.restore();
+            }
+
+            renderDamageTexts(ctx, width, height, horizon, cam) {
+                EFFECTS.damageTexts.forEach(dtText => {
+                    const dx = dtText.x - cam.x;
+                    const dy = dtText.y - cam.y;
+
+                    const invDet = 1.0 / (PLAYER.planeX * PLAYER.dirY - PLAYER.dirX * PLAYER.planeY);
+                    const transformX = invDet * (PLAYER.dirY * dx - PLAYER.dirX * dy);
+                    const transformY = invDet * (-PLAYER.planeY * dx + PLAYER.planeX * dy);
+
+                    if (transformY <= 0.2) return;
+
+                    const screenX = Math.floor((width / 2) * (1 + transformX / transformY));
+                    const progress = 1 - (dtText.life / dtText.maxLife);
+                    const floatY = progress * 50; 
+                    const screenY = horizon - (height / transformY) * 0.35 - floatY;
+
+                    if (screenX < -60 || screenX > width + 60) return;
+
+                    const fontSize = Math.max(14, Math.min(38, Math.floor(34 / transformY)));
+
+                    ctx.save();
+                    ctx.font = `900 ${fontSize}px 'Orbitron', sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.globalAlpha = Math.max(0, dtText.life / dtText.maxLife);
+
+                    if (dtText.isGrenade) {
+                        ctx.fillStyle = '#ff3366';
+                        ctx.shadowColor = '#ff0033';
+                    } else if (dtText.inCover) {
+                        ctx.fillStyle = '#fbbf24';
+                        ctx.shadowColor = '#d97706';
+                    } else {
+                        ctx.fillStyle = '#38bdf8';
+                        ctx.shadowColor = '#0284c7';
+                    }
+                    ctx.shadowBlur = 10;
+
+                    const displayText = dtText.amount.toString();
+                    ctx.fillText(displayText, screenX, screenY);
+                    ctx.strokeStyle = '#000000';
+                    ctx.lineWidth = 3;
+                    ctx.strokeText(displayText, screenX, screenY);
+
+                    ctx.restore();
+                });
+            }
+
+            renderSprites(ctx, width, height, horizon, zBuffer, cam) {
+                let allSprites = ENEMIES.filter(e => e.hp > 0).map(e => ({
+                    type: 'ENEMY',
+                    object: e,
+                    x: e.x,
+                    y: e.y,
+                    dist: Math.hypot(e.x - cam.x, e.y - cam.y)
+                }));
+
+                // Add Player Character Sprite in TPS Mode
+                if (PLAYER.cameraMode === 'TPS') {
+                    allSprites.push({
+                        type: 'PLAYER',
+                        object: PLAYER,
+                        x: PLAYER.x,
+                        y: PLAYER.y,
+                        dist: Math.hypot(PLAYER.x - cam.x, PLAYER.y - cam.y)
+                    });
+                }
+
+                // Sort back to front
+                allSprites.sort((a, b) => b.dist - a.dist);
+
+                allSprites.forEach(item => {
+                    if (item.dist < 0.1) return;
+
+                    const spriteX = item.x - cam.x;
+                    const spriteY = item.y - cam.y;
+
+                    const invDet = 1.0 / (PLAYER.planeX * PLAYER.dirY - PLAYER.dirX * PLAYER.planeY);
+                    const transformX = invDet * (PLAYER.dirY * spriteX - PLAYER.dirX * spriteY);
+                    const transformY = invDet * (-PLAYER.planeY * spriteX + PLAYER.planeX * spriteY);
+
+                    if (transformY <= 0.1) return;
+
+                    const spriteScreenX = Math.floor((width / 2) * (1 + transformX / transformY));
+                    const spriteHeight = Math.abs(Math.floor(height / transformY));
+                    const spriteWidth = spriteHeight * 0.52;
+
+                    if (spriteScreenX + spriteWidth / 2 < 0 || spriteScreenX - spriteWidth / 2 > width) return;
+
+                    const rayIdx = Math.floor(spriteScreenX / (width / CONFIG.RAY_COUNT));
+                    if (rayIdx >= 0 && rayIdx < CONFIG.RAY_COUNT && item.type !== 'PLAYER') {
+                        if (zBuffer[rayIdx] < transformY) return;
+                    }
+
+                    if (item.type === 'ENEMY') {
+                        this.drawEnemyModel(ctx, item.object, spriteScreenX, horizon, spriteHeight, spriteWidth, transformY);
+                    } else if (item.type === 'PLAYER') {
+                        this.drawPlayerModel(ctx, item.object, spriteScreenX, horizon, spriteHeight, spriteWidth, transformY);
+                    }
+                });
+            }
+
+            drawPlayerModel(ctx, p, centerX, horizon, h, w, transformY) {
+                const topY = horizon - h * (p.isCrouching ? 0.35 : 0.48);
+                const bottomY = horizon + h * 0.52;
+
+                ctx.save();
+                ctx.shadowColor = '#06b6d4';
+                ctx.shadowBlur = 15;
+
+                // 1. Legs & Tactical Boots
+                const legW = w * 0.28;
+                const legH = h * 0.36;
+                const legY = bottomY - legH;
+
+                ctx.fillStyle = '#0f172a';
+                ctx.fillRect(centerX - w * 0.32, legY, legW, legH);
+                ctx.fillRect(centerX + w * 0.04, legY, legW, legH);
+
+                ctx.fillStyle = '#06b6d4';
+                ctx.fillRect(centerX - w * 0.32, legY + legH * 0.3, legW, Math.max(2, legH * 0.15));
+                ctx.fillRect(centerX + w * 0.04, legY + legH * 0.3, legW, Math.max(2, legH * 0.15));
+
+                // 2. Torso Spec-Ops Armor
+                const torsoW = w * 0.7;
+                const torsoH = h * (p.isCrouching ? 0.3 : 0.4);
+                const torsoY = topY + h * 0.2;
+
+                ctx.fillStyle = '#1e293b';
+                ctx.fillRect(centerX - torsoW / 2, torsoY, torsoW, torsoH);
+
+                // Cyan Armor Accents
+                ctx.fillStyle = '#0284c7';
+                ctx.fillRect(centerX - torsoW * 0.35, torsoY + torsoH * 0.15, torsoW * 0.7, torsoH * 0.4);
+
+                // Glowing Spec-Ops Power Core
+                ctx.fillStyle = '#38bdf8';
+                ctx.beginPath();
+                ctx.arc(centerX, torsoY + torsoH * 0.35, Math.max(2, w * 0.1), 0, Math.PI * 2);
+                ctx.fill();
+
+                // 3. Helmet & Visor
+                const headR = h * 0.11;
+                const headY = topY + headR;
+
+                ctx.fillStyle = '#020617';
+                ctx.beginPath();
+                ctx.arc(centerX, headY, headR, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#38bdf8'; // Glowing Cyan Visor
+                ctx.fillRect(centerX - headR * 0.6, headY - headR * 0.2, headR * 1.2, Math.max(2, headR * 0.4));
+
+                // 4. Weapon Model (Pulse Rifle held out)
+                const gunW = w * 0.9;
+                const gunH = Math.max(4, h * 0.08);
+                const gunY = torsoY + torsoH * 0.55;
+
+                ctx.fillStyle = '#090d16';
+                ctx.fillRect(centerX, gunY, gunW * 0.6, gunH);
+                ctx.fillStyle = '#06b6d4';
+                ctx.fillRect(centerX + gunW * 0.1, gunY, gunW * 0.3, gunH);
+
+                ctx.restore();
+            }
+
+            drawEnemyModel(ctx, e, centerX, horizon, h, w, transformY) {
+                const topY = horizon - h * 0.5;
+                const bottomY = horizon + h * 0.5;
+
+                const shade = Math.max(0.55, 1 / (1 + transformY * 0.08));
+
+                ctx.save();
+                ctx.globalAlpha = shade;
+
+                ctx.shadowColor = e.color;
+                ctx.shadowBlur = Math.min(25, Math.max(10, 40 / transformY));
+
+                // Target Lock Marker
+                const markerY = topY - Math.max(18, h * 0.22);
+                ctx.fillStyle = '#ff1744';
+                ctx.beginPath();
+                ctx.moveTo(centerX - 8, markerY - 10);
+                ctx.lineTo(centerX + 8, markerY - 10);
+                ctx.lineTo(centerX, markerY);
+                ctx.closePath();
+                ctx.fill();
+
+                if (e.type === 'SCOUT') {
+                    // Floating Cyber Drone Model
+                    const hoverOffset = Math.sin(performance.now() * 0.005 + e.x * 10) * h * 0.08;
+                    const droneY = topY + h * 0.2 + hoverOffset;
+                    const droneRadius = w * 0.45;
+
+                    // Thruster Flame Trail
+                    ctx.fillStyle = '#00f0ff';
+                    ctx.beginPath();
+                    ctx.moveTo(centerX - droneRadius * 0.4, droneY + droneRadius * 0.6);
+                    ctx.lineTo(centerX, droneY + droneRadius * 1.5 + Math.random() * 6);
+                    ctx.lineTo(centerX + droneRadius * 0.4, droneY + droneRadius * 0.6);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    // Drone Main Body Sphere
+                    ctx.fillStyle = '#0f172a';
+                    ctx.beginPath();
+                    ctx.arc(centerX, droneY, droneRadius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#00f0ff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+
+                    // Rotor Wings
+                    ctx.fillStyle = '#334155';
+                    ctx.fillRect(centerX - droneRadius * 1.6, droneY - 4, droneRadius * 0.7, 8);
+                    ctx.fillRect(centerX + droneRadius * 0.9, droneY - 4, droneRadius * 0.7, 8);
+
+                    // Glowing Red Optical Sensor Eye
+                    ctx.fillStyle = '#ff0033';
+                    ctx.beginPath();
+                    ctx.arc(centerX, droneY, droneRadius * 0.4, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#ffffff';
+                    ctx.beginPath();
+                    ctx.arc(centerX - 2, droneY - 2, droneRadius * 0.15, 0, Math.PI * 2);
+                    ctx.fill();
+
+                } else if (e.type === 'HEAVY') {
+                    // Heavy Dreadnought Mech Behemoth
+                    const mechW = w * 1.25;
+                    const mechH = h * 0.9;
+                    const mTopY = horizon - mechH * 0.45;
+
+                    // Heavy Mech Piston Legs
+                    ctx.fillStyle = '#020617';
+                    ctx.fillRect(centerX - mechW * 0.4, mTopY + mechH * 0.5, mechW * 0.3, mechH * 0.5);
+                    ctx.fillRect(centerX + mechW * 0.1, mTopY + mechH * 0.5, mechW * 0.3, mechH * 0.5);
+
+                    // Massive Armored Torso Box
+                    ctx.fillStyle = '#1e293b';
+                    ctx.fillRect(centerX - mechW * 0.45, mTopY + mechH * 0.15, mechW * 0.9, mechH * 0.45);
+                    ctx.strokeStyle = '#ff0055';
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(centerX - mechW * 0.45, mTopY + mechH * 0.15, mechW * 0.9, mechH * 0.45);
+
+                    // Bulky Angular Shoulder Pads
+                    ctx.fillStyle = '#334155';
+                    ctx.fillRect(centerX - mechW * 0.6, mTopY + mechH * 0.1, mechW * 0.25, mechH * 0.25);
+                    ctx.fillRect(centerX + mechW * 0.35, mTopY + mechH * 0.1, mechW * 0.25, mechH * 0.25);
+
+                    // Plasma Engine Core
+                    ctx.fillStyle = '#ff0055';
+                    ctx.beginPath();
+                    ctx.arc(centerX, mTopY + mechH * 0.32, mechW * 0.16, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Mech Quad Visor Head
+                    ctx.fillStyle = '#0f172a';
+                    ctx.fillRect(centerX - mechW * 0.2, mTopY, mechW * 0.4, mechH * 0.15);
+                    ctx.fillStyle = '#ff0055';
+                    ctx.fillRect(centerX - mechW * 0.15, mTopY + 3, mechW * 0.3, 4);
+
+                    // Heavy Twin Arm Cannons
+                    ctx.fillStyle = '#000000';
+                    ctx.fillRect(centerX - mechW * 0.55, mTopY + mechH * 0.35, mechW * 0.2, mechH * 0.35);
+                    ctx.fillRect(centerX + mechW * 0.35, mTopY + mechH * 0.35, mechW * 0.2, mechH * 0.35);
+
+                } else if (e.type === 'SNIPER') {
+                    // Cyber Sniper Assassin
+                    const legW = w * 0.22;
+                    const legH = h * 0.42;
+                    const legY = bottomY - legH;
+
+                    // Stealth Cloak & Legs
+                    ctx.fillStyle = '#3b0764';
+                    ctx.fillRect(centerX - w * 0.3, legY - h * 0.1, w * 0.6, legH * 0.8);
+                    ctx.fillStyle = '#0f172a';
+                    ctx.fillRect(centerX - w * 0.25, legY, legW, legH);
+                    ctx.fillRect(centerX + w * 0.05, legY, legW, legH);
+
+                    // Slim Armor Torso
+                    ctx.fillStyle = '#581c87';
+                    ctx.fillRect(centerX - w * 0.28, topY + h * 0.25, w * 0.56, h * 0.35);
+
+                    // Visor Eye Lens
+                    const headR = h * 0.1;
+                    const headY = topY + headR;
+                    ctx.fillStyle = '#0f172a';
+                    ctx.beginPath();
+                    ctx.arc(centerX, headY, headR, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#a855f7';
+                    ctx.beginPath();
+                    ctx.arc(centerX + headR * 0.2, headY, headR * 0.4, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Long Precision Rifle Barrel
+                    ctx.fillStyle = '#111827';
+                    ctx.fillRect(centerX - w * 0.6, topY + h * 0.38, w * 1.3, Math.max(3, h * 0.06));
+                    ctx.fillStyle = '#a855f7';
+                    ctx.fillRect(centerX + w * 0.1, topY + h * 0.36, w * 0.25, Math.max(4, h * 0.08));
+
+                } else {
+                    // ENFORCER (Tactical Cyber Trooper)
+                    const legW = w * 0.3;
+                    const legH = h * 0.38;
+                    const legY = bottomY - legH;
+
+                    ctx.fillStyle = '#0f172a';
+                    ctx.fillRect(centerX - w * 0.38, legY, legW, legH);
+                    ctx.fillRect(centerX + w * 0.08, legY, legW, legH);
+
+                    ctx.fillStyle = e.color;
+                    ctx.fillRect(centerX - w * 0.38, legY + legH * 0.2, legW, Math.max(2, legH * 0.15));
+                    ctx.fillRect(centerX + w * 0.08, legY + legH * 0.2, legW, Math.max(2, legH * 0.15));
+
+                    // Torso & Reinforced Shoulder Armor
+                    const torsoW = w * 0.75;
+                    const torsoH = h * 0.38;
+                    const torsoY = topY + h * 0.24;
+
+                    ctx.fillStyle = '#1e293b';
+                    ctx.fillRect(centerX - torsoW / 2, torsoY, torsoW, torsoH);
+
+                    ctx.fillStyle = '#475569';
+                    ctx.fillRect(centerX - torsoW * 0.65, torsoY, torsoW * 0.3, torsoH * 0.4);
+                    ctx.fillRect(centerX + torsoW * 0.35, torsoY, torsoW * 0.3, torsoH * 0.4);
+
+                    ctx.fillStyle = e.color;
+                    ctx.fillRect(centerX - torsoW * 0.35, torsoY + torsoH * 0.1, torsoW * 0.7, torsoH * 0.5);
+
+                    ctx.fillStyle = '#ffffff';
+                    ctx.beginPath();
+                    ctx.arc(centerX, torsoY + torsoH * 0.35, Math.max(2, w * 0.12), 0, Math.PI * 2);
+                    ctx.fill();
+
+                    const headR = h * 0.12;
+                    const headY = topY + headR + 2;
+
+                    ctx.fillStyle = '#0f172a';
+                    ctx.beginPath();
+                    ctx.arc(centerX, headY, headR, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Tactical Visor
+                    ctx.fillStyle = '#ffcc00';
+                    ctx.fillRect(centerX - headR * 0.7, headY - headR * 0.3, headR * 1.4, Math.max(3, headR * 0.45));
+
+                    const gunW = w * 0.95;
+                    const gunH = Math.max(4, h * 0.08);
+                    const gunY = torsoY + torsoH * 0.5;
+
+                    ctx.fillStyle = '#000000';
+                    ctx.fillRect(centerX - gunW * 0.5, gunY, gunW, gunH);
+                    ctx.fillStyle = e.color;
+                    ctx.fillRect(centerX - gunW * 0.5, gunY, gunW * 0.4, gunH);
+                }
+
+                ctx.restore();
+
+                // Enemy HP Bar
+                const hpBarW = Math.max(32, w * 1.4);
+                const hpBarH = 6;
+                const hpRatio = Math.max(0, Math.min(1, e.hp / e.maxHp));
+                const hpBarY = topY - 8;
+
+                ctx.fillStyle = 'rgba(0,0,0,0.85)';
+                ctx.fillRect(centerX - hpBarW / 2 - 1, hpBarY - 1, hpBarW + 2, hpBarH + 2);
+                ctx.fillStyle = e.color;
+                ctx.fillRect(centerX - hpBarW / 2, hpBarY, hpBarW * hpRatio, hpBarH);
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(centerX - hpBarW / 2, hpBarY, hpBarW, hpBarH);
+            }
+
+            renderTPSLaserSight(ctx, width, height, horizon) {
+                // Laser beam in 3rd Person View
+                ctx.save();
+                ctx.strokeStyle = 'rgba(6, 182, 212, 0.4)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([4, 4]);
+
+                ctx.beginPath();
+                ctx.moveTo(width / 2, height / 2 + 60);
+                ctx.lineTo(width / 2, height / 2);
+                ctx.stroke();
+
+                ctx.restore();
+            }
+
+            renderWeapon(ctx, width, height) {
+                const isADS = PLAYER.isADS;
+                const recoilOffset = PLAYER.recoilOffset * 60;
+                const bobbing = Math.sin(performance.now() * 0.008) * (INPUT.keys['KeyW'] ? 8 : 2);
+
+                if (isADS) {
+                    ctx.strokeStyle = '#06b6d4';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.arc(width / 2, height / 2, 120, 0, Math.PI * 2);
+                    ctx.stroke();
+
+                    ctx.fillStyle = 'rgba(6, 182, 212, 0.08)';
+                    ctx.fill();
+                } else {
+                    const gunX = width / 2 + 180 + bobbing;
+                    const gunY = height - 220 + recoilOffset + bobbing;
+
+                    const gunGrad = ctx.createLinearGradient(gunX - 50, gunY, gunX + 80, gunY + 300);
+                    gunGrad.addColorStop(0, '#334155');
+                    gunGrad.addColorStop(1, '#0f172a');
+
+                    ctx.fillStyle = gunGrad;
+                    ctx.beginPath();
+                    ctx.moveTo(gunX - 40, height);
+                    ctx.lineTo(gunX - 20, gunY + 40);
+                    ctx.lineTo(gunX - 80, gunY + 20);
+                    ctx.lineTo(gunX - 80, gunY);
+                    ctx.lineTo(gunX + 20, gunY - 10);
+                    ctx.lineTo(gunX + 40, height);
+                    ctx.fill();
+
+                    ctx.strokeStyle = PLAYER.activeWeaponKey === 'PRIMARY' ? '#06b6d4' : '#f59e0b';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                }
+            }
+        }
+
+        // ==========================================
+        // MISSION CONTROLLER
+        // ==========================================
+        const MISSION = {
+            currentSectorIdx: 0,
+            killsInSector: 0,
+            isHacking: false,
+            hackProgress: 0,
+
+            initSector(index) {
+                this.currentSectorIdx = index;
+                this.killsInSector = 0;
+                this.isHacking = false;
+                this.hackProgress = 0;
+
+                const sectorData = SECTOR_MAPS[index];
+                GAME.currentMap = sectorData;
+
+                PLAYER.x = sectorData.startPos.x;
+                PLAYER.y = sectorData.startPos.y;
+
+                ENEMIES = sectorData.enemySpawns.map(s => new Enemy(s.x, s.y, s.type));
+
+                UI.updateHUD();
+            },
+
+            onEnemyKilled() {
+                this.killsInSector++;
+                UI.updateHUD();
+
+                const sectorData = SECTOR_MAPS[this.currentSectorIdx];
+                if (!sectorData.hasTerminal && this.killsInSector >= sectorData.targetKills) {
+                    this.completeSector();
+                }
+            },
+
+            startTerminalHack() {
+                if (this.isHacking) return;
+                this.isHacking = true;
+                UI.showSubObjectiveBar(true);
+            },
+
+            update(dt) {
+                if (this.isHacking) {
+                    this.hackProgress += dt * 0.2;
+                    UI.updateSubObjectiveProgress(this.hackProgress);
+
+                    if (this.hackProgress >= 1.0) {
+                        this.isHacking = false;
+                        this.completeSector();
+                    }
+                }
+            },
+
+            completeSector() {
+                if (this.currentSectorIdx < SECTOR_MAPS.length - 1) {
+                    GAME.showUpgradeShop();
+                } else {
+                    GAME.gameOver(true);
+                }
+            }
+        };
+
+        // ==========================================
+        // UI & MINIMAP CONTROLLER
+        // ==========================================
+        const UI = {
+            minimapCanvas: document.getElementById('minimap-canvas'),
+            minimapCtx: document.getElementById('minimap-canvas').getContext('2d'),
+
+            updateHUD() {
+                const sector = SECTOR_MAPS[MISSION.currentSectorIdx];
+                document.getElementById('sector-badge').textContent = `SECTOR ${MISSION.currentSectorIdx + 1}`;
+                document.getElementById('mission-title').textContent = sector.name;
+                document.getElementById('obj-count').textContent = `${MISSION.killsInSector} / ${sector.targetKills}`;
+
+                document.getElementById('camera-view-badge').textContent = `${PLAYER.cameraMode === 'FPS' ? '1인칭' : '3인칭'} [V]`;
+
+                document.getElementById('shield-val').textContent = `${Math.ceil(PLAYER.shield)} / ${PLAYER.maxShield}`;
+                document.getElementById('shield-bar').style.width = `${(PLAYER.shield / PLAYER.maxShield) * 100}%`;
+
+                document.getElementById('health-val').textContent = `${Math.ceil(PLAYER.health)} / ${PLAYER.maxHealth}`;
+                document.getElementById('health-bar').style.width = `${(PLAYER.health / PLAYER.maxHealth) * 100}%`;
+
+                const w = WEAPONS[PLAYER.activeWeaponKey];
+                const ammo = PLAYER.ammo[PLAYER.activeWeaponKey];
+                document.getElementById('weapon-type-badge').textContent = PLAYER.activeWeaponKey;
+                document.getElementById('weapon-name').textContent = w.name;
+                document.getElementById('ammo-clip').textContent = PLAYER.isReloading ? 'RELOAD' : ammo.clip;
+                document.getElementById('ammo-reserve').textContent = ammo.reserve;
+
+                document.getElementById('grenade-count').textContent = `x${PLAYER.grenades}`;
+                document.getElementById('credits-val').textContent = `${PLAYER.credits} CR`;
+
+                const crouchEl = document.getElementById('crouch-indicator');
+                if (PLAYER.isCrouching) crouchEl.classList.remove('hidden');
+                else crouchEl.classList.add('hidden');
+
+                const promptEl = document.getElementById('interaction-prompt');
+                const frontX = Math.floor(PLAYER.x + PLAYER.dirX * 1.2);
+                const frontY = Math.floor(PLAYER.y + PLAYER.dirY * 1.2);
+                const grid = GAME.currentMap.grid;
+
+                if (frontY >= 0 && frontY < CONFIG.MAP_SIZE && frontX >= 0 && frontX < CONFIG.MAP_SIZE && grid[frontY][frontX] === 5) {
+                    document.getElementById('prompt-text').textContent = "보안문 개방";
+                    promptEl.classList.remove('hidden');
+                } else if (sector.hasTerminal && !MISSION.isHacking) {
+                    const dist = Math.hypot(PLAYER.x - sector.terminalPos.x, PLAYER.y - sector.terminalPos.y);
+                    if (dist < 2.0) {
+                        document.getElementById('prompt-text').textContent = "보안 터미널 해킹";
+                        promptEl.classList.remove('hidden');
+                    } else {
+                        promptEl.classList.add('hidden');
+                    }
+                } else {
+                    promptEl.classList.add('hidden');
+                }
+            },
+
+            showSubObjectiveBar(show) {
+                const bar = document.getElementById('sub-objective-bar');
+                if (show) bar.classList.remove('hidden');
+                else bar.classList.add('hidden');
+            },
+
+            updateSubObjectiveProgress(val) {
+                document.getElementById('sub-obj-progress-fill').style.width = `${Math.min(100, val * 100)}%`;
+            },
+
+            triggerHitmarker() {
+                const hm = document.getElementById('hitmarker');
+                hm.classList.remove('hit-active');
+                void hm.offsetWidth;
+                hm.classList.add('hit-active');
+            },
+
+            triggerDamageFlash() {
+                const flash = document.getElementById('damage-flash');
+                flash.style.backgroundColor = 'rgba(220, 38, 38, 0.35)';
+                setTimeout(() => {
+                    flash.style.backgroundColor = 'rgba(220, 38, 38, 0)';
+                }, 90);
+            },
+
+            renderMinimap() {
+                const ctx = this.minimapCtx;
+                const size = 144;
+                ctx.fillStyle = '#020617';
+                ctx.fillRect(0, 0, size, size);
+
+                const grid = GAME.currentMap.grid;
+                const cellSize = size / CONFIG.MAP_SIZE;
+
+                for (let y = 0; y < CONFIG.MAP_SIZE; y++) {
+                    for (let x = 0; x < CONFIG.MAP_SIZE; x++) {
+                        if (grid[y][x] === 1) {
+                            ctx.fillStyle = '#334155';
+                            ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                        } else if (grid[y][x] === 2) {
+                            ctx.fillStyle = '#0284c7';
+                            ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                        } else if (grid[y][x] === 4) {
+                            ctx.fillStyle = '#64748b';
+                            ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                        } else if (grid[y][x] === 5) {
+                            ctx.fillStyle = '#d97706';
+                            ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                        }
+                    }
+                }
+
+                ENEMIES.forEach(e => {
+                    if (e.hp <= 0) return;
+                    ctx.fillStyle = '#ef4444';
+                    ctx.beginPath();
+                    ctx.arc(e.x * cellSize, e.y * cellSize, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                ctx.fillStyle = '#06b6d4';
+                ctx.beginPath();
+                ctx.arc(PLAYER.x * cellSize, PLAYER.y * cellSize, 4, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.strokeStyle = '#06b6d4';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(PLAYER.x * cellSize, PLAYER.y * cellSize);
+                ctx.lineTo((PLAYER.x + PLAYER.dirX * 2) * cellSize, (PLAYER.y + PLAYER.dirY * 2) * cellSize);
+                ctx.stroke();
+            }
+        };
+
+        // ==========================================
+        // MAIN GAME ENGINE & LOOP
+        // ==========================================
+        const GAME = {
+            state: 'START',
+            canvas: document.getElementById('fps-canvas'),
+            renderer: null,
+            currentMap: null,
+            lastTime: 0,
+
+            init() {
+                this.renderer = new Renderer(this.canvas);
+                INPUT.init(this.canvas);
+
+                document.getElementById('btn-start').addEventListener('click', () => {
+                    audio.init();
+                    this.canvas.requestPointerLock();
+                    this.startGame();
+                });
+
+                document.getElementById('btn-resume').addEventListener('click', () => this.resumeGame());
+                document.getElementById('btn-pause-restart').addEventListener('click', () => {
+                    document.getElementById('pause-overlay').classList.add('hidden');
+                    this.startGame();
+                });
+
+                document.getElementById('btn-restart').addEventListener('click', () => {
+                    document.getElementById('end-overlay').classList.add('hidden');
+                    this.startGame();
+                });
+
+                document.getElementById('btn-next-sector').addEventListener('click', () => {
+                    document.getElementById('upgrade-overlay').classList.add('hidden');
+                    MISSION.initSector(MISSION.currentSectorIdx + 1);
+                    this.state = 'PLAYING';
+                    this.canvas.requestPointerLock();
+                });
+
+                document.getElementById('btn-upg-dmg').addEventListener('click', () => this.buyUpgrade('dmg', 100));
+                document.getElementById('btn-upg-hp').addEventListener('click', () => this.buyUpgrade('hp', 100));
+                document.getElementById('btn-upg-reload').addEventListener('click', () => this.buyUpgrade('reload', 120));
+                document.getElementById('btn-upg-grenade').addEventListener('click', () => this.buyUpgrade('grenade', 80));
+
+                this.lastTime = performance.now();
+                requestAnimationFrame((t) => this.loop(t));
+            },
+
+            startGame() {
+                document.getElementById('start-overlay').classList.add('hidden');
+                PLAYER.init();
+                MISSION.initSector(0);
+                this.state = 'PLAYING';
+            },
+
+            pauseGame() {
+                this.state = 'PAUSED';
+                document.exitPointerLock();
+                document.getElementById('pause-overlay').classList.remove('hidden');
+            },
+
+            resumeGame() {
+                this.state = 'PLAYING';
+                document.getElementById('pause-overlay').classList.add('hidden');
+                this.canvas.requestPointerLock();
+            },
+
+            showUpgradeShop() {
+                this.state = 'UPGRADE';
+                document.exitPointerLock();
+                document.getElementById('upgrade-overlay').classList.remove('hidden');
+                document.getElementById('shop-credits').textContent = PLAYER.credits;
+            },
+
+            buyUpgrade(type, cost) {
+                if (PLAYER.credits < cost) return;
+                PLAYER.credits -= cost;
+
+                if (type === 'dmg') PLAYER.upgrades.damageMult += 0.2;
+                if (type === 'hp') {
+                    PLAYER.maxHealth += 25;
+                    PLAYER.maxShield += 25;
+                    PLAYER.health += 25;
+                    PLAYER.shield += 25;
+                }
+                if (type === 'reload') PLAYER.upgrades.reloadSpeedMult += 0.25;
+                if (type === 'grenade') PLAYER.grenades += 2;
+
+                document.getElementById('shop-credits').textContent = PLAYER.credits;
+                UI.updateHUD();
+            },
+
+            gameOver(victory) {
+                this.state = 'END';
+                document.exitPointerLock();
+
+                const overlay = document.getElementById('end-overlay');
+                const title = document.getElementById('end-title');
+                const desc = document.getElementById('end-desc');
+
+                if (victory) {
+                    title.textContent = "작전 성공! 전 구역 제어 완료";
+                    title.className = "font-orbitron text-3xl font-black text-cyan-400 tracking-wider";
+                    desc.textContent = "시설 내 모든 적 요새 및 반응로를 무력화하고 구역 통제권을 완전 확보했습니다.";
+                } else {
+                    title.textContent = "작전 실패";
+                    title.className = "font-orbitron text-3xl font-black text-red-500 tracking-wider";
+                    desc.textContent = "요원이 전사하였거나 임무 목표가 파기되었습니다.";
+                }
+
+                document.getElementById('stat-sector').textContent = `SECTOR ${MISSION.currentSectorIdx + 1}`;
+                document.getElementById('stat-kills').textContent = PLAYER.kills;
+                document.getElementById('stat-credits').textContent = `${PLAYER.credits} CR`;
+
+                overlay.classList.remove('hidden');
+            },
+
+            loop(now) {
+                const dt = Math.min(0.1, (now - this.lastTime) / 1000);
+                this.lastTime = now;
+
+                if (this.state === 'PLAYING') {
+                    PLAYER.update(dt);
+                    ENEMIES.forEach(e => e.update(dt));
+                    EFFECTS.update(dt);
+                    MISSION.update(dt);
+
+                    this.renderer.render();
+                    UI.renderMinimap();
+                    UI.updateHUD();
+                }
+
+                requestAnimationFrame((t) => this.loop(t));
+            }
+        };
+
+        window.onload = () => {
+            GAME.init();
+        };
+    </script>
+</body>
+</html>

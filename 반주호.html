@@ -1,0 +1,1388 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>저택의 그림자 (Shadows of the Manor) - 1인칭 탈출 공포</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Noto+Serif+KR:wght@300;600;900&display=swap');
+        
+        body {
+            font-family: 'Noto Serif KR', serif;
+            background-color: #050508;
+            color: #d1d5db;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .cinzel {
+            font-family: 'Cinzel', serif;
+        }
+
+        /* Screen Shake Effect */
+        .shake {
+            animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both infinite;
+        }
+
+        @keyframes shake {
+            10%, 90% { transform: translate3d(-2px, -1px, 0); }
+            20%, 80% { transform: translate3d(3px, 2px, 0); }
+            30%, 50%, 70% { transform: translate3d(-4px, -3px, 0); }
+            40%, 60% { transform: translate3d(4px, 3px, 0); }
+        }
+
+        /* Pulse effects for danger */
+        .heartbeat {
+            animation: heartbeat 1.2s ease-in-out infinite;
+        }
+
+        @keyframes heartbeat {
+            0% { transform: scale(1); opacity: 0.3; }
+            15% { transform: scale(1.08); opacity: 0.8; }
+            30% { transform: scale(1); opacity: 0.4; }
+            45% { transform: scale(1.05); opacity: 0.7; }
+            60% { transform: scale(1); opacity: 0.3; }
+            100% { transform: scale(1); opacity: 0.3; }
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #111;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #443333;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="w-screen h-screen flex flex-col justify-center items-center relative overflow-hidden bg-black">
+
+    <!-- Game Viewport Container -->
+    <div id="game-container" class="relative w-full h-full max-w-[1920px] max-h-[1080px] flex items-center justify-center overflow-hidden">
+        
+        <!-- 3D Raycasting Canvas -->
+        <canvas id="gameCanvas" class="w-full h-full block bg-black cursor-crosshair"></canvas>
+
+        <!-- Horror Atmospheric Vignette Overlay -->
+        <div id="vignette" class="absolute inset-0 pointer-events-none transition-opacity duration-300" 
+             style="background: radial-gradient(circle, transparent 40%, rgba(0,0,0,0.85) 80%, rgba(5,0,0,0.98) 100%);"></div>
+
+        <!-- Monster Proximity Danger Effect -->
+        <div id="danger-vignette" class="absolute inset-0 pointer-events-none opacity-0 transition-opacity duration-300 bg-red-950/20"
+             style="box-shadow: inset 0 0 120px rgba(180, 0, 0, 0.6);"></div>
+
+        <!-- Hiding Overlay Filter -->
+        <div id="hiding-overlay" class="absolute inset-0 pointer-events-none opacity-0 transition-all duration-500 bg-black/80 flex flex-col items-center justify-center">
+            <div class="text-amber-100/70 text-sm tracking-widest border-b border-amber-900/50 pb-1 mb-2">옷장 안 숨는 중...</div>
+            <div class="text-xs text-gray-500 animate-pulse">숨소리를 죽이세요. [E] 눌러 나가기</div>
+        </div>
+
+        <!-- Trap Restricted Vignette -->
+        <div id="trap-overlay" class="absolute inset-0 pointer-events-none opacity-0 transition-opacity duration-200 border-[16px] border-amber-900/60 bg-amber-950/20 flex items-center justify-center">
+            <div class="bg-black/90 px-6 py-3 rounded-lg border border-amber-700/50 text-amber-500 font-bold tracking-wider text-center shadow-2xl shadow-amber-900/50">
+                <div class="text-lg text-red-500 font-extrabold mb-1">⚠️ 발목 함정 발동!</div>
+                <div class="text-sm text-gray-300 mb-2">움직일 수 없습니다. 함정이 해제될 때까지 대기하세요.</div>
+                <div id="trap-timer-bar" class="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
+                    <div id="trap-timer-fill" class="h-full bg-red-600 transition-all duration-100" style="width: 100%;"></div>
+                </div>
+                <div id="trap-timer-text" class="text-xs text-amber-400 mt-1 font-mono">7.0s</div>
+            </div>
+        </div>
+
+        <!-- UI HUD Overlay Layer -->
+        <div id="ui-hud" class="absolute inset-0 pointer-events-none p-6 flex flex-col justify-between select-none">
+            
+            <!-- Top HUD Bar: Safezone Indicator & Objective -->
+            <div class="flex justify-between items-start">
+                <div class="flex flex-col gap-2">
+                    <div id="safe-zone-badge" class="hidden items-center gap-2 bg-emerald-950/80 border border-emerald-600/50 text-emerald-300 px-3 py-1.5 rounded-full text-xs font-semibold backdrop-blur-md shadow-lg shadow-emerald-900/30">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                        <span>안전 구역 (체크포인트 저장됨)</span>
+                    </div>
+                    <div id="objective-text" class="bg-black/70 border border-gray-800/80 text-gray-300 px-4 py-2 rounded-lg text-xs md:text-sm backdrop-blur-sm max-w-md shadow-md">
+                        <span class="text-amber-500 font-bold">목표:</span> 첫 번째 방에서 청동 열쇠를 찾아 잠긴 문을 열고 탐색을 시작하세요.
+                    </div>
+                </div>
+
+                <!-- Mini Map / Radar Frame -->
+                <div class="bg-black/80 border border-gray-800 p-2 rounded-xl shadow-xl backdrop-blur-md flex flex-col items-center">
+                    <div class="text-[10px] text-gray-400 mb-1 font-mono tracking-widest uppercase">MAP RADAR</div>
+                    <canvas id="minimapCanvas" width="110" height="110" class="rounded bg-black/90 border border-gray-900"></canvas>
+                </div>
+            </div>
+
+            <!-- Center Screen Crosshair & Interaction Prompt -->
+            <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <!-- Crosshair Dot -->
+                <div id="crosshair" class="w-2 h-2 rounded-full bg-white/70 transition-transform duration-100 shadow-[0_0_8px_rgba(255,255,255,0.8)]"></div>
+                
+                <!-- Interaction Prompt Box -->
+                <div id="interaction-prompt" class="opacity-0 transition-all duration-200 transform translate-y-4 mt-6 bg-black/90 border border-amber-500/60 px-5 py-2.5 rounded-lg shadow-2xl backdrop-blur-md flex items-center gap-3">
+                    <span class="bg-amber-500 text-black font-extrabold px-2 py-0.5 rounded text-xs animate-bounce">E</span>
+                    <span id="interaction-text" class="text-xs md:text-sm text-amber-200 font-medium">상호작용</span>
+                </div>
+            </div>
+
+            <!-- Bottom HUD Bar: Key Inventory & Controls Hint -->
+            <div class="flex justify-between items-end">
+                <!-- Inventory List -->
+                <div class="flex flex-col gap-1.5">
+                    <div class="text-[11px] text-amber-500/80 tracking-wider font-semibold">소지한 열쇠 & 아이템</div>
+                    <div id="inventory-list" class="flex gap-2">
+                        <!-- Key cards updated dynamically -->
+                        <div class="text-xs text-gray-600 bg-black/60 border border-gray-800/60 px-3 py-2 rounded-md">아이템 없음</div>
+                    </div>
+                </div>
+
+                <!-- Controls Guide -->
+                <div class="bg-black/70 border border-gray-800/80 px-3 py-2 rounded-lg text-[11px] text-gray-400 flex gap-3 backdrop-blur-sm">
+                    <div><span class="text-gray-200 font-bold">WASD</span> 이동</div>
+                    <div><span class="text-gray-200 font-bold">마우스</span> 시점 회전</div>
+                    <div><span class="text-gray-200 font-bold">E</span> 상호작용</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Overlay Screens (Start Menu, Game Over, Game Win) -->
+        <!-- 1. Start Screen -->
+        <div id="screen-start" class="absolute inset-0 bg-black/95 flex flex-col items-center justify-center p-6 text-center z-50">
+            <div class="max-w-xl flex flex-col items-center">
+                <div class="text-amber-600 font-mono text-xs tracking-widest uppercase mb-2">HTML5 Canvas First-Person Horror Game</div>
+                <h1 class="cinzel text-4xl md:text-6xl font-extrabold text-red-700 tracking-wider mb-4 drop-shadow-[0_5px_15px_rgba(180,0,0,0.5)]">
+                    저택의 그림자
+                </h1>
+                <div class="w-24 h-1 bg-gradient-to-r from-transparent via-red-800 to-transparent mb-6"></div>
+                <p class="text-sm md:text-base text-gray-300 leading-relaxed mb-8 font-light">
+                    당신은 어둡고 긴장감이 감도는 오래된 저택 안에 갇혔습니다.<br>
+                    기괴한 괴물이 복도를 배회하고 있으며, 바닥에는 무작위 함정이 설치되어 있습니다.<br>
+                    열쇠를 획득하여 새로운 구역을 해금하고, 괴물을 피해 현관문으로 탈출하세요.
+                </p>
+
+                <div class="grid grid-cols-2 gap-4 w-full max-w-md bg-gray-950 border border-gray-800 p-4 rounded-xl mb-8 text-left text-xs text-gray-400">
+                    <div class="flex items-center gap-2"><span class="text-amber-500 font-bold">• WASD</span>: 1인칭 이동</div>
+                    <div class="flex items-center gap-2"><span class="text-amber-500 font-bold">• 마우스</span>: 시점 전환</div>
+                    <div class="flex items-center gap-2"><span class="text-amber-500 font-bold">• E 키</span>: 문/아이템/숨기</div>
+                    <div class="flex items-center gap-2"><span class="text-amber-400 font-bold">• F 키</span>: 원하는 곳에 문 생성</div>
+                </div>
+
+                <button id="btn-start" class="px-8 py-4 bg-gradient-to-r from-red-900 to-red-950 hover:from-red-800 hover:to-red-900 border border-red-600/60 text-amber-100 font-bold rounded-xl shadow-2xl shadow-red-950/80 transform hover:-translate-y-0.5 transition-all duration-150 cursor-pointer text-lg tracking-wider">
+                <!-- Controls Guide -->
+                <div class="bg-black/70 border border-gray-800/80 px-3 py-2 rounded-lg text-[11px] text-gray-400 flex gap-3 backdrop-blur-sm">
+                    <div><span class="text-gray-200 font-bold">WASD</span> 이동</div>
+                    <div><span class="text-gray-200 font-bold">마우스</span> 시점 회전</div>
+                    <div><span class="text-gray-200 font-bold">E</span> 상호작용</div>
+                    <div><span class="text-amber-400 font-bold">F</span> 문 생성</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. Caught / Respawn Screen -->
+        <div id="screen-caught" class="absolute inset-0 bg-red-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-50 opacity-0 pointer-events-none transition-opacity duration-300">
+            <div class="max-w-md bg-black/90 border border-red-800/80 p-8 rounded-2xl shadow-2xl">
+                <div class="text-red-500 text-5xl mb-4 font-extrabold animate-bounce">💀</div>
+                <h2 class="cinzel text-2xl md:text-3xl font-bold text-red-600 mb-2">괴물에게 붙잡혔습니다</h2>
+                <p class="text-xs md:text-sm text-gray-300 mb-6">
+                    마지막으로 방문한 <span class="text-emerald-400 font-bold">안전 구역</span>에서 다시 시작합니다.<br>
+                    (획득한 열쇠와 구역 해금 상태는 그대로 유지됩니다)
+                </p>
+                <button id="btn-respawn" class="w-full py-3 bg-red-900 hover:bg-red-800 border border-red-600 text-white font-bold rounded-lg transition-colors cursor-pointer text-sm">
+                    안전 구역에서 재시작
+                </button>
+            </div>
+        </div>
+
+        <!-- 3. Escape Victory Screen -->
+        <div id="screen-victory" class="absolute inset-0 bg-black/95 flex flex-col items-center justify-center p-6 text-center z-50 opacity-0 pointer-events-none transition-opacity duration-500">
+            <div class="max-w-lg bg-gray-950 border border-amber-600/60 p-8 rounded-2xl shadow-2xl shadow-amber-900/30 flex flex-col items-center">
+                <div class="text-amber-400 text-6xl mb-4">🚪✨</div>
+                <h2 class="cinzel text-3xl md:text-4xl font-extrabold text-amber-400 mb-3 tracking-wide">탈출 성공!</h2>
+                <div class="w-16 h-0.5 bg-amber-600/50 mb-4"></div>
+                <p class="text-sm text-gray-300 leading-relaxed mb-6">
+                    현관문 열쇠로 육중한 문을 열고 마침내 어둠 속의 저택을 무사히 탈출했습니다.<br>
+                    공포의 밤이 지나가고 차가운 새벽 공기를 마십니다.
+                </p>
+                <div id="escape-time-display" class="text-xs font-mono text-amber-500/90 mb-8 bg-black px-4 py-2 rounded border border-gray-800">
+                    탈출 기록: --
+                </div>
+                <button id="btn-restart" class="px-8 py-3 bg-amber-600 hover:bg-amber-500 text-black font-extrabold rounded-xl transition-all cursor-pointer shadow-lg shadow-amber-600/20 text-sm">
+                    다시 도전하기
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+    // ==========================================
+    // 1. CONFIG (게임을 위한 설정 상수 모음)
+    // ==========================================
+    const CONFIG = {
+        // Canvas & Rendering
+        FOV: Math.PI / 3,             // 시야각 (60도)
+        RAY_COUNT: 320,               // Raycast 광선 수 (성능 & 가시성 밸런스)
+        MAX_DEPTH: 16.0,              // 가시 거리
+        MIN_DIST: 0.2,                // 최소 벽 거리
+        
+        // Player & Movement
+        PLAYER_SPEED: 2.3,            // 이동 속도 (초당 유닛)
+        PLAYER_ROT_SPEED: 2.0,        // 시점 회전 속도
+        PLAYER_RADIUS: 0.22,          // 충돌 반지름
+        TRAP_DURATION: 7.0,           // 함정 속박 시간 (초)
+
+        // Monster AI
+        MONSTER_SPEED_PATROL: 1.1,    // 괴물 순찰 속도
+        MONSTER_SPEED_CHASE: 2.4,     // 괴물 추격 속도
+        MONSTER_DETECT_RADIUS: 5.5,   // 감지 범위
+        MONSTER_KILL_RADIUS: 0.6,     // 잡히는 거리
+
+        // Map dimensions
+        MAP_WIDTH: 22,
+        MAP_HEIGHT: 22,
+        TILE_SIZE: 1.0
+    };
+
+    // ==========================================
+    // 2. AUDIO SYNTHESIZER (외부 파일 없는 사운드 효과)
+    // ==========================================
+    class SoundManager {
+        constructor() {
+            this.ctx = null;
+            this.isMuted = false;
+        }
+
+        init() {
+            if (!this.ctx) {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (AudioCtx) this.ctx = new AudioCtx();
+            }
+            if (this.ctx && this.ctx.state === 'suspended') {
+                this.ctx.resume();
+            }
+        }
+
+        playFootstep() {
+            if (!this.ctx) return;
+            try {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(80, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.08);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.08);
+            } catch(e){}
+        }
+
+        playDoor() {
+            if (!this.ctx) return;
+            try {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(60, this.ctx.currentTime + 0.3);
+                gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.3);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.3);
+            } catch(e){}
+        }
+
+        playPickup() {
+            if (!this.ctx) return;
+            try {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(440, this.ctx.currentTime);
+                osc.frequency.setValueAtTime(880, this.ctx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.25);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.25);
+            } catch(e){}
+        }
+
+        playTrap() {
+            if (!this.ctx) return;
+            try {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.4);
+                gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.4);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.4);
+            } catch(e){}
+        }
+
+        playJumpscare() {
+            if (!this.ctx) return;
+            try {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(100, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(600, this.ctx.currentTime + 0.2);
+                osc.frequency.linearRampToValueAtTime(100, this.ctx.currentTime + 0.5);
+                gain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.5);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.5);
+            } catch(e){}
+        }
+    }
+    const audio = new SoundManager();
+
+    // ==========================================
+    // 3. GAME STATE (게임 상태 제어)
+    // ==========================================
+    const GAME_STATE = {
+        current: 'START', // 'START', 'PLAYING', 'CAUGHT', 'VICTORY'
+        startTime: 0,
+        endTime: 0,
+        lastSafeZone: { x: 2.5, y: 2.5 },
+        isPointerLocked: false
+    };
+
+    // ==========================================
+    // 4. INPUT MANAGEMENT (키보드 및 마우스 입력을 관리)
+    // ==========================================
+    const INPUT = {
+        keys: {
+            KeyW: false,
+            KeyA: false,
+            KeyS: false,
+            KeyD: false,
+            KeyE: false,
+            KeyF: false
+        },
+        mouseDeltaX: 0,
+        eJustPressed: false,
+        fJustPressed: false,
+
+        init() {
+            window.addEventListener('keydown', (e) => {
+                if (e.code in this.keys) {
+                    if (e.code === 'KeyE' && !this.keys.KeyE) {
+                        this.eJustPressed = true;
+                    }
+                    if (e.code === 'KeyF' && !this.keys.KeyF) {
+                        this.fJustPressed = true;
+                    }
+                    this.keys[e.code] = true;
+                }
+            });
+
+            window.addEventListener('keyup', (e) => {
+                if (e.code in this.keys) {
+                    this.keys[e.code] = false;
+                }
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (document.pointerLockElement === document.getElementById('gameCanvas')) {
+                    this.mouseDeltaX += e.movementX;
+                }
+            });
+        },
+
+        resetDelta() {
+            this.mouseDeltaX = 0;
+            this.eJustPressed = false;
+            this.fJustPressed = false;
+        }
+    };
+
+    // ==========================================
+    // 5. MAP & WORLD DEFINITION (구역, 문, 맵 데이터)
+    // ==========================================
+    // 0: Floor
+    // 1: Wall Type 1 (Main Manor Outer Wall)
+    // 2: Wall Type 2 (Room Partition Wall)
+    // 3: Door - Bronze Key Required (Zone 2 Unlock)
+    // 4: Door - Silver Key Required (Zone 3 Unlock)
+    // 5: Door - Gold Key Required (Master Zone Unlock)
+    // 6: Door - Main Gate (Main Key Required - Exit)
+    // 7: Open Door
+    // 8: Wardrobe / Hiding Spot
+    // 9: Decorative Furniture / Cabinet
+    // 10: Regular Door (Closed - Can be Opened/Closed without Key)
+    // 11: Door - Iron Key Required (Iron Zone Unlock)
+    const MAP = {
+        width: 20,
+        height: 20,
+        // 20x20 Grid Map Design: Every room is enclosed with wall partitions and has at least one door
+        grid: [
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,0,0,0,1,0,0,0,2,0,0,0,0,0,0,1,0,0,0,1],
+            [1,0,8,0,1,0,8,0,10,0,0,0,8,0,0,10,0,8,0,1],
+            [1,0,0,0,3,0,0,0,2,0,0,0,0,0,0,1,0,0,0,1],
+            [1,1,1,1,1,1,11,1,1,1,1,1,1,1,1,1,0,0,0,1],
+            [1,0,0,0,0,0,0,0,1,0,0,1,0,0,0,1,0,0,0,1],
+            [1,2,10,2,1,0,0,0,2,0,0,0,0,0,0,2,0,0,0,1],
+            [1,0,8,0,1,1,2,1,1,0,0,0,0,0,0,1,1,5,1,1],
+            [1,1,2,1,1,0,0,0,1,1,2,1,0,1,2,1,0,0,0,1],
+            [1,0,0,0,2,0,0,0,1,0,0,2,2,10,2,2,0,0,0,1],
+            [1,0,0,0,2,0,0,0,0,0,0,0,0,0,0,10,0,8,0,1],
+            [1,0,8,0,1,1,2,1,1,0,0,0,1,1,2,1,0,0,0,1],
+            [1,1,10,1,1,0,0,0,1,1,2,1,1,0,0,10,0,0,0,1],
+            [1,0,0,0,0,0,0,0,2,0,0,0,1,0,0,2,0,0,0,1],
+            [1,0,0,0,0,0,0,0,2,0,0,0,2,0,8,1,0,0,0,1],
+            [1,1,4,1,1,1,0,1,1,0,0,0,1,1,1,1,2,1,1,1],
+            [1,0,0,0,1,2,10,2,1,0,0,0,0,0,0,10,0,0,0,1],
+            [1,0,8,0,2,0,0,0,0,0,0,0,0,0,0,2,0,0,0,1],
+            [1,0,0,0,1,0,0,0,1,1,6,1,1,0,0,1,0,0,0,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+        ],
+
+        getTile(x, y) {
+            const gx = Math.floor(x);
+            const gy = Math.floor(y);
+            if (gx < 0 || gx >= this.width || gy < 0 || gy >= this.height) return 1;
+            return this.grid[gy][gx];
+        },
+
+        setTile(x, y, val) {
+            const gx = Math.floor(x);
+            const gy = Math.floor(y);
+            if (gx >= 0 && gx < this.width && gy >= 0 && gy < this.height) {
+                this.grid[gy][gx] = val;
+            }
+        },
+
+        isSolid(x, y) {
+            const tile = this.getTile(x, y);
+            // Solid tiles: 1, 2, 3, 4, 5, 6, 8, 9, 10, 11
+            return tile === 1 || tile === 2 || tile === 3 || tile === 4 || tile === 5 || tile === 6 || tile === 8 || tile === 9 || tile === 10 || tile === 11;
+        }
+    };
+
+    // ==========================================
+    // 6. PLAYER & CAMERA
+    // ==========================================
+    const PLAYER = {
+        x: 2.5,
+        y: 2.5,
+        angle: 0.0, // Radians
+        isTrapped: false,
+        trapTimer: 0.0,
+        isHiding: false,
+        hidingTile: { x: -1, y: -1 },
+
+        reset(x = 2.5, y = 2.5) {
+            this.x = x;
+            this.y = y;
+            this.angle = 0.0;
+            this.isTrapped = false;
+            this.trapTimer = 0.0;
+            this.isHiding = false;
+        },
+
+        update(dt) {
+            // Handle trap constraint countdown
+            if (this.isTrapped) {
+                this.trapTimer -= dt;
+                if (this.trapTimer <= 0) {
+                    this.isTrapped = false;
+                    this.trapTimer = 0;
+                }
+                return; // Frozen in place while trapped
+            }
+
+            if (this.isHiding) return; // Cannot move while hiding in wardrobe
+
+            // Camera Rotation via Mouse Delta
+            if (INPUT.mouseDeltaX !== 0) {
+                this.angle += (INPUT.mouseDeltaX * 0.0025);
+                // Keep angle normalized
+                while (this.angle < 0) this.angle += Math.PI * 2;
+                while (this.angle >= Math.PI * 2) this.angle -= Math.PI * 2;
+            }
+
+            // Movement relative to current facing angle
+            let moveX = 0;
+            let moveY = 0;
+
+            const dirX = Math.cos(this.angle);
+            const dirY = Math.sin(this.angle);
+            const sideX = -Math.sin(this.angle);
+            const sideY = Math.cos(this.angle);
+
+            if (INPUT.keys.KeyW) { moveX += dirX; moveY += dirY; }
+            if (INPUT.keys.KeyS) { moveX -= dirX; moveY -= dirY; }
+            if (INPUT.keys.KeyA) { moveX -= sideX; moveY -= sideY; }
+            if (INPUT.keys.KeyD) { moveX += sideX; moveY += sideY; }
+
+            // Normalize diagonal movement
+            const len = Math.hypot(moveX, moveY);
+            if (len > 0) {
+                moveX = (moveX / len) * CONFIG.PLAYER_SPEED * dt;
+                moveY = (moveY / len) * CONFIG.PLAYER_SPEED * dt;
+
+                // Footstep audio trigger
+                if (Math.random() < 0.1) audio.playFootstep();
+
+                // Wall Collision handling with multi-point check (prevents corner clipping)
+                const r = CONFIG.PLAYER_RADIUS;
+                const newX = this.x + moveX;
+                const newY = this.y + moveY;
+
+                // Multi-point collision check for X movement
+                const checkXSide = Math.sign(moveX) * r;
+                const xSolid1 = MAP.isSolid(newX + checkXSide, this.y - r * 0.85);
+                const xSolid2 = MAP.isSolid(newX + checkXSide, this.y + r * 0.85);
+                const xSolid3 = MAP.isSolid(newX + checkXSide, this.y);
+                if (!xSolid1 && !xSolid2 && !xSolid3) {
+                    this.x = newX;
+                }
+
+                // Multi-point collision check for Y movement
+                const checkYSide = Math.sign(moveY) * r;
+                const ySolid1 = MAP.isSolid(this.x - r * 0.85, newY + checkYSide);
+                const ySolid2 = MAP.isSolid(this.x + r * 0.85, newY + checkYSide);
+                const ySolid3 = MAP.isSolid(this.x, newY + checkYSide);
+                if (!ySolid1 && !ySolid2 && !ySolid3) {
+                    this.y = newY;
+                }
+            }
+
+            // Safety check: Push player out if overlapping/getting stuck in walls or doors
+            this.resolveWallStuck();
+        },
+
+        resolveWallStuck() {
+            const r = CONFIG.PLAYER_RADIUS;
+            // Check if player center is trapped inside a solid tile
+            if (MAP.isSolid(this.x, this.y)) {
+                const gx = Math.floor(this.x);
+                const gy = Math.floor(this.y);
+                const dirs = [
+                    { dx: 0, dy: -1 }, { dx: 0, dy: 1 },
+                    { dx: -1, dy: 0 }, { dx: 1, dy: 0 },
+                    { dx: -1, dy: -1 }, { dx: 1, dy: -1 },
+                    { dx: -1, dy: 1 }, { dx: 1, dy: 1 }
+                ];
+                for (const d of dirs) {
+                    if (!MAP.isSolid(gx + d.dx + 0.5, gy + d.dy + 0.5)) {
+                        this.x = gx + d.dx + 0.5;
+                        this.y = gy + d.dy + 0.5;
+                        break;
+                    }
+                }
+            } else {
+                // Buffer distance push-out from adjacent walls
+                const pad = r * 0.95;
+                if (MAP.isSolid(this.x + pad, this.y)) this.x = Math.floor(this.x + pad) - pad;
+                if (MAP.isSolid(this.x - pad, this.y)) this.x = Math.floor(this.x) + pad;
+                if (MAP.isSolid(this.x, this.y + pad)) this.y = Math.floor(this.y + pad) - pad;
+                if (MAP.isSolid(this.x, this.y - pad)) this.y = Math.floor(this.y) + pad;
+            }
+        }
+    };
+
+    // ==========================================
+    // 7. ITEMS SYSTEM (열쇠 및 핵심 탈출 아이템)
+    // ==========================================
+    const ITEMS = {
+        // Items placed on map
+        list: [
+            { id: 'bronze_key', name: '청동 열쇠', type: 'key', x: 1.5, y: 1.5, collected: false, visible: true, color: '#cd7f32', desc: '첫 번째 방 문 해금' },
+            { id: 'iron_key', name: '녹슨 철 열쇠', type: 'key', x: 6.5, y: 1.5, collected: false, visible: false, color: '#a1a1aa', desc: '녹슨 철 문 해금' },
+            { id: 'silver_key', name: '은 열쇠', type: 'key', x: 17.5, y: 2.5, collected: false, visible: true, color: '#c0c0c0', desc: '동쪽 은 문 해금' },
+            { id: 'gold_key', name: '황금 문 열쇠', type: 'key', x: 17.5, y: 6.5, collected: false, visible: true, color: '#ffd700', desc: '황금 문 해금' },
+            { id: 'main_key', name: '현관문 열쇠', type: 'key', x: 17.5, y: 17.5, collected: false, visible: false, color: '#ef4444', desc: '저택 탈출 열쇠' }
+        ],
+
+        inventory: new Set(),
+
+        reset() {
+            // Keep keys collected on respawn!
+        },
+
+        collect(item) {
+            item.collected = true;
+            this.inventory.add(item.id);
+            audio.playPickup();
+            UI.updateInventory();
+            UI.showObjective(`획득: ${item.name} (${item.desc})`);
+        },
+
+        has(itemId) {
+            return this.inventory.has(itemId);
+        }
+    };
+
+    // ==========================================
+    // 8. TRAPS SYSTEM (랜덤 바닥 속박 함정)
+    // ==========================================
+    const TRAPS = {
+        traps: [],
+
+        initRandomTraps() {
+            this.traps = [];
+            // Generate 10 random traps across floor tiles
+            let placed = 0;
+            while (placed < 10) {
+                const tx = Math.floor(Math.random() * (MAP.width - 2)) + 1;
+                const ty = Math.floor(Math.random() * (MAP.height - 2)) + 1;
+                // Place only on walkable empty floor away from start
+                if (MAP.getTile(tx, ty) === 0 && Math.hypot(tx - 2.5, ty - 2.5) > 3) {
+                    this.traps.push({ x: tx + 0.5, y: ty + 0.5, active: true });
+                    placed++;
+                }
+            }
+        },
+
+        checkPlayer() {
+            if (PLAYER.isTrapped || PLAYER.isHiding) return;
+
+            for (const trap of this.traps) {
+                if (trap.active) {
+                    const dist = Math.hypot(PLAYER.x - trap.x, PLAYER.y - trap.y);
+                    if (dist < 0.45) {
+                        // Trigger Trap!
+                        PLAYER.isTrapped = true;
+                        PLAYER.trapTimer = CONFIG.TRAP_DURATION;
+                        trap.active = false; // Single use trap
+                        audio.playTrap();
+                        break;
+                    }
+                }
+            }
+        }
+    };
+
+    // ==========================================
+    // 9. MONSTER AI (괴물 인공지능)
+    // ==========================================
+    const MONSTER = {
+        x: 10.5,
+        y: 10.5,
+        state: 'PATROL', // 'PATROL', 'CHASE'
+        targetWaypoints: [
+            { x: 10.5, y: 10.5 },
+            { x: 2.5, y: 10.5 },
+            { x: 17.5, y: 10.5 },
+            { x: 10.5, y: 2.5 },
+            { x: 10.5, y: 17.5 }
+        ],
+        currentWpIndex: 0,
+
+        reset() {
+            this.x = 10.5;
+            this.y = 10.5;
+            this.state = 'PATROL';
+            this.currentWpIndex = 0;
+        },
+
+        update(dt) {
+            const distToPlayer = Math.hypot(PLAYER.x - this.x, PLAYER.y - this.y);
+            const inSafeZone = SAFE_ZONE.isPlayerInSafeZone();
+
+            // Line of sight check
+            const hasLOS = !inSafeZone && !PLAYER.isHiding && this.hasLineOfSight(PLAYER.x, PLAYER.y);
+
+            // State Transitions
+            if (hasLOS && distToPlayer <= CONFIG.MONSTER_DETECT_RADIUS) {
+                this.state = 'CHASE';
+            } else if (distToPlayer > CONFIG.MONSTER_DETECT_RADIUS * 1.3 || inSafeZone || PLAYER.isHiding) {
+                this.state = 'PATROL';
+            }
+
+            // Movement target selection
+            let targetX, targetY;
+            let speed = CONFIG.MONSTER_SPEED_PATROL;
+
+            if (this.state === 'CHASE') {
+                targetX = PLAYER.x;
+                targetY = PLAYER.y;
+                speed = CONFIG.MONSTER_SPEED_CHASE;
+            } else {
+                const wp = this.targetWaypoints[this.currentWpIndex];
+                targetX = wp.x;
+                targetY = wp.y;
+                if (Math.hypot(this.x - wp.x, this.y - wp.y) < 0.5) {
+                    this.currentWpIndex = (this.currentWpIndex + 1) % this.targetWaypoints.length;
+                }
+            }
+
+            // Move towards target
+            const angle = Math.atan2(targetY - this.y, targetX - this.x);
+            const moveX = Math.cos(angle) * speed * dt;
+            const moveY = Math.sin(angle) * speed * dt;
+
+            // Simple raycast collision movement for monster
+            if (!MAP.isSolid(this.x + moveX, this.y)) this.x += moveX;
+            if (!MAP.isSolid(this.x, this.y + moveY)) this.y += moveY;
+
+            // Check Catch/Kill Player
+            if (!inSafeZone && !PLAYER.isHiding && distToPlayer < CONFIG.MONSTER_KILL_RADIUS) {
+                onPlayerCaught();
+            }
+        },
+
+        hasLineOfSight(tx, ty) {
+            // Raycast from monster to target
+            const dx = tx - this.x;
+            const dy = ty - this.y;
+            const dist = Math.hypot(dx, dy);
+            const steps = Math.ceil(dist * 4);
+            for (let i = 1; i < steps; i++) {
+                const cx = this.x + (dx * (i / steps));
+                const cy = this.y + (dy * (i / steps));
+                if (MAP.isSolid(cx, cy)) return false;
+            }
+            return true;
+        }
+    };
+
+    // ==========================================
+    // 10. SAFE ZONE SYSTEM (체크포인트)
+    // ==========================================
+    const SAFE_ZONE = {
+        // Safe zones at starting room and room corners
+        zones: [
+            { x: 2.5, y: 2.5, radius: 2.2 },
+            { x: 17.5, y: 2.5, radius: 2.0 },
+            { x: 2.5, y: 17.5, radius: 2.0 }
+        ],
+
+        isPlayerInSafeZone() {
+            for (const z of this.zones) {
+                if (Math.hypot(PLAYER.x - z.x, PLAYER.y - z.y) <= z.radius) {
+                    // Update checkpoint
+                    GAME_STATE.lastSafeZone = { x: z.x, y: z.y };
+                    return true;
+                }
+            }
+            return false;
+        }
+    };
+
+    // ==========================================
+    // 11. 3D RAYCASTING ENGINE (Canvas 1인칭 렌더러)
+    // ==========================================
+    class Raycaster {
+        constructor(canvas) {
+            this.canvas = canvas;
+            this.ctx = canvas.getContext('2d');
+            this.zBuffer = new Float32Array(CONFIG.RAY_COUNT);
+        }
+
+        resize() {
+            this.canvas.width = this.canvas.clientWidth;
+            this.canvas.height = this.canvas.clientHeight;
+        }
+
+        render() {
+            const width = this.canvas.width;
+            const height = this.canvas.height;
+            const ctx = this.ctx;
+
+            // 1. Clear Screen (Ceiling & Floor gradient)
+            const ceilingGrad = ctx.createLinearGradient(0, 0, 0, height / 2);
+            ceilingGrad.addColorStop(0, '#020204');
+            ceilingGrad.addColorStop(1, '#0c0d12');
+            ctx.fillStyle = ceilingGrad;
+            ctx.fillRect(0, 0, width, height / 2);
+
+            const floorGrad = ctx.createLinearGradient(0, height / 2, 0, height);
+            floorGrad.addColorStop(0, '#110d0b');
+            floorGrad.addColorStop(1, '#050302');
+            ctx.fillStyle = floorGrad;
+            ctx.fillRect(0, height / 2, width, height / 2);
+
+            // 2. Cast Rays for Walls
+            const halfFov = CONFIG.FOV / 2;
+            const rayStep = CONFIG.FOV / CONFIG.RAY_COUNT;
+            const colWidth = width / CONFIG.RAY_COUNT;
+
+            for (let i = 0; i < CONFIG.RAY_COUNT; i++) {
+                const rayAngle = (PLAYER.angle - halfFov) + (i * rayStep);
+                const hit = this.castRay(rayAngle);
+
+                // Store in depth buffer for sprite sorting
+                this.zBuffer[i] = hit.distance;
+
+                // Fix fish-eye effect
+                const correctedDist = hit.distance * Math.cos(rayAngle - PLAYER.angle);
+                const wallHeight = (height / correctedDist) * 0.9;
+
+                // Color & Lighting Shading based on distance
+                const wallTop = (height - wallHeight) / 2;
+                const darkness = Math.max(0, Math.min(1, 1 - (correctedDist / CONFIG.MAX_DEPTH)));
+
+                let wallColor = '#2d251e';
+                if (hit.tile === 1) wallColor = hit.side === 0 ? '#3a2d23' : '#271e17'; // Outer Wall
+                else if (hit.tile === 2) wallColor = hit.side === 0 ? '#42372d' : '#30261e'; // Inner Wall
+                else if (hit.tile === 3) wallColor = '#b45309'; // Bronze Door
+                else if (hit.tile === 4) wallColor = '#64748b'; // Silver Door
+                else if (hit.tile === 5) wallColor = '#eab308'; // Gold Door
+                else if (hit.tile === 6) wallColor = '#dc2626'; // Main Exit Door
+                else if (hit.tile === 8) wallColor = '#1e1b18'; // Wardrobe
+                else if (hit.tile === 10) wallColor = hit.side === 0 ? '#78350f' : '#582507'; // Regular Wooden Door
+                else if (hit.tile === 11) wallColor = '#475569'; // Iron Door (Slate Gray)
+
+                ctx.fillStyle = wallColor;
+                ctx.fillRect(i * colWidth, wallTop, colWidth + 1, wallHeight);
+
+                // Distance Darkness Fog Effect
+                ctx.fillStyle = `rgba(3, 3, 5, ${1 - darkness})`;
+                ctx.fillRect(i * colWidth, wallTop, colWidth + 1, wallHeight);
+
+                // Flashlight Beam Center Highlight
+                const rayCenterDiff = Math.abs(i - CONFIG.RAY_COUNT / 2) / (CONFIG.RAY_COUNT / 2);
+                const lightIntensity = Math.max(0, (1 - rayCenterDiff * 0.8)) * darkness * 0.25;
+                ctx.fillStyle = `rgba(255, 240, 200, ${lightIntensity})`;
+                ctx.fillRect(i * colWidth, wallTop, colWidth + 1, wallHeight);
+            }
+
+            // 3. Render Sprites (Items, Traps, Monster)
+            this.renderSprites();
+        }
+
+        castRay(angle) {
+            const sin = Math.sin(angle);
+            const cos = Math.cos(angle);
+
+            let dist = 0;
+            const step = 0.02;
+            let hitTile = 0;
+            let side = 0;
+
+            while (dist < CONFIG.MAX_DEPTH) {
+                dist += step;
+                const checkX = PLAYER.x + cos * dist;
+                const checkY = PLAYER.y + sin * dist;
+
+                hitTile = MAP.getTile(checkX, checkY);
+                if (hitTile > 0 && hitTile !== 7) { // 7 is open door
+                    return { distance: dist, tile: hitTile, side: side };
+                }
+            }
+
+            return { distance: CONFIG.MAX_DEPTH, tile: 0, side: 0 };
+        }
+
+        renderSprites() {
+            const width = this.canvas.width;
+            const height = this.canvas.height;
+            const ctx = this.ctx;
+
+            // Collect all renderable 2D sprites
+            const sprites = [];
+
+            // Add uncollected items
+            for (const item of ITEMS.list) {
+                if (!item.collected && item.visible !== false) {
+                    sprites.push({ x: item.x, y: item.y, type: 'item', color: item.color, label: item.name });
+                }
+            }
+
+            // Add active traps
+            for (const trap of TRAPS.traps) {
+                if (trap.active) {
+                    sprites.push({ x: trap.x, y: trap.y, type: 'trap', color: '#7f1d1d', label: '함정' });
+                }
+            }
+
+            // Add Monster
+            sprites.push({ x: MONSTER.x, y: MONSTER.y, type: 'monster', color: '#991b1b', label: '괴물' });
+
+            // Calculate distance & angle to player for sorting
+            for (const s of sprites) {
+                const dx = s.x - PLAYER.x;
+                const dy = s.y - PLAYER.y;
+                s.dist = Math.hypot(dx, dy);
+
+                let angle = Math.atan2(dy, dx) - PLAYER.angle;
+                while (angle < -Math.PI) angle += Math.PI * 2;
+                while (angle > Math.PI) angle -= Math.PI * 2;
+                s.angle = angle;
+            }
+
+            // Sort back-to-front
+            sprites.sort((a, b) => b.dist - a.dist);
+
+            // Render each sprite
+            for (const s of sprites) {
+                if (s.dist < 0.2 || s.dist > CONFIG.MAX_DEPTH) continue;
+                if (Math.abs(s.angle) > CONFIG.FOV) continue; // Out of FOV
+
+                const screenX = (width / 2) + Math.tan(s.angle) * (width / 2);
+                const spriteSize = Math.min(height * 2, (height / s.dist) * 0.7);
+                const spriteTop = (height - spriteSize) / 2;
+
+                // Check depth buffer column visibility
+                const colIdx = Math.floor((screenX / width) * CONFIG.RAY_COUNT);
+                if (colIdx >= 0 && colIdx < CONFIG.RAY_COUNT && this.zBuffer[colIdx] < s.dist) {
+                    continue; // Occluded behind wall
+                }
+
+                const alpha = Math.max(0, Math.min(1, 1 - (s.dist / CONFIG.MAX_DEPTH)));
+
+                ctx.save();
+                ctx.globalAlpha = alpha;
+
+                if (s.type === 'monster') {
+                    // Render Monster Silhouette & Glowing Eyes
+                    ctx.fillStyle = '#0a0a0c';
+                    ctx.beginPath();
+                    ctx.arc(screenX, spriteTop + spriteSize * 0.3, spriteSize * 0.25, 0, Math.PI * 2);
+                    ctx.fillRect(screenX - spriteSize * 0.2, spriteTop + spriteSize * 0.3, spriteSize * 0.4, spriteSize * 0.6);
+                    ctx.fill();
+
+                    // Glowing Red Eyes
+                    ctx.fillStyle = '#ff0000';
+                    ctx.shadowColor = '#ff0000';
+                    ctx.shadowBlur = 12;
+                    ctx.beginPath();
+                    ctx.arc(screenX - spriteSize * 0.08, spriteTop + spriteSize * 0.25, spriteSize * 0.04, 0, Math.PI * 2);
+                    ctx.arc(screenX + spriteSize * 0.08, spriteTop + spriteSize * 0.25, spriteSize * 0.04, 0, Math.PI * 2);
+                    ctx.fill();
+                } else if (s.type === 'item') {
+                    // Key / Item Glowing Sphere
+                    ctx.fillStyle = s.color;
+                    ctx.shadowColor = s.color;
+                    ctx.shadowBlur = 10;
+                    ctx.beginPath();
+                    ctx.arc(screenX, spriteTop + spriteSize * 0.6, spriteSize * 0.12, 0, Math.PI * 2);
+                    ctx.fill();
+                } else if (s.type === 'trap') {
+                    // Floor Trap Spikes
+                    ctx.strokeStyle = '#991b1b';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(screenX, spriteTop + spriteSize * 0.8, spriteSize * 0.15, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+
+                ctx.restore();
+            }
+        }
+    }
+
+    // ==========================================
+    // 12. INTERACTION & UI MANAGEMENT
+    // ==========================================
+    const UI = {
+        promptEl: document.getElementById('interaction-prompt'),
+        textEl: document.getElementById('interaction-text'),
+        invEl: document.getElementById('inventory-list'),
+        objectiveEl: document.getElementById('objective-text'),
+        safeZoneEl: document.getElementById('safe-zone-badge'),
+        trapOverlay: document.getElementById('trap-overlay'),
+        trapTimerFill: document.getElementById('trap-timer-fill'),
+        trapTimerText: document.getElementById('trap-timer-text'),
+        dangerVignette: document.getElementById('danger-vignette'),
+        hidingOverlay: document.getElementById('hiding-overlay'),
+
+        showPrompt(msg) {
+            this.textEl.innerText = msg;
+            this.promptEl.classList.remove('opacity-0', 'translate-y-4');
+            this.promptEl.classList.add('opacity-100', 'translate-y-0');
+        },
+
+        hidePrompt() {
+            this.promptEl.classList.remove('opacity-100', 'translate-y-0');
+            this.promptEl.classList.add('opacity-0', 'translate-y-4');
+        },
+
+        showObjective(msg) {
+            this.objectiveEl.innerHTML = `<span class="text-amber-500 font-bold">목표:</span> ${msg}`;
+        },
+
+        updateInventory() {
+            if (ITEMS.inventory.size === 0) {
+                this.invEl.innerHTML = `<div class="text-xs text-gray-600 bg-black/60 border border-gray-800/60 px-3 py-2 rounded-md">소지품 없음</div>`;
+                return;
+            }
+
+            let html = '';
+            for (const item of ITEMS.list) {
+                if (item.collected) {
+                    html += `
+                        <div class="flex items-center gap-1.5 bg-black/80 border border-amber-600/50 px-3 py-1.5 rounded-md text-xs text-amber-200 shadow-md">
+                            <span class="w-2 h-2 rounded-full" style="background-color: ${item.color}"></span>
+                            <span>${item.name}</span>
+                        </div>
+                    `;
+                }
+            }
+            this.invEl.innerHTML = html;
+        },
+
+        updateHUD() {
+            // Safe zone badge
+            if (SAFE_ZONE.isPlayerInSafeZone()) {
+                this.safeZoneEl.classList.remove('hidden');
+                this.safeZoneEl.classList.add('flex');
+            } else {
+                this.safeZoneEl.classList.remove('flex');
+                this.safeZoneEl.classList.add('hidden');
+            }
+
+            // Trap status overlay
+            if (PLAYER.isTrapped) {
+                this.trapOverlay.classList.remove('opacity-0');
+                this.trapOverlay.classList.add('opacity-100');
+                const pct = (PLAYER.trapTimer / CONFIG.TRAP_DURATION) * 100;
+                this.trapTimerFill.style.width = `${pct}%`;
+                this.trapTimerText.innerText = `${PLAYER.trapTimer.toFixed(1)}s`;
+            } else {
+                this.trapOverlay.classList.remove('opacity-100');
+                this.trapOverlay.classList.add('opacity-0');
+            }
+
+            // Hiding status overlay
+            if (PLAYER.isHiding) {
+                this.hidingOverlay.classList.remove('opacity-0');
+                this.hidingOverlay.classList.add('opacity-100');
+            } else {
+                this.hidingOverlay.classList.remove('opacity-100');
+                this.hidingOverlay.classList.add('opacity-0');
+            }
+
+            // Monster Proximity Vignette
+            const dist = Math.hypot(MONSTER.x - PLAYER.x, MONSTER.y - PLAYER.y);
+            if (dist < CONFIG.MONSTER_DETECT_RADIUS && MONSTER.state === 'CHASE') {
+                const opacity = 1 - (dist / CONFIG.MONSTER_DETECT_RADIUS);
+                this.dangerVignette.style.opacity = opacity.toFixed(2);
+                document.getElementById('game-container').classList.add('shake');
+            } else {
+                this.dangerVignette.style.opacity = '0';
+                document.getElementById('game-container').classList.remove('shake');
+            }
+        },
+
+        renderMinimap(canvas) {
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const scale = canvas.width / MAP.width;
+
+            // Render Map Grid
+            for (let y = 0; y < MAP.height; y++) {
+                for (let x = 0; x < MAP.width; x++) {
+                    const tile = MAP.grid[y][x];
+                    if (tile === 1 || tile === 2) ctx.fillStyle = '#334155';
+                    else if ((tile >= 3 && tile <= 6) || tile === 11) ctx.fillStyle = '#d97706';
+                    else if (tile === 8) ctx.fillStyle = '#475569';
+                    else ctx.fillStyle = '#0f172a';
+
+                    ctx.fillRect(x * scale, y * scale, scale, scale);
+                }
+            }
+
+            // Player Marker
+            ctx.fillStyle = '#38bdf8';
+            ctx.beginPath();
+            ctx.arc(PLAYER.x * scale, PLAYER.y * scale, scale * 0.8, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Player Facing Cone
+            ctx.strokeStyle = '#38bdf8';
+            ctx.beginPath();
+            ctx.moveTo(PLAYER.x * scale, PLAYER.y * scale);
+            ctx.lineTo(
+                (PLAYER.x + Math.cos(PLAYER.angle) * 2) * scale,
+                (PLAYER.y + Math.sin(PLAYER.angle) * 2) * scale
+            );
+            ctx.stroke();
+
+            // Monster Radar Ping (if near)
+            const dist = Math.hypot(MONSTER.x - PLAYER.x, MONSTER.y - PLAYER.y);
+            if (dist < CONFIG.MONSTER_DETECT_RADIUS) {
+                ctx.fillStyle = '#ef4444';
+                ctx.beginPath();
+                ctx.arc(MONSTER.x * scale, MONSTER.y * scale, scale * 0.7, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+    };
+
+    // Interaction Check System
+    function checkInteraction() {
+        // 언제든지 F키를 누르면 바라보는 위치에 문을 직접 생성/설치
+        if (INPUT.fJustPressed) {
+            const targetX = PLAYER.x + Math.cos(PLAYER.angle) * 1.1;
+            const targetY = PLAYER.y + Math.sin(PLAYER.angle) * 1.1;
+            const gx = Math.floor(targetX);
+            const gy = Math.floor(targetY);
+
+            if (gx >= 0 && gx < MAP.width && gy >= 0 && gy < MAP.height) {
+                // 이미 특수 문이나 외벽(1)이 아니면 일반 목재 문(10)으로 전환/생성
+                const currentTile = MAP.getTile(targetX, targetY);
+                if (currentTile !== 1 && currentTile !== 6) {
+                    MAP.setTile(targetX, targetY, 10);
+                    audio.playDoor();
+                    UI.showObjective(`바라보는 위치 (X:${gx}, Y:${gy})에 새로운 문을 설치했습니다!`);
+                }
+            }
+        }
+
+        if (PLAYER.isTrapped) {
+            UI.hidePrompt();
+            return;
+        }
+
+        if (PLAYER.isHiding) {
+            UI.showPrompt("옷장에서 나가기 (E)");
+            if (INPUT.eJustPressed) {
+                PLAYER.isHiding = false;
+                audio.playDoor();
+            }
+            return;
+        }
+
+        // Check forward tile target
+        const lookX = PLAYER.x + Math.cos(PLAYER.angle) * 0.8;
+        const lookY = PLAYER.y + Math.sin(PLAYER.angle) * 0.8;
+        const tile = MAP.getTile(lookX, lookY);
+
+        // 1. Check Locked Key Doors
+        if ((tile >= 3 && tile <= 6) || tile === 11) {
+            let keyNeeded = '';
+            let doorName = '';
+            if (tile === 3) { keyNeeded = 'bronze_key'; doorName = '청동 문'; }
+            else if (tile === 11) { keyNeeded = 'iron_key'; doorName = '녹슨 철 문'; }
+            else if (tile === 4) { keyNeeded = 'silver_key'; doorName = '은 문'; }
+            else if (tile === 5) { keyNeeded = 'gold_key'; doorName = '황금 문'; }
+            else if (tile === 6) { keyNeeded = 'main_key'; doorName = '현관문'; }
+
+            if (ITEMS.has(keyNeeded)) {
+                UI.showPrompt(`${doorName} 열기 (E) | 문 설치 (F)`);
+                if (INPUT.eJustPressed) {
+                    if (tile === 6) {
+                        onPlayerEscapeSuccess();
+                    } else {
+                        MAP.setTile(lookX, lookY, 7); // Open door
+                        audio.playDoor();
+                        if (tile === 3) {
+                            const ironKey = ITEMS.list.find(i => i.id === 'iron_key');
+                            if (ironKey) ironKey.visible = true;
+                            UI.showObjective('청동 문을 해제했습니다! 방 안에서 녹슨 철 열쇠가 나타났습니다.');
+                        } else if (tile === 4) {
+                            UI.showObjective('은 문을 해제했습니다! 황금 문 앞으로 이동하여 열쇠를 획득하세요.');
+                        } else if (tile === 5) {
+                            const mainKey = ITEMS.list.find(i => i.id === 'main_key');
+                            if (mainKey) mainKey.visible = true;
+                            UI.showObjective('황금 문을 해제했습니다! 마스터 룸에서 현관문 열쇠가 나타났습니다.');
+                        } else {
+                            UI.showObjective('문이 열렸습니다. 다음 구역을 탐색하세요.');
+                        }
+                    }
+                }
+            } else {
+                UI.showPrompt(`[잠김] ${doorName} (열쇠 필요) | 문 설치 (F)`);
+            }
+            return;
+        }
+
+        // 2. Check Regular Doors (Tile 10)
+        if (tile === 10) {
+            UI.showPrompt("문 열기 (E) | 문 설치 (F)");
+            if (INPUT.eJustPressed) {
+                MAP.setTile(lookX, lookY, 7); // Open door
+                audio.playDoor();
+            }
+            return;
+        }
+
+        // 3. Check Open Doors (Tile 7) - Can close them to block pursuit
+        if (tile === 7) {
+            UI.showPrompt("문 닫기 (E) | 문 설치 (F)");
+            if (INPUT.eJustPressed) {
+                // Prevent closing if player or monster is inside or near the doorway tile
+                const doorGx = Math.floor(lookX);
+                const doorGy = Math.floor(lookY);
+                const doorCenterX = doorGx + 0.5;
+                const doorCenterY = doorGy + 0.5;
+
+                const pDist = Math.hypot(PLAYER.x - doorCenterX, PLAYER.y - doorCenterY);
+                const mDist = Math.hypot(MONSTER.x - doorCenterX, MONSTER.y - doorCenterY);
+
+                if (pDist < 0.85 || mDist < 0.85) {
+                    UI.showObjective("문 근처에 서 있어 문을 닫을 수 없습니다.");
+                } else {
+                    MAP.setTile(lookX, lookY, 10); // Close door
+                    audio.playDoor();
+                }
+            }
+            return;
+        }
+
+        // 4. Check Wardrobe / Hiding Spot
+        if (tile === 8) {
+            UI.showPrompt("옷장에 숨기 (E) | 문 설치 (F)");
+            if (INPUT.eJustPressed) {
+                PLAYER.isHiding = true;
+                audio.playDoor();
+            }
+            return;
+        }
+
+        // 5. Check Pickup Items
+        for (const item of ITEMS.list) {
+            if (!item.collected && item.visible !== false && Math.hypot(PLAYER.x - item.x, PLAYER.y - item.y) < 0.8) {
+                UI.showPrompt(`${item.name} 획득 (E) | 문 설치 (F)`);
+                if (INPUT.eJustPressed) {
+                    ITEMS.collect(item);
+                }
+                return;
+            }
+        }
+
+        // 6. 기본 조준 상태 - F 키 안내
+        UI.showPrompt("문 생성/설치 (F)");
+    }
+
+    // ==========================================
+    // 13. GAME STATE HANDLERS & MAIN LOOP
+    // ==========================================
+    // 안전한 Pointer Lock 요청 함수 (UNHANDLEDREJECTION 예방)
+    function safeRequestPointerLock(element) {
+        if (!element) return;
+        try {
+            const promise = element.requestPointerLock();
+            if (promise && typeof promise.catch === 'function') {
+                promise.catch((err) => {
+                    // 포인터 락 거부/쿨다운 시 예외를 안전하게 예방
+                    console.warn('Pointer lock request ignored:', err.message);
+                });
+            }
+        } catch (e) {
+            console.warn('Pointer lock error:', e);
+        }
+    }
+
+    function onPlayerCaught() {
+        if (GAME_STATE.current !== 'PLAYING') return;
+        GAME_STATE.current = 'CAUGHT';
+        audio.playJumpscare();
+        
+        document.exitPointerLock();
+        const screen = document.getElementById('screen-caught');
+        screen.classList.remove('opacity-0', 'pointer-events-none');
+        screen.classList.add('opacity-100');
+    }
+
+    function respawnAtLastSafeZone() {
+        PLAYER.reset(GAME_STATE.lastSafeZone.x, GAME_STATE.lastSafeZone.y);
+        MONSTER.reset();
+
+        const screen = document.getElementById('screen-caught');
+        screen.classList.remove('opacity-100');
+        screen.classList.add('opacity-0', 'pointer-events-none');
+
+        GAME_STATE.current = 'PLAYING';
+        safeRequestPointerLock(document.getElementById('gameCanvas'));
+    }
+
+    function onPlayerEscapeSuccess() {
+        GAME_STATE.current = 'VICTORY';
+        GAME_STATE.endTime = Date.now();
+        const duration = Math.floor((GAME_STATE.endTime - GAME_STATE.startTime) / 1000);
+
+        document.exitPointerLock();
+        document.getElementById('escape-time-display').innerText = `탈출 기록: ${duration}초`;
+
+        const screen = document.getElementById('screen-victory');
+        screen.classList.remove('opacity-0', 'pointer-events-none');
+        screen.classList.add('opacity-100');
+    }
+
+    function startGame() {
+        audio.init();
+        PLAYER.reset(2.5, 2.5);
+        MONSTER.reset();
+        TRAPS.initRandomTraps();
+
+        GAME_STATE.startTime = Date.now();
+        GAME_STATE.current = 'PLAYING';
+
+        const startScreen = document.getElementById('screen-start');
+        startScreen.classList.add('opacity-0', 'pointer-events-none');
+
+        safeRequestPointerLock(document.getElementById('gameCanvas'));
+    }
+
+    function restartGame() {
+        window.location.reload();
+    }
+
+    // Canvas Raycaster Renderer Instance
+    let raycaster = null;
+    let lastTime = performance.now();
+
+    function gameLoop(now) {
+        const dt = Math.min(0.1, (now - lastTime) / 1000);
+        lastTime = now;
+
+        if (GAME_STATE.current === 'PLAYING') {
+            // Update Core Systems
+            PLAYER.update(dt);
+            MONSTER.update(dt);
+            TRAPS.checkPlayer();
+            checkInteraction();
+            UI.updateHUD();
+
+            // Render Frame
+            raycaster.render();
+            UI.renderMinimap(document.getElementById('minimapCanvas'));
+        }
+
+        INPUT.resetDelta();
+        requestAnimationFrame(gameLoop);
+    }
+
+    // ==========================================
+    // 14. INITIALIZATION
+    // ==========================================
+    window.onload = function() {
+        const canvas = document.getElementById('gameCanvas');
+        raycaster = new Raycaster(canvas);
+        raycaster.resize();
+
+        window.addEventListener('resize', () => raycaster.resize());
+
+        INPUT.init();
+        UI.updateInventory();
+
+        // UI Button Event Binding
+        document.getElementById('btn-start').addEventListener('click', startGame);
+        document.getElementById('btn-respawn').addEventListener('click', respawnAtLastSafeZone);
+        document.getElementById('btn-restart').addEventListener('click', restartGame);
+
+        // Canvas click to request pointer lock during play
+        canvas.addEventListener('click', () => {
+            if (GAME_STATE.current === 'PLAYING') {
+                safeRequestPointerLock(canvas);
+            }
+        });
+
+        // Start animation frame loop
+        requestAnimationFrame(gameLoop);
+    };
+    </script>
+</body>
+</html>
