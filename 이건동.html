@@ -1,0 +1,1464 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>파멸의 불씨 (Ember of Ruin)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Fonts & Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800;900&family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Noto Sans KR', sans-serif;
+            user-select: none;
+            background-color: #08090c;
+            color: #f0f2f5;
+        }
+        .font-cinzel { font-family: 'Cinzel', serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        .glass-panel {
+            background: rgba(15, 18, 28, 0.75);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 215, 0, 0.15);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+        }
+        .glow-gold { text-shadow: 0 0 12px rgba(237, 184, 45, 0.6); }
+        .glow-cyan { text-shadow: 0 0 12px rgba(0, 213, 255, 0.6); }
+        .glow-red { text-shadow: 0 0 12px rgba(255, 50, 50, 0.8); }
+        
+        /* Floating Damage Text Animation */
+        @keyframes floatUp {
+            0% { opacity: 1; transform: translateY(0) scale(1); }
+            50% { opacity: 1; transform: translateY(-25px) scale(1.2); }
+            100% { opacity: 0; transform: translateY(-50px) scale(0.8); }
+        }
+        .dmg-text {
+            position: absolute;
+            font-weight: 800;
+            font-family: 'Cinzel', sans-serif;
+            pointer-events: none;
+            animation: floatUp 0.8s ease-out forwards;
+        }
+        /* Cooldown overlay */
+        .cd-overlay {
+            transition: height 0.1s linear;
+        }
+    </style>
+</head>
+<body class="relative">
+
+    <!-- Game Canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- UI OVERLAY -->
+    <div id="ui-container" class="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 sm:p-6">
+        
+        <!-- TOP BAR: Player HP & Stats + Boss HP -->
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 w-full">
+            
+            <!-- Player Stats Widget -->
+            <div class="glass-panel p-4 rounded-xl w-full sm:w-80 flex flex-col gap-2">
+                <div class="flex justify-between items-center">
+                    <span class="font-cinzel text-amber-400 font-bold text-lg tracking-wider">용사 <span id="player-level" class="text-white">Lv.1</span></span>
+                    <span id="player-hp-text" class="text-xs font-semibold text-gray-300">100 / 100</span>
+                </div>
+                <!-- Health Bar -->
+                <div class="w-full bg-gray-950 h-3.5 rounded-full overflow-hidden p-0.5 border border-red-900/50">
+                    <div id="player-hp-bar" class="bg-gradient-to-r from-red-700 via-rose-500 to-red-400 h-full rounded-full transition-all duration-200" style="width: 100%;"></div>
+                </div>
+                <!-- XP Bar -->
+                <div class="w-full bg-gray-950 h-1.5 rounded-full overflow-hidden border border-cyan-900/30">
+                    <div id="player-xp-bar" class="bg-cyan-400 h-full rounded-full transition-all duration-200" style="width: 0%;"></div>
+                </div>
+                <!-- Embers Counter -->
+                <div class="flex justify-between items-center mt-1 pt-1 border-t border-gray-800">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-fire-flame-curved text-amber-400 text-lg animate-pulse"></i>
+                        <span class="text-xs font-bold text-gray-300">불씨 (Ember)</span>
+                    </div>
+                    <span id="ember-count" class="font-cinzel font-black text-amber-300 text-xl glow-gold">0</span>
+                </div>
+            </div>
+
+            <!-- Boss HP Widget (Hidden by default) -->
+            <div id="boss-hud" class="glass-panel p-4 rounded-xl w-full max-w-xl mx-auto hidden flex-col gap-2 border-red-800/40">
+                <div class="flex justify-between items-center">
+                    <span class="font-cinzel text-red-500 font-black text-xl tracking-wider glow-red">파멸의 신 (God of Ruin)</span>
+                    <span id="boss-phase-text" class="px-2 py-0.5 bg-red-950/80 border border-red-700/60 rounded text-xs font-bold text-red-300">PHASE 1</span>
+                </div>
+                <div class="w-full bg-gray-950 h-5 rounded-full overflow-hidden p-0.5 border border-red-800">
+                    <div id="boss-hp-bar" class="bg-gradient-to-r from-red-900 via-rose-600 to-orange-500 h-full rounded-full transition-all duration-200" style="width: 100%;"></div>
+                </div>
+                <div class="flex justify-between text-xs text-gray-400">
+                    <span id="boss-hp-num">1000 / 1000</span>
+                    <span class="text-amber-400"><i class="fa-solid fa-triangle-exclamation mr-1"></i>강력한 불씨 일격으로 피해를 입히세요!</span>
+                </div>
+            </div>
+
+            <!-- Controls & Action Prompt -->
+            <div class="hidden lg:flex flex-col items-end gap-2 text-right">
+                <div class="glass-panel px-3 py-2 rounded-lg text-xs text-gray-300 flex flex-col gap-1">
+                    <div><span class="px-1.5 py-0.5 bg-gray-800 rounded font-bold border border-gray-700">WASD</span> 이동</div>
+                    <div><span class="px-1.5 py-0.5 bg-gray-800 rounded font-bold border border-gray-700">마우스 드래그</span> 시점 변경</div>
+                    <div><span class="px-1.5 py-0.5 bg-gray-800 rounded font-bold border border-gray-700">좌클릭</span> 검 콤보 공격</div>
+                    <div><span class="px-1.5 py-0.5 bg-gray-800 rounded font-bold border border-gray-700">우클릭</span> 회피 / 구르기</div>
+                    <div><span class="px-1.5 py-0.5 bg-amber-900/60 text-amber-300 rounded font-bold border border-amber-700">U</span> 강화 상점 오픈</div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- BOTTOM CENTER: Skill Hotbar & Upgrade Button -->
+        <div class="flex flex-col items-center gap-3 w-full my-2">
+            
+            <!-- Skill Hotbar -->
+            <div class="flex items-center gap-3 glass-panel p-2.5 rounded-2xl pointer-events-auto">
+                
+                <!-- Skill 1: Flame Dash -->
+                <div id="skill-1" class="relative group w-14 h-14 rounded-xl bg-gray-900 border-2 border-gray-700 flex flex-col items-center justify-center cursor-pointer overflow-hidden transition-all duration-200 hover:border-cyan-400">
+                    <div id="skill-1-cd" class="cd-overlay absolute bottom-0 left-0 right-0 bg-black/75 h-0 pointer-events-none"></div>
+                    <i class="fa-solid fa-bolt-lightning text-cyan-400 text-xl mb-0.5"></i>
+                    <span class="text-[10px] font-bold text-gray-400">돌진 [1]</span>
+                    <span id="skill-1-lock" class="absolute inset-0 bg-gray-950/90 flex items-center justify-center text-xs text-amber-400 font-bold"><i class="fa-solid fa-lock"></i></span>
+                </div>
+
+                <!-- Skill 2: Ember Nova -->
+                <div id="skill-2" class="relative group w-14 h-14 rounded-xl bg-gray-900 border-2 border-gray-700 flex flex-col items-center justify-center cursor-pointer overflow-hidden transition-all duration-200 hover:border-amber-400">
+                    <div id="skill-2-cd" class="cd-overlay absolute bottom-0 left-0 right-0 bg-black/75 h-0 pointer-events-none"></div>
+                    <i class="fa-solid fa-burst text-amber-400 text-xl mb-0.5"></i>
+                    <span class="text-[10px] font-bold text-gray-400">폭발 [2]</span>
+                    <span id="skill-2-lock" class="absolute inset-0 bg-gray-950/90 flex items-center justify-center text-xs text-amber-400 font-bold"><i class="fa-solid fa-lock"></i></span>
+                </div>
+
+                <!-- Skill 3: Ruin Buster (Ember Ultimate) -->
+                <div id="skill-3" class="relative group w-14 h-14 rounded-xl bg-gray-900 border-2 border-amber-500/50 flex flex-col items-center justify-center cursor-pointer overflow-hidden transition-all duration-200 hover:border-red-400 shadow-lg shadow-amber-500/20">
+                    <div id="skill-3-cd" class="cd-overlay absolute bottom-0 left-0 right-0 bg-black/75 h-0 pointer-events-none"></div>
+                    <i class="fa-solid fa-meteor text-rose-500 text-xl mb-0.5 animate-bounce"></i>
+                    <span class="text-[10px] font-bold text-amber-300">불씨 일격 [3]</span>
+                    <span id="skill-3-lock" class="absolute inset-0 bg-gray-950/90 flex items-center justify-center text-xs text-amber-400 font-bold"><i class="fa-solid fa-lock"></i></span>
+                </div>
+
+                <div class="h-8 w-px bg-gray-700 mx-1"></div>
+
+                <!-- Shop Toggle Button -->
+                <button id="btn-open-shop" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-gray-950 font-bold text-sm shadow-lg shadow-amber-600/30 transition-all transform hover:scale-105 active:scale-95 flex items-center gap-2">
+                    <i class="fa-solid fa-anvil text-lg"></i>
+                    <span>검 강화 & 스킬 [U]</span>
+                </button>
+
+            </div>
+
+            <!-- Active Zone Indicator -->
+            <div id="zone-indicator" class="glass-panel px-4 py-1 rounded-full text-xs font-semibold text-amber-300/80 tracking-widest uppercase border-amber-500/20">
+                폐허가 된 도시 (Ruined City)
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- START SCREEN MODAL -->
+    <div id="start-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex items-center justify-center p-4 transition-opacity duration-300">
+        <div class="glass-panel max-w-xl w-full p-8 sm:p-10 rounded-3xl border-amber-500/40 text-center flex flex-col items-center gap-6 shadow-2xl relative overflow-hidden">
+            <!-- Background Glow FX -->
+            <div class="absolute -top-24 -left-24 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
+            <div class="absolute -bottom-24 -right-24 w-48 h-48 bg-rose-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+            <div class="flex flex-col items-center gap-2">
+                <i class="fa-solid fa-fire-flame-curved text-amber-400 text-5xl animate-pulse mb-2"></i>
+                <h1 class="font-cinzel text-4xl sm:text-5xl font-black text-amber-400 tracking-wider glow-gold">파멸의 불씨</h1>
+                <p class="font-cinzel text-xs text-amber-200/80 tracking-widest uppercase">Ember of Ruin</p>
+            </div>
+
+            <p class="text-sm text-gray-300 leading-relaxed max-w-md">
+                파멸의 신에 의해 황폐해진 세상. 적들을 처치하여 희망의 <span class="text-amber-300 font-semibold">불씨</span>를 모으고, 성검을 강화하여 신전에 봉인된 파멸의 신을 물리치세요!
+            </p>
+
+            <!-- Quick Controls Summary -->
+            <div class="grid grid-cols-2 gap-3 w-full max-w-md bg-gray-950/70 p-4 rounded-2xl border border-gray-800 text-xs text-gray-300 text-left">
+                <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-gray-800 rounded font-bold border border-gray-700 text-amber-400">WASD</span> <span>이동</span></div>
+                <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-gray-800 rounded font-bold border border-gray-700 text-cyan-400">마우스</span> <span>시점 조작</span></div>
+                <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-gray-800 rounded font-bold border border-gray-700 text-amber-400">좌클릭</span> <span>콤보 공격</span></div>
+                <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-gray-800 rounded font-bold border border-gray-700 text-rose-400">우클릭</span> <span>구르기 회피</span></div>
+                <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-gray-800 rounded font-bold border border-gray-700 text-amber-300">1, 2, 3</span> <span>스킬 사용</span></div>
+                <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-gray-800 rounded font-bold border border-gray-700 text-amber-300">U</span> <span>강화 상점</span></div>
+            </div>
+
+            <button id="btn-start-game" class="w-full max-w-md py-4 rounded-2xl bg-gradient-to-r from-amber-600 via-amber-500 to-amber-400 hover:from-amber-500 hover:to-amber-300 text-gray-950 font-black text-xl shadow-xl shadow-amber-600/30 transition transform hover:scale-105 active:scale-95 flex items-center justify-center gap-3">
+                <i class="fa-solid fa-play"></i>
+                <span>모험 시작하기</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- UPGRADE SHOP MODAL -->
+    <div id="shop-modal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center hidden p-4">
+        <div class="glass-panel max-w-xl w-full p-6 sm:p-8 rounded-2xl border-amber-500/40 relative shadow-2xl flex flex-col gap-6">
+            
+            <!-- Close Button -->
+            <button id="btn-close-shop" class="absolute top-4 right-4 text-gray-400 hover:text-white text-xl">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+
+            <div class="text-center">
+                <h2 class="font-cinzel text-2xl sm:text-3xl font-black text-amber-400 glow-gold">불씨의 대장간</h2>
+                <p class="text-xs text-gray-400 mt-1">적을 처치하여 모은 불씨로 검을 제련하고 스킬을 해금하세요.</p>
+            </div>
+
+            <!-- Current Embers -->
+            <div class="flex justify-between items-center bg-gray-950/60 p-3 rounded-xl border border-amber-500/20">
+                <span class="text-sm text-gray-300 font-semibold">보유 불씨</span>
+                <span id="shop-ember-count" class="font-cinzel text-2xl font-black text-amber-300 glow-gold">0</span>
+            </div>
+
+            <!-- Upgrades List -->
+            <div class="flex flex-col gap-3">
+                <!-- Upgrade 1: Sword ATK -->
+                <div class="flex items-center justify-between p-3 rounded-xl bg-gray-900/80 border border-gray-800 hover:border-amber-500/50 transition">
+                    <div>
+                        <div class="font-bold text-amber-200 text-sm"><span class="px-1.5 py-0.5 bg-gray-800 border border-amber-500/50 rounded text-amber-300 font-mono text-xs mr-1">[1]</span> 검 공격력 강화 <span id="shop-atk-lvl" class="text-xs text-amber-400">+0</span></div>
+                        <div class="text-xs text-gray-400">기본 검 공격 데미지 증가 (+15)</div>
+                    </div>
+                    <button id="btn-upg-atk" class="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-gray-950 font-bold text-xs transition disabled:opacity-40 disabled:pointer-events-none">
+                        강화 (<span id="cost-atk">20</span> 불씨)
+                    </button>
+                </div>
+
+                <!-- Upgrade 2: Max HP -->
+                <div class="flex items-center justify-between p-3 rounded-xl bg-gray-900/80 border border-gray-800 hover:border-amber-500/50 transition">
+                    <div>
+                        <div class="font-bold text-rose-200 text-sm"><span class="px-1.5 py-0.5 bg-gray-800 border border-rose-500/50 rounded text-rose-300 font-mono text-xs mr-1">[2]</span> 최대 체력 증가 <span id="shop-hp-lvl" class="text-xs text-rose-400">+0</span></div>
+                        <div class="text-xs text-gray-400">최대 HP 증가 (+30) 및 체력 회복</div>
+                    </div>
+                    <button id="btn-upg-hp" class="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition disabled:opacity-40 disabled:pointer-events-none">
+                        강화 (<span id="cost-hp">15</span> 불씨)
+                    </button>
+                </div>
+
+                <!-- Unlock Skill 1: Flame Dash -->
+                <div class="flex items-center justify-between p-3 rounded-xl bg-gray-900/80 border border-gray-800 hover:border-cyan-500/50 transition">
+                    <div>
+                        <div class="font-bold text-cyan-300 text-sm"><span class="px-1.5 py-0.5 bg-gray-800 border border-cyan-500/50 rounded text-cyan-300 font-mono text-xs mr-1">[3]</span> 스킬: 화염 돌진</div>
+                        <div class="text-xs text-gray-400">전방으로 빠르게 돌진하며 관통 피해를 입힙니다.</div>
+                    </div>
+                    <button id="btn-unlock-s1" class="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-gray-950 font-bold text-xs transition disabled:opacity-40 disabled:pointer-events-none">
+                        해금 (<span id="cost-s1">30</span> 불씨)
+                    </button>
+                </div>
+
+                <!-- Unlock Skill 2: Ember Nova -->
+                <div class="flex items-center justify-between p-3 rounded-xl bg-gray-900/80 border border-gray-800 hover:border-amber-500/50 transition">
+                    <div>
+                        <div class="font-bold text-amber-300 text-sm"><span class="px-1.5 py-0.5 bg-gray-800 border border-amber-500/50 rounded text-amber-300 font-mono text-xs mr-1">[4]</span> 스킬: 불씨 폭발</div>
+                        <div class="text-xs text-gray-400">주변 넓은 범위를 격파하는 충격파를 발사합니다.</div>
+                    </div>
+                    <button id="btn-unlock-s2" class="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-gray-950 font-bold text-xs transition disabled:opacity-40 disabled:pointer-events-none">
+                        해금 (<span id="cost-s2">50</span> 불씨)
+                    </button>
+                </div>
+
+                <!-- Unlock Skill 3: Ruin Buster -->
+                <div class="flex items-center justify-between p-3 rounded-xl bg-gray-900/80 border border-gray-800 hover:border-red-500/50 transition">
+                    <div>
+                        <div class="font-bold text-rose-400 text-sm"><span class="px-1.5 py-0.5 bg-gray-800 border border-red-500/50 rounded text-red-300 font-mono text-xs mr-1">[5]</span> 필살기: 불씨 일격</div>
+                        <div class="text-xs text-gray-400">파멸의 신에게 막대한 피해를 주는 검기를 방출합니다.</div>
+                    </div>
+                    <button id="btn-unlock-s3" class="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold text-xs transition disabled:opacity-40 disabled:pointer-events-none">
+                        해금 (<span id="cost-s3">80</span> 불씨)
+                    </button>
+                </div>
+
+            </div>
+
+        </div>
+    </div>
+
+    <!-- GAME OVER / VICTORY OVERLAY -->
+    <div id="end-modal" class="fixed inset-0 bg-black/90 backdrop-blur-lg z-50 flex items-center justify-center hidden p-4">
+        <div class="glass-panel max-w-lg w-full p-8 rounded-3xl border-red-500/50 text-center flex flex-col items-center gap-6 shadow-2xl">
+            <h1 id="end-title" class="font-cinzel text-4xl sm:text-5xl font-black tracking-widest text-red-500 glow-red">GAME OVER</h1>
+            <p id="end-desc" class="text-sm text-gray-300 leading-relaxed">용사가 파멸의 화염 속에서 쓰러졌습니다...</p>
+            <button id="btn-restart" class="px-8 py-3 rounded-2xl bg-gradient-to-r from-red-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-gray-950 font-black text-lg shadow-xl transition transform hover:scale-105 active:scale-95">
+                다시 도전하기
+            </button>
+        </div>
+    </div>
+
+    <script>
+    /* =========================================================================
+       1. CONFIG & GAME STATE
+       ========================================================================= */
+    const CONFIG = {
+        PLAYER: {
+            BASE_HP: 100,
+            BASE_ATK: 25,
+            SPEED: 12,
+            DODGE_SPEED: 26,
+            DODGE_DURATION: 0.35,
+            INVULN_TIME: 0.5
+        },
+        UPGRADES: {
+            ATK_COST: 20,
+            ATK_INC: 15,
+            HP_COST: 15,
+            HP_INC: 30,
+            S1_COST: 30,
+            S2_COST: 50,
+            S3_COST: 80
+        },
+        SKILLS: {
+            S1: { cd: 4.0, damage: 60, range: 18 }, // Flame Dash
+            S2: { cd: 7.0, damage: 90, radius: 10 }, // Ember Nova
+            S3: { cd: 12.0, damage: 300, range: 25 } // Ruin Buster
+        },
+        BOSS: {
+            HP_P1: 1000,
+            HP_P2: 800,
+            HP_P3: 600,
+            ATK: 20
+        }
+    };
+
+    const gameState = {
+        isStarted: false,
+        isShopOpen: false,
+        level: 1,
+        xp: 0,
+        xpNeeded: 100,
+        embers: 0,
+        playerHp: CONFIG.PLAYER.BASE_HP,
+        maxHp: CONFIG.PLAYER.BASE_HP,
+        swordAtkLvl: 0,
+        hpLvl: 0,
+        unlockedSkills: { s1: false, s2: false, s3: false },
+        skillCooldowns: { s1: 0, s2: 0, s3: 0 },
+        isGameOver: false,
+        isVictory: false,
+        activeZone: 'Ruined City',
+        bossActive: false,
+        bossPhase: 1
+    };
+
+    /* =========================================================================
+       2. THREE.JS ENGINE SETUP
+       ========================================================================= */
+    const canvas = document.getElementById('game-canvas');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0c14);
+    scene.fog = new THREE.FogExp2(0x0a0c14, 0.015);
+
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    // Ambient & Directional Lights
+    const ambientLight = new THREE.AmbientLight(0x4a5568, 0.8);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffeedd, 1.2);
+    dirLight.position.set(40, 60, 20);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.camera.near = 0.5;
+    dirLight.shadow.camera.far = 150;
+    const d = 50;
+    dirLight.shadow.camera.left = -d;
+    dirLight.shadow.camera.right = d;
+    dirLight.shadow.camera.top = d;
+    dirLight.shadow.camera.bottom = -d;
+    scene.add(dirLight);
+
+    // Camera Rig (2-Axis Pivot Rig for Smooth 3rd-Person Back View)
+    const cameraPivot = new THREE.Group();
+    const cameraPitch = new THREE.Group();
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 300);
+    
+    cameraPivot.add(cameraPitch);
+    cameraPitch.add(camera);
+    scene.add(cameraPivot);
+
+    // Initial Camera Offset behind Player
+    camera.position.set(0, 3.5, 8.5);
+    camera.lookAt(0, 1.8, 0);
+
+    /* =========================================================================
+       3. INPUT CONTROLLER & CAMERA MOUSE TRACKING
+       ========================================================================= */
+    const keys = { w: false, a: false, s: false, d: false };
+    let yaw = 0;
+    let pitch = -0.15;
+    let targetYaw = 0;
+    let targetPitch = -0.15;
+
+    window.addEventListener('keydown', (e) => {
+        if (!gameState.isStarted) return;
+        const k = e.key.toLowerCase();
+
+        // If Upgrade Shop is open
+        if (gameState.isShopOpen) {
+            if (k === 'u' || e.key === 'Escape') {
+                toggleShopModal();
+                return;
+            }
+            if (k === '1') buyUpgrade('atk');
+            if (k === '2') buyUpgrade('hp');
+            if (k === '3') buyUpgrade('s1');
+            if (k === '4') buyUpgrade('s2');
+            if (k === '5') buyUpgrade('s3');
+            return;
+        }
+
+        if (k === 'w') keys.w = true;
+        if (k === 'a') keys.a = true;
+        if (k === 's') keys.s = true;
+        if (k === 'd') keys.d = true;
+        if (k === 'u') toggleShopModal();
+        if (k === '1') useSkill(1);
+        if (k === '2') useSkill(2);
+        if (k === '3') useSkill(3);
+    });
+
+    window.addEventListener('keyup', (e) => {
+        const k = e.key.toLowerCase();
+        if (k === 'w') keys.w = false;
+        if (k === 'a') keys.a = false;
+        if (k === 's') keys.s = false;
+        if (k === 'd') keys.d = false;
+    });
+
+    // Handle Start Game & Pointer Lock for Camera Tracking
+    const startModal = document.getElementById('start-modal');
+    const btnStart = document.getElementById('btn-start-game');
+
+    btnStart.addEventListener('click', startGame);
+
+    function startGame() {
+        gameState.isStarted = true;
+        startModal.classList.add('opacity-0', 'pointer-events-none');
+        setTimeout(() => startModal.classList.add('hidden'), 300);
+
+        // Lock pointer for seamless 360 third-person camera rotation
+        if (document.body.requestPointerLock) {
+            document.body.requestPointerLock();
+        }
+    }
+
+    // Re-lock pointer on canvas click if game started and shop is closed
+    canvas.addEventListener('click', () => {
+        if (gameState.isStarted && !gameState.isShopOpen && !document.pointerLockElement && !gameState.isGameOver && !gameState.isVictory) {
+            document.body.requestPointerLock();
+        }
+    });
+
+    // Mouse Attack & Dodge Listeners
+    window.addEventListener('mousedown', (e) => {
+        if (!gameState.isStarted || gameState.isGameOver || gameState.isShopOpen) return;
+        if (e.target.tagName === 'CANVAS' || document.pointerLockElement) {
+            if (e.button === 0) { // Left click -> Attack
+                player.attack();
+            } else if (e.button === 2) { // Right click -> Dodge
+                player.dodge();
+            }
+        }
+    });
+
+    window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // Continuous Mouse Tracking for Camera Movement
+    window.addEventListener('mousemove', (e) => {
+        if (!gameState.isStarted || gameState.isShopOpen) return;
+
+        // If pointer is locked (FPS / TPS mode)
+        if (document.pointerLockElement) {
+            const sensitivity = 0.0025;
+            targetYaw += e.movementX * sensitivity;
+            targetPitch -= e.movementY * sensitivity;
+        } else {
+            // Free mouse tracking based on screen relative position
+            const centerX = window.innerWidth / 2;
+            const centerY = window.innerHeight / 2;
+            const deltaX = (e.clientX - centerX) / centerX;
+            const deltaY = (e.clientY - centerY) / centerY;
+
+            targetYaw = deltaX * Math.PI * 0.8;
+            targetPitch = -0.15 - deltaY * 0.35;
+        }
+
+        targetPitch = Math.max(-0.6, Math.min(0.4, targetPitch));
+    });
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    /* =========================================================================
+       4. MAP & ENVIRONMENT BUILDER
+       ========================================================================= */
+    function buildWorld() {
+        // Floor Plane
+        const floorGeo = new THREE.PlaneGeometry(160, 240);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x151821, roughness: 0.9, metalness: 0.1 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // Zone 1: Ruined City (-100 < z < -30)
+        const cityGroup = new THREE.Group();
+        const pillarMat = new THREE.MeshStandardMaterial({ color: 0x2d3345, roughness: 0.7 });
+        for (let i = 0; i < 25; i++) {
+            const h = 4 + Math.random() * 8;
+            const pillar = new THREE.Mesh(new THREE.BoxGeometry(2, h, 2), pillarMat);
+            pillar.position.set((Math.random() - 0.5) * 60, h / 2, -100 + Math.random() * 60);
+            pillar.rotation.y = Math.random() * Math.PI;
+            pillar.castShadow = true;
+            cityGroup.add(pillar);
+        }
+        scene.add(cityGroup);
+
+        // Zone 2: Desolate Field (-30 < z < 30)
+        const fieldGroup = new THREE.Group();
+        const treeMat = new THREE.MeshStandardMaterial({ color: 0x0f1d18, roughness: 0.9 });
+        for (let i = 0; i < 20; i++) {
+            const tree = new THREE.Mesh(new THREE.ConeGeometry(1.5, 6, 5), treeMat);
+            tree.position.set((Math.random() - 0.5) * 70, 3, -30 + Math.random() * 60);
+            tree.castShadow = true;
+            fieldGroup.add(tree);
+        }
+        scene.add(fieldGroup);
+
+        // Zone 3: Underground Ruin / Boss Arena (30 < z < 100)
+        const arenaGroup = new THREE.Group();
+        const arenaWallMat = new THREE.MeshStandardMaterial({ color: 0x3d1c1c, roughness: 0.5, metalness: 0.3 });
+        
+        // Massive Ancient Boss Ring
+        const ringGeo = new THREE.TorusGeometry(22, 0.8, 16, 32);
+        const ringMat = new THREE.MeshStandardMaterial({ color: 0xedb82d, metalness: 0.8, roughness: 0.2, emissive: 0x442200 });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.position.set(0, 0.2, 70);
+        ring.rotation.x = Math.PI / 2;
+        arenaGroup.add(ring);
+
+        // Altar Pillars
+        for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+            const pillar = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.5, 12, 8), arenaWallMat);
+            pillar.position.set(Math.cos(a) * 22, 6, 70 + Math.sin(a) * 22);
+            pillar.castShadow = true;
+            arenaGroup.add(pillar);
+        }
+        scene.add(arenaGroup);
+    }
+    buildWorld();
+
+    /* =========================================================================
+       5. PLAYER CONTROLLER & COMBAT
+       ========================================================================= */
+    class Player {
+        constructor() {
+            this.mesh = new THREE.Group();
+
+            // Player Materials matching Character Design
+            const whiteFabricMat = new THREE.MeshStandardMaterial({ color: 0xf0f2f8, roughness: 0.4, metalness: 0.1 });
+            const darkVestMat   = new THREE.MeshStandardMaterial({ color: 0x1b1e28, roughness: 0.6 });
+            const blueTrimMat   = new THREE.MeshStandardMaterial({ color: 0x0055d4, roughness: 0.3, metalness: 0.4 });
+            const goldArmorMat  = new THREE.MeshStandardMaterial({ color: 0xedb82d, roughness: 0.25, metalness: 0.85 });
+            const innerLiningMat= new THREE.MeshStandardMaterial({ color: 0xd9a426, roughness: 0.5, side: THREE.DoubleSide });
+            const darkLeatherMat= new THREE.MeshStandardMaterial({ color: 0x2e2621, roughness: 0.7 });
+            const skinMat       = new THREE.MeshStandardMaterial({ color: 0xffe2d1, roughness: 0.8 });
+            const hairMat       = new THREE.MeshStandardMaterial({ color: 0xe8ecf5, roughness: 0.35 });
+            const eyeMat        = new THREE.MeshBasicMaterial({ color: 0x44d3ff });
+            const bootMat       = new THREE.MeshStandardMaterial({ color: 0x12141c, roughness: 0.4, metalness: 0.3 });
+
+            // 1. Torso & Inner Vest
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.35, 1.4, 10), darkVestMat);
+            body.position.y = 1.0;
+            body.castShadow = true;
+            this.mesh.add(body);
+
+            // Sternum Gold Emblem & Collar
+            const emblem = new THREE.Mesh(new THREE.OctahedronGeometry(0.12, 0), goldArmorMat);
+            emblem.position.set(0, 1.3, 0.38);
+            emblem.rotation.z = Math.PI / 4;
+            this.mesh.add(emblem);
+
+            const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.26, 0.2, 8), darkLeatherMat);
+            collar.position.y = 1.7;
+            this.mesh.add(collar);
+
+            // 2. Long White Coat with Blue Accent Trims & Gold Inner Lining
+            const coatBack = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.65, 1.5, 12, 1, true, -Math.PI*0.75, Math.PI*1.5), whiteFabricMat);
+            coatBack.position.set(0, 0.65, 0);
+            coatBack.castShadow = true;
+            this.mesh.add(coatBack);
+
+            // Gold Inner Coat Tail Lining
+            const coatLining = new THREE.Mesh(new THREE.CylinderGeometry(0.47, 0.64, 1.48, 12, 1, true, -Math.PI*0.75, Math.PI*1.5), innerLiningMat);
+            coatLining.position.set(0, 0.65, 0);
+            this.mesh.add(coatLining);
+
+            // Blue Coat Edge Trim Lines
+            const trimLeft = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.4, 0.04), blueTrimMat);
+            trimLeft.position.set(0.35, 0.65, 0.38);
+            trimLeft.rotation.z = -0.08;
+            this.mesh.add(trimLeft);
+
+            const trimRight = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.4, 0.04), blueTrimMat);
+            trimRight.position.set(-0.35, 0.65, 0.38);
+            trimRight.rotation.z = 0.08;
+            this.mesh.add(trimRight);
+
+            // 3. Legs & Boots
+            const legL = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.12, 0.8, 8), darkVestMat);
+            legL.position.set(0.2, 0.35, 0);
+            this.mesh.add(legL);
+
+            const legR = legL.clone();
+            legR.position.x = -0.2;
+            this.mesh.add(legR);
+
+            const bootL = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.13, 0.7, 8), bootMat);
+            bootL.position.set(0.2, -0.35, 0.02);
+            this.mesh.add(bootL);
+
+            const bootR = bootL.clone();
+            bootR.position.x = -0.2;
+            this.mesh.add(bootR);
+
+            // Gold Knee Armor Caps
+            const kneeL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.15, 0.12), goldArmorMat);
+            kneeL.position.set(0.2, 0.0, 0.15);
+            this.mesh.add(kneeL);
+            const kneeR = kneeL.clone();
+            kneeR.position.x = -0.2;
+            this.mesh.add(kneeR);
+
+            // 4. Asymmetrical Pauldrons (Right Gold Ornate, Left Dark Strap)
+            // Right Shoulder - Heavy Gold Ornate Pauldron
+            const rightPauldronGroup = new THREE.Group();
+            const goldPad = new THREE.Mesh(new THREE.SphereGeometry(0.28, 8, 8, 0, Math.PI, 0, Math.PI*0.7), goldArmorMat);
+            goldPad.rotation.z = -Math.PI / 3;
+            goldPad.position.set(0.52, 1.48, 0);
+            rightPauldronGroup.add(goldPad);
+
+            const goldPlateInner = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 8, 0, Math.PI, 0, Math.PI*0.7), whiteFabricMat);
+            goldPlateInner.rotation.z = -Math.PI / 3;
+            goldPlateInner.position.set(0.50, 1.46, 0);
+            rightPauldronGroup.add(goldPlateInner);
+            this.mesh.add(rightPauldronGroup);
+
+            // Left Shoulder - Dark Leather Pad & Diagonal Chest Strap
+            const leftPad = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.12, 0.32), darkLeatherMat);
+            leftPad.position.set(-0.48, 1.48, 0);
+            leftPad.rotation.z = -0.2;
+            this.mesh.add(leftPad);
+
+            const strap = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.08, 0.04), darkLeatherMat);
+            strap.position.set(0.02, 1.25, 0.28);
+            strap.rotation.z = -0.55;
+            this.mesh.add(strap);
+
+            // 5. Head, Hair & Face Details
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 12), skinMat);
+            head.position.y = 1.95;
+            this.mesh.add(head);
+
+            // Eyes
+            const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 6), eyeMat);
+            eyeL.position.set(0.11, 1.98, 0.28);
+            const eyeR = eyeL.clone();
+            eyeR.position.x = -0.11;
+            this.mesh.add(eyeL);
+            this.mesh.add(eyeR);
+
+            // Layered Silver/White Hair (Anime Bangs & Messy Spikes)
+            const hairGroup = new THREE.Group();
+            const topSpike = new THREE.Mesh(new THREE.ConeGeometry(0.38, 0.55, 8), hairMat);
+            topSpike.position.set(0, 2.2, -0.02);
+            topSpike.rotation.x = -0.15;
+            hairGroup.add(topSpike);
+
+            // Front Bangs (Left, Center, Right)
+            const bangCenter = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.35, 4), hairMat);
+            bangCenter.position.set(0, 2.08, 0.26);
+            bangCenter.rotation.x = 0.4;
+            hairGroup.add(bangCenter);
+
+            const bangLeft = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.38, 4), hairMat);
+            bangLeft.position.set(0.16, 2.05, 0.24);
+            bangLeft.rotation.z = -0.35;
+            bangLeft.rotation.x = 0.3;
+            hairGroup.add(bangLeft);
+
+            const bangRight = bangLeft.clone();
+            bangRight.position.x = -0.16;
+            bangRight.rotation.z = 0.35;
+            hairGroup.add(bangRight);
+
+            // Back & Side Hair Strands
+            for (let a = -1.2; a <= 1.2; a += 0.6) {
+                const strand = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.4, 4), hairMat);
+                strand.position.set(Math.sin(a) * 0.28, 2.02, -0.15 - Math.cos(a) * 0.1);
+                strand.rotation.z = -a * 0.4;
+                strand.rotation.x = -0.3;
+                hairGroup.add(strand);
+            }
+            this.mesh.add(hairGroup);
+
+            // Arms & Forearms
+            const armR = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.1, 0.6, 8), whiteFabricMat);
+            armR.position.set(0.5, 1.2, 0);
+            armR.rotation.z = -0.15;
+            this.mesh.add(armR);
+
+            const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.1, 0.6, 8), whiteFabricMat);
+            armL.position.set(-0.5, 1.2, 0);
+            armL.rotation.z = 0.15;
+            this.mesh.add(armL);
+
+            // Forearm Bracers (Gold & Leather)
+            const bracerR = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.09, 0.45, 8), goldArmorMat);
+            bracerR.position.set(0.55, 0.8, 0.1);
+            this.mesh.add(bracerR);
+
+            const bracerL = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.09, 0.45, 8), darkLeatherMat);
+            bracerL.position.set(-0.55, 0.8, 0.1);
+            this.mesh.add(bracerL);
+
+            // Divine Sword
+            this.swordGroup = new THREE.Group();
+
+            const goldSwordMat = new THREE.MeshStandardMaterial({
+                color: 0xffd700,
+                metalness: 0.95,
+                roughness: 0.15,
+                emissive: 0x664400,
+                emissiveIntensity: 0.3
+            });
+
+            const blueBladeMat = new THREE.MeshStandardMaterial({
+                color: 0x00bfff,
+                emissive: 0x0088ff,
+                emissiveIntensity: 1.2,
+                metalness: 0.3,
+                roughness: 0.1,
+                transparent: true,
+                opacity: 0.92
+            });
+
+            const cyanGlowMat = new THREE.MeshStandardMaterial({
+                color: 0x70f0ff,
+                emissive: 0x00e1ff,
+                emissiveIntensity: 1.5,
+                metalness: 0.1,
+                roughness: 0.1,
+                transparent: true,
+                opacity: 0.85
+            });
+
+            // Handle & Golden Pommel
+            const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.5, 8), darkVestMat);
+            handle.position.y = 0.25;
+            this.swordGroup.add(handle);
+
+            const pommel = new THREE.Mesh(new THREE.OctahedronGeometry(0.1, 0), goldSwordMat);
+            pommel.position.y = 0.0;
+            this.swordGroup.add(pommel);
+
+            // Winged Golden Crossguard
+            const guardCenter = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.12), goldSwordMat);
+            guardCenter.position.y = 0.52;
+            this.swordGroup.add(guardCenter);
+
+            for (let side = -1; side <= 1; side += 2) {
+                const wingGuard = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.38, 4), goldSwordMat);
+                wingGuard.rotation.z = side * Math.PI / 2.5;
+                wingGuard.position.set(side * 0.22, 0.56, 0);
+                this.swordGroup.add(wingGuard);
+            }
+
+            // Dual Blue & Gold Blade Assembly
+            const bladeCore = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.5, 0.04), blueBladeMat);
+            bladeCore.position.y = 1.45;
+            bladeCore.castShadow = true;
+            this.swordGroup.add(bladeCore);
+
+            const bladeEdge = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.52, 0.025), cyanGlowMat);
+            bladeEdge.position.y = 1.45;
+            this.swordGroup.add(bladeEdge);
+
+            const goldSpine = new THREE.Mesh(new THREE.BoxGeometry(0.03, 1.4, 0.05), goldSwordMat);
+            goldSpine.position.y = 1.4;
+            this.swordGroup.add(goldSpine);
+
+            const tip = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.4, 4), cyanGlowMat);
+            tip.rotation.y = Math.PI / 4;
+            tip.position.y = 2.38;
+            this.swordGroup.add(tip);
+
+            this.bladeMat = blueBladeMat;
+
+            this.swordGroup.position.set(0.6, 1.0, 0.2);
+            this.swordGroup.rotation.x = Math.PI / 4;
+            this.mesh.add(this.swordGroup);
+
+            scene.add(this.mesh);
+
+            // State variables
+            this.position = this.mesh.position;
+            this.position.set(0, 0, -20);
+            this.velocity = new THREE.Vector3();
+            this.isAttacking = false;
+            this.attackTimer = 0;
+            this.comboStep = 0;
+            this.isDodging = false;
+            this.dodgeTimer = 0;
+            this.dodgeDir = new THREE.Vector3();
+            this.invulnerable = false;
+        }
+
+        update(dt) {
+            if (gameState.isGameOver || gameState.isVictory) return;
+
+            // Dodge Timer Update
+            if (this.isDodging) {
+                this.dodgeTimer -= dt;
+                this.mesh.position.addScaledVector(this.dodgeDir, CONFIG.PLAYER.DODGE_SPEED * dt);
+                if (this.dodgeTimer <= 0) {
+                    this.isDodging = false;
+                    this.invulnerable = false;
+                }
+            } else {
+                // Regular Movement relative to Camera Angle
+                const moveVector = new THREE.Vector3();
+                if (keys.w) moveVector.z -= 1;
+                if (keys.s) moveVector.z += 1;
+                if (keys.a) moveVector.x -= 1;
+                if (keys.d) moveVector.x += 1;
+
+                if (moveVector.lengthSq() > 0) {
+                    moveVector.normalize();
+                    // Rotate move vector according to camera yaw
+                    moveVector.applyAxisAngle(new THREE.Vector3(0, 1, 0), cameraPivot.rotation.y);
+                    this.mesh.position.addScaledVector(moveVector, CONFIG.PLAYER.SPEED * dt);
+
+                    // Smooth rotation towards movement direction
+                    const targetAngle = Math.atan2(moveVector.x, moveVector.z);
+                    this.mesh.rotation.y = THREE.MathUtils.lerp(this.mesh.rotation.y, targetAngle, 0.2);
+                }
+            }
+
+            // Keep in map bounds
+            this.position.x = THREE.MathUtils.clamp(this.position.x, -38, 38);
+            this.position.z = THREE.MathUtils.clamp(this.position.z, -115, 90);
+
+            // Smooth Interpolated Camera Yaw & Pitch Tracking
+            yaw = THREE.MathUtils.lerp(yaw, targetYaw, 0.1);
+            pitch = THREE.MathUtils.lerp(pitch, targetPitch, 0.1);
+
+            // Camera follow lerp
+            cameraPivot.position.lerp(this.position, 0.15);
+            cameraPivot.rotation.y = yaw;
+            cameraPitch.rotation.x = pitch;
+
+            // Attack Slash Animation Update
+            if (this.isAttacking) {
+                this.attackTimer -= dt;
+                this.swordGroup.rotation.z = Math.sin(this.attackTimer * 20) * 1.8;
+                if (this.attackTimer <= 0) {
+                    this.isAttacking = false;
+                    this.swordGroup.rotation.set(Math.PI / 4, 0, 0);
+                }
+            }
+
+            // Update zone text based on Z position
+            if (this.position.z < -30 && gameState.activeZone !== 'Ruined City') {
+                gameState.activeZone = 'Ruined City';
+                document.getElementById('zone-indicator').innerText = '폐허가 된 도시 (Ruined City)';
+            } else if (this.position.z >= -30 && this.position.z < 30 && gameState.activeZone !== 'Desolate Field') {
+                gameState.activeZone = 'Desolate Field';
+                document.getElementById('zone-indicator').innerText = '황폐한 숲과 들판 (Desolate Field)';
+            } else if (this.position.z >= 30 && gameState.activeZone !== 'Boss Arena') {
+                gameState.activeZone = 'Boss Arena';
+                document.getElementById('zone-indicator').innerText = '파멸의 신전 (Boss Arena)';
+            }
+        }
+
+        attack() {
+            if (this.isAttacking || this.isDodging) return;
+            this.isAttacking = true;
+            this.attackTimer = 0.25;
+            this.comboStep = (this.comboStep + 1) % 3;
+
+            // Spawn Slash Arc Visual Effect
+            spawnSlashFx(this.position, this.mesh.rotation.y);
+
+            // Deal Damage to Nearby Enemies
+            const totalAtk = CONFIG.PLAYER.BASE_ATK + (gameState.swordAtkLvl * CONFIG.UPGRADES.ATK_INC);
+            enemies.forEach(e => {
+                if (e.mesh.position.distanceTo(this.position) < 3.8) {
+                    e.takeDamage(totalAtk);
+                }
+            });
+
+            if (boss && boss.mesh.position.distanceTo(this.position) < 6.5) {
+                boss.takeDamage(totalAtk);
+            }
+        }
+
+        dodge() {
+            if (this.isDodging) return;
+            this.isDodging = true;
+            this.dodgeTimer = CONFIG.PLAYER.DODGE_DURATION;
+            this.invulnerable = true;
+
+            // Roll vector towards movement direction or backwards
+            const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.mesh.rotation.y);
+            this.dodgeDir.copy(forward);
+
+            spawnParticleRing(this.position, 0x00ffff, 12);
+        }
+
+        takeDamage(amount) {
+            if (this.invulnerable || gameState.isGameOver) return;
+            gameState.playerHp = Math.max(0, gameState.playerHp - amount);
+            updateHUD();
+
+            // Hit feedback flash & Floating Text
+            spawnDamageText(this.position, amount, '#ff3333');
+            spawnParticleRing(this.position, 0xff0000, 10);
+
+            if (gameState.playerHp <= 0) {
+                triggerGameOver();
+            }
+        }
+    }
+
+    /* =========================================================================
+       6. ENEMY & AI CONTROLLER
+       ========================================================================= */
+    class Enemy {
+        constructor(type, x, z) {
+            this.type = type; // 'grunt', 'stalker', 'caster', 'brute'
+            this.mesh = new THREE.Group();
+            
+            let color = 0x883333;
+            let scale = 1;
+            this.hp = 60;
+            this.maxHp = 60;
+            this.speed = 6;
+            this.atk = 10;
+            this.emberYield = 5;
+
+            if (type === 'stalker') {
+                color = 0x9900ff;
+                scale = 0.8;
+                this.hp = 40;
+                this.speed = 10;
+                this.atk = 8;
+                this.emberYield = 8;
+            } else if (type === 'caster') {
+                color = 0x00ccff;
+                scale = 0.9;
+                this.hp = 50;
+                this.speed = 4;
+                this.atk = 15;
+                this.emberYield = 10;
+            } else if (type === 'brute') {
+                color = 0xcc3300;
+                scale = 1.6;
+                this.hp = 180;
+                this.speed = 3.5;
+                this.atk = 22;
+                this.emberYield = 25;
+            }
+
+            const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.4 * scale, 0.3 * scale, 1.6 * scale, 8), bodyMat);
+            body.position.y = 0.8 * scale;
+            body.castShadow = true;
+            this.mesh.add(body);
+
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.3 * scale, 8, 8), bodyMat);
+            head.position.y = 1.8 * scale;
+            this.mesh.add(head);
+
+            this.mesh.position.set(x, 0, z);
+            scene.add(this.mesh);
+
+            this.atkTimer = 0;
+        }
+
+        update(dt) {
+            if (gameState.isGameOver) return;
+            const dist = this.mesh.position.distanceTo(player.position);
+
+            // Follow player when in range
+            if (dist < 28 && dist > 1.8) {
+                const dir = new THREE.Vector3().subVectors(player.position, this.mesh.position).normalize();
+                this.mesh.position.addScaledVector(dir, this.speed * dt);
+                this.mesh.rotation.y = Math.atan2(dir.x, dir.z);
+            }
+
+            // Attack Logic
+            this.atkTimer -= dt;
+            if (dist <= 2.2 && this.atkTimer <= 0) {
+                player.takeDamage(this.atk);
+                this.atkTimer = 1.5;
+            }
+        }
+
+        takeDamage(amount) {
+            this.hp -= amount;
+            spawnDamageText(this.mesh.position, amount, '#ffffff');
+            spawnParticleRing(this.mesh.position, 0xffaa00, 8);
+
+            if (this.hp <= 0) {
+                this.die();
+            }
+        }
+
+        die() {
+            scene.remove(this.mesh);
+            const index = enemies.indexOf(this);
+            if (index > -1) enemies.splice(index, 1);
+
+            // Spawn Ember Drops
+            spawnEmbers(this.mesh.position, this.emberYield);
+
+            // Give XP
+            gameState.xp += 25;
+            if (gameState.xp >= gameState.xpNeeded) {
+                gameState.level++;
+                gameState.xp = 0;
+                gameState.xpNeeded = Math.floor(gameState.xpNeeded * 1.4);
+                gameState.maxHp += 20;
+                gameState.playerHp = gameState.maxHp;
+                spawnDamageText(player.position, 'LEVEL UP!', '#00ffff');
+            }
+            updateHUD();
+        }
+    }
+
+    /* =========================================================================
+       7. BOSS CONTROLLER ("파멸의 신" - God of Ruin)
+       ========================================================================= */
+    class Boss {
+        constructor() {
+            this.mesh = new THREE.Group();
+
+            const bossMat = new THREE.MeshStandardMaterial({ color: 0x220505, roughness: 0.2, metalness: 0.9, emissive: 0x440000 });
+            const goldDecorMat = new THREE.MeshStandardMaterial({ color: 0xedb82d, metalness: 0.9, roughness: 0.2 });
+
+            // Giant Body Structure
+            const torso = new THREE.Mesh(new THREE.BoxGeometry(2.5, 4.5, 1.8), bossMat);
+            torso.position.y = 3.5;
+            torso.castShadow = true;
+            this.mesh.add(torso);
+
+            const crown = new THREE.Mesh(new THREE.ConeGeometry(1.2, 2.5, 6), goldDecorMat);
+            crown.position.y = 6.8;
+            this.mesh.add(crown);
+
+            const shoulderL = new THREE.Mesh(new THREE.SphereGeometry(1.2, 8, 8), goldDecorMat);
+            shoulderL.position.set(-2.0, 5.2, 0);
+            this.mesh.add(shoulderL);
+
+            const shoulderR = shoulderL.clone();
+            shoulderR.position.x = 2.0;
+            this.mesh.add(shoulderR);
+
+            this.mesh.position.set(0, 0, 75);
+            scene.add(this.mesh);
+
+            this.maxHp = CONFIG.BOSS.HP_P1 + CONFIG.BOSS.HP_P2 + CONFIG.BOSS.HP_P3;
+            this.hp = this.maxHp;
+            this.phase = 1;
+            this.atkTimer = 0;
+            this.summonTimer = 0;
+        }
+
+        update(dt) {
+            if (gameState.isGameOver || gameState.isVictory) return;
+
+            const dist = this.mesh.position.distanceTo(player.position);
+            
+            // Show Boss HUD when near
+            if (dist < 45 && !gameState.bossActive) {
+                gameState.bossActive = true;
+                document.getElementById('boss-hud').classList.remove('hidden');
+                document.getElementById('boss-hud').classList.add('flex');
+            }
+
+            if (!gameState.bossActive) return;
+
+            // Turn toward player
+            const dir = new THREE.Vector3().subVectors(player.position, this.mesh.position).normalize();
+            this.mesh.rotation.y = Math.atan2(dir.x, dir.z);
+
+            // Phase Transitions
+            if (this.hp <= CONFIG.BOSS.HP_P3 && this.phase < 3) {
+                this.phase = 3;
+                gameState.bossPhase = 3;
+                document.getElementById('boss-phase-text').innerText = 'PHASE 3 (최후의 파멸)';
+                spawnParticleRing(this.mesh.position, 0xff0000, 40);
+            } else if (this.hp <= CONFIG.BOSS.HP_P3 + CONFIG.BOSS.HP_P2 && this.phase < 2) {
+                this.phase = 2;
+                gameState.bossPhase = 2;
+                document.getElementById('boss-phase-text').innerText = 'PHASE 2 (파멸 폭주)';
+                spawnParticleRing(this.mesh.position, 0xff5500, 30);
+            }
+
+            // Attack Logic based on Phase
+            this.atkTimer -= dt;
+            if (this.atkTimer <= 0) {
+                if (dist < 8) {
+                    player.takeDamage(CONFIG.BOSS.ATK * (this.phase === 3 ? 1.5 : 1.0));
+                    this.atkTimer = this.phase === 2 ? 1.2 : 2.0;
+                } else {
+                    // Boss Ranged AoE Strike
+                    spawnHazardZone(player.position.clone());
+                    this.atkTimer = 2.5;
+                }
+            }
+
+            // Minion Summons
+            this.summonTimer -= dt;
+            if (this.summonTimer <= 0) {
+                const spawnCount = this.phase === 3 ? 3 : 2;
+                for (let i = 0; i < spawnCount; i++) {
+                    const offset = (Math.random() - 0.5) * 15;
+                    enemies.push(new Enemy('grunt', this.mesh.position.x + offset, this.mesh.position.z - 10));
+                }
+                this.summonTimer = this.phase === 2 ? 10 : 15;
+            }
+        }
+
+        takeDamage(amount) {
+            this.hp = Math.max(0, this.hp - amount);
+            updateHUD();
+            spawnDamageText(this.mesh.position, amount, '#ffcc00');
+
+            if (this.hp <= 0) {
+                triggerVictory();
+            }
+        }
+    }
+
+    /* =========================================================================
+       8. PARTICLES & VISUAL EFFECTS
+       ========================================================================= */
+    const embersList = [];
+    const particles = [];
+    const hazardZones = [];
+
+    // Spawn Floating Embers Item Drop
+    function spawnEmbers(pos, count) {
+        const emberGeo = new THREE.OctahedronGeometry(0.25, 0);
+        const emberMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+
+        for (let i = 0; i < count; i++) {
+            const mesh = new THREE.Mesh(emberGeo, emberMat);
+            mesh.position.copy(pos).add(new THREE.Vector3((Math.random() - 0.5) * 2, 0.5, (Math.random() - 0.5) * 2));
+            scene.add(mesh);
+            embersList.push(mesh);
+        }
+    }
+
+    function updateEmbers(dt) {
+        for (let i = embersList.length - 1; i >= 0; i--) {
+            const e = embersList[i];
+            e.rotation.y += dt * 3;
+            const dist = e.position.distanceTo(player.position);
+
+            // Magnetized pickup
+            if (dist < 6) {
+                const dir = new THREE.Vector3().subVectors(player.position, e.position).normalize();
+                e.position.addScaledVector(dir, 12 * dt);
+            }
+
+            if (dist < 1.2) {
+                scene.remove(e);
+                embersList.splice(i, 1);
+                gameState.embers += 1;
+                updateHUD();
+            }
+        }
+    }
+
+    function spawnSlashFx(pos, angle) {
+        const ringGeo = new THREE.RingGeometry(1.5, 3.0, 16, 1, 0, Math.PI * 0.8);
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0x00d5ff, side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
+        const mesh = new THREE.Mesh(ringGeo, ringMat);
+        mesh.position.copy(pos).add(new THREE.Vector3(0, 1.2, 0));
+        mesh.rotation.x = Math.PI / 2;
+        mesh.rotation.z = angle + Math.PI / 4;
+        scene.add(mesh);
+
+        particles.push({ mesh, life: 0.2, maxLife: 0.2 });
+    }
+
+    function spawnParticleRing(pos, color, count) {
+        const geo = new THREE.SphereGeometry(0.12, 4, 4);
+        const mat = new THREE.MeshBasicMaterial({ color });
+        for (let i = 0; i < count; i++) {
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.copy(pos).add(new THREE.Vector3(0, 0.8, 0));
+            const vel = new THREE.Vector3((Math.random() - 0.5) * 8, Math.random() * 4, (Math.random() - 0.5) * 8);
+            scene.add(mesh);
+            particles.push({ mesh, vel, life: 0.4, maxLife: 0.4 });
+        }
+    }
+
+    function spawnHazardZone(pos) {
+        const ringGeo = new THREE.RingGeometry(0.1, 4.5, 32);
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0xff0033, side: THREE.DoubleSide, transparent: true, opacity: 0.5 });
+        const mesh = new THREE.Mesh(ringGeo, ringMat);
+        mesh.position.copy(pos);
+        mesh.position.y = 0.05;
+        mesh.rotation.x = -Math.PI / 2;
+        scene.add(mesh);
+
+        hazardZones.push({ mesh, timer: 1.2, pos: pos.clone() });
+    }
+
+    function updateParticles(dt) {
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.life -= dt;
+            if (p.vel) p.mesh.position.addScaledVector(p.vel, dt);
+            p.mesh.material.opacity = p.life / p.maxLife;
+
+            if (p.life <= 0) {
+                scene.remove(p.mesh);
+                particles.splice(i, 1);
+            }
+        }
+
+        for (let i = hazardZones.length - 1; i >= 0; i--) {
+            const h = hazardZones[i];
+            h.timer -= dt;
+            if (h.timer <= 0) {
+                // Erupt Hazard Damage
+                spawnParticleRing(h.pos, 0xff0000, 20);
+                if (player.position.distanceTo(h.pos) < 4.5) {
+                    player.takeDamage(25);
+                }
+                scene.remove(h.mesh);
+                hazardZones.splice(i, 1);
+            }
+        }
+    }
+
+    function spawnDamageText(pos, text, colorHex) {
+        const div = document.createElement('div');
+        div.className = 'dmg-text';
+        div.innerText = text;
+        div.style.color = colorHex;
+
+        // Project 3D vector to 2D screen coordinates
+        const tempV = pos.clone().add(new THREE.Vector3(0, 2, 0));
+        tempV.project(camera);
+        const x = (tempV.x * 0.5 + 0.5) * window.innerWidth;
+        const y = (-(tempV.y * 0.5) + 0.5) * window.innerHeight;
+
+        div.style.left = `${x}px`;
+        div.style.top = `${y}px`;
+        document.body.appendChild(div);
+
+        setTimeout(() => div.remove(), 800);
+    }
+
+    /* =========================================================================
+       9. SKILLS & UPGRADE SHOP CONTROLLER
+       ========================================================================= */
+    function useSkill(num) {
+        if (gameState.isGameOver || gameState.isShopOpen) return;
+
+        if (num === 1 && gameState.unlockedSkills.s1 && gameState.skillCooldowns.s1 <= 0) {
+            gameState.skillCooldowns.s1 = CONFIG.SKILLS.S1.cd;
+            player.position.addScaledVector(new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.mesh.rotation.y), CONFIG.SKILLS.S1.range);
+            enemies.forEach(e => {
+                if (e.mesh.position.distanceTo(player.position) < 5) e.takeDamage(CONFIG.SKILLS.S1.damage);
+            });
+            spawnParticleRing(player.position, 0x00ffff, 25);
+        } else if (num === 2 && gameState.unlockedSkills.s2 && gameState.skillCooldowns.s2 <= 0) {
+            gameState.skillCooldowns.s2 = CONFIG.SKILLS.S2.cd;
+            enemies.forEach(e => {
+                if (e.mesh.position.distanceTo(player.position) < CONFIG.SKILLS.S2.radius) e.takeDamage(CONFIG.SKILLS.S2.damage);
+            });
+            if (boss && boss.mesh.position.distanceTo(player.position) < CONFIG.SKILLS.S2.radius) boss.takeDamage(CONFIG.SKILLS.S2.damage);
+            spawnParticleRing(player.position, 0xffaa00, 35);
+        } else if (num === 3 && gameState.unlockedSkills.s3 && gameState.skillCooldowns.s3 <= 0) {
+            gameState.skillCooldowns.s3 = CONFIG.SKILLS.S3.cd;
+            if (boss && boss.mesh.position.distanceTo(player.position) < CONFIG.SKILLS.S3.range) {
+                boss.takeDamage(CONFIG.SKILLS.S3.damage);
+                spawnParticleRing(boss.mesh.position, 0xff0033, 50);
+            }
+        }
+        updateHUD();
+    }
+
+    function toggleShopModal() {
+        const modal = document.getElementById('shop-modal');
+        const isOpening = modal.classList.contains('hidden');
+        modal.classList.toggle('hidden');
+        
+        gameState.isShopOpen = isOpening;
+
+        if (isOpening) {
+            // Exit pointer lock so user can use mouse freely in shop
+            if (document.pointerLockElement) {
+                document.exitPointerLock();
+            }
+        } else {
+            // Re-acquire pointer lock if game is running
+            if (gameState.isStarted && !gameState.isGameOver && !gameState.isVictory && document.body.requestPointerLock) {
+                document.body.requestPointerLock();
+            }
+        }
+        updateShopUI();
+    }
+
+    function buyUpgrade(type) {
+        if (type === 'atk' && gameState.embers >= CONFIG.UPGRADES.ATK_COST) {
+            gameState.embers -= CONFIG.UPGRADES.ATK_COST;
+            gameState.swordAtkLvl++;
+        } else if (type === 'hp' && gameState.embers >= CONFIG.UPGRADES.HP_COST) {
+            gameState.embers -= CONFIG.UPGRADES.HP_COST;
+            gameState.hpLvl++;
+            gameState.maxHp += CONFIG.UPGRADES.HP_INC;
+            gameState.playerHp = gameState.maxHp;
+        } else if (type === 's1' && gameState.embers >= CONFIG.UPGRADES.S1_COST && !gameState.unlockedSkills.s1) {
+            gameState.embers -= CONFIG.UPGRADES.S1_COST;
+            gameState.unlockedSkills.s1 = true;
+            document.getElementById('skill-1-lock').classList.add('hidden');
+        } else if (type === 's2' && gameState.embers >= CONFIG.UPGRADES.S2_COST && !gameState.unlockedSkills.s2) {
+            gameState.embers -= CONFIG.UPGRADES.S2_COST;
+            gameState.unlockedSkills.s2 = true;
+            document.getElementById('skill-2-lock').classList.add('hidden');
+        } else if (type === 's3' && gameState.embers >= CONFIG.UPGRADES.S3_COST && !gameState.unlockedSkills.s3) {
+            gameState.embers -= CONFIG.UPGRADES.S3_COST;
+            gameState.unlockedSkills.s3 = true;
+            document.getElementById('skill-3-lock').classList.add('hidden');
+        }
+        updateHUD();
+        updateShopUI();
+    }
+
+    document.getElementById('btn-open-shop').addEventListener('click', toggleShopModal);
+    document.getElementById('btn-close-shop').addEventListener('click', toggleShopModal);
+
+    document.getElementById('btn-upg-atk').addEventListener('click', () => buyUpgrade('atk'));
+    document.getElementById('btn-upg-hp').addEventListener('click', () => buyUpgrade('hp'));
+    document.getElementById('btn-unlock-s1').addEventListener('click', () => buyUpgrade('s1'));
+    document.getElementById('btn-unlock-s2').addEventListener('click', () => buyUpgrade('s2'));
+    document.getElementById('btn-unlock-s3').addEventListener('click', () => buyUpgrade('s3'));
+
+    function updateHUD() {
+        document.getElementById('player-level').innerText = `Lv.${gameState.level}`;
+        document.getElementById('player-hp-text').innerText = `${Math.ceil(gameState.playerHp)} / ${gameState.maxHp}`;
+        document.getElementById('player-hp-bar').style.width = `${(gameState.playerHp / gameState.maxHp) * 100}%`;
+        document.getElementById('player-xp-bar').style.width = `${(gameState.xp / gameState.xpNeeded) * 100}%`;
+        document.getElementById('ember-count').innerText = gameState.embers;
+
+        if (boss && gameState.bossActive) {
+            document.getElementById('boss-hp-num').innerText = `${Math.ceil(boss.hp)} / ${boss.maxHp}`;
+            document.getElementById('boss-hp-bar').style.width = `${(boss.hp / boss.maxHp) * 100}%`;
+        }
+    }
+
+    function updateShopUI() {
+        document.getElementById('shop-ember-count').innerText = gameState.embers;
+        document.getElementById('shop-atk-lvl').innerText = `+${gameState.swordAtkLvl}`;
+        document.getElementById('shop-hp-lvl').innerText = `+${gameState.hpLvl}`;
+
+        document.getElementById('btn-upg-atk').disabled = gameState.embers < CONFIG.UPGRADES.ATK_COST;
+        document.getElementById('btn-upg-hp').disabled = gameState.embers < CONFIG.UPGRADES.HP_COST;
+        document.getElementById('btn-unlock-s1').disabled = gameState.embers < CONFIG.UPGRADES.S1_COST || gameState.unlockedSkills.s1;
+        document.getElementById('btn-unlock-s2').disabled = gameState.embers < CONFIG.UPGRADES.S2_COST || gameState.unlockedSkills.s2;
+        document.getElementById('btn-unlock-s3').disabled = gameState.embers < CONFIG.UPGRADES.S3_COST || gameState.unlockedSkills.s3;
+    }
+
+    function triggerGameOver() {
+        gameState.isGameOver = true;
+        document.getElementById('end-title').innerText = 'GAME OVER';
+        document.getElementById('end-title').className = 'font-cinzel text-4xl sm:text-5xl font-black tracking-widest text-red-500 glow-red';
+        document.getElementById('end-desc').innerText = '용사가 파멸의 화염 속에서 쓰러졌습니다...';
+        document.getElementById('end-modal').classList.remove('hidden');
+    }
+
+    function triggerVictory() {
+        gameState.isVictory = true;
+        document.getElementById('end-title').innerText = 'VICTORY';
+        document.getElementById('end-title').className = 'font-cinzel text-4xl sm:text-5xl font-black tracking-widest text-amber-400 glow-gold';
+        document.getElementById('end-desc').innerText = '파멸의 신을 처치하고 행성에 다시 희망의 불씨를 가져왔습니다!';
+        document.getElementById('end-modal').classList.remove('hidden');
+    }
+
+    document.getElementById('btn-restart').addEventListener('click', () => {
+        window.location.reload();
+    });
+
+    /* =========================================================================
+       10. ENTITIES INITIALIZATION & GAME LOOP
+       ========================================================================= */
+    const player = new Player();
+    const enemies = [];
+    const boss = new Boss();
+
+    // Populate Initial World Minions
+    for (let i = 0; i < 8; i++) {
+        enemies.push(new Enemy('grunt', (Math.random() - 0.5) * 50, -90 + Math.random() * 40));
+        enemies.push(new Enemy('stalker', (Math.random() - 0.5) * 50, -50 + Math.random() * 40));
+        enemies.push(new Enemy('brute', (Math.random() - 0.5) * 40, -10 + Math.random() * 30));
+    }
+
+    let lastTime = performance.now();
+    function gameLoop(now) {
+        requestAnimationFrame(gameLoop);
+        const dt = Math.min(0.05, (now - lastTime) / 1000);
+        lastTime = now;
+
+        // Render scene
+        renderer.render(scene, camera);
+
+        // Freeze game loop before starting or when shop is open
+        if (!gameState.isStarted) return;
+
+        // Skill Cooldown Updates
+        ['s1', 's2', 's3'].forEach(s => {
+            if (gameState.skillCooldowns[s] > 0) {
+                gameState.skillCooldowns[s] -= dt;
+                const cdElem = document.getElementById(`skill-${s.replace('s','')}-cd`);
+                if (cdElem) {
+                    const ratio = gameState.skillCooldowns[s] / CONFIG.SKILLS[s.toUpperCase()].cd;
+                    cdElem.style.height = `${Math.max(0, ratio * 100)}%`;
+                }
+            }
+        });
+
+        player.update(dt);
+        enemies.forEach(e => e.update(dt));
+        boss.update(dt);
+        updateEmbers(dt);
+        updateParticles(dt);
+    }
+
+    window.onload = () => {
+        updateHUD();
+        requestAnimationFrame(gameLoop);
+    };
+    </script>
+</body>
+</html>

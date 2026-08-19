@@ -1,0 +1,2335 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minecraft Web Voxel Survival Edition</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Minecraft Pixel Font -->
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    
+    <style>
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            font-family: 'VT323', monospace;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+        }
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        /* Pixelated Crosshair */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 16px;
+            height: 16px;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 10;
+        }
+        #crosshair::before, #crosshair::after {
+            content: '';
+            position: absolute;
+            background-color: rgba(255, 255, 255, 0.8);
+            box-shadow: 0 0 2px #000;
+        }
+        #crosshair::before { left: 7px; top: 0; width: 2px; height: 16px; }
+        #crosshair::after { top: 7px; left: 0; width: 16px; height: 2px; }
+
+        /* Mining Progress Bar Overlay */
+        #mining-progress-container {
+            position: absolute;
+            top: 58%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80px;
+            height: 8px;
+            background-color: rgba(0, 0, 0, 0.6);
+            border: 1px solid #FFF;
+            border-radius: 4px;
+            overflow: hidden;
+            display: none;
+            z-index: 12;
+        }
+        #mining-progress-bar {
+            width: 0%;
+            height: 100%;
+            background-color: #eab308;
+            transition: width 0.05s linear;
+        }
+
+        /* Minecraft Style Slot */
+        .mc-slot {
+            width: 44px;
+            height: 44px;
+            background-color: #8B8B8B;
+            border: 3px solid;
+            border-color: #373737 #FFF #FFF #373737;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            image-rendering: pixelated;
+        }
+        .mc-slot.active {
+            border-color: #555 #FFF #FFF #555;
+            outline: 3px solid #FFF;
+            z-index: 2;
+        }
+        .mc-slot .count {
+            position: absolute;
+            bottom: 2px;
+            right: 4px;
+            color: #FFF;
+            font-size: 18px;
+            text-shadow: 2px 2px 0px #000;
+            font-weight: bold;
+        }
+        .mc-container {
+            background-color: #C6C6C6;
+            border: 4px solid;
+            border-color: #FFF #555 #555 #FFF;
+            box-shadow: 4px 4px 15px rgba(0,0,0,0.8);
+        }
+        .mc-button {
+            background-color: #707070;
+            border: 3px solid;
+            border-color: #FFF #373737 #373737 #FFF;
+            color: #FFF;
+            text-shadow: 2px 2px 0px #000;
+            transition: all 0.05s;
+        }
+        .mc-button:hover {
+            background-color: #8B8B8B;
+        }
+        .mc-button:active {
+            border-color: #373737 #FFF #FFF #373737;
+        }
+
+        /* Custom Scrollbar for Recipe Book */
+        .custom-scroll::-webkit-scrollbar {
+            width: 8px;
+        }
+        .custom-scroll::-webkit-scrollbar-track {
+            background: #8B8B8B;
+            border: 1px solid #373737;
+        }
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: #555;
+            border: 1px solid #FFF;
+        }
+    </style>
+</head>
+<body class="bg-black text-white overflow-hidden">
+
+    <!-- 3D WebGL Canvas -->
+    <div id="canvas-container"></div>
+
+    <!-- Center Crosshair -->
+    <div id="crosshair"></div>
+
+    <!-- Floating Held Item Cursor Icon -->
+    <div id="floating-item" class="fixed pointer-events-none hidden z-50 text-3xl drop-shadow-lg select-none flex items-center justify-center w-10 h-10 -ml-5 -mt-5"></div>
+
+    <!-- Mining Progress Bar -->
+    <div id="mining-progress-container">
+        <div id="mining-progress-bar"></div>
+    </div>
+
+    <!-- HUD Overlay -->
+    <div id="hud" class="absolute inset-0 pointer-events-none z-10 flex flex-col justify-between p-4">
+        <!-- Top Status & Stats -->
+        <div class="flex justify-between items-start">
+            <!-- Left Info Panel -->
+            <div class="mc-container p-3 rounded text-black text-xl font-bold flex flex-col gap-1 opacity-90">
+                <div class="text-green-800 text-2xl">🌲 마인크래프트 정글 생존</div>
+                <div id="score-display" class="text-yellow-700">점수: 0</div>
+                <div id="biome-display" class="text-emerald-700">지역: 깊은 정글</div>
+                <div id="time-display" class="text-blue-800 font-extrabold">☀️ 시간: 낮 (12:00)</div>
+            </div>
+
+            <!-- Top Right: Unlocked Abilities HUD -->
+            <div class="mc-container p-2 text-black text-lg">
+                <div class="font-bold border-b border-gray-600 mb-1 text-center">⚡ 해금된 맹수 능력</div>
+                <div id="ability-hud-list" class="flex flex-col gap-1 text-sm font-semibold">
+                    <div>[Q] 치타 질주 (100점)</div>
+                    <div>[R] 곰 장갑 (250점)</div>
+                    <div>[F] 호랑이 일격 (450점)</div>
+                    <div>[G] 늑대의 눈 (700점)</div>
+                    <div>[H] 독수리 도약 (1000점)</div>
+                    <div>[Z] 거북 방패 (1400점)</div>
+                    <div>[X] 용의 화염 (2000점)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center Notification Toast -->
+        <div id="toast-container" class="self-center flex flex-col items-center gap-2 mb-20"></div>
+
+        <!-- Bottom HUD Bar (Hearts, Hunger, XP, Hotbar) -->
+        <div class="self-center flex flex-col items-center gap-1 mb-2 pointer-events-auto">
+            <!-- Hearts & Hunger Row -->
+            <div class="flex justify-between w-full px-2 items-center text-xl">
+                <!-- Hearts (HP) -->
+                <div id="hearts-container" class="flex gap-1 text-red-600 drop-shadow">
+                    ❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️
+                </div>
+                <!-- Hunger (Food) -->
+                <div id="hunger-container" class="flex gap-1 text-amber-700 drop-shadow">
+                    🍗🍗🍗🍗🍗🍗🍗🍗🍗🍗
+                </div>
+            </div>
+
+            <!-- XP Level Bar -->
+            <div class="w-full h-3 bg-gray-900 border-2 border-gray-700 relative rounded">
+                <div id="xp-bar" class="h-full bg-green-500 w-0 transition-all duration-300"></div>
+                <span id="xp-level" class="absolute -top-3 left-1/2 -translate-x-1/2 text-xs font-bold text-green-400 drop-shadow">LVL 1</span>
+            </div>
+
+            <!-- Hotbar (9 Slots) -->
+            <div id="hotbar" class="mc-container p-1.5 flex gap-1.5">
+                <!-- 9 Slots dynamically rendered -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Inventory Screen (E Key) -->
+    <div id="inventory-modal" class="fixed inset-0 bg-black/70 z-30 hidden flex items-center justify-center p-4">
+        <div class="mc-container p-6 w-[820px] text-black flex gap-6">
+            <!-- Left Side: Player & Crafting & Inventory Grid -->
+            <div class="flex-1 flex flex-col">
+                <div class="flex justify-between items-center mb-3 border-b-2 border-gray-500 pb-1">
+                    <h2 class="text-3xl font-bold">소지품 & 간이 제작</h2>
+                    <button onclick="UI.closeInventory()" class="text-2xl font-bold hover:text-red-600">✕</button>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <!-- Armor & Character -->
+                    <div class="flex gap-3 items-center">
+                        <div class="flex flex-col gap-1">
+                            <div class="mc-slot" title="투구">🪖</div>
+                            <div class="mc-slot" title="갑옷">👕</div>
+                            <div class="mc-slot" title="바지">👖</div>
+                            <div class="mc-slot" title="부츠">👞</div>
+                        </div>
+                        <div class="w-24 h-36 bg-gray-300 border-2 border-gray-600 flex items-center justify-center text-4xl">
+                            🧍
+                        </div>
+                    </div>
+
+                    <!-- 2x2 Crafting Box -->
+                    <div class="flex flex-col gap-2 bg-gray-300 p-2.5 rounded border border-gray-500">
+                        <span class="font-bold text-lg">간이 제작 (2x2)</span>
+                        <div class="flex items-center gap-3">
+                            <div class="grid grid-cols-2 gap-1">
+                                <div class="mc-slot" id="craft-in-0" onclick="CRAFTING.onCraftInputClick(0)"></div>
+                                <div class="mc-slot" id="craft-in-1" onclick="CRAFTING.onCraftInputClick(1)"></div>
+                                <div class="mc-slot" id="craft-in-2" onclick="CRAFTING.onCraftInputClick(2)"></div>
+                                <div class="mc-slot" id="craft-in-3" onclick="CRAFTING.onCraftInputClick(3)"></div>
+                            </div>
+                            <span class="text-3xl font-bold">➡</span>
+                            <div class="mc-slot bg-yellow-100" id="craft-out" onclick="CRAFTING.onCraftOutputClick()"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Inventory Grid (3x9 = 27 slots) -->
+                <div class="mb-3">
+                    <div class="font-bold mb-1">보관함</div>
+                    <div id="inv-grid" class="grid grid-cols-9 gap-1 bg-gray-400 p-2 border border-gray-600"></div>
+                </div>
+
+                <!-- Hotbar mirrored -->
+                <div>
+                    <div class="font-bold mb-1">단축바 (1-9)</div>
+                    <div id="inv-hotbar" class="grid grid-cols-9 gap-1 bg-gray-400 p-2 border border-gray-600"></div>
+                </div>
+            </div>
+
+            <!-- Right Side: Crafting Recipes Guide Side Panel -->
+            <div class="w-[280px] bg-gray-300 border-2 border-gray-600 p-3 rounded flex flex-col">
+                <div class="font-bold text-xl border-b border-gray-500 pb-1 mb-2 text-center text-emerald-900">📖 제작법 가이드</div>
+                <div id="inv-recipe-list" class="flex-1 overflow-y-auto custom-scroll flex flex-col gap-2 pr-1 max-h-[460px]">
+                    <!-- Dynamic Recipes Rendered Here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Crafting Table Modal (3x3 Crafting Grid) -->
+    <div id="crafting-table-modal" class="fixed inset-0 bg-black/70 z-30 hidden flex items-center justify-center p-4">
+        <div class="mc-container p-6 w-[860px] text-black flex gap-6">
+            <!-- Left Side: 3x3 Crafting Grid & Inventory -->
+            <div class="flex-1 flex flex-col">
+                <div class="flex justify-between items-center mb-3 border-b-2 border-gray-500 pb-1">
+                    <h2 class="text-3xl font-bold">작업대 (3x3 제작)</h2>
+                    <button onclick="UI.closeCraftingTable()" class="text-2xl font-bold hover:text-red-600">✕</button>
+                </div>
+
+                <div class="flex items-center justify-center gap-6 mb-4 bg-gray-300 p-3 rounded border border-gray-500">
+                    <!-- 3x3 Grid -->
+                    <div class="grid grid-cols-3 gap-1">
+                        <div class="mc-slot" id="ct-in-0" onclick="CRAFTING.onTableInputClick(0)"></div>
+                        <div class="mc-slot" id="ct-in-1" onclick="CRAFTING.onTableInputClick(1)"></div>
+                        <div class="mc-slot" id="ct-in-2" onclick="CRAFTING.onTableInputClick(2)"></div>
+                        <div class="mc-slot" id="ct-in-3" onclick="CRAFTING.onTableInputClick(3)"></div>
+                        <div class="mc-slot" id="ct-in-4" onclick="CRAFTING.onTableInputClick(4)"></div>
+                        <div class="mc-slot" id="ct-in-5" onclick="CRAFTING.onTableInputClick(5)"></div>
+                        <div class="mc-slot" id="ct-in-6" onclick="CRAFTING.onTableInputClick(6)"></div>
+                        <div class="mc-slot" id="ct-in-7" onclick="CRAFTING.onTableInputClick(7)"></div>
+                        <div class="mc-slot" id="ct-in-8" onclick="CRAFTING.onTableInputClick(8)"></div>
+                    </div>
+                    <span class="text-4xl font-bold">➔</span>
+                    <div class="mc-slot bg-yellow-200 w-16 h-16 text-2xl" id="ct-out" onclick="CRAFTING.onTableOutputClick()"></div>
+                </div>
+
+                <!-- Inventory Grid Below -->
+                <div>
+                    <div class="font-bold mb-1">소지품</div>
+                    <div id="ct-inv-grid" class="grid grid-cols-9 gap-1 bg-gray-400 p-2 border border-gray-600"></div>
+                </div>
+            </div>
+
+            <!-- Right Side: Crafting Recipe Book -->
+            <div class="w-[300px] bg-gray-300 border-2 border-gray-600 p-3 rounded flex flex-col">
+                <div class="font-bold text-xl border-b border-gray-500 pb-1 mb-2 text-center text-amber-900">🛠️ 전체 제작 조합법 도감</div>
+                <div id="ct-recipe-list" class="flex-1 overflow-y-auto custom-scroll flex flex-col gap-2 pr-1 max-h-[460px]">
+                    <!-- Dynamic Recipes Rendered Here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pause and Death Modals -->
+    <div id="pause-modal" class="fixed inset-0 bg-black/80 z-40 hidden flex items-center justify-center p-4">
+        <div class="mc-container p-8 w-[600px] text-black flex flex-col gap-6">
+            <h1 class="text-4xl font-bold text-center border-b-4 border-black pb-2">게임 일시 정지</h1>
+
+            <div class="bg-gray-200 p-4 rounded border-2 border-gray-600 text-lg">
+                <div class="font-bold text-xl text-green-900 mb-2 border-b border-gray-400">🎮 조작법 & 단축키 안내</div>
+                <div class="grid grid-cols-2 gap-2 text-base">
+                    <div><b>W, A, S, D</b> : 이동</div>
+                    <div><b>스페이스바</b> : 점프</div>
+                    <div><b>마우스 좌클릭</b> : 채굴 / 공격</div>
+                    <div><b>마우스 우클릭</b> : 블록 설치 / 음식 섭취</div>
+                    <div><b>1 ~ 9 키 / 휠</b> : 핫바 슬롯 선택</div>
+                    <div><b>E 키</b> : 소지품 & 제작창 열기</div>
+                    <div><b>Q 키</b> : 치타 질주 (100점)</div>
+                    <div><b>R 키</b> : 곰 장갑 (250점)</div>
+                    <div><b>F 키</b> : 호랑이 일격 (450점)</div>
+                    <div><b>G 키</b> : 늑대의 눈 (700점)</div>
+                    <div><b>H 키</b> : 독수리 도약 (1000점)</div>
+                    <div><b>Z 키</b> : 거북 방패 (1400점)</div>
+                    <div><b>X 키</b> : 용의 화염 (2000점)</div>
+                    <div><b>ESC 키</b> : 메뉴 / 일시정지</div>
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-3">
+                <button onclick="GAME.resume()" class="mc-button py-3 text-2xl font-bold rounded">1. 게임 계속하기 (Resume)</button>
+                <button onclick="location.reload()" class="mc-button py-3 text-2xl font-bold rounded bg-red-700 hover:bg-red-800">2. 처음부터 다시 시작 (Restart)</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="death-modal" class="fixed inset-0 bg-red-950/90 z-50 hidden flex items-center justify-center p-4">
+        <div class="mc-container p-8 w-[480px] text-black text-center flex flex-col gap-6">
+            <h1 class="text-5xl font-bold text-red-600 drop-shadow">당신은 사망했습니다!</h1>
+            <p id="death-score" class="text-2xl font-bold">최종 점수: 0 점</p>
+            <button onclick="location.reload()" class="mc-button py-4 text-3xl font-bold rounded">부활 및 다시 시작</button>
+        </div>
+    </div>
+
+    <script>
+        var CONFIG, AUDIO, TEXTURES, WORLD, PLAYER, INVENTORY, CRAFTING, ENEMIES, ABILITY, SCORE, UI, EFFECTS, GAME;
+
+        CONFIG = {
+            BLOCK_SIZE: 1,
+            WORLD_SIZE: 64,
+            DAY_NIGHT_SPEED: 0.00015,
+            VOID_Y: -20,
+            SCORES: {
+                mineBlock: 10,
+                placeBlock: 5,
+                killMob: 100,
+                eatFood: 20,
+                craftItem: 15,
+                abilityUnlock: 50
+            },
+            ABILITIES: [
+                { key: 'Q', name: '치타 질주', scoreReq: 100, speedBoost: 2.2, duration: 6000 },
+                { key: 'R', name: '곰 장갑', scoreReq: 250, armorBoost: 0.5, duration: 8000 },
+                { key: 'F', name: '호랑이 일격', scoreReq: 450, dmgBoost: 3.0, duration: 6000 },
+                { key: 'G', name: '늑대의 눈', scoreReq: 700, vision: true, duration: 12000 },
+                { key: 'H', name: '독수리 도약', scoreReq: 1000, jumpBoost: 2.5, duration: 8000 },
+                { key: 'Z', name: '거북 방패', scoreReq: 1400, invulnerable: true, duration: 5000 },
+                { key: 'X', name: '용의 화염', scoreReq: 2000, AoEAttack: true, duration: 1000 }
+            ],
+            BLOCK_TYPES: {
+                AIR: 0,
+                GRASS: 1,
+                DIRT: 2,
+                STONE: 3,
+                BEDROCK: 4,
+                OAK_LOG: 5,
+                OAK_LEAVES: 6,
+                COAL_ORE: 7,
+                IRON_ORE: 8,
+                SAND: 9,
+                WATER: 10,
+                PLANKS: 11,
+                COBBLESTONE: 12,
+                GLASS: 13,
+                CRAFTING_TABLE: 14,
+                BRICK: 15,
+                TNT: 16,
+                FURNACE: 17,
+                TORCH: 18,
+                LADDER: 19
+            },
+            RECIPES: [
+                {
+                    name: '나무 판자 x4',
+                    icon: '📦',
+                    gridType: '2x2 / 3x3',
+                    desc: '통나무 1개',
+                    materials: '통나무 1개 어디든 배치'
+                },
+                {
+                    name: '막대기 x4',
+                    icon: '🥢',
+                    gridType: '2x2 / 3x3',
+                    desc: '나무 판자 2개 (세로)',
+                    materials: '나무 판자 2개 (위/아래)'
+                },
+                {
+                    name: '작업대 x1',
+                    icon: '🛠️',
+                    gridType: '2x2 / 3x3',
+                    desc: '나무 판자 4개 (가득)',
+                    materials: '나무 판자 4개 (2x2 공간에 채움)'
+                },
+                {
+                    name: '나무 곡괭이',
+                    icon: '⛏️',
+                    gridType: '3x3 작업대',
+                    desc: '판자 3개 (윗줄) + 막대 2개 (중앙 세로)',
+                    materials: '상단 3줄: 판자, 중앙 2줄: 막대기'
+                },
+                {
+                    name: '돌 곡괭이',
+                    icon: '⛏️',
+                    gridType: '3x3 작업대',
+                    desc: '조약돌 3개 (윗줄) + 막대 2개 (중앙 세로)',
+                    materials: '상단 3줄: 조약돌, 중앙 2줄: 막대기'
+                },
+                {
+                    name: '철 곡괭이',
+                    icon: '⛏️',
+                    gridType: '3x3 작업대',
+                    desc: '철 광석 3개 (윗줄) + 막대 2개 (중앙 세로)',
+                    materials: '상단 3줄: 철 광석, 중앙 2줄: 막대기'
+                },
+                {
+                    name: '나무 도끼',
+                    icon: '🪓',
+                    gridType: '3x3 작업대',
+                    desc: '판자 3개 (좌상단 L자) + 막대 2개',
+                    materials: '상단 2개 + 왼쪽 1개: 판자, 세로 2개: 막대기'
+                },
+                {
+                    name: '나무 삽',
+                    icon: '🪵',
+                    gridType: '3x3 작업대',
+                    desc: '판자 1개 (상단 중앙) + 막대 2개',
+                    materials: '중앙 상단: 판자, 중앙 세로: 막대기'
+                },
+                {
+                    name: '나무 검',
+                    icon: '🗡️',
+                    gridType: '3x3 작업대',
+                    desc: '판자 2개 (중앙 세로) + 막대 1개',
+                    materials: '중앙 상단 2개: 판자, 하단: 막대기'
+                },
+                {
+                    name: '돌 검',
+                    icon: '⚔️',
+                    gridType: '3x3 작업대',
+                    desc: '조약돌 2개 (중앙 세로) + 막대 1개',
+                    materials: '중앙 상단 2개: 조약돌, 하단: 막대기'
+                },
+                {
+                    name: '철 검',
+                    icon: '⚔️',
+                    gridType: '3x3 작업대',
+                    desc: '철 광석 2개 (중앙 세로) + 막대 1개',
+                    materials: '중앙 상단 2개: 철 광석, 하단: 막대기'
+                },
+                {
+                    name: '돌 도끼',
+                    icon: '🪓',
+                    gridType: '3x3 작업대',
+                    desc: '조약돌 3개 (좌상단 L자) + 막대 2개',
+                    materials: '상단 2개 + 왼쪽 1개: 조약돌, 세로 2개: 막대기'
+                },
+                {
+                    name: '돌 삽',
+                    icon: '🪵',
+                    gridType: '3x3 작업대',
+                    desc: '조약돌 1개 (상단 중앙) + 막대 2개',
+                    materials: '중앙 상단: 조약돌, 중앙 세로: 막대기'
+                },
+                {
+                    name: '철 도끼',
+                    icon: '🪓',
+                    gridType: '3x3 작업대',
+                    desc: '철 광석 3개 (좌상단 L자) + 막대 2개',
+                    materials: '상단 2개 + 왼쪽 1개: 철 광석, 세로 2개: 막대기'
+                },
+                {
+                    name: '철 삽',
+                    icon: '🪵',
+                    gridType: '3x3 작업대',
+                    desc: '철 광석 1개 (상단 중앙) + 막대 2개',
+                    materials: '중앙 상단: 철 광석, 중앙 세로: 막대기'
+                },
+                {
+                    name: '횃불 x4',
+                    icon: '🔥',
+                    gridType: '3x3 작업대',
+                    desc: '석탄 1개 + 막대 1개',
+                    materials: '상단 중앙: 석탄 광석, 중앙: 막대기'
+                },
+                {
+                    name: '사다리 x3',
+                    icon: '🪜',
+                    gridType: '3x3 작업대',
+                    desc: '막대 6개 (양쪽 기둥 + 가로대)',
+                    materials: '중앙 열을 제외한 8칸 중 6칸(좌우 3줄)에 막대기'
+                },
+                {
+                    name: '화로 x1',
+                    icon: '🧱',
+                    gridType: '3x3 작업대',
+                    desc: '조약돌 8개 (중앙 제외 테두리 전부)',
+                    materials: '중앙 1칸을 뺀 나머지 8칸에 조약돌'
+                },
+                {
+                    name: '유리 x1',
+                    icon: '🪟',
+                    gridType: '2x2 / 3x3',
+                    desc: '모래 1개',
+                    materials: '모래 1개 어디든 배치 (해변에서 채굴)'
+                },
+                {
+                    name: '벽돌 x4',
+                    icon: '🟥',
+                    gridType: '2x2 / 3x3',
+                    desc: '조약돌 4개 (가득)',
+                    materials: '조약돌 4개 (2x2 공간에 채움)'
+                }
+            ],
+            BREAK_TIME: {
+                1: 0.25,
+                2: 0.2,
+                3: 0.8,
+                4: Infinity,
+                5: 0.6,
+                6: 0.15,
+                7: 1.0,
+                8: 1.2,
+                9: 0.3,
+                10: Infinity,
+                11: 0.4,
+                12: 0.8,
+                13: 0.2,
+                14: 0.6,
+                15: 0.8,
+                17: 1.0,
+                18: 0.1,
+                19: 0.3
+            }
+        };
+
+        AUDIO = {
+            ctx: null,
+            init() {
+                try {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                } catch(e){}
+            },
+            playDig() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.1);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.1);
+            },
+            playHit() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(220, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(80, this.ctx.currentTime + 0.15);
+                gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.15);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.15);
+            },
+            playEat() {
+                if (!this.ctx) return;
+                for (let i = 0; i < 3; i++) {
+                    setTimeout(() => {
+                        const osc = this.ctx.createOscillator();
+                        const gain = this.ctx.createGain();
+                        osc.frequency.setValueAtTime(300 + Math.random() * 200, this.ctx.currentTime);
+                        gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                        gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.08);
+                        osc.connect(gain);
+                        gain.connect(this.ctx.destination);
+                        osc.start();
+                        osc.stop(this.ctx.currentTime + 0.08);
+                    }, i * 100);
+                }
+            },
+            playExplode() {
+                if (!this.ctx) return;
+                const bufferSize = this.ctx.sampleRate * 0.5;
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+                const gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(0.8, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.5);
+                noise.connect(gain);
+                gain.connect(this.ctx.destination);
+                noise.start();
+            }
+        };
+
+        TEXTURES = {
+            materials: {},
+            generatePixelCanvas(drawFn) {
+                const canvas = document.createElement('canvas');
+                canvas.width = 16;
+                canvas.height = 16;
+                const ctx = canvas.getContext('2d');
+                drawFn(ctx);
+                const texture = new THREE.CanvasTexture(canvas);
+                texture.magFilter = THREE.NearestFilter;
+                texture.minFilter = THREE.NearestFilter;
+                return texture;
+            },
+            init() {
+                const createFlatColor = (color) => this.generatePixelCanvas(ctx => {
+                    ctx.fillStyle = color;
+                    ctx.fillRect(0,0,16,16);
+                    ctx.fillStyle = 'rgba(0,0,0,0.1)';
+                    for(let i=0; i<30; i++) ctx.fillRect(Math.random()*16|0, Math.random()*16|0, 1, 1);
+                });
+
+                const grassTop = this.generatePixelCanvas(ctx => {
+                    ctx.fillStyle = '#557a2b'; ctx.fillRect(0,0,16,16);
+                    ctx.fillStyle = '#3c5a1e';
+                    for(let i=0;i<40;i++) ctx.fillRect(Math.random()*16|0, Math.random()*16|0, 1, 1);
+                });
+                const dirtTex = this.generatePixelCanvas(ctx => {
+                    ctx.fillStyle = '#866043'; ctx.fillRect(0,0,16,16);
+                    ctx.fillStyle = '#573d2a';
+                    for(let i=0;i<40;i++) ctx.fillRect(Math.random()*16|0, Math.random()*16|0, 1, 1);
+                });
+                const grassSide = this.generatePixelCanvas(ctx => {
+                    ctx.fillStyle = '#866043'; ctx.fillRect(0,0,16,16);
+                    ctx.fillStyle = '#557a2b'; ctx.fillRect(0,0,16,6);
+                    for(let i=0;i<16;i+=2) ctx.fillRect(i, 5+ (i%3), 1, 3);
+                });
+                const stoneTex = createFlatColor('#737373');
+                const bedrockTex = createFlatColor('#222222');
+
+                const coalOreTex = this.generatePixelCanvas(ctx => {
+                    ctx.fillStyle = '#737373'; ctx.fillRect(0,0,16,16);
+                    ctx.fillStyle = '#111111';
+                    for(let i=0;i<12;i++) ctx.fillRect(Math.random()*14|0, Math.random()*14|0, 2, 2);
+                });
+                const ironOreTex = this.generatePixelCanvas(ctx => {
+                    ctx.fillStyle = '#737373'; ctx.fillRect(0,0,16,16);
+                    ctx.fillStyle = '#d4a373';
+                    for(let i=0;i<12;i++) ctx.fillRect(Math.random()*14|0, Math.random()*14|0, 2, 2);
+                });
+
+                const logSide = this.generatePixelCanvas(ctx => {
+                    ctx.fillStyle = '#674a2d'; ctx.fillRect(0,0,16,16);
+                    ctx.fillStyle = '#3d2a17';
+                    for(let i=0;i<16;i+=3) ctx.fillRect(i,0,1,16);
+                });
+                const logTop = this.generatePixelCanvas(ctx => {
+                    ctx.fillStyle = '#a2825c'; ctx.fillRect(0,0,16,16);
+                    ctx.strokeStyle = '#674a2d'; ctx.strokeRect(3,3,10,10);
+                });
+                const leavesTex = this.generatePixelCanvas(ctx => {
+                    ctx.fillStyle = '#2e6f21'; ctx.fillRect(0,0,16,16);
+                    ctx.fillStyle = '#1c4a14';
+                    for(let i=0;i<50;i++) ctx.fillRect(Math.random()*16|0, Math.random()*16|0, 1, 1);
+                });
+                const planksTex = createFlatColor('#b88b56');
+                const cobbleTex = createFlatColor('#555555');
+                const craftTop = this.generatePixelCanvas(ctx => {
+                    ctx.fillStyle = '#b88b56'; ctx.fillRect(0,0,16,16);
+                    ctx.fillStyle = '#553311'; ctx.strokeRect(2,2,12,12);
+                });
+
+                this.materials[CONFIG.BLOCK_TYPES.GRASS] = [
+                    new THREE.MeshLambertMaterial({ map: grassSide }),
+                    new THREE.MeshLambertMaterial({ map: grassSide }),
+                    new THREE.MeshLambertMaterial({ map: grassTop }),
+                    new THREE.MeshLambertMaterial({ map: dirtTex }),
+                    new THREE.MeshLambertMaterial({ map: grassSide }),
+                    new THREE.MeshLambertMaterial({ map: grassSide })
+                ];
+                this.materials[CONFIG.BLOCK_TYPES.DIRT] = new THREE.MeshLambertMaterial({ map: dirtTex });
+                this.materials[CONFIG.BLOCK_TYPES.STONE] = new THREE.MeshLambertMaterial({ map: stoneTex });
+                this.materials[CONFIG.BLOCK_TYPES.BEDROCK] = new THREE.MeshLambertMaterial({ map: bedrockTex });
+                this.materials[CONFIG.BLOCK_TYPES.COAL_ORE] = new THREE.MeshLambertMaterial({ map: coalOreTex });
+                this.materials[CONFIG.BLOCK_TYPES.IRON_ORE] = new THREE.MeshLambertMaterial({ map: ironOreTex });
+                this.materials[CONFIG.BLOCK_TYPES.OAK_LOG] = [
+                    new THREE.MeshLambertMaterial({ map: logSide }),
+                    new THREE.MeshLambertMaterial({ map: logSide }),
+                    new THREE.MeshLambertMaterial({ map: logTop }),
+                    new THREE.MeshLambertMaterial({ map: logTop }),
+                    new THREE.MeshLambertMaterial({ map: logSide }),
+                    new THREE.MeshLambertMaterial({ map: logSide })
+                ];
+                this.materials[CONFIG.BLOCK_TYPES.OAK_LEAVES] = new THREE.MeshLambertMaterial({ map: leavesTex, transparent: true, opacity: 0.95 });
+                this.materials[CONFIG.BLOCK_TYPES.PLANKS] = new THREE.MeshLambertMaterial({ map: planksTex });
+                this.materials[CONFIG.BLOCK_TYPES.COBBLESTONE] = new THREE.MeshLambertMaterial({ map: cobbleTex });
+                this.materials[CONFIG.BLOCK_TYPES.CRAFTING_TABLE] = [
+                    new THREE.MeshLambertMaterial({ map: planksTex }),
+                    new THREE.MeshLambertMaterial({ map: planksTex }),
+                    new THREE.MeshLambertMaterial({ map: craftTop }),
+                    new THREE.MeshLambertMaterial({ map: planksTex }),
+                    new THREE.MeshLambertMaterial({ map: planksTex }),
+                    new THREE.MeshLambertMaterial({ map: planksTex })
+                ];
+                this.materials[CONFIG.BLOCK_TYPES.WATER] = new THREE.MeshLambertMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.6 });
+
+                const sandTex = this.generatePixelCanvas(ctx => {
+                    ctx.fillStyle = '#e6d19a'; ctx.fillRect(0,0,16,16);
+                    ctx.fillStyle = '#cdb87a';
+                    for(let i=0;i<30;i++) ctx.fillRect(Math.random()*16|0, Math.random()*16|0, 1, 1);
+                });
+                this.materials[CONFIG.BLOCK_TYPES.SAND] = new THREE.MeshLambertMaterial({ map: sandTex });
+                this.materials[CONFIG.BLOCK_TYPES.GLASS] = new THREE.MeshLambertMaterial({ color: 0xbae6fd, transparent: true, opacity: 0.4 });
+                this.materials[CONFIG.BLOCK_TYPES.BRICK] = createFlatColor('#9a3412');
+                const furnaceTex = this.generatePixelCanvas(ctx => {
+                    ctx.fillStyle = '#57534e'; ctx.fillRect(0,0,16,16);
+                    ctx.fillStyle = '#1c1917'; ctx.fillRect(5,6,6,6);
+                    ctx.fillStyle = '#f97316'; ctx.fillRect(6,7,4,4);
+                });
+                this.materials[CONFIG.BLOCK_TYPES.FURNACE] = [
+                    new THREE.MeshLambertMaterial({ map: furnaceTex }),
+                    new THREE.MeshLambertMaterial({ color: 0x57534e }),
+                    new THREE.MeshLambertMaterial({ color: 0x57534e }),
+                    new THREE.MeshLambertMaterial({ color: 0x57534e }),
+                    new THREE.MeshLambertMaterial({ color: 0x57534e }),
+                    new THREE.MeshLambertMaterial({ color: 0x57534e })
+                ];
+                this.materials[CONFIG.BLOCK_TYPES.TORCH] = new THREE.MeshLambertMaterial({ color: 0xfbbf24, emissive: 0xf59e0b, emissiveIntensity: 0.6 });
+                this.materials[CONFIG.BLOCK_TYPES.LADDER] = new THREE.MeshLambertMaterial({ color: 0x8b5a2b, transparent: true, opacity: 0.9 });
+            }
+        };
+
+        WORLD = {
+            grid: {},
+            scene: null,
+            blockMeshes: {},
+            visibleBlockMeshes: {},
+            sharedBoxGeo: null,
+            droppedItems: [],
+
+            init(scene) {
+                this.scene = scene;
+                this.sharedBoxGeo = new THREE.BoxGeometry(1, 1, 1);
+                this.generateTerrain();
+            },
+
+            getKey(x, y, z) {
+                return `${x},${y},${z}`;
+            },
+
+            getBlock(x, y, z) {
+                return this.grid[this.getKey(x, y, z)] || CONFIG.BLOCK_TYPES.AIR;
+            },
+
+            isBlockExposed(x, y, z) {
+                const neighbors = [
+                    [x + 1, y, z], [x - 1, y, z],
+                    [x, y + 1, z], [x, y - 1, z],
+                    [x, y, z + 1], [x, y, z - 1]
+                ];
+                for (let i = 0; i < neighbors.length; i++) {
+                    const nbType = this.getBlock(neighbors[i][0], neighbors[i][1], neighbors[i][2]);
+                    if (nbType === CONFIG.BLOCK_TYPES.AIR || 
+                        nbType === CONFIG.BLOCK_TYPES.WATER || 
+                        nbType === CONFIG.BLOCK_TYPES.OAK_LEAVES) {
+                        return true;
+                    }
+                }
+                return false;
+            },
+
+            updateBlockMesh(x, y, z) {
+                const key = this.getKey(x, y, z);
+                const type = this.getBlock(x, y, z);
+
+                if (type === CONFIG.BLOCK_TYPES.AIR) {
+                    if (this.blockMeshes[key]) {
+                        this.scene.remove(this.blockMeshes[key]);
+                        delete this.blockMeshes[key];
+                        delete this.visibleBlockMeshes[key];
+                    }
+                    return;
+                }
+
+                const exposed = this.isBlockExposed(x, y, z);
+
+                if (exposed) {
+                    if (!this.blockMeshes[key]) {
+                        const mat = TEXTURES.materials[type] || new THREE.MeshLambertMaterial({ color: 0x888888 });
+                        const mesh = new THREE.Mesh(this.sharedBoxGeo, mat);
+                        mesh.position.set(x + 0.5, y + 0.5, z + 0.5);
+                        mesh.userData = { x, y, z, type };
+                        this.scene.add(mesh);
+                        this.blockMeshes[key] = mesh;
+                        this.visibleBlockMeshes[key] = mesh;
+                    }
+                } else {
+                    if (this.blockMeshes[key]) {
+                        this.scene.remove(this.blockMeshes[key]);
+                        delete this.blockMeshes[key];
+                        delete this.visibleBlockMeshes[key];
+                    }
+                }
+            },
+
+            setBlock(x, y, z, type) {
+                const key = this.getKey(x, y, z);
+                if (type === CONFIG.BLOCK_TYPES.AIR) {
+                    delete this.grid[key];
+                } else {
+                    this.grid[key] = type;
+                }
+
+                this.updateBlockMesh(x, y, z);
+                const neighbors = [
+                    [x + 1, y, z], [x - 1, y, z],
+                    [x, y + 1, z], [x, y - 1, z],
+                    [x, y, z + 1], [x, y, z - 1]
+                ];
+                neighbors.forEach(([nx, ny, nz]) => {
+                    if (this.getBlock(nx, ny, nz) !== CONFIG.BLOCK_TYPES.AIR) {
+                        this.updateBlockMesh(nx, ny, nz);
+                    }
+                });
+            },
+
+            // 3D 의사 노이즈로 지하 동굴 공동을 판정 (실제 Perlin 노이즈 라이브러리 없이 사인파 합성으로 근사)
+            caveNoise(x, y, z) {
+                const n1 = Math.sin(x * 0.15 + y * 0.35) * Math.cos(z * 0.15 - y * 0.25);
+                const n2 = Math.sin(x * 0.3 - z * 0.28 + y * 0.5) * 0.6;
+                const n3 = Math.cos(x * 0.09 + z * 0.11) * Math.sin(y * 0.4) * 0.5;
+                return n1 + n2 + n3;
+            },
+
+            isCave(x, y, z) {
+                return this.caveNoise(x, y, z) > 1.15;
+            },
+
+            generateTerrain() {
+                const S = CONFIG.WORLD_SIZE;
+                const half = S / 2;
+
+                for (let x = -half; x < half; x++) {
+                    for (let z = -half; z < half; z++) {
+                        const noise1 = Math.sin(x * 0.1) * Math.cos(z * 0.1) * 4;
+                        const noise2 = Math.sin(x * 0.25 + z * 0.25) * 1.8;
+                        const h = Math.floor(noise1 + noise2 + 6);
+
+                        this.grid[this.getKey(x, 0, z)] = CONFIG.BLOCK_TYPES.BEDROCK;
+
+                        for (let y = 1; y < h - 1; y++) {
+                            // 표면 아래 3블록 이상 깊은 곳에서만 동굴을 뚫어 지표면이 무너지지 않게 함
+                            if (y <= h - 3 && this.isCave(x, y, z)) {
+                                continue;
+                            }
+
+                            let blockType = CONFIG.BLOCK_TYPES.STONE;
+                            const randOre = Math.random();
+                            if (randOre < 0.04) blockType = CONFIG.BLOCK_TYPES.COAL_ORE;
+                            else if (randOre < 0.065 && y < 5) blockType = CONFIG.BLOCK_TYPES.IRON_ORE;
+
+                            this.grid[this.getKey(x, y, z)] = blockType;
+                        }
+
+                        this.grid[this.getKey(x, h - 1, z)] = CONFIG.BLOCK_TYPES.DIRT;
+
+                        if (h <= 3) {
+                            this.grid[this.getKey(x, h, z)] = CONFIG.BLOCK_TYPES.WATER;
+                        } else if (h <= 5) {
+                            this.grid[this.getKey(x, h, z)] = CONFIG.BLOCK_TYPES.SAND;
+                        } else {
+                            this.grid[this.getKey(x, h, z)] = CONFIG.BLOCK_TYPES.GRASS;
+                        }
+                    }
+                }
+
+                for (let x = -half + 3; x < half - 3; x++) {
+                    for (let z = -half + 3; z < half - 3; z++) {
+                        const h = Math.floor(Math.sin(x * 0.1) * Math.cos(z * 0.1) * 4 + Math.sin(x * 0.25 + z * 0.25) * 1.8 + 6);
+                        if (h > 3 && Math.random() < 0.035) {
+                            this.spawnTreeGrid(x, h + 1, z);
+                        }
+                    }
+                }
+
+                for (let x = -half; x < half; x++) {
+                    for (let z = -half; z < half; z++) {
+                        for (let y = 0; y < 16; y++) {
+                            if (this.getBlock(x, y, z) !== CONFIG.BLOCK_TYPES.AIR) {
+                                this.updateBlockMesh(x, y, z);
+                            }
+                        }
+                    }
+                }
+            },
+
+            spawnTreeGrid(x, y, z) {
+                for (let i = 0; i < 4; i++) {
+                    this.grid[this.getKey(x, y + i, z)] = CONFIG.BLOCK_TYPES.OAK_LOG;
+                }
+                for (let lx = -2; lx <= 2; lx++) {
+                    for (let lz = -2; lz <= 2; lz++) {
+                        for (let ly = 2; ly <= 4; ly++) {
+                            if (Math.abs(lx) === 2 && Math.abs(lz) === 2) continue;
+                            if (this.getBlock(x + lx, y + ly, z + lz) === CONFIG.BLOCK_TYPES.AIR) {
+                                this.grid[this.getKey(x + lx, y + ly, z + lz)] = CONFIG.BLOCK_TYPES.OAK_LEAVES;
+                            }
+                        }
+                    }
+                }
+            },
+
+            spawnDroppedItem(x, y, z, type, count = 1) {
+                const geo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+                const mat = TEXTURES.materials[type] || new THREE.MeshBasicMaterial({ color: 0xffff00 });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(x, y, z);
+                this.scene.add(mesh);
+                this.droppedItems.push({ mesh, type, count, rotSpeed: Math.random() * 0.05 + 0.02 });
+            },
+
+            updateDroppedItems() {
+                for (let i = this.droppedItems.length - 1; i >= 0; i--) {
+                    const item = this.droppedItems[i];
+                    item.mesh.rotation.y += item.rotSpeed;
+
+                    const dist = item.mesh.position.distanceTo(PLAYER.camera.position);
+                    if (dist < 2.0) {
+                        item.mesh.position.lerp(PLAYER.camera.position, 0.2);
+                        if (dist < 0.8) {
+                            INVENTORY.addItem(item.type, item.count);
+                            AUDIO.playDig();
+                            this.scene.remove(item.mesh);
+                            this.droppedItems.splice(i, 1);
+                        }
+                    }
+                }
+            }
+        };
+
+        PLAYER = {
+            camera: null,
+            position: new THREE.Vector3(0, 10, 0),
+            velocity: new THREE.Vector3(),
+            keys: {},
+            isGrounded: false,
+            hp: 20,
+            maxHp: 20,
+            hunger: 20,
+            maxHunger: 20,
+            selectedSlot: 0,
+            handMesh: null,
+            isSwinging: false,
+            swingTime: 0,
+
+            isMouseDown: false,
+            miningTarget: null,
+            miningProgress: 0,
+            lastDigSoundTime: 0,
+            eyeHeight: 1.6,
+            radius: 0.3,
+            isDead: false,
+
+            isSolidBlock(bx, by, bz) {
+                const t = WORLD.getBlock(bx, by, bz);
+                return t !== CONFIG.BLOCK_TYPES.AIR &&
+                       t !== CONFIG.BLOCK_TYPES.WATER &&
+                       t !== CONFIG.BLOCK_TYPES.TORCH &&
+                       t !== CONFIG.BLOCK_TYPES.LADDER;
+            },
+
+            // 플레이어가 (x, z)로 이동했을 때 몸(발~머리)이 벽에 박히는지 검사
+            collidesAt(x, z) {
+                const feetY = this.position.y - this.eyeHeight;
+                const yLevels = [feetY + 0.1, feetY + 0.9, feetY + this.eyeHeight - 0.1];
+                const xs = [x - this.radius, x + this.radius];
+                const zs = [z - this.radius, z + this.radius];
+
+                for (const yy of yLevels) {
+                    for (const xx of xs) {
+                        for (const zz of zs) {
+                            if (this.isSolidBlock(Math.floor(xx), Math.floor(yy), Math.floor(zz))) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                return false;
+            },
+
+            getNearbyBlockMeshes(maxDist = 6) {
+                const px = this.camera.position.x;
+                const py = this.camera.position.y;
+                const pz = this.camera.position.z;
+                const nearMeshes = [];
+                const maxDistSq = maxDist * maxDist;
+
+                for (const key in WORLD.visibleBlockMeshes) {
+                    const mesh = WORLD.visibleBlockMeshes[key];
+                    const dx = mesh.position.x - px;
+                    const dy = mesh.position.y - py;
+                    const dz = mesh.position.z - pz;
+                    if (dx * dx + dy * dy + dz * dz <= maxDistSq) {
+                        nearMeshes.push(mesh);
+                    }
+                }
+                return nearMeshes;
+            },
+
+            init(camera) {
+                this.camera = camera;
+                this.camera.rotation.order = 'YXZ';
+                this.camera.position.copy(this.position);
+
+                const handGeo = new THREE.BoxGeometry(0.2, 0.2, 0.5);
+                const handMat = new THREE.MeshLambertMaterial({ color: 0xc49a6c });
+                this.handMesh = new THREE.Mesh(handGeo, handMat);
+                this.camera.add(this.handMesh);
+                this.handMesh.position.set(0.4, -0.3, -0.6);
+
+                window.addEventListener('keydown', (e) => {
+                    this.keys[e.code] = true;
+                    if (e.code.startsWith('Digit') && e.code !== 'Digit0') {
+                        const idx = parseInt(e.code.replace('Digit', '')) - 1;
+                        this.selectedSlot = idx;
+                        UI.updateHotbar();
+                    }
+                    if (e.code === 'KeyE') UI.toggleInventory();
+                    if (e.code === 'Escape') GAME.togglePause();
+
+                    CONFIG.ABILITIES.forEach(ab => {
+                        if (e.code === 'Key' + ab.key) ABILITY.trigger(ab);
+                    });
+                });
+
+                window.addEventListener('keyup', (e) => { this.keys[e.code] = false; });
+                window.addEventListener('wheel', (e) => {
+                    if (e.deltaY > 0) this.selectedSlot = (this.selectedSlot + 1) % 9;
+                    else this.selectedSlot = (this.selectedSlot + 8) % 9;
+                    UI.updateHotbar();
+                });
+
+                window.addEventListener('mousedown', (e) => {
+                    if (UI.isAnyModalOpen()) return;
+
+                    if (!GAME.isPointerLocked) {
+                        GAME.requestLock();
+                        return;
+                    }
+                    if (e.button === 0) {
+                        this.isMouseDown = true;
+                        this.attackOrStartMining();
+                    }
+                    if (e.button === 2) this.rightClickAction();
+                });
+
+                window.addEventListener('mouseup', (e) => {
+                    if (e.button === 0) {
+                        this.isMouseDown = false;
+                        this.cancelMining();
+                    }
+                });
+            },
+
+            update(dt) {
+                if (GAME.isPaused || this.isDead) return;
+
+                if (Math.random() < 0.0005) {
+                    this.hunger = Math.max(0, this.hunger - 1);
+                    UI.updateHUD();
+                }
+
+                this.velocity.y -= 25 * dt;
+
+                const dir = new THREE.Vector3();
+                if (this.keys['KeyW']) dir.z -= 1;
+                if (this.keys['KeyS']) dir.z += 1;
+                if (this.keys['KeyA']) dir.x -= 1;
+                if (this.keys['KeyD']) dir.x += 1;
+                dir.normalize();
+
+                const speed = (ABILITY.activeEffects.speedBoost || 1) * 7;
+                const euler = new THREE.Euler(0, this.camera.rotation.y, 0, 'YXZ');
+                dir.applyEuler(euler);
+
+                // 벽 통과 방지: 각 축으로 이동을 미리 검사해서 막힌 방향만 취소 (벽 옆에서는 미끄러지듯 이동)
+                const newX = this.position.x + dir.x * speed * dt;
+                const newZ = this.position.z + dir.z * speed * dt;
+
+                if (!this.collidesAt(newX, this.position.z)) {
+                    this.position.x = newX;
+                }
+                if (!this.collidesAt(this.position.x, newZ)) {
+                    this.position.z = newZ;
+                }
+
+                if (this.keys['Space'] && this.isGrounded) {
+                    this.velocity.y = (ABILITY.activeEffects.jumpBoost || 1) * 9;
+                    this.isGrounded = false;
+                }
+
+                this.position.y += this.velocity.y * dt;
+
+                const eyeHeight = this.eyeHeight;
+                const feetY = this.position.y - eyeHeight;
+                const bx = Math.floor(this.position.x);
+                const bz = Math.floor(this.position.z);
+                const checkY = Math.floor(feetY - 0.05);
+
+                const blockType = WORLD.getBlock(bx, checkY, bz);
+
+                if (blockType !== CONFIG.BLOCK_TYPES.AIR && blockType !== CONFIG.BLOCK_TYPES.WATER) {
+                    const solidTop = checkY + 1;
+                    if (feetY <= solidTop && this.velocity.y <= 0) {
+                        this.position.y = solidTop + eyeHeight;
+                        this.velocity.y = 0;
+                        this.isGrounded = true;
+                    }
+                } else {
+                    this.isGrounded = false;
+                }
+
+                // 맵 밖이나 동굴 구멍 등으로 한없이 떨어지면 사망 처리
+                if (this.position.y < CONFIG.VOID_Y) {
+                    this.hp = 0;
+                    UI.notify('💀 끝없는 낭떠러지로 떨어졌습니다...');
+                    GAME.gameOver();
+                    return;
+                }
+
+                this.camera.position.copy(this.position);
+
+                if (this.isMouseDown) {
+                    this.processMining(dt);
+                }
+
+                if (this.isSwinging) {
+                    this.swingTime += dt * 15;
+                    this.handMesh.rotation.x = -Math.sin(this.swingTime) * 0.8;
+                    if (this.swingTime > Math.PI) {
+                        this.isSwinging = false;
+                        this.handMesh.rotation.x = 0;
+                    }
+                }
+            },
+
+            swingHand() {
+                this.isSwinging = true;
+                this.swingTime = 0;
+            },
+
+            getMiningSpeedMultiplier(blockType) {
+                const slot = INVENTORY.hotbar[this.selectedSlot];
+                if (!slot) return 1.0;
+                const tool = slot.type;
+
+                if ([CONFIG.BLOCK_TYPES.STONE, CONFIG.BLOCK_TYPES.COAL_ORE, CONFIG.BLOCK_TYPES.IRON_ORE, CONFIG.BLOCK_TYPES.COBBLESTONE, CONFIG.BLOCK_TYPES.FURNACE].includes(blockType)) {
+                    if (tool === 'iron_pickaxe') return 9.0;
+                    if (tool === 'stone_pickaxe') return 5.5;
+                    if (tool === 'wood_pickaxe') return 3.2;
+                }
+                if ([CONFIG.BLOCK_TYPES.OAK_LOG, CONFIG.BLOCK_TYPES.PLANKS, CONFIG.BLOCK_TYPES.CRAFTING_TABLE, CONFIG.BLOCK_TYPES.LADDER].includes(blockType)) {
+                    if (tool === 'iron_axe') return 6.0;
+                    if (tool === 'stone_axe') return 5.0;
+                    if (tool === 'wood_axe') return 4.0;
+                    if (tool === 'wood_pickaxe') return 1.5;
+                }
+                if ([CONFIG.BLOCK_TYPES.GRASS, CONFIG.BLOCK_TYPES.DIRT, CONFIG.BLOCK_TYPES.SAND].includes(blockType)) {
+                    if (tool === 'iron_shovel') return 6.0;
+                    if (tool === 'stone_shovel') return 5.0;
+                    if (tool === 'wood_shovel') return 4.0;
+                }
+                return 1.0;
+            },
+
+            attackOrStartMining() {
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
+
+                const hitMob = ENEMIES.checkAttack(raycaster);
+                if (hitMob) return;
+
+                const meshes = this.getNearbyBlockMeshes(5.5);
+                const intersects = raycaster.intersectObjects(meshes);
+
+                if (intersects.length > 0 && intersects[0].distance < 4.5) {
+                    const hit = intersects[0];
+                    const ud = hit.object.userData;
+                    if (ud.type !== CONFIG.BLOCK_TYPES.BEDROCK) {
+                        this.miningTarget = { x: ud.x, y: ud.y, z: ud.z, type: ud.type };
+                        this.miningProgress = 0;
+                        UI.showMiningBar(0);
+                    }
+                }
+            },
+
+            processMining(dt) {
+                if (!this.miningTarget) return;
+
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
+                const meshes = this.getNearbyBlockMeshes(5.5);
+                const intersects = raycaster.intersectObjects(meshes);
+
+                if (intersects.length > 0 && intersects[0].distance < 4.5) {
+                    const hit = intersects[0];
+                    const ud = hit.object.userData;
+
+                    if (ud.x === this.miningTarget.x && ud.y === this.miningTarget.y && ud.z === this.miningTarget.z) {
+                        const baseTime = CONFIG.BREAK_TIME[ud.type] || 0.8;
+                        const speedMult = this.getMiningSpeedMultiplier(ud.type);
+                        const requiredTime = baseTime / speedMult;
+
+                        this.miningProgress += dt;
+                        this.swingHand();
+
+                        if (Date.now() - this.lastDigSoundTime > 200) {
+                            AUDIO.playDig();
+                            this.lastDigSoundTime = Date.now();
+                        }
+
+                        const pct = Math.min(100, (this.miningProgress / requiredTime) * 100);
+                        UI.showMiningBar(pct);
+
+                        if (this.miningProgress >= requiredTime) {
+                            WORLD.setBlock(ud.x, ud.y, ud.z, CONFIG.BLOCK_TYPES.AIR);
+                            
+                            let dropType = ud.type;
+                            if (ud.type === CONFIG.BLOCK_TYPES.STONE) dropType = CONFIG.BLOCK_TYPES.COBBLESTONE;
+
+                            WORLD.spawnDroppedItem(ud.x + 0.5, ud.y + 0.5, ud.z + 0.5, dropType);
+                            SCORE.add(CONFIG.SCORES.mineBlock);
+                            AUDIO.playHit();
+                            this.cancelMining();
+                        }
+                        return;
+                    }
+                }
+
+                this.cancelMining();
+            },
+
+            cancelMining() {
+                this.miningTarget = null;
+                this.miningProgress = 0;
+                UI.hideMiningBar();
+            },
+
+            rightClickAction() {
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
+                const meshes = this.getNearbyBlockMeshes(5.5);
+                const intersects = raycaster.intersectObjects(meshes);
+
+                const slotItem = INVENTORY.hotbar[this.selectedSlot];
+
+                if (slotItem && slotItem.type === 'meat') {
+                    if (this.hunger < this.maxHunger || this.hp < this.maxHp) {
+                        this.hunger = Math.min(this.maxHunger, this.hunger + 6);
+                        this.hp = Math.min(this.maxHp, this.hp + 4);
+                        INVENTORY.removeItem('meat', 1, 'hotbar', this.selectedSlot);
+                        AUDIO.playEat();
+                        UI.notify('🍗 고기를 먹었습니다! (허기/체력 회복)');
+                        UI.updateHUD();
+                    }
+                    return;
+                }
+
+                if (intersects.length > 0 && intersects[0].distance < 4.5) {
+                    const hit = intersects[0];
+                    const ud = hit.object.userData;
+
+                    if (ud.type === CONFIG.BLOCK_TYPES.CRAFTING_TABLE) {
+                        UI.openCraftingTable();
+                        return;
+                    }
+
+                    if (slotItem && typeof slotItem.type === 'number' && slotItem.type !== CONFIG.BLOCK_TYPES.AIR) {
+                        const normal = hit.face.normal;
+                        const px = ud.x + Math.round(normal.x);
+                        const py = ud.y + Math.round(normal.y);
+                        const pz = ud.z + Math.round(normal.z);
+
+                        const playerBx = Math.floor(this.position.x);
+                        const playerBy1 = Math.floor(this.position.y - 1.6);
+                        const playerBy2 = Math.floor(this.position.y - 0.6);
+                        const playerBz = Math.floor(this.position.z);
+
+                        if (px === playerBx && pz === playerBz && (py === playerBy1 || py === playerBy2)) {
+                            return;
+                        }
+
+                        if (WORLD.getBlock(px, py, pz) === CONFIG.BLOCK_TYPES.AIR || WORLD.getBlock(px, py, pz) === CONFIG.BLOCK_TYPES.WATER) {
+                            WORLD.setBlock(px, py, pz, slotItem.type);
+                            INVENTORY.removeItem(slotItem.type, 1, 'hotbar', this.selectedSlot);
+                            SCORE.add(CONFIG.SCORES.placeBlock);
+                            AUDIO.playHit();
+                        }
+                    }
+                }
+            }
+        };
+
+        INVENTORY = {
+            hotbar: [
+                { type: CONFIG.BLOCK_TYPES.PLANKS, count: 32 },
+                { type: CONFIG.BLOCK_TYPES.CRAFTING_TABLE, count: 1 },
+                { type: 'meat', count: 10 },
+                null, null, null, null, null, null
+            ],
+            storage: new Array(27).fill(null),
+            heldItem: null,
+
+            setHeldItem(item) {
+                this.heldItem = item;
+                UI.updateFloatingItem();
+            },
+
+            onSlotClick(location, index) {
+                let currentItem = null;
+                if (location === 'storage') currentItem = this.storage[index];
+                if (location === 'hotbar') currentItem = this.hotbar[index];
+
+                if (!this.heldItem && currentItem) {
+                    this.setHeldItem({ ...currentItem });
+                    if (location === 'storage') this.storage[index] = null;
+                    if (location === 'hotbar') this.hotbar[index] = null;
+                } else if (this.heldItem && !currentItem) {
+                    if (location === 'storage') this.storage[index] = { ...this.heldItem };
+                    if (location === 'hotbar') this.hotbar[index] = { ...this.heldItem };
+                    this.setHeldItem(null);
+                } else if (this.heldItem && currentItem) {
+                    if (this.heldItem.type === currentItem.type) {
+                        currentItem.count += this.heldItem.count;
+                        this.setHeldItem(null);
+                    } else {
+                        const temp = { ...currentItem };
+                        if (location === 'storage') this.storage[index] = { ...this.heldItem };
+                        if (location === 'hotbar') this.hotbar[index] = { ...this.heldItem };
+                        this.setHeldItem(temp);
+                    }
+                }
+
+                UI.updateInventory();
+                UI.updateHUD();
+            },
+
+            addItem(type, count = 1) {
+                for (let i = 0; i < 9; i++) {
+                    if (this.hotbar[i] && this.hotbar[i].type === type) {
+                        this.hotbar[i].count += count;
+                        UI.updateHUD();
+                        return true;
+                    }
+                }
+                for (let i = 0; i < 9; i++) {
+                    if (!this.hotbar[i]) {
+                        this.hotbar[i] = { type, count };
+                        UI.updateHUD();
+                        return true;
+                    }
+                }
+                for (let i = 0; i < 27; i++) {
+                    if (this.storage[i] && this.storage[i].type === type) {
+                        this.storage[i].count += count;
+                        UI.updateInventory();
+                        return true;
+                    }
+                }
+                for (let i = 0; i < 27; i++) {
+                    if (!this.storage[i]) {
+                        this.storage[i] = { type, count };
+                        UI.updateInventory();
+                        return true;
+                    }
+                }
+                return false;
+            },
+
+            removeItem(type, count = 1, location = null, index = null) {
+                if (location === 'hotbar' && index !== null && this.hotbar[index]) {
+                    this.hotbar[index].count -= count;
+                    if (this.hotbar[index].count <= 0) this.hotbar[index] = null;
+                    UI.updateHUD();
+                    return;
+                }
+                for (let i = 0; i < 9; i++) {
+                    if (this.hotbar[i] && this.hotbar[i].type === type) {
+                        this.hotbar[i].count -= count;
+                        if (this.hotbar[i].count <= 0) this.hotbar[i] = null;
+                        UI.updateHUD();
+                        return;
+                    }
+                }
+                for (let i = 0; i < 27; i++) {
+                    if (this.storage[i] && this.storage[i].type === type) {
+                        this.storage[i].count -= count;
+                        if (this.storage[i].count <= 0) this.storage[i] = null;
+                        UI.updateInventory();
+                        return;
+                    }
+                }
+            }
+        };
+
+        CRAFTING = {
+            craftInput: [null, null, null, null],
+            craftOutput: null,
+            tableInput: [null, null, null, null, null, null, null, null, null],
+            tableOutput: null,
+
+            init() {},
+
+            onCraftInputClick(idx) {
+                const current = this.craftInput[idx];
+                if (!INVENTORY.heldItem && current) {
+                    INVENTORY.setHeldItem({ ...current });
+                    this.craftInput[idx] = null;
+                } else if (INVENTORY.heldItem) {
+                    if (!current) {
+                        this.craftInput[idx] = { type: INVENTORY.heldItem.type, count: 1 };
+                        INVENTORY.heldItem.count--;
+                        if (INVENTORY.heldItem.count <= 0) INVENTORY.setHeldItem(null);
+                    } else if (current.type === INVENTORY.heldItem.type) {
+                        current.count++;
+                        INVENTORY.heldItem.count--;
+                        if (INVENTORY.heldItem.count <= 0) INVENTORY.setHeldItem(null);
+                    }
+                }
+                this.renderCraftSlots();
+                this.check2x2();
+            },
+
+            renderCraftSlots() {
+                for (let i = 0; i < 4; i++) {
+                    const el = document.getElementById(`craft-in-${i}`);
+                    if (!el) continue;
+                    const item = this.craftInput[i];
+                    el.innerHTML = item ? `<span class="text-xl">${UI.getItemIcon(item.type)}</span><span class="count">${item.count}</span>` : '';
+                }
+            },
+
+            check2x2() {
+                const slots = this.craftInput;
+                const logIdx = slots.findIndex(s => s && s.type === CONFIG.BLOCK_TYPES.OAK_LOG);
+                const sandIdx = slots.findIndex(s => s && s.type === CONFIG.BLOCK_TYPES.SAND);
+                const countItems = slots.filter(s => s !== null).length;
+
+                if (logIdx !== -1 && countItems === 1) {
+                    this.craftOutput = { type: CONFIG.BLOCK_TYPES.PLANKS, count: 4 };
+                } else if (sandIdx !== -1 && countItems === 1) {
+                    this.craftOutput = { type: CONFIG.BLOCK_TYPES.GLASS, count: 1 };
+                } else if (countItems === 4 && slots.every(s => s && s.type === CONFIG.BLOCK_TYPES.PLANKS)) {
+                    this.craftOutput = { type: CONFIG.BLOCK_TYPES.CRAFTING_TABLE, count: 1 };
+                } else if (countItems === 4 && slots.every(s => s && s.type === CONFIG.BLOCK_TYPES.COBBLESTONE)) {
+                    this.craftOutput = { type: CONFIG.BLOCK_TYPES.BRICK, count: 4 };
+                } else if (countItems === 2 && ((slots[0]&&slots[2]&&slots[0].type===CONFIG.BLOCK_TYPES.PLANKS&&slots[2].type===CONFIG.BLOCK_TYPES.PLANKS) || (slots[1]&&slots[3]&&slots[1].type===CONFIG.BLOCK_TYPES.PLANKS&&slots[3].type===CONFIG.BLOCK_TYPES.PLANKS))) {
+                    this.craftOutput = { type: 'stick', count: 4 };
+                } else {
+                    this.craftOutput = null;
+                }
+                this.render2x2Output();
+            },
+
+            render2x2Output() {
+                const outEl = document.getElementById('craft-out');
+                if (outEl) {
+                    outEl.innerHTML = this.craftOutput ? `<span class="text-xl">${UI.getItemIcon(this.craftOutput.type)}</span><span class="count">${this.craftOutput.count}</span>` : '';
+                }
+            },
+
+            onCraftOutputClick() {
+                if (!this.craftOutput) return;
+
+                if (!INVENTORY.heldItem) {
+                    INVENTORY.setHeldItem({ ...this.craftOutput });
+                } else if (INVENTORY.heldItem.type === this.craftOutput.type) {
+                    INVENTORY.heldItem.count += this.craftOutput.count;
+                    UI.updateFloatingItem();
+                } else {
+                    return;
+                }
+
+                SCORE.add(CONFIG.SCORES.craftItem);
+                AUDIO.playDig();
+
+                for (let i = 0; i < 4; i++) {
+                    if (this.craftInput[i]) {
+                        this.craftInput[i].count--;
+                        if (this.craftInput[i].count <= 0) this.craftInput[i] = null;
+                    }
+                }
+                this.renderCraftSlots();
+                this.check2x2();
+                UI.notify('🛠️ 아이템 제작 완료!');
+            },
+
+            onTableInputClick(idx) {
+                const current = this.tableInput[idx];
+                if (!INVENTORY.heldItem && current) {
+                    INVENTORY.setHeldItem({ ...current });
+                    this.tableInput[idx] = null;
+                } else if (INVENTORY.heldItem) {
+                    if (!current) {
+                        this.tableInput[idx] = { type: INVENTORY.heldItem.type, count: 1 };
+                        INVENTORY.heldItem.count--;
+                        if (INVENTORY.heldItem.count <= 0) INVENTORY.setHeldItem(null);
+                    } else if (current.type === INVENTORY.heldItem.type) {
+                        current.count++;
+                        INVENTORY.heldItem.count--;
+                        if (INVENTORY.heldItem.count <= 0) INVENTORY.setHeldItem(null);
+                    }
+                }
+                this.renderTableSlots();
+                this.check3x3();
+            },
+
+            renderTableSlots() {
+                for (let i = 0; i < 9; i++) {
+                    const el = document.getElementById(`ct-in-${i}`);
+                    if (!el) continue;
+                    const item = this.tableInput[i];
+                    el.innerHTML = item ? `<span class="text-xl">${UI.getItemIcon(item.type)}</span><span class="count">${item.count}</span>` : '';
+                }
+            },
+
+            check3x3() {
+                const s = this.tableInput;
+                const count = s.filter(x => x !== null).length;
+                const isType = (idx, type) => s[idx] && s[idx].type === type;
+                const isStick = (idx) => s[idx] && s[idx].type === 'stick';
+
+                const tiers = [
+                    { mat: CONFIG.BLOCK_TYPES.PLANKS, pick: 'wood_pickaxe', axe: 'wood_axe', shovel: 'wood_shovel', sword: 'wood_sword' },
+                    { mat: CONFIG.BLOCK_TYPES.COBBLESTONE, pick: 'stone_pickaxe', axe: 'stone_axe', shovel: 'stone_shovel', sword: 'stone_sword' },
+                    { mat: CONFIG.BLOCK_TYPES.IRON_ORE, pick: 'iron_pickaxe', axe: 'iron_axe', shovel: 'iron_shovel', sword: 'iron_sword' }
+                ];
+
+                this.tableOutput = null;
+
+                for (const tier of tiers) {
+                    // 곡괭이: 윗줄 3개 + 중앙 세로 막대 2개
+                    if (count === 5 && isType(0, tier.mat) && isType(1, tier.mat) && isType(2, tier.mat) && isStick(4) && isStick(7)) {
+                        this.tableOutput = { type: tier.pick, count: 1 };
+                        break;
+                    }
+                    // 도끼: 좌상단 L자 3개 + 중앙 세로 막대 2개
+                    if (count === 5 && isType(0, tier.mat) && isType(1, tier.mat) && isType(3, tier.mat) && isStick(4) && isStick(7)) {
+                        this.tableOutput = { type: tier.axe, count: 1 };
+                        break;
+                    }
+                    // 삽: 재료 1개 + 중앙 세로 막대 2개
+                    if (count === 3 && isType(1, tier.mat) && isStick(4) && isStick(7)) {
+                        this.tableOutput = { type: tier.shovel, count: 1 };
+                        break;
+                    }
+                    // 검: 재료 2개(세로) + 막대 1개
+                    if (count === 3 && isType(1, tier.mat) && isType(4, tier.mat) && isStick(7)) {
+                        this.tableOutput = { type: tier.sword, count: 1 };
+                        break;
+                    }
+                }
+
+                if (!this.tableOutput) {
+                    if (count === 2 && isType(1, CONFIG.BLOCK_TYPES.COAL_ORE) && isStick(4)) {
+                        // 횃불: 석탄 1개 + 막대 1개
+                        this.tableOutput = { type: CONFIG.BLOCK_TYPES.TORCH, count: 4 };
+                    } else if (count === 6 && isStick(0) && isStick(2) && isStick(3) && isStick(5) && isStick(6) && isStick(8)) {
+                        // 사다리: 좌우 기둥 + 가로대 형태로 막대 6개 (중앙 열 비움)
+                        this.tableOutput = { type: CONFIG.BLOCK_TYPES.LADDER, count: 3 };
+                    } else if (count === 8 && [0,1,2,3,5,6,7,8].every(i => isType(i, CONFIG.BLOCK_TYPES.COBBLESTONE))) {
+                        // 화로: 중앙을 비우고 조약돌 8개로 테두리를 채움
+                        this.tableOutput = { type: CONFIG.BLOCK_TYPES.FURNACE, count: 1 };
+                    } else if (count === 1 && s.some(x => x && x.type === CONFIG.BLOCK_TYPES.OAK_LOG)) {
+                        this.tableOutput = { type: CONFIG.BLOCK_TYPES.PLANKS, count: 4 };
+                    }
+                }
+
+                const outEl = document.getElementById('ct-out');
+                if (outEl) {
+                    outEl.innerHTML = this.tableOutput ? `<span class="text-2xl">${UI.getItemIcon(this.tableOutput.type)}</span><span class="count">${this.tableOutput.count}</span>` : '';
+                }
+            },
+
+            onTableOutputClick() {
+                if (!this.tableOutput) return;
+
+                if (!INVENTORY.heldItem) {
+                    INVENTORY.setHeldItem({ ...this.tableOutput });
+                } else if (INVENTORY.heldItem.type === this.tableOutput.type) {
+                    INVENTORY.heldItem.count += this.tableOutput.count;
+                    UI.updateFloatingItem();
+                } else {
+                    return;
+                }
+
+                SCORE.add(CONFIG.SCORES.craftItem);
+                AUDIO.playDig();
+
+                for (let i = 0; i < 9; i++) {
+                    if (this.tableInput[i]) {
+                        this.tableInput[i].count--;
+                        if (this.tableInput[i].count <= 0) this.tableInput[i] = null;
+                    }
+                }
+                this.renderTableSlots();
+                this.check3x3();
+                UI.notify('🛠️ 도구 제작 완료!');
+            }
+        };
+
+        ENEMIES = {
+            mobs: [],
+            scene: null,
+            spawnTimer: 0,
+
+            init(scene) {
+                this.scene = scene;
+                // Spawn initial cute animals & mobs
+                this.spawnMob('돼지', 8, -6);
+                this.spawnMob('돼지', -8, 6);
+                this.spawnMob('돼지', 4, 10);
+            },
+
+            spawnMob(type, x, z) {
+                const group = new THREE.Group();
+                const animParts = { legs: [], arms: [], ears: [], tail: null };
+
+                if (type === '돼지') {
+                    // Cute Pink Pig with Eyes, Snout, Ears, Curly Tail & 4 Legs
+                    const pinkMat = new THREE.MeshLambertMaterial({ color: 0xffb6c1 });
+                    const darkPinkMat = new THREE.MeshLambertMaterial({ color: 0xf48fb1 });
+                    const eyeWhiteMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+                    const eyePupilMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+
+                    // Body
+                    const body = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.7, 1.2), pinkMat);
+                    body.position.y = 0.5;
+                    group.add(body);
+
+                    // Head
+                    const head = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.65, 0.65), pinkMat);
+                    head.position.set(0, 0.75, 0.6);
+                    group.add(head);
+
+                    // Snout (Cute Nose)
+                    const snout = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.15), darkPinkMat);
+                    snout.position.set(0, 0.7, 0.95);
+                    group.add(snout);
+
+                    // Eyes (White + Pupil)
+                    [-0.2, 0.2].forEach(ex => {
+                        const eyeW = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.05), eyeWhiteMat);
+                        eyeW.position.set(ex, 0.82, 0.93);
+                        group.add(eyeW);
+
+                        const eyeP = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), eyePupilMat);
+                        eyeP.position.set(ex + (ex > 0 ? -0.02 : 0.02), 0.82, 0.95);
+                        group.add(eyeP);
+                    });
+
+                    // Flappy Ears
+                    [-0.32, 0.32].forEach(earX => {
+                        const ear = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.2, 0.15), darkPinkMat);
+                        ear.position.set(earX, 1.0, 0.6);
+                        ear.rotation.z = earX > 0 ? -0.3 : 0.3;
+                        group.add(ear);
+                        animParts.ears.push(ear);
+                    });
+
+                    // Curly Tail
+                    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.2, 0.08), darkPinkMat);
+                    tail.position.set(0, 0.65, -0.65);
+                    tail.rotation.x = 0.5;
+                    group.add(tail);
+                    animParts.tail = tail;
+
+                    // 4 Cute Legs
+                    [[-0.3, 0.4], [0.3, 0.4], [-0.3, -0.4], [0.3, -0.4]].forEach(([lx, lz]) => {
+                        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.4, 0.22), pinkMat);
+                        leg.position.set(lx, 0.2, lz);
+                        group.add(leg);
+                        animParts.legs.push(leg);
+                    });
+                } 
+                else if (type === '좀비') {
+                    // Cute Pixel Zombie
+                    const zombieSkin = new THREE.MeshLambertMaterial({ color: 0x4caf50 });
+                    const shirtMat = new THREE.MeshLambertMaterial({ color: 0x0284c7 });
+                    const eyeMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+
+                    // Head
+                    const head = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), zombieSkin);
+                    head.position.set(0, 1.4, 0);
+                    group.add(head);
+
+                    // Eyes
+                    [-0.15, 0.15].forEach(ex => {
+                        const eye = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.05), eyeMat);
+                        eye.position.set(ex, 1.45, 0.31);
+                        group.add(eye);
+                    });
+
+                    // Body
+                    const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.4), shirtMat);
+                    body.position.set(0, 0.7, 0);
+                    group.add(body);
+
+                    // Arms (Reaching forward)
+                    [-0.4, 0.4].forEach(ax => {
+                        const arm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.6, 0.18), zombieSkin);
+                        arm.position.set(ax, 0.8, 0.3);
+                        arm.rotation.x = -Math.PI / 2;
+                        group.add(arm);
+                        animParts.arms.push(arm);
+                    });
+
+                    // Legs
+                    [-0.18, 0.18].forEach(lx => {
+                        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.6, 0.2), zombieSkin);
+                        leg.position.set(lx, 0.3, 0);
+                        group.add(leg);
+                        animParts.legs.push(leg);
+                    });
+                }
+                else if (type === '크리퍼') {
+                    // Cute Sad Creeper
+                    const creeperMat = new THREE.MeshLambertMaterial({ color: 0x22c55e });
+                    const faceMat = new THREE.MeshLambertMaterial({ color: 0x000000 });
+
+                    const head = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), creeperMat);
+                    head.position.set(0, 1.2, 0);
+                    group.add(head);
+
+                    // Cute Creeper Sad Face
+                    [-0.14, 0.14].forEach(fx => {
+                        const eye = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.05), faceMat);
+                        eye.position.set(fx, 1.28, 0.31);
+                        group.add(eye);
+                    });
+                    const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.22, 0.05), faceMat);
+                    mouth.position.set(0, 1.12, 0.31);
+                    group.add(mouth);
+
+                    const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.35), creeperMat);
+                    body.position.set(0, 0.55, 0);
+                    group.add(body);
+
+                    // 4 Feet
+                    [[-0.18, 0.15], [0.18, 0.15], [-0.18, -0.15], [0.18, -0.15]].forEach(([lx, lz]) => {
+                        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.3, 0.18), creeperMat);
+                        leg.position.set(lx, 0.15, lz);
+                        group.add(leg);
+                        animParts.legs.push(leg);
+                    });
+                }
+                else {
+                    // Skeleton or Spider fallback (Cute styling)
+                    const mat = new THREE.MeshLambertMaterial({ color: type === '거미' ? 0x374151 : 0xe5e7eb });
+                    const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.5), mat);
+                    body.position.y = 0.5;
+                    group.add(body);
+
+                    const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), mat);
+                    head.position.y = 1.1;
+                    group.add(head);
+
+                    // Cute Eyes
+                    const eyeMat = new THREE.MeshLambertMaterial({ color: 0xef4444 });
+                    [-0.12, 0.12].forEach(ex => {
+                        const eye = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.05), eyeMat);
+                        eye.position.set(ex, 1.15, 0.26);
+                        group.add(eye);
+                    });
+                }
+
+                group.position.set(x, 6, z);
+                this.scene.add(group);
+
+                this.mobs.push({
+                    type,
+                    mesh: group,
+                    animParts,
+                    hp: type === '크리퍼' ? 15 : (type === '돼지' ? 10 : 20),
+                    fuse: 0,
+                    isHostile: type !== '돼지',
+                    walkPhase: Math.random() * 10
+                });
+            },
+
+            checkAttack(raycaster) {
+                for (let i = this.mobs.length - 1; i >= 0; i--) {
+                    const mob = this.mobs[i];
+                    const intersects = raycaster.intersectObjects(mob.mesh.children);
+                    if (intersects.length > 0) {
+                        const slot = INVENTORY.hotbar[PLAYER.selectedSlot];
+                        let weaponMult = 1.0;
+                        if (slot) {
+                            if (slot.type === 'wood_sword') weaponMult = 2.0;
+                            if (slot.type === 'stone_sword') weaponMult = 3.2;
+                            if (slot.type === 'iron_sword') weaponMult = 5.0;
+                        }
+
+                        const dmg = (ABILITY.activeEffects.dmgBoost || 1) * 8 * weaponMult;
+                        mob.hp -= dmg;
+                        AUDIO.playHit();
+                        UI.notify(`⚔️ ${mob.type} 공격! (-${dmg.toFixed(1)} HP)`);
+
+                        if (mob.hp <= 0) {
+                            SCORE.add(CONFIG.SCORES.killMob);
+                            WORLD.spawnDroppedItem(mob.mesh.position.x, mob.mesh.position.y + 0.5, mob.mesh.position.z, 'meat', 2);
+                            this.scene.remove(mob.mesh);
+                            this.mobs.splice(i, 1);
+                        }
+                        return true;
+                    }
+                }
+                return false;
+            },
+
+            update(dt) {
+                const isNight = GAME.isNightTime();
+
+                if (isNight) {
+                    this.spawnTimer += dt;
+                    if (this.spawnTimer > 8.0 && this.mobs.length < 12) {
+                        this.spawnTimer = 0;
+                        const types = ['좀비', '크리퍼', '스켈레톤', '거미'];
+                        const type = types[Math.floor(Math.random() * types.length)];
+                        const rx = PLAYER.position.x + (Math.random() - 0.5) * 36;
+                        const rz = PLAYER.position.z + (Math.random() - 0.5) * 36;
+                        this.spawnMob(type, rx, rz);
+                        UI.notify(`⚠️ 밤이 깊어 어둠 속에서 ${type}가 나타났습니다!`);
+                    }
+                }
+
+                for (let i = this.mobs.length - 1; i >= 0; i--) {
+                    const mob = this.mobs[i];
+
+                    // Cute Walking Leg Animations
+                    mob.walkPhase += dt * 6;
+                    const legSwing = Math.sin(mob.walkPhase) * 0.4;
+
+                    if (mob.animParts && mob.animParts.legs) {
+                        mob.animParts.legs.forEach((leg, idx) => {
+                            leg.rotation.x = (idx % 2 === 0 ? 1 : -1) * legSwing;
+                        });
+                    }
+                    if (mob.animParts && mob.animParts.tail) {
+                        mob.animParts.tail.rotation.y = Math.sin(mob.walkPhase * 2) * 0.3;
+                    }
+
+                    if (!isNight && mob.isHostile) {
+                        mob.hp -= dt * 4;
+                        mob.mesh.position.y += Math.sin(Date.now() * 0.01) * 0.01;
+                        if (mob.hp <= 0) {
+                            UI.notify(`🔥 ${mob.type}가 햇빛에 불타 소멸했습니다!`);
+                            SCORE.add(CONFIG.SCORES.killMob);
+                            WORLD.spawnDroppedItem(mob.mesh.position.x, mob.mesh.position.y + 0.5, mob.mesh.position.z, 'meat', 1);
+                            this.scene.remove(mob.mesh);
+                            this.mobs.splice(i, 1);
+                            continue;
+                        }
+                    }
+
+                    if (mob.isHostile) {
+                        const dist = mob.mesh.position.distanceTo(PLAYER.position);
+                        if (dist < 14.0) {
+                            mob.mesh.lookAt(PLAYER.position.x, mob.mesh.position.y, PLAYER.position.z);
+                            mob.mesh.translateZ(2.2 * dt);
+
+                            if (dist < 1.4 && !ABILITY.activeEffects.invulnerable) {
+                                PLAYER.hp -= dt * 4;
+                                UI.updateHUD();
+                                if (PLAYER.hp <= 0) GAME.gameOver();
+                            }
+
+                            if (mob.type === '크리퍼' && dist < 2.5) {
+                                mob.fuse += dt;
+                                if (mob.fuse > 1.5) {
+                                    AUDIO.playExplode();
+                                    if (!ABILITY.activeEffects.invulnerable) PLAYER.hp -= 12;
+                                    UI.notify('💥 크리퍼가 폭발했습니다!');
+                                    UI.updateHUD();
+                                    this.scene.remove(mob.mesh);
+                                    this.mobs.splice(i, 1);
+                                    if (PLAYER.hp <= 0) GAME.gameOver();
+                                }
+                            }
+                        }
+                    } else {
+                        // Passive Cute Animals (Wander around)
+                        if (Math.random() < 0.02) {
+                            mob.mesh.rotation.y += (Math.random() - 0.5) * 1.5;
+                        }
+                        mob.mesh.translateZ(0.5 * dt);
+                    }
+                }
+            }
+        };
+
+        ABILITY = {
+            activeEffects: {},
+
+            trigger(ability) {
+                if (SCORE.current < ability.scoreReq) {
+                    UI.notify(`🔒 ${ability.name} 해금 필요 (${ability.scoreReq}점)`);
+                    return;
+                }
+                UI.notify(`⚡ ${ability.name} 능력 발동!`);
+                AUDIO.playHit();
+
+                if (ability.speedBoost) this.activeEffects.speedBoost = ability.speedBoost;
+                if (ability.jumpBoost) this.activeEffects.jumpBoost = ability.jumpBoost;
+                if (ability.dmgBoost) this.activeEffects.dmgBoost = ability.dmgBoost;
+
+                setTimeout(() => {
+                    this.activeEffects = {};
+                    UI.notify(`⏳ ${ability.name} 능력 종료`);
+                }, ability.duration);
+            }
+        };
+
+        SCORE = {
+            current: 0,
+            add(pts) {
+                this.current += pts;
+                UI.updateHUD();
+            }
+        };
+
+        EFFECTS = {
+            init() {}
+        };
+
+        UI = {
+            isAnyModalOpen() {
+                return !document.getElementById('inventory-modal').classList.contains('hidden') ||
+                       !document.getElementById('crafting-table-modal').classList.contains('hidden') ||
+                       !document.getElementById('pause-modal').classList.contains('hidden') ||
+                       !document.getElementById('death-modal').classList.contains('hidden');
+            },
+
+            getItemName(type) {
+                if (type === 'meat') return '🥩 익힌 고기';
+                if (type === 'stick') return '🥢 막대기';
+                if (type === 'wood_pickaxe') return '⛏️ 나무 곡괭이';
+                if (type === 'stone_pickaxe') return '⛏️ 돌 곡괭이';
+                if (type === 'iron_pickaxe') return '⛏️ 철 곡괭이';
+                if (type === 'wood_axe') return '🪓 나무 도끼';
+                if (type === 'wood_shovel') return '🪵 나무 삽';
+                if (type === 'wood_sword') return '🗡️ 나무 검';
+                if (type === 'stone_sword') return '⚔️ 돌 검';
+                if (type === 'iron_sword') return '⚔️ 철 검';
+                const names = {
+                    1: '🟩 잔디', 2: '흙', 3: '돌', 5: '통나무',
+                    6: '나뭇잎', 7: '⬛ 석탄', 8: '🟧 철', 11: '나무 판자', 12: '조약돌', 14: '작업대'
+                };
+                return names[type] || '아이템';
+            },
+
+            getItemIcon(type) {
+                if (type === 'meat') return '🥩';
+                if (type === 'stick') return '🥢';
+                if (type === 'wood_pickaxe') return '⛏️';
+                if (type === 'stone_pickaxe') return '⛏️';
+                if (type === 'iron_pickaxe') return '⛏️';
+                if (type === 'wood_axe' || type === 'stone_axe' || type === 'iron_axe') return '🪓';
+                if (type === 'wood_shovel' || type === 'stone_shovel' || type === 'iron_shovel') return '🪵';
+                if (type === 'wood_sword') return '🗡️';
+                if (type === 'stone_sword') return '⚔️';
+                if (type === 'iron_sword') return '⚔️';
+                if (type === CONFIG.BLOCK_TYPES.GRASS) return '🟩';
+                if (type === CONFIG.BLOCK_TYPES.DIRT) return '🟫';
+                if (type === CONFIG.BLOCK_TYPES.OAK_LOG) return '🪵';
+                if (type === CONFIG.BLOCK_TYPES.PLANKS) return '📦';
+                if (type === CONFIG.BLOCK_TYPES.COBBLESTONE) return '🧱';
+                if (type === CONFIG.BLOCK_TYPES.CRAFTING_TABLE) return '🛠️';
+                if (type === CONFIG.BLOCK_TYPES.COAL_ORE) return '⬛';
+                if (type === CONFIG.BLOCK_TYPES.IRON_ORE) return '🟧';
+                if (type === CONFIG.BLOCK_TYPES.SAND) return '🟨';
+                if (type === CONFIG.BLOCK_TYPES.GLASS) return '🪟';
+                if (type === CONFIG.BLOCK_TYPES.BRICK) return '🟥';
+                if (type === CONFIG.BLOCK_TYPES.FURNACE) return '🔥';
+                if (type === CONFIG.BLOCK_TYPES.TORCH) return '🕯️';
+                if (type === CONFIG.BLOCK_TYPES.LADDER) return '🪜';
+                return '🧱';
+            },
+
+            updateFloatingItem() {
+                const el = document.getElementById('floating-item');
+                if (!el) return;
+                if (INVENTORY.heldItem) {
+                    el.classList.remove('hidden');
+                    el.innerHTML = `<span>${this.getItemIcon(INVENTORY.heldItem.type)}</span><span class="text-xs font-bold text-white relative -bottom-2 -right-1 drop-shadow-md">${INVENTORY.heldItem.count}</span>`;
+                } else {
+                    el.classList.add('hidden');
+                    el.innerHTML = '';
+                }
+            },
+
+            showMiningBar(progressPct) {
+                const bar = document.getElementById('mining-progress-bar');
+                const container = document.getElementById('mining-progress-container');
+                if (container && bar) {
+                    container.style.display = 'block';
+                    bar.style.width = `${progressPct}%`;
+                }
+            },
+
+            hideMiningBar() {
+                const container = document.getElementById('mining-progress-container');
+                if (container) container.style.display = 'none';
+            },
+
+            updateHUD() {
+                document.getElementById('score-display').innerText = `점수: ${SCORE.current}`;
+
+                const timeEl = document.getElementById('time-display');
+                if (timeEl && GAME) {
+                    const isNight = GAME.isNightTime();
+                    const hours = Math.floor(GAME.dayTime * 24);
+                    const formattedHour = hours < 10 ? '0' + hours : hours;
+                    timeEl.innerText = isNight ? `🌙 시간: 밤 (${formattedHour}:00)` : `☀️ 시간: 낮 (${formattedHour}:00)`;
+                    timeEl.className = isNight ? 'text-indigo-900 font-extrabold' : 'text-blue-800 font-extrabold';
+                }
+
+                let heartsHtml = '';
+                for (let i = 0; i < 10; i++) {
+                    heartsHtml += (i < PLAYER.hp / 2) ? '❤️' : '🖤';
+                }
+                document.getElementById('hearts-container').innerHTML = heartsHtml;
+
+                let hungerHtml = '';
+                for (let i = 0; i < 10; i++) {
+                    hungerHtml += (i < PLAYER.hunger / 2) ? '🍗' : '🦴';
+                }
+                document.getElementById('hunger-container').innerHTML = hungerHtml;
+
+                this.updateHotbar();
+            },
+
+            updateHotbar() {
+                const container = document.getElementById('hotbar');
+                container.innerHTML = '';
+                for (let i = 0; i < 9; i++) {
+                    const slot = INVENTORY.hotbar[i];
+                    const div = document.createElement('div');
+                    div.className = `mc-slot ${PLAYER.selectedSlot === i ? 'active' : ''}`;
+                    div.innerHTML = slot ? `<span class="text-xl">${this.getItemIcon(slot.type)}</span><span class="count">${slot.count}</span>` : '';
+                    container.appendChild(div);
+                }
+            },
+
+            notify(msg) {
+                const container = document.getElementById('toast-container');
+                const div = document.createElement('div');
+                div.className = 'mc-container px-4 py-2 text-black text-xl font-bold rounded shadow';
+                div.innerText = msg;
+                container.appendChild(div);
+                setTimeout(() => div.remove(), 2500);
+            },
+
+            renderRecipeList(targetElemId) {
+                const container = document.getElementById(targetElemId);
+                if (!container) return;
+                container.innerHTML = '';
+
+                CONFIG.RECIPES.forEach(rec => {
+                    const card = document.createElement('div');
+                    card.className = 'bg-gray-200 border border-gray-500 rounded p-2 flex flex-col gap-0.5 shadow-sm text-black';
+                    card.innerHTML = `
+                        <div class="flex items-center gap-2 font-bold text-lg border-b border-gray-400 pb-0.5">
+                            <span class="text-2xl">${rec.icon}</span>
+                            <span class="text-amber-900">${rec.name}</span>
+                            <span class="text-xs ml-auto bg-gray-400 px-1 rounded text-white font-semibold">${rec.gridType}</span>
+                        </div>
+                        <div class="text-sm font-bold text-gray-800">📌 형태: ${rec.desc}</div>
+                        <div class="text-xs text-gray-600">💡 배합: ${rec.materials}</div>
+                    `;
+                    container.appendChild(card);
+                });
+            },
+
+            toggleInventory() {
+                const modal = document.getElementById('inventory-modal');
+                modal.classList.toggle('hidden');
+                if (!modal.classList.contains('hidden')) {
+                    this.updateInventory();
+                    this.renderRecipeList('inv-recipe-list');
+                    document.exitPointerLock();
+                } else {
+                    GAME.requestLock();
+                }
+            },
+
+            updateInventory() {
+                const grid = document.getElementById('inv-grid');
+                grid.innerHTML = '';
+                for (let i = 0; i < 27; i++) {
+                    const item = INVENTORY.storage[i];
+                    const div = document.createElement('div');
+                    div.className = 'mc-slot';
+                    div.onclick = () => INVENTORY.onSlotClick('storage', i);
+                    div.innerHTML = item ? `<span class="text-xl">${this.getItemIcon(item.type)}</span><span class="count">${item.count}</span>` : '';
+                    grid.appendChild(div);
+                }
+
+                const hotbarGrid = document.getElementById('inv-hotbar');
+                hotbarGrid.innerHTML = '';
+                for (let i = 0; i < 9; i++) {
+                    const item = INVENTORY.hotbar[i];
+                    const div = document.createElement('div');
+                    div.className = 'mc-slot';
+                    div.onclick = () => INVENTORY.onSlotClick('hotbar', i);
+                    div.innerHTML = item ? `<span class="text-xl">${this.getItemIcon(item.type)}</span><span class="count">${item.count}</span>` : '';
+                    hotbarGrid.appendChild(div);
+                }
+
+                const ctGrid = document.getElementById('ct-inv-grid');
+                if (ctGrid) {
+                    ctGrid.innerHTML = '';
+                    for (let i = 0; i < 27; i++) {
+                        const item = INVENTORY.storage[i];
+                        const div = document.createElement('div');
+                        div.className = 'mc-slot';
+                        div.onclick = () => { INVENTORY.onSlotClick('storage', i); UI.updateInventory(); };
+                        div.innerHTML = item ? `<span class="text-xl">${this.getItemIcon(item.type)}</span><span class="count">${item.count}</span>` : '';
+                        ctGrid.appendChild(div);
+                    }
+                }
+            },
+
+            openCraftingTable() {
+                document.getElementById('crafting-table-modal').classList.remove('hidden');
+                this.updateInventory();
+                this.renderRecipeList('ct-recipe-list');
+                document.exitPointerLock();
+            },
+
+            closeCraftingTable() {
+                document.getElementById('crafting-table-modal').classList.add('hidden');
+                GAME.requestLock();
+            },
+
+            closeInventory() {
+                document.getElementById('inventory-modal').classList.add('hidden');
+                GAME.requestLock();
+            }
+        };
+
+        GAME = {
+            scene: null,
+            camera: null,
+            renderer: null,
+            sunLight: null,
+            ambientLight: null,
+            isPointerLocked: false,
+            isPaused: false,
+            dayTime: 0.2,
+
+            init() {
+                AUDIO.init();
+                TEXTURES.init();
+
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x78a7ff);
+                this.scene.fog = new THREE.FogExp2(0x78a7ff, 0.015);
+
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+                this.renderer = new THREE.WebGLRenderer({ antialias: false });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                document.getElementById('canvas-container').appendChild(this.renderer.domElement);
+
+                this.ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+                this.scene.add(this.ambientLight);
+                this.sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                this.sunLight.position.set(50, 100, 50);
+                this.scene.add(this.sunLight);
+
+                document.addEventListener('pointerlockchange', () => {
+                    this.isPointerLocked = (document.pointerLockElement === document.body);
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    if (UI.isAnyModalOpen()) {
+                        const floatEl = document.getElementById('floating-item');
+                        if (floatEl && INVENTORY.heldItem) {
+                            floatEl.style.left = e.clientX + 'px';
+                            floatEl.style.top = e.clientY + 'px';
+                        }
+                        return;
+                    }
+
+                    if (!this.isPointerLocked) return;
+                    PLAYER.camera.rotation.y -= e.movementX * 0.002;
+                    PLAYER.camera.rotation.x -= e.movementY * 0.002;
+                    PLAYER.camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, PLAYER.camera.rotation.x));
+                });
+
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+
+                WORLD.init(this.scene);
+                PLAYER.init(this.camera);
+                this.scene.add(PLAYER.camera);
+                CRAFTING.init();
+                ENEMIES.init(this.scene);
+                UI.updateHUD();
+
+                this.animate();
+            },
+
+            isNightTime() {
+                return this.dayTime > 0.55 && this.dayTime < 0.95;
+            },
+
+            updateDayNightCycle(dt) {
+                this.dayTime = (this.dayTime + CONFIG.DAY_NIGHT_SPEED) % 1.0;
+
+                const angle = this.dayTime * Math.PI * 2;
+                this.sunLight.position.x = Math.cos(angle) * 120;
+                this.sunLight.position.y = Math.sin(angle) * 120;
+
+                const isNight = this.isNightTime();
+                const dayColor = new THREE.Color(0x78a7ff);
+                const nightColor = new THREE.Color(0x0a0e1a);
+                const sunsetColor = new THREE.Color(0xf97316);
+
+                let targetSky = dayColor;
+                if (this.dayTime > 0.48 && this.dayTime <= 0.55) targetSky = sunsetColor;
+                else if (isNight) targetSky = nightColor;
+                else if (this.dayTime >= 0.95 || this.dayTime <= 0.05) targetSky = sunsetColor;
+
+                this.scene.background.lerp(targetSky, 0.05);
+                this.scene.fog.color.lerp(targetSky, 0.05);
+
+                this.ambientLight.intensity = isNight ? 0.2 : 0.7;
+                this.sunLight.intensity = isNight ? 0.1 : 0.8;
+
+                UI.updateHUD();
+            },
+
+            gameOver() {
+                if (PLAYER.isDead) return;
+                PLAYER.isDead = true;
+                document.getElementById('death-score').innerText = `최종 점수: ${SCORE.current} 점`;
+                document.getElementById('death-modal').classList.remove('hidden');
+                document.exitPointerLock();
+            },
+
+            requestLock() {
+                if (UI.isAnyModalOpen()) return;
+                try { document.body.requestPointerLock(); } catch(e){}
+            },
+
+            togglePause() {
+                this.isPaused = !this.isPaused;
+                const modal = document.getElementById('pause-modal');
+                if (this.isPaused) {
+                    modal.classList.remove('hidden');
+                    document.exitPointerLock();
+                } else {
+                    modal.classList.add('hidden');
+                    this.requestLock();
+                }
+            },
+
+            resume() {
+                this.isPaused = false;
+                document.getElementById('pause-modal').classList.add('hidden');
+                this.requestLock();
+            },
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+
+                const dt = 0.016;
+                this.updateDayNightCycle(dt);
+                PLAYER.update(dt);
+                WORLD.updateDroppedItems();
+                ENEMIES.update(dt);
+
+                this.renderer.render(this.scene, this.camera);
+            }
+        };
+
+        window.onload = () => GAME.init();
+    </script>
+</body>
+</html>

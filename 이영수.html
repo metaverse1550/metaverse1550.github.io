@@ -1,0 +1,1315 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Cosmic Vanguard - 우주 생존 아케이드</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: #050510;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            max-width: 540px;
+            max-height: 960px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 0 30px rgba(0, 200, 255, 0.2);
+            border-radius: 12px;
+            overflow: hidden;
+            background: #000;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            background: #03030a;
+        }
+
+        /* 터치용 가상 패드 (모바일 환경 대비) */
+        .touch-controls {
+            display: none;
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            right: 0;
+            padding: 0 20px;
+            justify-content: space-between;
+            align-items: flex-end;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        @media (pointer: coarse) {
+            .touch-controls {
+                display: flex;
+            }
+        }
+
+        .d-pad {
+            display: grid;
+            grid-template-columns: repeat(3, 50px);
+            grid-template-rows: repeat(3, 50px);
+            gap: 5px;
+            pointer-events: auto;
+        }
+
+        .touch-btn {
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            touch-action: manipulation;
+            backdrop-filter: blur(4px);
+        }
+
+        .touch-btn:active {
+            background: rgba(0, 229, 255, 0.4);
+        }
+
+        .btn-fire {
+            width: 75px;
+            height: 75px;
+            background: rgba(255, 60, 100, 0.3);
+            border: 2px solid rgba(255, 100, 150, 0.6);
+            border-radius: 50%;
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            pointer-events: auto;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            touch-action: manipulation;
+            backdrop-filter: blur(4px);
+        }
+
+        .btn-fire:active {
+            background: rgba(255, 60, 100, 0.7);
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <!-- 게임 캔버스 -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- 모바일/터치용 가상 버튼 -->
+    <div class="touch-controls" id="touchControls">
+        <div class="d-pad">
+            <div></div>
+            <div class="touch-btn" id="btn-up">▲</div>
+            <div></div>
+            <div class="touch-btn" id="btn-left">◀</div>
+            <div></div>
+            <div class="touch-btn" id="btn-right">▶</div>
+            <div></div>
+            <div class="touch-btn" id="btn-down">▼</div>
+            <div></div>
+        </div>
+        <button class="btn-fire" id="btn-shoot">FIRE</button>
+    </div>
+</div>
+
+<script>
+// ==========================================
+// 1. CONFIG: 게임 설정값 통합 관리 (이지 모드 밸런스 조정)
+// ==========================================
+const CONFIG = {
+    CANVAS_WIDTH: 480,
+    CANVAS_HEIGHT: 720,
+
+    PLAYER: {
+        WIDTH: 44,
+        HEIGHT: 50,
+        BASE_SPEED: 5.5,
+        SPEED_UP_INCREMENT: 0.7,
+        MAX_SPEED_LEVEL: 6,
+        MAX_HP: 150,               // 기본 체력 상향 (100 -> 150)
+        HIT_FLASH_DURATION: 35,   // 피격 후 무적 시간 연장 (15 -> 35 프레임)
+        SHOOT_COOLDOWN: 6,        // 총알 연사 속도 대폭 향상 (10 -> 6 프레임)
+    },
+
+    BULLET: {
+        WIDTH: 8,                  // 탄환 크기 확대
+        HEIGHT: 20,
+        SPEED: 14,
+        DAMAGE: 35,                // 탄환 데미지 상향 (25 -> 35)
+        COLOR: '#00ffff'
+    },
+
+    METEOR: {
+        TYPES: {
+            LARGE:  { radius: 36, hp: 35, speedMin: 1.0, speedMax: 2.0, score: 150, color: '#a3846e' }, // 운석 체력 & 속도 완화
+            MEDIUM: { radius: 24, hp: 20, speedMin: 1.5, speedMax: 2.8, score: 90,  color: '#8c705c' },
+            SMALL:  { radius: 14, hp: 10, speedMin: 2.2, speedMax: 3.8, score: 50,  color: '#6e5645' }
+        },
+        SPAWN_INTERVAL_INITIAL: 95, // 운석 초기 생성 간격 여유있게 조정
+        SPAWN_INTERVAL_MIN: 35,     // 최단 생성 간격 제한 완화
+        DIFFICULTY_RAMP_RATE: 0.0001 // 시간에 따른 난이도 상승 속도 완화 (0.0003 -> 0.0001)
+    },
+
+    ITEM: {
+        RADIUS: 16,
+        DROP_CHANCE: 0.35,          // 아이템 드랍 확률 상향 (18% -> 35%)
+        SPEED: 1.5,
+        HEAL_AMOUNT: 20,            // 아이템 획득 시 체력 회복량 (+20 HP)
+        DURATION_SURVIVAL_SPAWN: 450 // 자동 아이템 드랍 주기 단축
+    },
+
+    COMBO: {
+        TIMEOUT: 150,
+        BONUS_MULTIPLIER: 0.2
+    },
+
+    PARTICLE: {
+        EXPLOSION_COUNT: 16,
+        DEBRIS_COUNT: 8
+    }
+};
+
+// ==========================================
+// 2. AUDIO ENGINE (효과음 합성기)
+// ==========================================
+class SoundEngine {
+    constructor() {
+        this.ctx = null;
+        this.muted = false;
+    }
+
+    init() {
+        if (!this.ctx) {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (AudioContext) {
+                this.ctx = new AudioContext();
+            }
+        }
+    }
+
+    playShoot() {
+        if (!this.ctx) return;
+        try {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(150, this.ctx.currentTime + 0.1);
+            gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start();
+            osc.stop(this.ctx.currentTime + 0.1);
+        } catch (e) {}
+    }
+
+    playExplode(isLarge = false) {
+        if (!this.ctx) return;
+        try {
+            const dur = isLarge ? 0.35 : 0.2;
+            const bufferSize = this.ctx.sampleRate * dur;
+            const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = Math.random() * 2 - 1;
+            }
+
+            const noise = this.ctx.createBufferSource();
+            noise.buffer = buffer;
+
+            const filter = this.ctx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(isLarge ? 400 : 800, this.ctx.currentTime);
+            filter.frequency.linearRampToValueAtTime(50, this.ctx.currentTime + dur);
+
+            const gain = this.ctx.createGain();
+            gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + dur);
+
+            noise.connect(filter);
+            filter.connect(gain);
+            gain.connect(this.ctx.destination);
+
+            noise.start();
+        } catch (e) {}
+    }
+
+    playPowerUp() {
+        if (!this.ctx) return;
+        try {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(300, this.ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(900, this.ctx.currentTime + 0.2);
+            gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start();
+            osc.stop(this.ctx.currentTime + 0.2);
+        } catch (e) {}
+    }
+
+    playHit() {
+        if (!this.ctx) return;
+        try {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+            osc.frequency.linearRampToValueAtTime(40, this.ctx.currentTime + 0.15);
+            gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start();
+            osc.stop(this.ctx.currentTime + 0.15);
+        } catch (e) {}
+    }
+}
+
+const sound = new SoundEngine();
+
+// ==========================================
+// 3. INPUT: 키보드 및 터치 입력 상태 조율
+// ==========================================
+class InputHandler {
+    constructor() {
+        this.keys = {
+            ArrowUp: false,
+            ArrowDown: false,
+            ArrowLeft: false,
+            ArrowRight: false,
+            KeyZ: false,
+            KeyR: false
+        };
+
+        // 키보드 이벤트
+        window.addEventListener('keydown', (e) => {
+            sound.init(); // 사용자 상호작용 후 오디오 활성화
+            if (e.code === 'KeyZ' || e.code === 'KeyR' || e.code.startsWith('Arrow')) {
+                if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
+                    e.preventDefault();
+                }
+                this.keys[e.code] = true;
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (this.keys.hasOwnProperty(e.code)) {
+                this.keys[e.code] = false;
+            }
+        });
+
+        // 터치 버튼 매핑 설정
+        this.setupTouchButton('btn-up', 'ArrowUp');
+        this.setupTouchButton('btn-down', 'ArrowDown');
+        this.setupTouchButton('btn-left', 'ArrowLeft');
+        this.setupTouchButton('btn-right', 'ArrowRight');
+        this.setupTouchButton('btn-shoot', 'KeyZ');
+    }
+
+    setupTouchButton(elementId, keyName) {
+        const btn = document.getElementById(elementId);
+        if (!btn) return;
+
+        const press = (e) => {
+            e.preventDefault();
+            sound.init();
+            this.keys[keyName] = true;
+        };
+
+        const release = (e) => {
+            e.preventDefault();
+            this.keys[keyName] = false;
+        };
+
+        btn.addEventListener('touchstart', press, { passive: false });
+        btn.addEventListener('touchend', release, { passive: false });
+        btn.addEventListener('mousedown', press);
+        btn.addEventListener('mouseup', release);
+        btn.addEventListener('mouseleave', release);
+    }
+}
+
+// ==========================================
+// 4. BACKGROUND: 배경 별자리 & 우주 가스 입자
+// ==========================================
+class Background {
+    constructor(width, height) {
+        this.width = width;
+        this.height = height;
+        this.stars = [];
+        this.nebulas = [];
+
+        // 3단계 레이어 별 생성 (원경, 중경, 근경)
+        for (let i = 0; i < 90; i++) {
+            this.stars.push({
+                x: Math.random() * this.width,
+                y: Math.random() * this.height,
+                size: Math.random() * 2 + 0.5,
+                speed: Math.random() * 1.5 + 0.5,
+                alpha: Math.random() * 0.8 + 0.2
+            });
+        }
+
+        // 은하수/성운 은은한 효과 입자
+        for (let i = 0; i < 5; i++) {
+            this.nebulas.push({
+                x: Math.random() * this.width,
+                y: Math.random() * this.height,
+                radius: Math.random() * 80 + 60,
+                color: i % 2 === 0 ? 'rgba(75, 0, 130, 0.08)' : 'rgba(0, 100, 200, 0.06)',
+                speed: 0.3
+            });
+        }
+    }
+
+    update(speedMultiplier = 1) {
+        // 별 이동
+        this.stars.forEach(star => {
+            star.y += star.speed * speedMultiplier;
+            if (star.y > this.height) {
+                star.y = 0;
+                star.x = Math.random() * this.width;
+            }
+        });
+
+        // 성운 연출 이동
+        this.nebulas.forEach(nebula => {
+            nebula.y += nebula.speed * speedMultiplier;
+            if (nebula.y - nebula.radius > this.height) {
+                nebula.y = -nebula.radius;
+                nebula.x = Math.random() * this.width;
+            }
+        });
+    }
+
+    draw(ctx) {
+        // 성운 그리기
+        this.nebulas.forEach(n => {
+            const grad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.radius);
+            grad.addColorStop(0, n.color);
+            grad.addColorStop(1, 'transparent');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        // 별 그리기
+        ctx.fillStyle = '#ffffff';
+        this.stars.forEach(star => {
+            ctx.globalAlpha = star.alpha;
+            ctx.fillRect(star.x, star.y, star.size, star.size);
+        });
+        ctx.globalAlpha = 1.0;
+    }
+}
+
+// ==========================================
+// 5. PARTICLES: 폭발, 반짝임, 점수 텍스트 연출
+// ==========================================
+class ParticleSystem {
+    constructor() {
+        this.particles = [];
+        this.floatingTexts = [];
+    }
+
+    // 운석 파괴 및 엔진 파편 폭발
+    createExplosion(x, y, color, count = 15) {
+        for (let i = 0; i < count; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = Math.random() * 4 + 1;
+            this.particles.push({
+                x: x,
+                y: y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                size: Math.random() * 3.5 + 1.5,
+                color: color,
+                alpha: 1,
+                decay: Math.random() * 0.03 + 0.015,
+                shape: Math.random() > 0.5 ? 'circle' : 'square'
+            });
+        }
+    }
+
+    // 플레이어 엔진 화염 부스터 불꽃
+    createEngineFlame(x, y) {
+        this.particles.push({
+            x: x + (Math.random() * 10 - 5),
+            y: y,
+            vx: (Math.random() - 0.5) * 0.8,
+            vy: Math.random() * 3 + 2,
+            size: Math.random() * 3 + 2,
+            color: Math.random() > 0.3 ? '#ffaa00' : '#ff3300',
+            alpha: 0.9,
+            decay: 0.08,
+            shape: 'circle'
+        });
+    }
+
+    // Floating text (점수나 아이템 획득 표시)
+    addFloatingText(x, y, text, color = '#ffff00') {
+        this.floatingTexts.push({
+            x: x,
+            y: y,
+            text: text,
+            color: color,
+            alpha: 1.0,
+            vy: -1.2,
+            life: 45
+        });
+    }
+
+    update() {
+        // 일반 파티클 업데이트
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            const p = this.particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.alpha -= p.decay;
+            if (p.alpha <= 0) {
+                this.particles.splice(i, 1);
+            }
+        }
+
+        // 플로팅 텍스트 업데이트
+        for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
+            const ft = this.floatingTexts[i];
+            ft.y += ft.vy;
+            ft.life--;
+            ft.alpha = Math.max(0, ft.life / 45);
+            if (ft.life <= 0) {
+                this.floatingTexts.splice(i, 1);
+            }
+        }
+    }
+
+    draw(ctx) {
+        // 파티클 그리기
+        this.particles.forEach(p => {
+            ctx.save();
+            ctx.globalAlpha = Math.max(0, p.alpha);
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            if (p.shape === 'circle') {
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+            }
+            ctx.restore();
+        });
+
+        // 텍스트 그리기
+        this.floatingTexts.forEach(ft => {
+            ctx.save();
+            ctx.globalAlpha = ft.alpha;
+            ctx.fillStyle = ft.color;
+            ctx.font = 'bold 16px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.shadowColor = '#000000';
+            ctx.shadowBlur = 4;
+            ctx.fillText(ft.text, ft.x, ft.y);
+            ctx.restore();
+        });
+    }
+}
+
+// ==========================================
+// 6. PLAYER: 플레이어 전투기 클래스
+// ==========================================
+class Player {
+    constructor(canvasWidth, canvasHeight) {
+        this.canvasWidth = canvasWidth;
+        this.canvasHeight = canvasHeight;
+        this.width = CONFIG.PLAYER.WIDTH;
+        this.height = CONFIG.PLAYER.HEIGHT;
+        this.reset();
+    }
+
+    reset() {
+        this.x = this.canvasWidth / 2;
+        this.y = this.canvasHeight - 100;
+        this.hp = CONFIG.PLAYER.MAX_HP;
+        this.maxHp = CONFIG.PLAYER.MAX_HP;
+        this.speedLevel = 0;
+        this.hitFlashTimer = 0;
+        this.shootTimer = 0;
+    }
+
+    get currentSpeed() {
+        return CONFIG.PLAYER.BASE_SPEED + (this.speedLevel * CONFIG.PLAYER.SPEED_UP_INCREMENT);
+    }
+
+    upgradeSpeed() {
+        if (this.speedLevel < CONFIG.PLAYER.MAX_SPEED_LEVEL) {
+            this.speedLevel++;
+            return true;
+        }
+        return false;
+    }
+
+    takeDamage(amount) {
+        if (this.hitFlashTimer > 0) return false; // 무적 시간 피격 방지
+        this.hp = Math.max(0, this.hp - amount);
+        this.hitFlashTimer = CONFIG.PLAYER.HIT_FLASH_DURATION;
+        sound.playHit();
+        return true;
+    }
+
+    update(input, particleSystem) {
+        // 이동 처리
+        const speed = this.currentSpeed;
+        if (input.keys.ArrowLeft)  this.x -= speed;
+        if (input.keys.ArrowRight) this.x += speed;
+        if (input.keys.ArrowUp)    this.y -= speed;
+        if (input.keys.ArrowDown)  this.y += speed;
+
+        // 화면 경계 제한
+        const halfW = this.width / 2;
+        const halfH = this.height / 2;
+        this.x = Math.max(halfW, Math.min(this.canvasWidth - halfW, this.x));
+        this.y = Math.max(halfH, Math.min(this.canvasHeight - halfH, this.y));
+
+        // 피격 효과 타이머
+        if (this.hitFlashTimer > 0) {
+            this.hitFlashTimer--;
+        }
+
+        // 발사 타이머
+        if (this.shootTimer > 0) {
+            this.shootTimer--;
+        }
+
+        // 엔진 화염 입자 생성
+        particleSystem.createEngineFlame(this.x, this.y + halfH - 4);
+    }
+
+    canShoot(input) {
+        return input.keys.KeyZ && this.shootTimer === 0;
+    }
+
+    triggerShootCooldown() {
+        this.shootTimer = CONFIG.PLAYER.SHOOT_COOLDOWN;
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+
+        // 피격 시 반짝임 연출
+        if (this.hitFlashTimer > 0 && Math.floor(this.hitFlashTimer / 2) % 2 === 0) {
+            ctx.globalAlpha = 0.4;
+        }
+
+        // 전투기 실루엣 / 디자인 (Canvas Vector Drawing)
+        
+        // 1. 날개 그라데이션
+        const wingGrad = ctx.createLinearGradient(-this.width/2, 0, this.width/2, 0);
+        wingGrad.addColorStop(0, '#0088ff');
+        wingGrad.addColorStop(0.5, '#00d4ff');
+        wingGrad.addColorStop(1, '#0088ff');
+
+        ctx.fillStyle = wingGrad;
+        ctx.beginPath();
+        ctx.moveTo(0, -this.height / 2); // 노즈 (앞부분)
+        ctx.lineTo(this.width / 2, this.height / 2 - 5);
+        ctx.lineTo(this.width / 4, this.height / 2);
+        ctx.lineTo(0, this.height / 3);
+        ctx.lineTo(-this.width / 4, this.height / 2);
+        ctx.lineTo(-this.width / 2, this.height / 2 - 5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // 2. 주 몸체 (기체 중앙)
+        ctx.fillStyle = '#1e293b';
+        ctx.beginPath();
+        ctx.ellipse(0, 2, this.width / 5, this.height / 2.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 3. 조종석 캡슐 (Cockpit Glass)
+        const cockpitGrad = ctx.createLinearGradient(0, -15, 0, 5);
+        cockpitGrad.addColorStop(0, '#7dd3fc');
+        cockpitGrad.addColorStop(1, '#0284c7');
+        ctx.fillStyle = cockpitGrad;
+        ctx.beginPath();
+        ctx.ellipse(0, -6, 6, 12, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 4. 주익 빛나는 엔진 코어
+        ctx.fillStyle = '#00ffff';
+        ctx.beginPath();
+        ctx.arc(-this.width / 3, 10, 3, 0, Math.PI * 2);
+        ctx.arc(this.width / 3, 10, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+    }
+}
+
+// ==========================================
+// 7. BULLET & ITEMS: 탄환 및 속도 강화 아이템
+// ==========================================
+class Bullet {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.width = CONFIG.BULLET.WIDTH;
+        this.height = CONFIG.BULLET.HEIGHT;
+        this.speed = CONFIG.BULLET.SPEED;
+        this.damage = CONFIG.BULLET.DAMAGE;
+        this.toRemove = false;
+    }
+
+    update() {
+        this.y -= this.speed;
+        if (this.y + this.height < 0) {
+            this.toRemove = true;
+        }
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.shadowColor = CONFIG.BULLET.COLOR;
+        ctx.shadowBlur = 8;
+        
+        // 탄환 그라데이션 연출
+        const grad = ctx.createLinearGradient(this.x, this.y, this.x, this.y + this.height);
+        grad.addColorStop(0, '#ffffff');
+        grad.addColorStop(1, CONFIG.BULLET.COLOR);
+
+        ctx.fillStyle = grad;
+        ctx.fillRect(this.x - this.width / 2, this.y, this.width, this.height);
+        ctx.restore();
+    }
+}
+
+class SpeedItem {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.radius = CONFIG.ITEM.RADIUS;
+        this.speed = CONFIG.ITEM.SPEED;
+        this.toRemove = false;
+        this.pulseAngle = 0;
+    }
+
+    update() {
+        this.y += this.speed;
+        this.pulseAngle += 0.08;
+        if (this.y - this.radius > CONFIG.CANVAS_HEIGHT) {
+            this.toRemove = true;
+        }
+    }
+
+    draw(ctx) {
+        ctx.save();
+        const pulse = Math.sin(this.pulseAngle) * 3;
+
+        // 아이템 외곽 글로우
+        ctx.shadowColor = '#00ffcc';
+        ctx.shadowBlur = 12 + pulse;
+
+        // 구체 그라데이션
+        const grad = ctx.createRadialGradient(this.x, this.y, 2, this.x, this.y, this.radius + pulse);
+        grad.addColorStop(0, '#ffffff');
+        grad.addColorStop(0.5, '#00ffaa');
+        grad.addColorStop(1, '#008855');
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius + pulse / 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 번개/속도 아이콘 심볼 (S)
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('SPD', this.x, this.y);
+
+        ctx.restore();
+    }
+}
+
+// ==========================================
+// 8. METEOR: 운석 객체 (크기, 회전, 디테일 표면)
+// ==========================================
+class Meteor {
+    constructor(typeKey, canvasWidth) {
+        this.typeKey = typeKey;
+        const spec = CONFIG.METEOR.TYPES[typeKey];
+
+        this.radius = spec.radius;
+        this.hp = spec.hp;
+        this.maxHp = spec.hp;
+        this.score = spec.score;
+        this.color = spec.color;
+
+        this.x = Math.random() * (canvasWidth - this.radius * 2) + this.radius;
+        this.y = -this.radius * 2;
+        this.speed = Math.random() * (spec.speedMax - spec.speedMin) + spec.speedMin;
+        this.rotation = 0;
+        this.rotationSpeed = (Math.random() - 0.5) * 0.04;
+        this.toRemove = false;
+
+        // 절차적 운석 모서리 및 크레이터 생성 (입체감 유지를 위함)
+        this.vertices = [];
+        const numPoints = 9 + Math.floor(Math.random() * 5);
+        for (let i = 0; i < numPoints; i++) {
+            const angle = (i / numPoints) * Math.PI * 2;
+            const distOffset = (Math.random() * 0.35 - 0.18) * this.radius;
+            this.vertices.push({
+                x: Math.cos(angle) * (this.radius + distOffset),
+                y: Math.sin(angle) * (this.radius + distOffset)
+            });
+        }
+
+        // 표면 크레이터 구멍
+        this.craters = [];
+        const craterCount = Math.floor(this.radius / 8);
+        for (let i = 0; i < craterCount; i++) {
+            this.craters.push({
+                x: (Math.random() * 0.9 - 0.45) * this.radius,
+                y: (Math.random() * 0.9 - 0.45) * this.radius,
+                r: Math.random() * (this.radius * 0.22) + 2
+            });
+        }
+    }
+
+    update(difficultyFactor = 1) {
+        this.y += this.speed * difficultyFactor;
+        this.rotation += this.rotationSpeed;
+
+        if (this.y - this.radius > CONFIG.CANVAS_HEIGHT) {
+            this.toRemove = true;
+        }
+    }
+
+    takeDamage(damage) {
+        this.hp -= damage;
+        return this.hp <= 0;
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.rotation);
+
+        // 운석 몸체
+        ctx.fillStyle = this.color;
+        ctx.strokeStyle = '#3d281c';
+        ctx.lineWidth = 2;
+
+        ctx.beginPath();
+        ctx.moveTo(this.vertices[0].x, this.vertices[0].y);
+        for (let i = 1; i < this.vertices.length; i++) {
+            ctx.lineTo(this.vertices[i].x, this.vertices[i].y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // 표면 크레이터
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+        this.craters.forEach(c => {
+            ctx.beginPath();
+            ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        // 체력바 (데미지를 받았을 경우만 표시)
+        if (this.hp < this.maxHp) {
+            ctx.rotate(-this.rotation); // 체력바는 회전하지 않고 평평하게
+            const barW = this.radius * 1.5;
+            const barH = 4;
+            const hpRatio = Math.max(0, this.hp / this.maxHp);
+
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(-barW / 2, -this.radius - 12, barW, barH);
+
+            ctx.fillStyle = hpRatio > 0.5 ? '#00ff66' : '#ff3330';
+            ctx.fillRect(-barW / 2, -this.radius - 12, barW * hpRatio, barH);
+        }
+
+        ctx.restore();
+    }
+}
+
+// ==========================================
+// 9. GAME MAIN ENGINE & UI MANAGER
+// ==========================================
+class Game {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+
+        this.canvas.width = CONFIG.CANVAS_WIDTH;
+        this.canvas.height = CONFIG.CANVAS_HEIGHT;
+
+        this.input = new InputHandler();
+        this.background = new Background(CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+        this.particles = new ParticleSystem();
+        this.player = new Player(CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+        this.bullets = [];
+        this.meteors = [];
+        this.items = [];
+
+        this.state = 'START'; // 'START', 'PLAYING', 'GAMEOVER'
+        this.score = 0;
+        this.highScore = localStorage.getItem('cosmic_high_score') || 0;
+        this.combo = 0;
+        this.comboTimer = 0;
+        this.survivalTimer = 0;
+
+        this.meteorSpawnTimer = 0;
+        this.difficultyFactor = 1.0;
+
+        // 게임 루프 바인딩
+        this.loop = this.loop.bind(this);
+        requestAnimationFrame(this.loop);
+    }
+
+    startNewGame() {
+        this.player.reset();
+        this.bullets = [];
+        this.meteors = [];
+        this.items = [];
+        this.score = 0;
+        this.combo = 0;
+        this.comboTimer = 0;
+        this.survivalTimer = 0;
+        this.meteorSpawnTimer = 0;
+        this.difficultyFactor = 1.0;
+        this.state = 'PLAYING';
+    }
+
+    // 원형 충돌 검사
+    checkCircleCollision(c1, c2) {
+        const dx = c1.x - c2.x;
+        const dy = c1.y - c2.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        return dist < (c1.radius + c2.radius);
+    }
+
+    // 플레이어(사각형/원 혼합) 충돌 검사
+    checkPlayerCollision(meteor) {
+        const dx = this.player.x - meteor.x;
+        const dy = this.player.y - meteor.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        return dist < (meteor.radius + this.player.width * 0.4);
+    }
+
+    update() {
+        // 난이도 및 배경 업데이트는 어떤 상태든 수행
+        this.background.update(this.state === 'PLAYING' ? this.difficultyFactor : 0.8);
+        this.particles.update();
+
+        if (this.state === 'START') {
+            if (this.input.keys.KeyZ) {
+                this.startNewGame();
+            }
+            return;
+        }
+
+        if (this.state === 'GAMEOVER') {
+            if (this.input.keys.KeyR) {
+                this.startNewGame();
+            }
+            return;
+        }
+
+        // --- PLAYING STATE UPDATES ---
+
+        // 시간 경과에 따른 난이도 상승 & 점수 보너스
+        this.survivalTimer++;
+        if (this.survivalTimer % 60 === 0) { // 매 1초마다
+            this.score += 5; // 생존 점수
+        }
+        this.difficultyFactor = 1.0 + (this.survivalTimer * CONFIG.METEOR.DIFFICULTY_RAMP_RATE);
+
+        // 일정 주기로 이동속도 아이템 자동 드랍 시도
+        if (this.survivalTimer % CONFIG.ITEM.DURATION_SURVIVAL_SPAWN === 0) {
+            this.items.push(new SpeedItem(
+                Math.random() * (CONFIG.CANVAS_WIDTH - 40) + 20,
+                -20
+            ));
+        }
+
+        // 콤보 타이머 차감
+        if (this.comboTimer > 0) {
+            this.comboTimer--;
+            if (this.comboTimer === 0) {
+                this.combo = 0;
+            }
+        }
+
+        // 플레이어 업데이트 및 발사 처리
+        this.player.update(this.input, this.particles);
+
+        if (this.player.canShoot(this.input)) {
+            this.bullets.push(new Bullet(this.player.x, this.player.y - this.player.height / 2));
+            this.player.triggerShootCooldown();
+            sound.playShoot();
+        }
+
+        // 탄환 이동
+        this.bullets.forEach(b => b.update());
+
+        // 운석 생성 제어
+        this.meteorSpawnTimer++;
+        const currentInterval = Math.max(
+            CONFIG.METEOR.SPAWN_INTERVAL_MIN,
+            CONFIG.METEOR.SPAWN_INTERVAL_INITIAL / this.difficultyFactor
+        );
+
+        if (this.meteorSpawnTimer >= currentInterval) {
+            this.meteorSpawnTimer = 0;
+            const types = ['LARGE', 'MEDIUM', 'SMALL'];
+            const chosenType = types[Math.floor(Math.random() * types.length)];
+            this.meteors.push(new Meteor(chosenType, CONFIG.CANVAS_WIDTH));
+        }
+
+        // 운석 이동
+        this.meteors.forEach(m => m.update(this.difficultyFactor));
+
+        // 아이템 이동
+        this.items.forEach(item => item.update());
+
+        // --- 충돌 판정 ---
+
+        // 1. 탄환 vs 운석
+        for (let b of this.bullets) {
+            if (b.toRemove) continue;
+            for (let m of this.meteors) {
+                if (m.toRemove) continue;
+
+                // 단순 거리 기반 충돌
+                const dx = b.x - m.x;
+                const dy = b.y - m.y;
+                if (Math.sqrt(dx * dx + dy * dy) < m.radius + b.width) {
+                    b.toRemove = true;
+                    this.particles.createExplosion(b.x, b.y, '#00ffff', 4);
+
+                    const destroyed = m.takeDamage(b.damage);
+                    if (destroyed) {
+                        m.toRemove = true;
+
+                        // 콤보 처리
+                        this.combo++;
+                        this.comboTimer = CONFIG.COMBO.TIMEOUT;
+                        const comboBonus = Math.floor(m.score * (this.combo * CONFIG.COMBO.BONUS_MULTIPLIER));
+                        const totalAddedScore = m.score + comboBonus;
+
+                        this.score += totalAddedScore;
+                        if (this.score > this.highScore) {
+                            this.highScore = this.score;
+                            localStorage.setItem('cosmic_high_score', this.highScore);
+                        }
+
+                        // 시각 연출 및 소리
+                        sound.playExplode(m.radius > 25);
+                        this.particles.createExplosion(m.x, m.y, m.color, CONFIG.PARTICLE.EXPLOSION_COUNT);
+                        
+                        const txt = this.combo > 1 ? `+${totalAddedScore} (${this.combo} Combo!)` : `+${totalAddedScore}`;
+                        this.particles.addFloatingText(m.x, m.y, txt, this.combo > 1 ? '#ffea00' : '#ffffff');
+
+                        // 강화 아이템 확률 드랍
+                        if (Math.random() < CONFIG.ITEM.DROP_CHANCE) {
+                            this.items.push(new SpeedItem(m.x, m.y));
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        // 2. 플레이어 vs 운석 충돌
+        for (let m of this.meteors) {
+            if (m.toRemove) continue;
+            if (this.checkPlayerCollision(m)) {
+                m.toRemove = true;
+                const damage = Math.floor(m.radius * 0.8);
+                const survived = !this.player.takeDamage(damage);
+
+                this.particles.createExplosion(m.x, m.y, '#ff4400', CONFIG.PARTICLE.EXPLOSION_COUNT);
+
+                if (!survived) {
+                    // 게임오버
+                    this.state = 'GAMEOVER';
+                    sound.playExplode(true);
+                    this.particles.createExplosion(this.player.x, this.player.y, '#00d4ff', 30);
+                }
+            }
+        }
+
+        // 3. 플레이어 vs 이동속도 및 체력 회복 아이템 획득
+        for (let item of this.items) {
+            if (item.toRemove) continue;
+            if (this.checkCircleCollision({ x: this.player.x, y: this.player.y, radius: this.player.width/2 }, item)) {
+                item.toRemove = true;
+                const upgraded = this.player.upgradeSpeed();
+                // 체력 회복 효과 적용
+                this.player.hp = Math.min(this.player.maxHp, this.player.hp + CONFIG.ITEM.HEAL_AMOUNT);
+                sound.playPowerUp();
+
+                if (upgraded) {
+                    this.particles.addFloatingText(this.player.x, this.player.y - 20, 'SPEED UP & +20 HP!', '#00ffcc');
+                } else {
+                    this.score += 200;
+                    this.particles.addFloatingText(this.player.x, this.player.y - 20, '+200 PTS & +20 HP!', '#ffff00');
+                }
+            }
+        }
+
+        // 제거 대상 배열 정리
+        this.bullets = this.bullets.filter(b => !b.toRemove);
+        this.meteors = this.meteors.filter(m => !m.toRemove);
+        this.items = this.items.filter(i => !i.toRemove);
+    }
+
+    drawHUD() {
+        const ctx = this.ctx;
+
+        ctx.save();
+        // 상단 오버레이 바
+        ctx.fillStyle = 'rgba(10, 15, 30, 0.75)';
+        ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, 60);
+        ctx.strokeStyle = 'rgba(0, 200, 255, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, 60);
+        ctx.lineTo(CONFIG.CANVAS_WIDTH, 60);
+        ctx.stroke();
+
+        // 1. 점수 및 최고 점수
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 15px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`SCORE: ${this.score}`, 15, 25);
+        ctx.fillStyle = '#00e5ff';
+        ctx.fillText(`HIGH: ${this.highScore}`, 15, 47);
+
+        // 2. 체력 게이지 (Health Bar)
+        const barW = 140;
+        const barH = 14;
+        const barX = CONFIG.CANVAS_WIDTH - barW - 15;
+        const barY = 15;
+        const hpRatio = this.player.hp / this.player.maxHp;
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.fillRect(barX, barY, barW, barH);
+
+        const hpGrad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+        if (hpRatio > 0.5) {
+            hpGrad.addColorStop(0, '#00ff88');
+            hpGrad.addColorStop(1, '#00b359');
+        } else if (hpRatio > 0.25) {
+            hpGrad.addColorStop(0, '#ffbb00');
+            hpGrad.addColorStop(1, '#ff8800');
+        } else {
+            hpGrad.addColorStop(0, '#ff3355');
+            hpGrad.addColorStop(1, '#990011');
+        }
+
+        ctx.fillStyle = hpGrad;
+        ctx.fillRect(barX, barY, barW * hpRatio, barH);
+        ctx.strokeStyle = '#ffffff';
+        ctx.strokeRect(barX, barY, barW, barH);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`HP ${this.player.hp} / ${this.player.maxHp}`, barX + barW / 2, barY + 11);
+
+        // 3. 이동 속도 강화 단계 (Speed Level Indicators)
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#a0aec0';
+        ctx.font = '11px sans-serif';
+        ctx.fillText('SPEED LV:', barX - 10, 47);
+
+        for (let i = 0; i < CONFIG.PLAYER.MAX_SPEED_LEVEL; i++) {
+            const dotX = barX + (i * 18);
+            ctx.fillStyle = i < this.player.speedLevel ? '#00ffcc' : 'rgba(255, 255, 255, 0.2)';
+            ctx.beginPath();
+            ctx.arc(dotX + 6, 43, 5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // 4. 콤보 배너 연출
+        if (this.combo > 1) {
+            ctx.textAlign = 'center';
+            ctx.font = 'italic bold 18px sans-serif';
+            ctx.fillStyle = '#ffea00';
+            ctx.shadowColor = '#ff6600';
+            ctx.shadowBlur = 8;
+            ctx.fillText(`${this.combo} COMBO!`, CONFIG.CANVAS_WIDTH / 2, 40);
+        }
+
+        ctx.restore();
+    }
+
+    drawStartScreen() {
+        const ctx = this.ctx;
+        ctx.save();
+
+        // 배경 어둡게
+        ctx.fillStyle = 'rgba(5, 5, 15, 0.85)';
+        ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+        // 타이틀
+        ctx.textAlign = 'center';
+        ctx.shadowColor = '#00d4ff';
+        ctx.shadowBlur = 15;
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 36px sans-serif';
+        ctx.fillText('COSMIC VANGUARD', CONFIG.CANVAS_WIDTH / 2, 220);
+
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#00e5ff';
+        ctx.font = '16px sans-serif';
+        ctx.fillText('우주 생존 아케이드 슈팅', CONFIG.CANVAS_WIDTH / 2, 260);
+
+        // 설명 및 조작 방법 패널
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.07)';
+        ctx.strokeStyle = 'rgba(0, 229, 255, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.roundRect(40, 310, CONFIG.CANVAS_WIDTH - 80, 200, 12);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 16px sans-serif';
+        ctx.fillText('― 조작 방법 ―', CONFIG.CANVAS_WIDTH / 2, 345);
+
+        ctx.font = '14px sans-serif';
+        ctx.fillStyle = '#cbd5e1';
+        ctx.fillText('방향키 (↑ ↓ ← →) : 이동', CONFIG.CANVAS_WIDTH / 2, 385);
+        ctx.fillText('Z 키 : 빠른 탄환 연속 발사', CONFIG.CANVAS_WIDTH / 2, 415);
+        ctx.fillText('R 키 : 게임 재시작', CONFIG.CANVAS_WIDTH / 2, 445);
+        ctx.fillText('SPD 아이템 : 속도 강화 + 체력 +20 회복', CONFIG.CANVAS_WIDTH / 2, 475);
+
+        // 시작 안내 깜빡임
+        const blink = Math.floor(Date.now() / 400) % 2 === 0;
+        if (blink) {
+            ctx.fillStyle = '#00ffcc';
+            ctx.font = 'bold 20px sans-serif';
+            ctx.fillText('Z 키를 눌러 게임 시작', CONFIG.CANVAS_WIDTH / 2, 570);
+        }
+
+        ctx.restore();
+    }
+
+    drawGameOverScreen() {
+        const ctx = this.ctx;
+        ctx.save();
+
+        ctx.fillStyle = 'rgba(10, 0, 5, 0.85)';
+        ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+        ctx.textAlign = 'center';
+        ctx.shadowColor = '#ff0055';
+        ctx.shadowBlur = 15;
+        ctx.fillStyle = '#ff3366';
+        ctx.font = 'bold 42px sans-serif';
+        ctx.fillText('GAME OVER', CONFIG.CANVAS_WIDTH / 2, 240);
+
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '20px sans-serif';
+        ctx.fillText(`최종 점수: ${this.score}`, CONFIG.CANVAS_WIDTH / 2, 310);
+
+        ctx.fillStyle = '#00e5ff';
+        ctx.font = '18px sans-serif';
+        ctx.fillText(`최고 기록: ${this.highScore}`, CONFIG.CANVAS_WIDTH / 2, 350);
+
+        // 재시작 안내
+        const blink = Math.floor(Date.now() / 400) % 2 === 0;
+        if (blink) {
+            ctx.fillStyle = '#ffea00';
+            ctx.font = 'bold 20px sans-serif';
+            ctx.fillText('R 키를 눌러 다시 도전', CONFIG.CANVAS_WIDTH / 2, 460);
+        }
+
+        ctx.restore();
+    }
+
+    render() {
+        // 캔버스 초기화
+        this.ctx.clearRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+        // 배경 & 별자리
+        this.background.draw(this.ctx);
+
+        // 객체 그리기
+        this.items.forEach(item => item.draw(this.ctx));
+        this.bullets.forEach(b => b.draw(this.ctx));
+        this.meteors.forEach(m => m.draw(this.ctx));
+
+        if (this.state === 'PLAYING') {
+            this.player.draw(this.ctx);
+        }
+
+        // 파티클 & 특수효과
+        this.particles.draw(this.ctx);
+
+        // UI 오버레이
+        if (this.state === 'PLAYING') {
+            this.drawHUD();
+        } else if (this.state === 'START') {
+            this.drawStartScreen();
+        } else if (this.state === 'GAMEOVER') {
+            this.drawGameOverScreen();
+        }
+    }
+
+    loop() {
+        this.update();
+        this.render();
+        requestAnimationFrame(this.loop);
+    }
+}
+
+// ==========================================
+// 10. GAME LAUNCHER
+// ==========================================
+window.onload = () => {
+    new Game();
+};
+</script>
+</body>
+</html>
