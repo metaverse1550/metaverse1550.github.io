@@ -1,0 +1,2683 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dead Run: Post-Apocalypse Survival</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;600;700&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            user-select: none;
+            background-color: #050505;
+            font-family: 'Noto Sans KR', sans-serif;
+            color: #e5e7eb;
+        }
+        .font-teko { font-family: 'Teko', sans-serif; }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        /* HUD Crosshair */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 12px;
+            height: 12px;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+        #crosshair::before, #crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(255, 255, 255, 0.8);
+            box-shadow: 0 0 4px rgba(0,0,0,0.8);
+        }
+        #crosshair::before { left: 5px; top: 0; width: 2px; height: 12px; }
+        #crosshair::after { top: 5px; left: 0; width: 12px; height: 2px; }
+        
+        /* Hurt Screen Flash */
+        #hurt-overlay {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle, transparent 60%, rgba(220, 38, 38, 0.6) 100%);
+            opacity: 0;
+            transition: opacity 0.15s ease-out;
+            pointer-events: none;
+        }
+        /* Custom Scrollbar for Upgrade Modal */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.3); }
+        ::-webkit-scrollbar-thumb { background: #dc2626; border-radius: 3px; }
+    </style>
+</head>
+<body class="relative w-full h-screen overflow-hidden bg-black select-none">
+
+    <!-- 3D Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- Hurt Overlay -->
+    <div id="hurt-overlay"></div>
+
+    <!-- UI Crosshair -->
+    <div id="crosshair"></div>
+
+    <!-- HUD Overlay -->
+    <div id="hud" class="absolute inset-0 pointer-events-none flex flex-col justify-between p-6">
+        <!-- Top Bar: Objective & Notifications -->
+        <div class="flex flex-col items-center gap-2">
+            <div id="objective-box" class="bg-black/80 border border-red-900/60 px-6 py-2 rounded-lg text-center backdrop-blur-sm shadow-lg flex items-center gap-5">
+                <div>
+                    <span class="text-xs text-red-500 font-bold uppercase tracking-wider block">현재 목표</span>
+                    <span id="objective-text" class="text-lg md:text-xl font-bold text-gray-100">10km 거리의 황무지를 돌파하세요 (2km마다 성벽 마을 등장)</span>
+                </div>
+                <div class="border-l border-zinc-700 pl-4 text-center">
+                    <span class="text-xs text-amber-500 font-bold uppercase tracking-wider block">시간</span>
+                    <span id="time-text" class="text-base font-bold text-amber-300">☀️ 낮</span>
+                </div>
+            </div>
+            <div id="toast-message" class="opacity-0 transition-opacity duration-300 bg-red-950/90 border border-red-600 text-red-200 px-4 py-1.5 rounded text-sm font-semibold shadow-md">
+                메시지
+            </div>
+        </div>
+
+        <!-- Center Prompt (Interaction) -->
+        <div id="interaction-prompt" class="self-center bg-zinc-900/90 border border-amber-500/80 px-5 py-2.5 rounded-lg text-amber-400 font-bold text-sm tracking-wide hidden animate-pulse shadow-xl">
+            [E] 키를 눌러 작업대 이용 / 물자 수집 / 기차 조작
+        </div>
+
+        <!-- Train Status Overlay -->
+        <div id="train-hud" class="absolute top-20 left-1/2 -translate-x-1/2 bg-zinc-950/80 border border-amber-600/60 px-5 py-2 rounded-full text-amber-300 text-xs font-bold hidden flex items-center gap-3 backdrop-blur-md">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+            <span id="train-status-text">🚂 기차 운행 중 (속도: 30 km/h)</span>
+            <div class="flex items-center gap-1.5 border-l border-zinc-700 pl-3">
+                <span class="text-amber-500 font-bold">🔥 연료:</span>
+                <div class="w-20 bg-zinc-800 h-2.5 rounded-full overflow-hidden border border-zinc-700">
+                    <div id="train-fuel-bar" class="bg-gradient-to-r from-red-600 to-amber-500 h-full w-full transition-all duration-300"></div>
+                </div>
+                <span id="train-fuel-text" class="text-amber-300 text-[11px] font-mono">100%</span>
+            </div>
+        </div>
+
+        <!-- Bottom Bar: Status, Inventory & Weapons -->
+        <div class="flex justify-between items-end gap-2 md:gap-4 w-full">
+            <!-- Left: Health, Stamina, Scrap & Fuel -->
+            <div class="flex flex-col gap-2 w-56 md:w-72 bg-zinc-950/80 p-3.5 rounded-xl border border-zinc-800/80 backdrop-blur-md">
+                <!-- HP Bar -->
+                <div>
+                    <div class="flex justify-between text-xs font-bold mb-1">
+                        <span class="text-red-500">HEALTH</span>
+                        <span id="hp-text" class="text-red-400">100 / 100</span>
+                    </div>
+                    <div class="w-full bg-zinc-800 h-3.5 rounded-full overflow-hidden border border-zinc-700">
+                        <div id="hp-bar" class="bg-gradient-to-r from-red-800 to-red-500 h-full w-full transition-all duration-200"></div>
+                    </div>
+                </div>
+                <!-- Stamina Bar -->
+                <div>
+                    <div class="flex justify-between text-xs font-bold mb-1">
+                        <span class="text-emerald-500">STAMINA</span>
+                        <span id="stamina-text" class="text-emerald-400">100 / 100</span>
+                    </div>
+                    <div class="w-full bg-zinc-800 h-2.5 rounded-full overflow-hidden border border-zinc-700">
+                        <div id="stamina-bar" class="bg-emerald-500 h-full w-full transition-all duration-100"></div>
+                    </div>
+                </div>
+                <!-- Materials / Scrap & Fuel Items -->
+                <div class="flex items-center justify-between pt-1 border-t border-zinc-800/60 text-xs font-bold">
+                    <div class="flex items-center gap-1 text-amber-400">
+                        <span>돈:</span>
+                        <span id="scrap-count" class="text-amber-300 font-teko text-xl tracking-wider">0</span>
+                    </div>
+                    <div class="flex items-center gap-1 text-yellow-300 border-l border-zinc-800 pl-3">
+                        <span>💎 보물:</span>
+                        <span id="treasure-count" class="text-yellow-200 font-teko text-xl tracking-wider">0</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-1 text-orange-400 text-xs font-bold">
+                    <span>⛽ 연료통:</span>
+                    <span id="fuel-count" class="text-orange-300 font-teko text-xl tracking-wider">2</span>
+                </div>
+            </div>
+
+            <!-- Center: 6-Slot Inventory Bar -->
+            <div id="inventory-bar" class="flex gap-1.5 md:gap-2 bg-zinc-950/80 p-2.5 rounded-xl border border-zinc-800/80 backdrop-blur-md">
+                <!-- Slots 1 to 6 will be populated dynamically -->
+            </div>
+
+            <!-- Right: Weapon & Ammo Info -->
+            <div class="flex flex-col items-end gap-1 bg-zinc-950/80 p-3.5 rounded-xl border border-zinc-800/80 backdrop-blur-md min-w-[170px] md:min-w-[200px]">
+                <div id="weapon-name" class="text-amber-500 font-teko text-3xl font-bold tracking-wider uppercase leading-none">
+                    CROWBAR
+                </div>
+                <div class="flex items-baseline gap-1 font-teko">
+                    <span id="ammo-clip" class="text-4xl font-bold text-white">∞</span>
+                    <span class="text-xl text-zinc-500">/</span>
+                    <span id="ammo-reserve" class="text-2xl font-bold text-zinc-400">∞</span>
+                </div>
+                <div class="text-[10px] text-zinc-400 font-semibold tracking-wider">
+                    [1-6] 무기 선택 | [R] 재장전 | [Shift] 회피
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Start Overlay Screen -->
+    <div id="start-screen" class="absolute inset-0 bg-zinc-950/95 flex flex-col items-center justify-center text-center p-6 z-50">
+        <h1 class="font-teko text-7xl md:text-9xl font-extrabold text-red-600 tracking-wider mb-2 drop-shadow-[0_5px_15px_rgba(220,38,38,0.4)]">
+            DEAD RUN
+        </h1>
+        <p class="text-zinc-400 text-lg md:text-xl max-w-xl mb-8 leading-relaxed font-semibold">
+            포스트 아포칼립스 세계관의 죽음의 사막.<br>
+            끝없이 펼쳐진 황무지 속 좀비 무리를 뚫고 최종 탈출 지점까지 살아남으십시오.
+        </p>
+        
+        <div class="bg-zinc-900/90 border border-zinc-800 p-6 rounded-xl max-w-md w-full mb-8 text-left text-sm text-zinc-300 space-y-2">
+            <div class="text-red-500 font-bold text-base mb-2 border-b border-zinc-800 pb-1">조작 가이드 (PC)</div>
+            <p>• <span class="text-amber-400 font-bold">WASD</span> : 이동 | <span class="text-amber-400 font-bold">Space</span> : 점프</p>
+            <p>• <span class="text-amber-400 font-bold">마우스 이동</span> : 시점 조준 (클릭 시 화면 잠금)</p>
+            <p>• <span class="text-amber-400 font-bold">좌클릭</span> : 공격 / 사격</p>
+            <p>• <span class="text-amber-400 font-bold">Shift</span> : 회피 / 대시 (스태미나 소비)</p>
+            <p>• <span class="text-amber-400 font-bold">1 ~ 4</span> : 무기 교체 (빠루 / 권총 / 샷건 / 소총)</p>
+            <p>• <span class="text-amber-400 font-bold">R</span> : 재장전 | <span class="text-amber-400 font-bold">E</span> : 상호작용 (아이템 획득 & 강화)</p>
+            <p>• 기차 경로 <span class="text-amber-400 font-bold">중간 폐가</span>에서 보물을 챙긴 뒤, <span class="text-amber-400 font-bold">마을 상점</span>에 팔아 업그레이드하세요.</p>
+            <p>• <span class="text-red-400 font-bold">두 마을을 지날 때마다</span> 새로운 종류의 좀비가 출현합니다.</p>
+        </div>
+
+        <button id="btn-start" class="px-10 py-4 bg-red-600 hover:bg-red-700 text-white font-teko text-3xl font-bold tracking-widest rounded-lg transition-all transform hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(220,38,38,0.5)]">
+            생존 시작하기 (START GAME)
+        </button>
+    </div>
+
+    <!-- Upgrade / Workbench Modal Screen -->
+    <div id="upgrade-modal" class="absolute inset-0 bg-black/80 backdrop-blur-md hidden flex items-center justify-center p-6 z-40">
+        <div class="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 max-w-2xl w-full text-zinc-100 shadow-2xl relative">
+            <div class="flex justify-between items-center border-b border-zinc-800 pb-4 mb-4">
+                <div>
+                    <h2 class="font-teko text-4xl text-amber-500 font-bold leading-none">SAFEZONE WORKBENCH</h2>
+                    <p class="text-xs text-zinc-400">마을에서 보물을 팔아 얻은 돈으로 생존 능력을 강화하세요.</p>
+                </div>
+                <div class="text-right">
+                    <span class="text-xs text-zinc-400 block">보유 돈</span>
+                    <span id="modal-scrap" class="font-teko text-3xl text-amber-400 font-bold">0</span>
+                </div>
+            </div>
+
+            <!-- Upgrade Items List -->
+            <div class="space-y-4 mb-6 max-h-[60vh] overflow-y-auto pr-2">
+                <!-- Upgrade 1: Damage -->
+                <div class="flex items-center justify-between p-4 bg-zinc-950/60 rounded-xl border border-zinc-800">
+                    <div>
+                        <div class="font-bold text-amber-300">무기 위력 강화 (Damage UP)</div>
+                        <div class="text-xs text-zinc-400">모든 총기와 근접 무기의 데미지가 20% 증가합니다.</div>
+                        <div id="lvl-damage" class="text-xs text-zinc-500 font-semibold mt-1">현재 레벨: Lv.0</div>
+                    </div>
+                    <button id="btn-up-damage" class="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-black font-bold text-sm rounded-lg transition-colors">
+                        강화 (비용: 15 돈)
+                    </button>
+                </div>
+
+                <!-- Upgrade 2: Health -->
+                <div class="flex items-center justify-between p-4 bg-zinc-950/60 rounded-xl border border-zinc-800">
+                    <div>
+                        <div class="font-bold text-red-400">최대 체력 증가 (Max Health)</div>
+                        <div class="text-xs text-zinc-400">플레이어의 최대 체력이 25 증가하며 즉시 치료됩니다.</div>
+                        <div id="lvl-health" class="text-xs text-zinc-500 font-semibold mt-1">현재 레벨: Lv.0</div>
+                    </div>
+                    <button id="btn-up-health" class="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-black font-bold text-sm rounded-lg transition-colors">
+                        강화 (비용: 10 돈)
+                    </button>
+                </div>
+
+                <!-- Upgrade 3: Ammo Capacity & Supply -->
+                <div class="flex items-center justify-between p-4 bg-zinc-950/60 rounded-xl border border-zinc-800">
+                    <div>
+                        <div class="font-bold text-emerald-400">탄약 보급 & 대용량 탄창 (Ammo Boost)</div>
+                        <div class="text-xs text-zinc-400">모든 탄약을 완전히 보충하고 최대 탄약 소지량을 늘립니다.</div>
+                        <div id="lvl-ammo" class="text-xs text-zinc-500 font-semibold mt-1">현재 레벨: Lv.0</div>
+                    </div>
+                    <button id="btn-up-ammo" class="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-black font-bold text-sm rounded-lg transition-colors">
+                        강화 (비용: 12 돈)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Close Modal -->
+            <div class="flex justify-end pt-2 border-t border-zinc-800">
+                <button id="btn-close-upgrade" class="px-6 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold rounded-lg transition-colors">
+                    작업대 닫기 [ESC / E]
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Weapon Shop Modal Screen -->
+    <div id="shop-modal" class="absolute inset-0 bg-black/80 backdrop-blur-md hidden flex items-center justify-center p-6 z-40">
+        <div class="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 max-w-2xl w-full text-zinc-100 shadow-2xl relative">
+            <div class="flex justify-between items-center border-b border-zinc-800 pb-4 mb-4">
+                <div>
+                    <h2 class="font-teko text-4xl text-emerald-500 font-bold leading-none">VILLAGE MARKET</h2>
+                    <p class="text-xs text-zinc-400">폐가에서 가져온 보물을 팔고, 그 돈으로 무기를 구매하세요.</p>
+                </div>
+                <div class="text-right">
+                    <span class="text-xs text-zinc-400 block">보유 돈</span>
+                    <span id="shop-coin" class="font-teko text-3xl text-amber-400 font-bold">0</span>
+                </div>
+            </div>
+
+            <!-- Treasure Sell Panel -->
+            <div class="mb-5 p-4 bg-amber-950/40 border border-amber-700/50 rounded-xl">
+                <div class="flex items-center justify-between gap-3">
+                    <div>
+                        <div class="font-bold text-amber-300">💎 보물 판매</div>
+                        <div id="shop-treasure-info" class="text-xs text-zinc-400 mt-0.5">보유 보물 0개 (예상 판매가: 0)</div>
+                        <div id="shop-treasure-list" class="text-[11px] text-zinc-500 mt-1"></div>
+                    </div>
+                    <button id="btn-sell-treasure" class="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-black font-bold text-sm rounded-lg transition-colors whitespace-nowrap">
+                        모두 판매
+                    </button>
+                </div>
+            </div>
+
+            <!-- Shop Items List -->
+            <div class="space-y-4 mb-6 max-h-[60vh] overflow-y-auto pr-2">
+                <!-- Item 1: Pistol -->
+                <div class="flex items-center justify-between p-4 bg-zinc-950/60 rounded-xl border border-zinc-800">
+                    <div>
+                        <div class="font-bold text-blue-400">🔫 권총 (Pistol)</div>
+                        <div class="text-xs text-zinc-400">중거리용 기본 소화기입니다. 재장전이 빠릅니다.</div>
+                        <div id="shop-status-pistol" class="text-xs text-zinc-500 font-semibold mt-1">미보유</div>
+                    </div>
+                    <button id="btn-buy-pistol" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-black font-bold text-sm rounded-lg transition-colors">
+                        구매 (비용: 동전 50개)
+                    </button>
+                </div>
+
+                <!-- Item 2: Shotgun -->
+                <div class="flex items-center justify-between p-4 bg-zinc-950/60 rounded-xl border border-zinc-800">
+                    <div>
+                        <div class="font-bold text-amber-400">💥 샷건 (Shotgun)</div>
+                        <div class="text-xs text-zinc-400">근거리에서 강력한 산탄을 발사합니다.</div>
+                        <div id="shop-status-shotgun" class="text-xs text-zinc-500 font-semibold mt-1">미보유</div>
+                    </div>
+                    <button id="btn-buy-shotgun" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-black font-bold text-sm rounded-lg transition-colors">
+                        구매 (비용: 동전 100개)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Close Modal -->
+            <div class="flex justify-end pt-2 border-t border-zinc-800">
+                <button id="btn-close-shop" class="px-6 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold rounded-lg transition-colors">
+                    상점 닫기 [ESC / E]
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="gameover-screen" class="absolute inset-0 bg-red-950/90 backdrop-blur-md hidden flex flex-col items-center justify-center text-center p-6 z-50">
+        <h2 class="font-teko text-8xl font-black text-red-500 tracking-wider mb-2 animate-bounce">YOU DIED</h2>
+        <p class="text-zinc-300 text-lg mb-8 max-w-md">좀비 무리에게 압도당했습니다. 생존에 실패했습니다.</p>
+        <button id="btn-restart" class="px-8 py-3.5 bg-zinc-100 hover:bg-white text-black font-teko text-3xl font-bold tracking-wider rounded-lg transition-all transform hover:scale-105">
+            다시 시도하기 (RESTART)
+        </button>
+    </div>
+
+    <!-- Game Clear Screen -->
+    <div id="clear-screen" class="absolute inset-0 bg-emerald-950/90 backdrop-blur-md hidden flex flex-col items-center justify-center text-center p-6 z-50">
+        <h2 class="font-teko text-8xl font-black text-emerald-400 tracking-wider mb-2 drop-shadow-[0_0_20px_rgba(16,185,129,0.5)]">STAGE CLEAR!</h2>
+        <p class="text-zinc-200 text-lg mb-8 max-w-lg">
+            축하합니다! 구출 지점에 도달하여 마지막 좀비 웨이브를 모두 소탕하고 성공적으로 탈출했습니다!
+        </p>
+        <button id="btn-clear-restart" class="px-8 py-3.5 bg-emerald-500 hover:bg-emerald-400 text-black font-teko text-3xl font-bold tracking-wider rounded-lg transition-all transform hover:scale-105">
+            처음부터 재도전 (PLAY AGAIN)
+        </button>
+    </div>
+
+    <!-- Main Game Script -->
+    <script>
+        // ==========================================
+        // 1. CONFIGURATION & GAME CONSTANTS
+        // ==========================================
+        let gameTime = 0; // 초 단위 게임 시간
+        const streetLights = []; // 밤낮에 따라 밝기가 조절되는 가로등 배열
+
+        const DAY_COLOR = {
+            bg: new THREE.Color(0xd4a373),
+            fog: new THREE.Color(0xd4a373),
+            fogDensity: 0.008,
+            ambientColor: new THREE.Color(0xffe8d6),
+            ambientIntensity: 0.9,
+            dirColor: new THREE.Color(0xfff3e0),
+            dirIntensity: 1.3,
+            streetLightIntensity: 0.0
+        };
+
+        const NIGHT_COLOR = {
+            bg: new THREE.Color(0x0a0a12),
+            fog: new THREE.Color(0x12101e),
+            fogDensity: 0.018,
+            ambientColor: new THREE.Color(0x1a1c2e),
+            ambientIntensity: 0.2,
+            dirColor: new THREE.Color(0x4a5568),
+            dirIntensity: 0.3,
+            streetLightIntensity: 2.0
+        };
+
+        const CONFIG = {
+            player: {
+                radius: 0.6,
+                height: 1.8,
+                speed: 7.0,
+                dashSpeed: 18.0,
+                dashDuration: 0.25,
+                dashCooldown: 1.0,
+                maxHp: 100,
+                maxStamina: 100,
+                staminaRegen: 25, // per sec
+                dashStaminaCost: 35,
+            },
+            train: {
+                speed: 32.0, // 10km 주행에 적합하도록 기차 속도 상향
+                zStart: 10,
+                zEnd: -10000, // 10km 목적지 (z = -10,000m)
+                maxFuel: 100,
+                fuelBurnRate: 1.2, // 연료 소모율 조정
+                fuelPerItem: 35   // 연료통 1개당 충전량
+            },
+            weapons: {
+                crowbar: {
+                    name: 'Crowbar (빠루)',
+                    type: 'melee',
+                    damage: 55,
+                    range: 3.2,
+                    fireRate: 0.38,
+                    clipSize: Infinity,
+                    reserveAmmo: Infinity,
+                    color: 0xdc2626
+                },
+                pistol: {
+                    name: 'Pistol',
+                    type: 'ranged',
+                    damage: 32,
+                    range: 45,
+                    fireRate: 0.25,
+                    clipSize: 12,
+                    reserveAmmo: 36,
+                    reloadTime: 1.4,
+                    color: 0x3b82f6
+                },
+                shotgun: {
+                    name: 'Shotgun',
+                    type: 'ranged',
+                    damage: 18,
+                    pellets: 6,
+                    spread: 0.12,
+                    range: 25,
+                    fireRate: 0.85,
+                    clipSize: 6,
+                    reserveAmmo: 24,
+                    reloadTime: 2.2,
+                    color: 0xf59e0b
+                },
+                rifle: {
+                    name: 'Assault Rifle',
+                    type: 'ranged',
+                    damage: 28,
+                    range: 60,
+                    fireRate: 0.12,
+                    clipSize: 30,
+                    reserveAmmo: 90,
+                    reloadTime: 1.8,
+                    color: 0xef4444
+                }
+            },
+            zombie: {
+                baseHp: 75,
+                baseSpeed: 3.6,
+                attackDamage: 15,
+                attackRange: 1.5,
+                attackCooldown: 1.0,
+                detectRadius: 35
+            },
+            zombieTypes: {
+                walker: {
+                    name: '배회 좀비',
+                    hp: 75,
+                    speed: 3.6,
+                    damage: 15,
+                    attackRange: 1.5,
+                    attackCooldown: 1.0,
+                    detectRadius: 35,
+                    scale: 1.0,
+                    skin: 0x4d5d53,
+                    clothes: 0x27272a
+                },
+                runner: {
+                    name: '질주 좀비',
+                    hp: 48,
+                    speed: 8.2,
+                    damage: 12,
+                    attackRange: 1.35,
+                    attackCooldown: 0.65,
+                    detectRadius: 48,
+                    scale: 0.88,
+                    skin: 0x7f1d1d,
+                    clothes: 0x450a0a
+                },
+                brute: {
+                    name: '거대 좀비',
+                    hp: 260,
+                    speed: 2.15,
+                    damage: 34,
+                    attackRange: 2.35,
+                    attackCooldown: 1.35,
+                    detectRadius: 28,
+                    scale: 1.58,
+                    skin: 0x3f4a22,
+                    clothes: 0x1c1917
+                }
+            },
+            treasurePool: [
+                { id: 'jewelry', name: '보석 목걸이', value: 35, icon: '💎' },
+                { id: 'watch', name: '금시계', value: 50, icon: '⌚' },
+                { id: 'gold', name: '금괴', value: 80, icon: '🥇' },
+                { id: 'relic', name: '고대 유물', value: 110, icon: '🏺' },
+                { id: 'crown', name: '왕관', value: 150, icon: '👑' }
+            ],
+            map: {
+                length: 10200, // 10km 전체 스테이지
+                width: 140   // 사막 폭
+            }
+        };
+
+        // ==========================================
+        // 2. AUDIO SYNTHESIZER (Web Audio API)
+        // ==========================================
+        class SoundEngine {
+            constructor() {
+                this.ctx = null;
+            }
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+            playGunshot(type) {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const gain = this.ctx.createGain();
+                const bufferSize = this.ctx.sampleRate * 0.15;
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = type === 'shotgun' ? 'lowpass' : 'bandpass';
+                filter.frequency.setValueAtTime(type === 'shotgun' ? 800 : 1800, now);
+
+                gain.gain.setValueAtTime(0.6, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + (type === 'shotgun' ? 0.3 : 0.15));
+
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                noise.start(now);
+            }
+            playSwing() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(300, now);
+                osc.frequency.exponentialRampToValueAtTime(80, now + 0.15);
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.15);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.15);
+            }
+            playHit() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.linearRampToValueAtTime(40, now + 0.1);
+                gain.gain.setValueAtTime(0.4, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.1);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            }
+            playZombieGrowl() {
+                if (!this.ctx || Math.random() > 0.3) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(80 + Math.random() * 40, now);
+                osc.frequency.linearRampToValueAtTime(50, now + 0.4);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.4);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.4);
+            }
+            playPickup() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(440, now);
+                osc.frequency.setValueAtTime(880, now + 0.08);
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.2);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.2);
+            }
+        }
+        const soundEngine = new SoundEngine();
+
+        // ==========================================
+        // 3. GAME STATE MANAGEMENT
+        // ==========================================
+        const GAME_STATE = {
+            START: 'START',
+            PLAYING: 'PLAYING',
+            WORKBENCH: 'WORKBENCH',
+            SHOP: 'SHOP',
+            GAMEOVER: 'GAMEOVER',
+            CLEAR: 'CLEAR'
+        };
+        let currentState = GAME_STATE.START;
+
+        // ==========================================
+        // 4. INPUT CONTROLLER
+        // ==========================================
+        class InputManager {
+            constructor() {
+                this.keys = {};
+                this.mouseDeltaX = 0;
+                this.mouseDeltaY = 0;
+                this.isMouseDown = false;
+                this.mousePressed = false;
+                this.eKeyPressed = false;
+
+                window.addEventListener('keydown', (e) => {
+                    this.keys[e.code] = true;
+                    if (e.code === 'KeyE') this.eKeyPressed = true;
+                });
+                window.addEventListener('keyup', (e) => {
+                    this.keys[e.code] = false;
+                });
+                window.addEventListener('mousedown', (e) => {
+                    if (e.button === 0) {
+                        this.isMouseDown = true;
+                        this.mousePressed = true;
+                    }
+                });
+                window.addEventListener('mouseup', (e) => {
+                    if (e.button === 0) this.isMouseDown = false;
+                });
+                window.addEventListener('mousemove', (e) => {
+                    if (document.pointerLockElement === document.body) {
+                        this.mouseDeltaX += e.movementX;
+                        this.mouseDeltaY += e.movementY;
+                    }
+                });
+            }
+            resetFrameDeltas() {
+                this.mouseDeltaX = 0;
+                this.mouseDeltaY = 0;
+                this.mousePressed = false;
+                this.eKeyPressed = false;
+            }
+        }
+        const input = new InputManager();
+
+        // ==========================================
+        // 5. THREE.JS SCENE SETUP & CAMERA
+        // ==========================================
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = DAY_COLOR.bg.clone();
+        scene.fog = new THREE.FogExp2(DAY_COLOR.fog.clone(), DAY_COLOR.fogDensity);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        // Lighting Setup (Start with Daytime Lighting)
+        const ambientLight = new THREE.AmbientLight(DAY_COLOR.ambientColor, DAY_COLOR.ambientIntensity);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(DAY_COLOR.dirColor, DAY_COLOR.dirIntensity);
+        dirLight.position.set(20, 50, -20);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        scene.add(dirLight);
+
+        // Flashlight (Player)
+        const flashlight = new THREE.SpotLight(0xfffaed, 2.5, 30, Math.PI / 6, 0.4, 1);
+        scene.add(flashlight);
+        scene.add(flashlight.target);
+
+        // ==========================================
+        // 6. PLAYER CONTROLLER
+        // ==========================================
+        class Player {
+            constructor() {
+                this.position = new THREE.Vector3(0, CONFIG.player.height, 10);
+                this.velocityY = 0;
+                this.isGrounded = true;
+                this.gravity = -24.0;
+                this.jumpForce = 8.5;
+
+                this.yaw = 0;
+                this.pitch = 0;
+                this.hp = CONFIG.player.maxHp;
+                this.maxHp = CONFIG.player.maxHp;
+                this.stamina = CONFIG.player.maxStamina;
+                this.maxStamina = CONFIG.player.maxStamina;
+                this.scrap = 0;
+                this.treasures = [];
+                this.fuelCount = 2; // 보유 연료통 개수
+
+                // Dash
+                this.isDashing = false;
+                this.dashTimer = 0;
+                this.dashCooldownTimer = 0;
+                this.dashDir = new THREE.Vector3();
+
+                // Unlocked Weapons (Start with Crowbar ONLY in slot 1)
+                this.unlockedWeapons = {
+                    crowbar: true,
+                    pistol: false,
+                    shotgun: false,
+                    rifle: false
+                };
+
+                this.inventory = ['crowbar', null, null, null, null, null];
+                this.activeSlotIndex = 0;
+
+                // Weapons
+                this.weapons = JSON.parse(JSON.stringify(CONFIG.weapons));
+                this.currentWeaponKey = 'crowbar';
+                this.weaponCoolTimer = 0;
+                this.isReloading = false;
+                this.reloadTimer = 0;
+
+                // Upgrade Levels
+                this.upgradeDamageLvl = 0;
+                this.upgradeHealthLvl = 0;
+                this.upgradeAmmoLvl = 0;
+
+                // First person mesh group
+                this.cameraGroup = new THREE.Group();
+                scene.add(this.cameraGroup);
+                this.cameraGroup.add(camera);
+
+                this.createWeaponMeshes();
+            }
+
+            reset() {
+                this.position.set(0, CONFIG.player.height, 10);
+                this.velocityY = 0;
+                this.isGrounded = true;
+                this.yaw = 0;
+                this.pitch = 0;
+                this.hp = CONFIG.player.maxHp;
+                this.maxHp = CONFIG.player.maxHp;
+                this.stamina = CONFIG.player.maxStamina;
+                this.scrap = 0;
+                this.treasures = [];
+                this.fuelCount = 2;
+                this.isDashing = false;
+
+                // Reset unlocked weapons (Crowbar in slot 1)
+                this.unlockedWeapons = {
+                    crowbar: true,
+                    pistol: false,
+                    shotgun: false,
+                    rifle: false
+                };
+                this.inventory = ['crowbar', null, null, null, null, null];
+                this.activeSlotIndex = 0;
+
+                this.weapons = JSON.parse(JSON.stringify(CONFIG.weapons));
+                this.currentWeaponKey = 'crowbar';
+                this.upgradeDamageLvl = 0;
+                this.upgradeHealthLvl = 0;
+                this.upgradeAmmoLvl = 0;
+                this.updateWeaponVisuals();
+                updateInventoryUI();
+            }
+
+            createWeaponMeshes() {
+                this.weaponGroup = new THREE.Group();
+                camera.add(this.weaponGroup);
+                this.weaponGroup.position.set(0.3, -0.25, -0.5);
+
+                // Simple 3D Procedural Weapons
+                const matGun = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.3, metalness: 0.8 });
+                const matSteel = new THREE.MeshStandardMaterial({ color: 0xa8a29e, roughness: 0.2, metalness: 0.9 });
+                const matRedMetal = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.4, metalness: 0.6 });
+                const matWood = new THREE.MeshStandardMaterial({ color: 0x5c3a21, roughness: 0.8 });
+
+                // Pistol Mesh
+                this.pistolMesh = new THREE.Group();
+                const bodyPistol = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.25), matGun);
+                const barrelPistol = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.2), matSteel);
+                barrelPistol.rotation.x = Math.PI / 2;
+                barrelPistol.position.set(0, 0.04, -0.15);
+                this.pistolMesh.add(bodyPistol, barrelPistol);
+
+                // Shotgun Mesh
+                this.shotgunMesh = new THREE.Group();
+                const bodyShotgun = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.5), matWood);
+                const barrelShotgun = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.6), matSteel);
+                barrelShotgun.rotation.x = Math.PI / 2;
+                barrelShotgun.position.set(0, 0.03, -0.25);
+                this.shotgunMesh.add(bodyShotgun, barrelShotgun);
+
+                // Rifle Mesh
+                this.rifleMesh = new THREE.Group();
+                const bodyRifle = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.14, 0.6), matGun);
+                const magRifle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.2, 0.1), matGun);
+                magRifle.position.set(0, -0.12, 0);
+                this.rifleMesh.add(bodyRifle, magRifle);
+
+                // Crowbar Mesh (Red shaft with curved silver claw tip)
+                this.crowbarMesh = new THREE.Group();
+                const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.55), matRedMetal);
+                shaft.position.set(0, 0.18, 0);
+                const claw = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.12, 0.08), matSteel);
+                claw.position.set(0, 0.42, -0.03);
+                claw.rotation.x = -Math.PI / 4;
+                this.crowbarMesh.add(shaft, claw);
+                this.crowbarMesh.rotation.x = Math.PI / 3.2;
+
+                this.weaponMeshes = {
+                    crowbar: this.crowbarMesh,
+                    pistol: this.pistolMesh,
+                    shotgun: this.shotgunMesh,
+                    rifle: this.rifleMesh
+                };
+
+                Object.values(this.weaponMeshes).forEach(mesh => {
+                    mesh.visible = false;
+                    this.weaponGroup.add(mesh);
+                });
+
+                this.updateWeaponVisuals();
+            }
+
+            updateWeaponVisuals() {
+                Object.keys(this.weaponMeshes).forEach(key => {
+                    this.weaponMeshes[key].visible = (key === this.currentWeaponKey);
+                });
+            }
+
+            update(delta, obstacles) {
+                // Rotation
+                const sensitivity = 0.0022;
+                this.yaw -= input.mouseDeltaX * sensitivity;
+                this.pitch -= input.mouseDeltaY * sensitivity;
+                this.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, this.pitch));
+
+                this.cameraGroup.position.copy(this.position);
+                this.cameraGroup.rotation.y = this.yaw;
+                camera.rotation.x = this.pitch;
+
+                // Flashlight update
+                flashlight.position.copy(this.position);
+                const dir = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
+                flashlight.target.position.copy(this.position).add(dir.multiplyScalar(10));
+
+                // Weapon Cool & Reload
+                if (this.weaponCoolTimer > 0) this.weaponCoolTimer -= delta;
+                if (this.isReloading) {
+                    this.reloadTimer -= delta;
+                    if (this.reloadTimer <= 0) {
+                        this.completeReload();
+                    }
+                }
+
+                // Stamina Recovery
+                if (!this.isDashing && this.stamina < this.maxStamina) {
+                    this.stamina = Math.min(this.maxStamina, this.stamina + CONFIG.player.staminaRegen * delta);
+                }
+
+                // Dash Cool
+                if (this.dashCooldownTimer > 0) this.dashCooldownTimer -= delta;
+
+                // Jump Input (Spacebar)
+                if (input.keys['Space'] && this.isGrounded) {
+                    this.velocityY = this.jumpForce;
+                    this.isGrounded = false;
+                    soundEngine.playSwing();
+                }
+
+                // Gravity & Vertical Position Check
+                this.position.y += this.velocityY * delta;
+                this.velocityY += this.gravity * delta;
+
+                // Calculate floor Y elevation (on ground vs on train bed)
+                let floorY = CONFIG.player.height;
+                const isPlayerOnTrain = (
+                    Math.abs(this.position.x - train.position.x) <= 2.2 &&
+                    this.position.z <= (train.position.z + 10.0) &&
+                    this.position.z >= (train.position.z - 7.5)
+                );
+                if (isPlayerOnTrain) {
+                    floorY = CONFIG.player.height + 0.9;
+                }
+
+                if (this.position.y <= floorY) {
+                    this.position.y = floorY;
+                    this.velocityY = 0;
+                    this.isGrounded = true;
+                }
+
+                // Movement Logic
+                const moveVector = new THREE.Vector3();
+                if (input.keys['KeyW']) moveVector.z -= 1;
+                if (input.keys['KeyS']) moveVector.z += 1;
+                if (input.keys['KeyA']) moveVector.x -= 1;
+                if (input.keys['KeyD']) moveVector.x += 1;
+                moveVector.normalize();
+
+                // Dodge / Dash Trigger
+                if (input.keys['ShiftLeft'] || input.keys['ShiftRight']) {
+                    if (!this.isDashing && this.dashCooldownTimer <= 0 && this.stamina >= CONFIG.player.dashStaminaCost) {
+                        this.isDashing = true;
+                        this.dashTimer = CONFIG.player.dashDuration;
+                        this.dashCooldownTimer = CONFIG.player.dashCooldown;
+                        this.stamina -= CONFIG.player.dashStaminaCost;
+
+                        // Dash direction
+                        this.dashDir.copy(moveVector.lengthSq() > 0 ? moveVector : new THREE.Vector3(0, 0, -1));
+                        this.dashDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+                        soundEngine.playSwing();
+                    }
+                }
+
+                // Movement Velocity
+                let speed = CONFIG.player.speed;
+                let moveDir = new THREE.Vector3();
+
+                if (this.isDashing) {
+                    this.dashTimer -= delta;
+                    speed = CONFIG.player.dashSpeed;
+                    moveDir.copy(this.dashDir);
+                    if (this.dashTimer <= 0) this.isDashing = false;
+                } else {
+                    moveDir.copy(moveVector).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+                }
+
+                // Apply movement with collision
+                const nextPos = this.position.clone().addScaledVector(moveDir, speed * delta);
+                
+                // Desert Map Boundary Check
+                nextPos.x = Math.max(-CONFIG.map.width / 2 + 2, Math.min(CONFIG.map.width / 2 - 2, nextPos.x));
+                nextPos.z = Math.max(-CONFIG.map.length + 10, Math.min(15, nextPos.z));
+
+                // Obstacle collision check (bounding boxes are cached on each
+                // obstacle the first time they're checked, since these props
+                // don't move — avoids recomputing Box3 for every obstacle every frame)
+                let canMove = true;
+                const playerRadius = CONFIG.player.radius;
+                for (let obs of obstacles) {
+                    if (!obs.userData.cachedBox) {
+                        obs.userData.cachedBox = new THREE.Box3().setFromObject(obs);
+                        obs.userData.cachedBox.expandByScalar(playerRadius);
+                    }
+                    if (obs.userData.cachedBox.containsPoint(nextPos)) {
+                        canMove = false;
+                        break;
+                    }
+                }
+
+                if (canMove) {
+                    this.position.x = nextPos.x;
+                    this.position.z = nextPos.z;
+                }
+
+                // Inventory & Weapon Switch Input (1-6)
+                if (input.keys['Digit1']) this.selectSlot(0);
+                if (input.keys['Digit2']) this.selectSlot(1);
+                if (input.keys['Digit3']) this.selectSlot(2);
+                if (input.keys['Digit4']) this.selectSlot(3);
+                if (input.keys['Digit5']) this.selectSlot(4);
+                if (input.keys['Digit6']) this.selectSlot(5);
+
+                // Reload Input
+                if (input.keys['KeyR'] && !this.isReloading) {
+                    this.startReload();
+                }
+
+                // Attack Input
+                if (input.isMouseDown && this.weaponCoolTimer <= 0 && !this.isReloading) {
+                    this.attack();
+                }
+            }
+
+            selectSlot(slotIndex) {
+                if (slotIndex < 0 || slotIndex >= 6) return;
+                const itemKey = this.inventory[slotIndex];
+                if (!itemKey) return;
+
+                if (this.weapons[itemKey]) {
+                    this.currentWeaponKey = itemKey;
+                    this.activeSlotIndex = slotIndex;
+                    this.isReloading = false;
+                    this.updateWeaponVisuals();
+                    soundEngine.playSwing();
+                    showToast(`무기 교체: ${this.weapons[itemKey].name}`);
+                    updateInventoryUI();
+                } else if (itemKey === 'corpse') {
+                    this.activeSlotIndex = slotIndex;
+                    showToast(`선택됨: 🧟 좀비 시체 (기차 화로 소모용)`);
+                    updateInventoryUI();
+                }
+            }
+
+            switchWeapon(key) {
+                if (this.currentWeaponKey !== key && this.weapons[key]) {
+                    if (!this.unlockedWeapons[key]) {
+                        showToast(`🔒 ${this.weapons[key].name}을(를) 아직 소지하고 있지 않습니다!`);
+                        return;
+                    }
+                    this.currentWeaponKey = key;
+                    this.isReloading = false;
+                    this.updateWeaponVisuals();
+                    soundEngine.playSwing();
+                    showToast(`무기 교체: ${this.weapons[key].name}`);
+                }
+            }
+
+            startReload() {
+                const w = this.weapons[this.currentWeaponKey];
+                if (w.type === 'melee' || w.clipAmmo === w.clipSize || w.reserveAmmo <= 0) return;
+                this.isReloading = true;
+                this.reloadTimer = w.reloadTime;
+                showToast('재장전 중...');
+            }
+
+            completeReload() {
+                const w = this.weapons[this.currentWeaponKey];
+                const needed = w.clipSize - w.clipAmmo;
+                const load = Math.min(needed, w.reserveAmmo);
+                w.clipAmmo += load;
+                w.reserveAmmo -= load;
+                this.isReloading = false;
+            }
+
+            attack() {
+                const w = this.weapons[this.currentWeaponKey];
+                this.weaponCoolTimer = w.fireRate;
+
+                // Animate recoil
+                this.weaponGroup.position.z = -0.35;
+                setTimeout(() => { this.weaponGroup.position.z = -0.5; }, 80);
+
+                if (w.type === 'melee') {
+                    soundEngine.playSwing();
+                    combatSystem.performMeleeAttack(this, w);
+                } else {
+                    if (w.clipAmmo <= 0) {
+                        this.startReload();
+                        return;
+                    }
+                    w.clipAmmo--;
+                    soundEngine.playGunshot(this.currentWeaponKey);
+                    effectsManager.spawnMuzzleFlash(this.position, camera.getWorldDirection(new THREE.Vector3()));
+                    combatSystem.performRangedAttack(this, w);
+                }
+            }
+
+            takeDamage(amount) {
+                this.hp = Math.max(0, this.hp - amount);
+                soundEngine.playHit();
+                
+                // Screen Hurt Vignette Flash
+                const hurtOverlay = document.getElementById('hurt-overlay');
+                hurtOverlay.style.opacity = '1';
+                setTimeout(() => { hurtOverlay.style.opacity = '0'; }, 200);
+
+                if (this.hp <= 0) {
+                    setGameState(GAME_STATE.GAMEOVER);
+                }
+            }
+        }
+
+        // ==========================================
+        // 7. ENVIRONMENT & MAP GENERATOR
+        // ==========================================
+        class MapManager {
+            constructor() {
+                this.obstacles = [];
+                this.interactables = [];
+                this.treasureHouses = [];
+                this.buildLinearMap();
+            }
+
+            buildLinearMap() {
+                // Giant Sand Ground Plane (12km coverage)
+                const groundGeo = new THREE.PlaneGeometry(1200, 12000, 32, 32);
+                const sandMat = new THREE.MeshStandardMaterial({ 
+                    color: 0xc2a677, 
+                    roughness: 0.95,
+                    metalness: 0.05
+                });
+                const ground = new THREE.Mesh(groundGeo, sandMat);
+                ground.rotation.x = -Math.PI / 2;
+                ground.position.set(0, 0, -CONFIG.map.length / 2);
+                ground.receiveShadow = true;
+                scene.add(ground);
+
+                // Desert Obstacles: Rock Formations & Wrecks
+                const rockMat = new THREE.MeshStandardMaterial({ color: 0x8c6d53, roughness: 0.9 });
+                const wreckMat = new THREE.MeshStandardMaterial({ color: 0x5a4d41, roughness: 0.7, metalness: 0.4 });
+                
+                // Distant Rock Pillars along desert horizon
+                for (let z = 20; z > -CONFIG.map.length; z -= 30) {
+                    const rockL = new THREE.Mesh(
+                        new THREE.DodecahedronGeometry(3 + Math.random() * 4), 
+                        rockMat
+                    );
+                    rockL.position.set(-CONFIG.map.width / 2 - (Math.random() * 25), 1.5 + Math.random(), z);
+                    rockL.rotation.set(Math.random(), Math.random(), Math.random());
+                    scene.add(rockL);
+
+                    const rockR = new THREE.Mesh(
+                        new THREE.DodecahedronGeometry(3 + Math.random() * 4), 
+                        rockMat
+                    );
+                    rockR.position.set(CONFIG.map.width / 2 + (Math.random() * 25), 1.5 + Math.random(), z);
+                    rockR.rotation.set(Math.random(), Math.random(), Math.random());
+                    scene.add(rockR);
+                }
+
+                // Random Obstacles along the desert tracks (avoiding villages)
+                for (let z = -20; z > -CONFIG.map.length + 50; z -= 25) {
+                    // 마을 구역(2km, 4km, 6km, 8km, 10km) 및 보물 폐가(1km, 3km, 5km, 7km, 9km) 인근 장애물 스폰 방지
+                    const distToNearestVillage = Math.abs((z % 2000));
+                    if (distToNearestVillage < 80 || distToNearestVillage > 1920) continue;
+                    const distToHouseBand = Math.abs((z + 1000) % 2000);
+                    if (distToHouseBand < 28 || distToHouseBand > 1972) continue;
+
+                    let xOffset = (Math.random() - 0.5) * (CONFIG.map.width - 24);
+                    if (Math.abs(xOffset) < 5) {
+                        xOffset = xOffset >= 0 ? xOffset + 6 : xOffset - 6;
+                    }
+                    
+                    if (Math.random() > 0.4) {
+                        const car = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.5, 4.8), wreckMat);
+                        car.position.set(xOffset, 0.75, z);
+                        car.rotation.y = Math.random() * Math.PI;
+                        car.castShadow = true;
+                        car.receiveShadow = true;
+                        scene.add(car);
+                        this.obstacles.push(car);
+                    } else {
+                        const rockPillar = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 2.0, 3.5, 7), rockMat);
+                        rockPillar.position.set(xOffset, 1.75, z);
+                        rockPillar.castShadow = true;
+                        scene.add(rockPillar);
+                        this.obstacles.push(rockPillar);
+                    }
+                }
+
+                // 2km마다 성벽으로 둘러쌓인 작은 마을 생성 (2km, 4km, 6km, 8km, 10km)
+                for (let v = 1; v <= 5; v++) {
+                    const villageZ = -v * 2000;
+                    this.createWalledVillage(0, villageZ, v);
+                }
+
+                // 마을 사이(1/3/5/7/9km) 기차 경로 옆 보물 폐가
+                for (let i = 0; i < 5; i++) {
+                    const houseZ = -1000 - i * 2000;
+                    const houseX = (i % 2 === 0 ? 1 : -1) * 20;
+                    this.createTreasureHouse(houseX, houseZ, i);
+                }
+
+                // Final Evac Zone Marker at 10km (z = -10000)
+                this.createEvacZone(0, -10000);
+            }
+
+            createWalledVillage(centerX, centerZ, villageIndex) {
+                const wallMat = new THREE.MeshStandardMaterial({ color: 0x3d3e42, roughness: 0.8 });
+                const houseMat = new THREE.MeshStandardMaterial({ color: 0x6e5c4f, roughness: 0.9 });
+                const roofMat = new THREE.MeshStandardMaterial({ color: 0x8b3a3a, roughness: 0.6 });
+                const woodMat = new THREE.MeshStandardMaterial({ color: 0x4a3525, roughness: 0.8 });
+
+                const wallHeight = 5.0;
+                const wallThick = 2.0;
+                const halfW = 24.0;
+                const halfD = 24.0;
+
+                // 1. 성벽 생성 (기차가 지나갈 수 있도록 북쪽/남쪽 벽 중앙에 7m 폭의 대문 개포구 확보)
+                // 남쪽 성벽 (지진 진입부)
+                const southWallL = new THREE.Mesh(new THREE.BoxGeometry(halfW - 3.5, wallHeight, wallThick), wallMat);
+                southWallL.position.set(centerX - (halfW + 3.5) / 2, wallHeight / 2, centerZ + halfD);
+                const southWallR = new THREE.Mesh(new THREE.BoxGeometry(halfW - 3.5, wallHeight, wallThick), wallMat);
+                southWallR.position.set(centerX + (halfW + 3.5) / 2, wallHeight / 2, centerZ + halfD);
+
+                // 북쪽 성벽 (기차 출구부)
+                const northWallL = new THREE.Mesh(new THREE.BoxGeometry(halfW - 3.5, wallHeight, wallThick), wallMat);
+                northWallL.position.set(centerX - (halfW + 3.5) / 2, wallHeight / 2, centerZ - halfD);
+                const northWallR = new THREE.Mesh(new THREE.BoxGeometry(halfW - 3.5, wallHeight, wallThick), wallMat);
+                northWallR.position.set(centerX + (halfW + 3.5) / 2, wallHeight / 2, centerZ - halfD);
+
+                // 동쪽/서쪽 측면 성벽 (완전 차단)
+                const eastWall = new THREE.Mesh(new THREE.BoxGeometry(wallThick, wallHeight, halfD * 2), wallMat);
+                eastWall.position.set(centerX + halfW, wallHeight / 2, centerZ);
+
+                const westWall = new THREE.Mesh(new THREE.BoxGeometry(wallThick, wallHeight, halfD * 2), wallMat);
+                westWall.position.set(centerX - halfW, wallHeight / 2, centerZ);
+
+                scene.add(southWallL, southWallR, northWallL, northWallR, eastWall, westWall);
+                this.obstacles.push(southWallL, southWallR, northWallL, northWallR, eastWall, westWall);
+
+                // 2. 모서리 감시 망루 4개 (Watchtowers)
+                const corners = [
+                    [centerX - halfW, centerZ - halfD],
+                    [centerX + halfW, centerZ - halfD],
+                    [centerX - halfW, centerZ + halfD],
+                    [centerX + halfW, centerZ + halfD]
+                ];
+                corners.forEach(([cx, cz]) => {
+                    const tower = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.2, wallHeight + 2, 8), wallMat);
+                    tower.position.set(cx, (wallHeight + 2) / 2, cz);
+                    scene.add(tower);
+                    this.obstacles.push(tower);
+
+                    // 망루 조명
+                    const torch = new THREE.PointLight(0xf59e0b, 2.0, 20);
+                    torch.position.set(cx, wallHeight + 2.5, cz);
+                    scene.add(torch);
+                    streetLights.push(torch);
+                });
+
+                // 3. 마을 내부 건물 (Small Houses)
+                const houseOffsets = [
+                    [-12, -10], [12, -10],
+                    [-12, 10],  [12, 10]
+                ];
+                houseOffsets.forEach(([ox, oz]) => {
+                    const houseGroup = new THREE.Group();
+                    const bldg = new THREE.Mesh(new THREE.BoxGeometry(6.0, 3.2, 6.0), houseMat);
+                    bldg.position.set(centerX + ox, 1.6, centerZ + oz);
+                    bldg.castShadow = true;
+
+                    const roof = new THREE.Mesh(new THREE.ConeGeometry(5.0, 2.0, 4), roofMat);
+                    roof.position.set(centerX + ox, 4.2, centerZ + oz);
+                    roof.rotation.y = Math.PI / 4;
+
+                    scene.add(bldg, roof);
+                    this.obstacles.push(bldg);
+                });
+
+                // 4. 안전지대 작업대 (Safezone Workbench) 설치
+                this.createWorkbench(centerX - 8, centerZ - 2);
+
+                // 4.5 안전지대 무기 상점 (Weapon Shop) 설치
+                this.createShop(centerX + 8, centerZ - 2);
+
+                // 5. 마을 내부 보급품 드랍
+                for (let i = 0; i < 3; i++) {
+                    const dropX = centerX + (Math.random() > 0.5 ? 8 : -8) + (Math.random() - 0.5) * 4;
+                    const dropZ = centerZ + (Math.random() - 0.5) * 16;
+                    itemManager.spawnRandomDrop(dropX, dropZ);
+                }
+            }
+
+            createWorkbench(x, z) {
+                const benchGroup = new THREE.Group();
+                const table = new THREE.Mesh(
+                    new THREE.BoxGeometry(2.5, 1.0, 1.2),
+                    new THREE.MeshStandardMaterial({ color: 0xd97706 })
+                );
+                table.position.set(x, 0.5, z);
+                benchGroup.add(table);
+
+                const signLight = new THREE.PointLight(0xd97706, 2, 8);
+                signLight.position.set(x, 2, z);
+                benchGroup.add(signLight);
+
+                scene.add(benchGroup);
+                this.obstacles.push(table);
+
+                this.interactables.push({
+                    type: 'workbench',
+                    position: new THREE.Vector3(x, 0.5, z),
+                    radius: 3.0
+                });
+            }
+
+            createShop(x, z) {
+                const shopGroup = new THREE.Group();
+                const stall = new THREE.Mesh(
+                    new THREE.BoxGeometry(2.5, 1.0, 1.2),
+                    new THREE.MeshStandardMaterial({ color: 0x15803d })
+                );
+                stall.position.set(x, 0.5, z);
+                shopGroup.add(stall);
+
+                // 좌판 위 무기 진열대 표시용 작은 상자
+                const display = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.6, 0.3, 0.6),
+                    new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xfacc15, emissiveIntensity: 0.4 })
+                );
+                display.position.set(x, 1.15, z);
+                shopGroup.add(display);
+
+                const signLight = new THREE.PointLight(0x22c55e, 2, 8);
+                signLight.position.set(x, 2, z);
+                shopGroup.add(signLight);
+
+                scene.add(shopGroup);
+                this.obstacles.push(stall);
+
+                this.interactables.push({
+                    type: 'shop',
+                    position: new THREE.Vector3(x, 0.5, z),
+                    radius: 3.0
+                });
+            }
+
+            createTreasureHouse(centerX, centerZ, index) {
+                const houseMat = new THREE.MeshStandardMaterial({ color: 0x4a3728, roughness: 0.92 });
+                const roofMat = new THREE.MeshStandardMaterial({ color: 0x3f3f46, roughness: 0.7 });
+                const floorMat = new THREE.MeshStandardMaterial({ color: 0x292524, roughness: 1 });
+                const chestMat = new THREE.MeshStandardMaterial({
+                    color: 0xd97706,
+                    metalness: 0.55,
+                    roughness: 0.35,
+                    emissive: 0xf59e0b,
+                    emissiveIntensity: 0.6
+                });
+
+                const W = 8.5, D = 8.5, H = 3.5, T = 0.4, doorW = 3.2;
+                const towardTracks = centerX > 0 ? -1 : 1;
+
+                const floor = new THREE.Mesh(new THREE.BoxGeometry(W, 0.12, D), floorMat);
+                floor.position.set(centerX, 0.06, centerZ);
+                scene.add(floor);
+
+                const back = new THREE.Mesh(new THREE.BoxGeometry(T, H, D), houseMat);
+                back.position.set(centerX - towardTracks * (W / 2), H / 2, centerZ);
+
+                const side1 = new THREE.Mesh(new THREE.BoxGeometry(W, H, T), houseMat);
+                side1.position.set(centerX, H / 2, centerZ - D / 2);
+                const side2 = new THREE.Mesh(new THREE.BoxGeometry(W, H, T), houseMat);
+                side2.position.set(centerX, H / 2, centerZ + D / 2);
+
+                const frontLen = (D - doorW) / 2;
+                const front1 = new THREE.Mesh(new THREE.BoxGeometry(T, H, frontLen), houseMat);
+                front1.position.set(
+                    centerX + towardTracks * (W / 2),
+                    H / 2,
+                    centerZ - (doorW / 2 + frontLen / 2)
+                );
+                const front2 = new THREE.Mesh(new THREE.BoxGeometry(T, H, frontLen), houseMat);
+                front2.position.set(
+                    centerX + towardTracks * (W / 2),
+                    H / 2,
+                    centerZ + (doorW / 2 + frontLen / 2)
+                );
+
+                scene.add(back, side1, side2, front1, front2);
+                this.obstacles.push(back, side1, side2, front1, front2);
+
+                const roof = new THREE.Mesh(new THREE.BoxGeometry(W + 0.6, 0.3, D + 0.6), roofMat);
+                roof.position.set(centerX, H + 0.12, centerZ);
+                scene.add(roof);
+
+                const chestX = centerX - towardTracks * 2.4;
+                const chest = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.7, 0.75), chestMat);
+                chest.position.set(chestX, 0.4, centerZ);
+                scene.add(chest);
+
+                const glow = new THREE.PointLight(0xf59e0b, 2.4, 14);
+                glow.position.set(chestX, 1.5, centerZ);
+                scene.add(glow);
+
+                const beacon = new THREE.PointLight(0xfbbf24, 3.8, 45);
+                beacon.position.set(centerX, H + 2.4, centerZ);
+                scene.add(beacon);
+
+                const pole = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.08, 0.08, 2.2, 6),
+                    new THREE.MeshStandardMaterial({ color: 0xfbbf24, emissive: 0xf59e0b, emissiveIntensity: 0.8 })
+                );
+                pole.position.set(centerX, H + 1.3, centerZ);
+                scene.add(pole);
+
+                const interactable = {
+                    type: 'treasureChest',
+                    position: new THREE.Vector3(chestX, 0.4, centerZ),
+                    radius: 2.2,
+                    looted: false,
+                    houseIndex: index,
+                    chestMesh: chest,
+                    glow
+                };
+                this.interactables.push(interactable);
+
+                this.treasureHouses.push({
+                    x: centerX,
+                    z: centerZ,
+                    index,
+                    warned: false,
+                    interactable
+                });
+            }
+
+            resetTreasureChests() {
+                this.treasureHouses.forEach(h => {
+                    h.warned = false;
+                    const chest = h.interactable;
+                    chest.looted = false;
+                    if (chest.chestMesh && chest.chestMesh.material) {
+                        chest.chestMesh.material.emissiveIntensity = 0.6;
+                    }
+                    if (chest.glow) chest.glow.intensity = 2.4;
+                });
+            }
+
+            createEvacZone(x, z) {
+                const evacZoneGeo = new THREE.CylinderGeometry(6, 6, 0.1, 32);
+                const evacMat = new THREE.MeshBasicMaterial({ color: 0xdc2626, wireframe: true });
+                const evacZone = new THREE.Mesh(evacZoneGeo, evacMat);
+                evacZone.position.set(x, 0.05, z);
+                scene.add(evacZone);
+
+                const beacon = new THREE.PointLight(0xdc2626, 3, 20);
+                beacon.position.set(x, 3, z);
+                scene.add(beacon);
+
+                this.evacPosition = new THREE.Vector3(x, 0, z);
+            }
+        }
+
+        // ==========================================
+        // 7.5 TRAIN VEHICLE & RAILWAY SYSTEM
+        // ==========================================
+        class Train {
+            constructor() {
+                this.position = new THREE.Vector3(0, 0, CONFIG.train.zStart);
+                this.speed = CONFIG.train.speed;
+                this.isRunning = false;
+                this.fuel = 60; // 초기 연료량
+                this.maxFuel = CONFIG.train.maxFuel;
+                this.autoStoppedVillages = new Set(); // 자동 정지 처리된 마을 인덱스 기록
+                this.mesh = new THREE.Group();
+
+                this.buildTrainMesh();
+                this.buildRailwayTracks();
+
+                scene.add(this.mesh);
+            }
+
+            buildTrainMesh() {
+                const matBody = new THREE.MeshStandardMaterial({ color: 0x27272a, roughness: 0.5, metalness: 0.8 });
+                const matDark = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.8 });
+                const matRed = new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.4, metalness: 0.6 });
+                const railMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.3 });
+
+                // Locomotive Body
+                const engine = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.6, 5.5), matBody);
+                engine.position.set(0, 2.0, -1.0);
+                engine.castShadow = true;
+                this.mesh.add(engine);
+
+                // Boiler Cylinder
+                const boiler = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 4.8, 16), matDark);
+                boiler.rotation.x = Math.PI / 2;
+                boiler.position.set(0, 2.3, -4.5);
+                boiler.castShadow = true;
+                this.mesh.add(boiler);
+
+                // 🔥 Boiler Furnace / Firebox (기차 화로 구조물)
+                const furnaceGroup = new THREE.Group();
+                const furnaceBody = new THREE.Mesh(
+                    new THREE.BoxGeometry(1.4, 1.5, 1.2),
+                    new THREE.MeshStandardMaterial({ color: 0x1c1917, roughness: 0.9 })
+                );
+                furnaceBody.position.set(0, 1.55, 1.2);
+                
+                // Furnace Fireplace Glowing Door
+                const fireGlowMat = new THREE.MeshBasicMaterial({ color: 0xf97316 });
+                const furnaceDoor = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.6), fireGlowMat);
+                furnaceDoor.position.set(0, 1.5, 1.81);
+                
+                // Furnace Interior Fire Light
+                this.furnaceLight = new THREE.PointLight(0xeab308, 2.5, 6);
+                this.furnaceLight.position.set(0, 1.6, 1.9);
+
+                furnaceGroup.add(furnaceBody, furnaceDoor, this.furnaceLight);
+                this.mesh.add(furnaceGroup);
+
+                // Local furnace center position for interaction
+                this.furnaceOffset = new THREE.Vector3(0, 1.5, 1.2);
+
+                // Armored Front Cowcatcher
+                const wedge = new THREE.Mesh(new THREE.ConeGeometry(1.8, 1.4, 4), matRed);
+                wedge.rotation.x = Math.PI / 2;
+                wedge.rotation.y = Math.PI / 4;
+                wedge.position.set(0, 0.8, -7.2);
+                this.mesh.add(wedge);
+
+                // Chimney Stack
+                const chimney = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 1.2), matDark);
+                chimney.position.set(0, 3.8, -5.5);
+                this.mesh.add(chimney);
+
+                // Flatbed Wagon
+                const flatbed = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.6, 8.0), matDark);
+                flatbed.position.set(0, 0.9, 5.5);
+                flatbed.receiveShadow = true;
+                flatbed.castShadow = true;
+                this.mesh.add(flatbed);
+
+                // Flatbed Safety Railings
+                const railL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.9, 8.0), railMat);
+                railL.position.set(-1.75, 1.6, 5.5);
+                const railR = railL.clone();
+                railR.position.x = 1.75;
+                this.mesh.add(railL, railR);
+
+                // Train Front Headlight
+                this.headlight = new THREE.SpotLight(0xfffaed, 4, 45, Math.PI / 5, 0.3, 1);
+                this.headlight.position.set(0, 2.8, -7.0);
+                this.headlightTarget = new THREE.Object3D();
+                this.headlightTarget.position.set(0, 1.0, -30.0);
+                this.mesh.add(this.headlight);
+                this.mesh.add(this.headlightTarget);
+                this.headlight.target = this.headlightTarget;
+
+                this.mesh.position.copy(this.position);
+            }
+
+            getFurnaceWorldPosition() {
+                return this.position.clone().add(this.furnaceOffset);
+            }
+
+            buildRailwayTracks() {
+                const trackGroup = new THREE.Group();
+                const tieMat = new THREE.MeshStandardMaterial({ color: 0x3f2e21, roughness: 0.9 });
+                const railMat = new THREE.MeshStandardMaterial({ color: 0x71717a, metalness: 0.9, roughness: 0.2 });
+
+                // Steel Rails along Z axis (10,500m length)
+                const railL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.2, 10500), railMat);
+                railL.position.set(-1.2, 0.1, -5000);
+                const railR = railL.clone();
+                railR.position.x = 1.2;
+                trackGroup.add(railL, railR);
+
+                // Wooden Ties
+                for (let z = 30; z > -10200; z -= 2.5) {
+                    const tie = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.12, 0.45), tieMat);
+                    tie.position.set(0, 0.05, z);
+                    trackGroup.add(tie);
+                }
+                scene.add(trackGroup);
+            }
+
+            addFuel(amount) {
+                if (this.fuel >= this.maxFuel) return false;
+                this.fuel = Math.min(this.maxFuel, this.fuel + amount);
+                return true;
+            }
+
+            update(delta, player, zombies) {
+                const prevPos = this.position.clone();
+
+                // Furnace flickering light effect
+                if (this.furnaceLight) {
+                    this.furnaceLight.intensity = this.isRunning 
+                        ? 2.5 + Math.sin(performance.now() * 0.02) * 1.0 
+                        : (this.fuel > 0 ? 0.8 : 0.1);
+                }
+
+                // Fuel Consumption & Movement Logic
+                if (this.isRunning) {
+                    // Burn fuel while running
+                    this.fuel -= CONFIG.train.fuelBurnRate * delta;
+
+                    if (this.fuel <= 0) {
+                        this.fuel = 0;
+                        this.isRunning = false;
+                        showToast("⚠️ 연료가 바닥나 기차가 멈추었습니다! 화로에 연료를 투입하세요!");
+                    } else if (this.position.z > CONFIG.train.zEnd) {
+                        this.position.z -= this.speed * delta;
+
+                        // 2km 간격 성벽 마을 도착 시 자동 정지 (마을당 최초 1회)
+                        for (let v = 1; v <= 5; v++) {
+                            const villageZ = -v * 2000;
+                            if (!this.autoStoppedVillages.has(v) && Math.abs(this.position.z - villageZ) < 30) {
+                                this.isRunning = false;
+                                this.autoStoppedVillages.add(v);
+                                showToast(`🚉 ${v * 2}km 지점 성벽 마을에 도착하여 기차가 자동으로 정지했습니다!`);
+                                break;
+                            }
+                        }
+                    } else {
+                        this.isRunning = false;
+                        showToast("🚂 기차가 최종 목적지(구출 지점)에 도착했습니다!");
+                    }
+                }
+
+                this.mesh.position.copy(this.position);
+
+                // Delta movement vector
+                const moveDelta = new THREE.Vector3().subVectors(this.position, prevPos);
+
+                // Check if player is on the train wagon/engine
+                const isPlayerOnTrain = (
+                    Math.abs(player.position.x - this.position.x) <= 2.2 &&
+                    player.position.z <= (this.position.z + 10.0) &&
+                    player.position.z >= (this.position.z - 7.5) &&
+                    player.position.y >= 0.8
+                );
+
+                if (isPlayerOnTrain && moveDelta.lengthSq() > 0) {
+                    player.position.add(moveDelta);
+                }
+
+                // Train crush damage logic
+                if (this.isRunning) {
+                    const frontPos = this.position.clone().add(new THREE.Vector3(0, 0.8, -7.5));
+                    zombies.forEach(z => {
+                        if (!z.isDead && z.mesh.position.distanceTo(frontPos) < 3.2) {
+                            z.takeDamage(1000, frontPos);
+                            showToast("💥 기차가 좀비를 짓밟고 돌진합니다!");
+                        }
+                    });
+                }
+
+                // HUD Train Indicator & Fuel Bar
+                const trainHud = document.getElementById('train-hud');
+                const trainStatusText = document.getElementById('train-status-text');
+                const trainFuelBar = document.getElementById('train-fuel-bar');
+                const trainFuelText = document.getElementById('train-fuel-text');
+
+                if (trainHud) {
+                    const fuelPct = Math.max(0, Math.min(100, Math.floor((this.fuel / this.maxFuel) * 100)));
+                    if (trainFuelBar) trainFuelBar.style.width = `${fuelPct}%`;
+                    if (trainFuelText) trainFuelText.innerText = `${fuelPct}%`;
+
+                    if (this.isRunning) {
+                        trainHud.classList.remove('hidden');
+                        trainHud.classList.add('flex');
+                        trainStatusText.innerText = `🚂 기차 직진 운행 중 (남은 거리: ${Math.max(0, Math.floor(this.position.z - CONFIG.train.zEnd))}m)`;
+                    } else if (this.fuel <= 0) {
+                        trainHud.classList.remove('hidden');
+                        trainHud.classList.add('flex');
+                        trainStatusText.innerText = `⚠️ 연료 고갈 (정지됨)`;
+                    } else {
+                        trainHud.classList.add('hidden');
+                        trainHud.classList.remove('flex');
+                    }
+                }
+            }
+
+            toggleEngine() {
+                if (this.fuel <= 0) {
+                    showToast("❌ 연료가 없어 시동을 걸 수 없습니다! 화로에 연료를 넣으세요.");
+                    return;
+                }
+                this.isRunning = !this.isRunning;
+                if (this.isRunning) {
+                    showToast("🚂 기차 시동 완료! 목적지를 향해 직진합니다.");
+                    soundEngine.playPickup();
+                } else {
+                    showToast("🚂 기차 엔진 일시 정지.");
+                }
+            }
+
+            reset() {
+                this.position.set(0, 0, CONFIG.train.zStart);
+                this.mesh.position.copy(this.position);
+                this.fuel = 60;
+                this.isRunning = false;
+                this.autoStoppedVillages.clear();
+            }
+        }
+        const train = new Train();
+
+        // ==========================================
+        // 8. ZOMBIE ENEMY & AI
+        // ==========================================
+        class Zombie {
+            constructor(x, z, typeKey) {
+                this.typeKey = typeKey || pickZombieType(z);
+                const stats = CONFIG.zombieTypes[this.typeKey] || CONFIG.zombieTypes.walker;
+
+                this.hp = stats.hp;
+                this.maxHp = stats.hp;
+                this.speed = stats.speed + (Math.random() * 0.6 - 0.3);
+                this.attackDamage = stats.damage;
+                this.attackRange = stats.attackRange;
+                this.attackCooldownMax = stats.attackCooldown;
+                this.detectRadius = stats.detectRadius;
+                this.attackCooldown = 0;
+                this.isDead = false;
+                this.isCollected = false;
+                this.scale = stats.scale;
+
+                // 3D Procedural Zombie Model (종류별 색/크기)
+                this.mesh = new THREE.Group();
+                const matSkin = new THREE.MeshStandardMaterial({ color: stats.skin, roughness: 0.9 });
+                const matClothes = new THREE.MeshStandardMaterial({ color: stats.clothes, roughness: 0.8 });
+
+                const bodyW = this.typeKey === 'brute' ? 0.95 : (this.typeKey === 'runner' ? 0.45 : 0.6);
+                const bodyH = this.typeKey === 'brute' ? 1.15 : 1.0;
+                const body = new THREE.Mesh(new THREE.BoxGeometry(bodyW, bodyH, this.typeKey === 'brute' ? 0.45 : 0.3), matClothes);
+                body.position.y = this.typeKey === 'brute' ? 1.05 : 0.9;
+                
+                const headSize = this.typeKey === 'brute' ? 0.48 : 0.35;
+                const head = new THREE.Mesh(new THREE.BoxGeometry(headSize, headSize, headSize), matSkin);
+                head.position.y = this.typeKey === 'brute' ? 1.85 : 1.6;
+
+                const armL = new THREE.Mesh(new THREE.BoxGeometry(
+                    this.typeKey === 'brute' ? 0.28 : 0.18,
+                    this.typeKey === 'runner' ? 0.95 : 0.8,
+                    this.typeKey === 'brute' ? 0.28 : 0.18
+                ), matSkin);
+                armL.position.set(this.typeKey === 'brute' ? -0.62 : -0.4, this.typeKey === 'brute' ? 1.0 : 0.9, this.typeKey === 'runner' ? -0.45 : -0.3);
+                armL.rotation.x = this.typeKey === 'runner' ? -Math.PI / 1.8 : -Math.PI / 2.5;
+
+                const armR = armL.clone();
+                armR.position.x = -armL.position.x;
+
+                this.mesh.add(body, head, armL, armR);
+                this.mesh.scale.setScalar(this.scale);
+                this.mesh.position.set(x, 0, z);
+                scene.add(this.mesh);
+            }
+
+            update(delta, playerPos, playerInstance) {
+                if (this.isDead) return;
+
+                // 지면 고정: Y축 이동이 누적되면 좀비가 공중으로 날아감
+                this.mesh.position.y = 0;
+
+                if (this.attackCooldown > 0) this.attackCooldown -= delta;
+
+                const dx = playerPos.x - this.mesh.position.x;
+                const dz = playerPos.z - this.mesh.position.z;
+                const dist = Math.hypot(dx, dz);
+
+                // Detection range (XZ 평면 거리만 사용)
+                if (dist < this.detectRadius) {
+                    // Face player (같은 높이만 바라봐 상하 기울기/부양 방지)
+                    this.mesh.lookAt(playerPos.x, this.mesh.position.y, playerPos.z);
+
+                    // Move towards player on the ground
+                    if (dist > this.attackRange) {
+                        const dir = new THREE.Vector3(dx, 0, dz).normalize();
+                        this.mesh.position.addScaledVector(dir, this.speed * delta);
+                        this.mesh.position.y = 0;
+                        soundEngine.playZombieGrowl();
+                    } else if (this.attackCooldown <= 0) {
+                        // Attack
+                        playerInstance.takeDamage(this.attackDamage);
+                        this.attackCooldown = this.attackCooldownMax;
+                    }
+                }
+            }
+
+            takeDamage(damage, hitPoint) {
+                if (this.isDead) return;
+                this.hp -= damage;
+                soundEngine.playHit();
+                effectsManager.spawnBloodParticles(hitPoint || this.mesh.position);
+
+                // 플레이어 반대 방향으로만 수평 넉백 (공중으로 밀리지 않음)
+                const kb = new THREE.Vector3(
+                    this.mesh.position.x - player.position.x,
+                    0,
+                    this.mesh.position.z - player.position.z
+                );
+                if (kb.lengthSq() > 0.0001) {
+                    kb.normalize().multiplyScalar(0.3);
+                    this.mesh.position.add(kb);
+                }
+                this.mesh.position.y = 0;
+
+                if (this.hp <= 0) {
+                    this.die();
+                }
+            }
+
+            die() {
+                this.isDead = true;
+
+                // 쓰러지는 포즈 및 살짝 비틀어진 랜덤 회전 적용
+                this.mesh.rotation.x = Math.PI / 2;
+                this.mesh.rotation.z = (Math.random() - 0.5) * 0.6;
+                this.mesh.position.y = 0.15 * this.scale;
+
+                // 사망 연출을 위해 시체 색상을 어둡게 변경
+                this.mesh.traverse((child) => {
+                    if (child.isMesh && child.material) {
+                        child.material = child.material.clone();
+                        child.material.color.multiplyScalar(0.4);
+                    }
+                });
+
+                // 드랍 아이템 생성 (좀비 처치 시 동전 5~20개 드롭)
+                itemManager.spawnCoinDrop(this.mesh.position.x, this.mesh.position.z);
+
+                // 기존의 4초 후 scene.remove() 타이머를 제거하여 시체가 화면에 유지됨
+            }
+        }
+
+        // ==========================================
+        // 9. ITEM & DROP SYSTEM
+        // ==========================================
+        class ItemManager {
+            constructor() {
+                this.items = [];
+            }
+
+            spawnRandomDrop(x, z) {
+                const rand = Math.random();
+                let type = 'scrap';
+                let color = 0xf59e0b;
+
+                if (rand < 0.20) {
+                    type = 'ammo';
+                    color = 0x3b82f6;
+                } else if (rand < 0.35) {
+                    type = 'fuel';
+                    color = 0xeab308; // Fuel Canister Drop (Yellow/Orange)
+                } else if (rand < 0.50) {
+                    type = 'health';
+                    color = 0x10b981;
+                } else if (rand < 0.65) {
+                    const gunTypes = ['pistol', 'shotgun', 'rifle'];
+                    type = gunTypes[Math.floor(Math.random() * gunTypes.length)];
+                    color = 0xef4444;
+                }
+
+                this.createItemMesh(type, color, x, z);
+            }
+
+            // 좀비 처치 전용 드롭: 다른 아이템 없이 동전 5~20개만 지급
+            spawnCoinDrop(x, z) {
+                const amount = Math.floor(Math.random() * 16) + 5; // 5 ~ 20
+                this.createItemMesh('coin', 0xfacc15, x, z, { amount });
+            }
+
+            createItemMesh(type, color, x, z, extra) {
+                const geo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+                const mat = new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 0.5 });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(x, 0.3, z);
+                scene.add(mesh);
+
+                this.items.push({ type, mesh, position: mesh.position, ...(extra || {}) });
+            }
+
+            update(player) {
+                for (let i = this.items.length - 1; i >= 0; i--) {
+                    const item = this.items[i];
+                    item.mesh.rotation.y += 0.02;
+
+                    const dist = player.position.distanceTo(item.position);
+                    if (dist < 1.8) {
+                        // Pickup item
+                        if (item.type === 'coin') {
+                            player.scrap += item.amount;
+                            showToast(`🪙 돈 +${item.amount} 획득!`);
+                        } else if (item.type === 'scrap') {
+                            const amount = Math.floor(Math.random() * 5) + 3;
+                            player.scrap += amount;
+                            showToast(`돈 +${amount} 수집!`);
+                        } else if (item.type === 'fuel') {
+                            player.fuelCount = (player.fuelCount || 0) + 1;
+                            showToast(`⛽ 연료통 +1 획득! (보유: ${player.fuelCount}개)`);
+                        } else if (item.type === 'ammo') {
+                            Object.values(player.weapons).forEach(w => {
+                                if (w.type === 'ranged') w.reserveAmmo += w.clipSize;
+                            });
+                            showToast(`탄약 세트 획득!`);
+                        } else if (item.type === 'health') {
+                            player.hp = Math.min(player.maxHp, player.hp + 30);
+                            showToast(`체력 +30 회복!`);
+                        } else if (['pistol', 'shotgun', 'rifle'].includes(item.type)) {
+                            player.unlockedWeapons[item.type] = true;
+                            player.weapons[item.type].reserveAmmo += player.weapons[item.type].clipSize * 2;
+                            
+                            if (!player.inventory.includes(item.type)) {
+                                const emptyIndex = player.inventory.findIndex(slot => slot === null);
+                                if (emptyIndex !== -1) {
+                                    player.inventory[emptyIndex] = item.type;
+                                    player.selectSlot(emptyIndex);
+                                    showToast(`🔫 새 무기 획득: ${player.weapons[item.type].name}! 슬롯 ${emptyIndex + 1}에 장착되었습니다.`);
+                                }
+                            } else {
+                                showToast(`🔫 ${player.weapons[item.type].name} 탄약 보충!`);
+                            }
+                            updateInventoryUI();
+                        }
+                        soundEngine.playPickup();
+
+                        scene.remove(item.mesh);
+                        this.items.splice(i, 1);
+                    }
+                }
+            }
+        }
+        const itemManager = new ItemManager();
+
+        // ==========================================
+        // 10. COMBAT SYSTEM
+        // ==========================================
+        class CombatSystem {
+            constructor() {
+                this.raycaster = new THREE.Raycaster();
+            }
+
+            performMeleeAttack(player, weapon) {
+                const dmg = weapon.damage * (1 + player.upgradeDamageLvl * 0.2);
+                zombies.forEach(z => {
+                    if (!z.isDead) {
+                        const dist = player.position.distanceTo(z.mesh.position);
+                        if (dist <= weapon.range) {
+                            // Angle check
+                            const dirToZombie = new THREE.Vector3().subVectors(z.mesh.position, player.position).normalize();
+                            const lookDir = camera.getWorldDirection(new THREE.Vector3());
+                            if (dirToZombie.dot(lookDir) > 0.5) {
+                                z.takeDamage(dmg, z.mesh.position);
+                            }
+                        }
+                    }
+                });
+            }
+
+            performRangedAttack(player, weapon) {
+                const dmg = weapon.damage * (1 + player.upgradeDamageLvl * 0.2);
+                const pellets = weapon.pellets || 1;
+
+                // 카메라는 cameraGroup 자식이라 camera.position은 로컬 (0,0,0).
+                // 월드 좌표에서 쏘지 않으면 조준한 좀비에 레이가 안 맞음.
+                const rayOrigin = new THREE.Vector3();
+                camera.getWorldPosition(rayOrigin);
+
+                for (let p = 0; p < pellets; p++) {
+                    const rayDir = camera.getWorldDirection(new THREE.Vector3());
+
+                    // Spread for Shotgun
+                    if (weapon.spread) {
+                        rayDir.x += (Math.random() - 0.5) * weapon.spread;
+                        rayDir.y += (Math.random() - 0.5) * weapon.spread;
+                        rayDir.z += (Math.random() - 0.5) * weapon.spread;
+                        rayDir.normalize();
+                    }
+
+                    this.raycaster.set(rayOrigin, rayDir);
+                    this.raycaster.far = weapon.range || 60;
+                    const zMeshes = zombies.filter(z => !z.isDead).map(z => z.mesh);
+                    const intersects = this.raycaster.intersectObjects(zMeshes, true);
+
+                    if (intersects.length > 0) {
+                        const hit = intersects[0];
+                        // 자식 메시(머리/몸/팔)부터 부모 그룹까지 올라가며 좀비 찾기
+                        let obj = hit.object;
+                        let hitZombie = null;
+                        while (obj) {
+                            hitZombie = zombies.find(z => z.mesh === obj);
+                            if (hitZombie) break;
+                            obj = obj.parent;
+                        }
+                        if (hitZombie) {
+                            hitZombie.takeDamage(dmg, hit.point);
+                        }
+                    }
+                }
+            }
+        }
+        const combatSystem = new CombatSystem();
+
+        // ==========================================
+        // 11. VISUAL EFFECTS MANAGER
+        // ==========================================
+        class EffectsManager {
+            constructor() {
+                this.particles = [];
+            }
+
+            spawnBloodParticles(pos) {
+                for (let i = 0; i < 8; i++) {
+                    const pGeo = new THREE.BoxGeometry(0.08, 0.08, 0.08);
+                    const pMat = new THREE.MeshBasicMaterial({ color: 0x990000 });
+                    const p = new THREE.Mesh(pGeo, pMat);
+                    p.position.copy(pos);
+                    p.velocity = new THREE.Vector3(
+                        (Math.random() - 0.5) * 4,
+                        Math.random() * 3,
+                        (Math.random() - 0.5) * 4
+                    );
+                    p.life = 0.3;
+                    scene.add(p);
+                    this.particles.push(p);
+                }
+            }
+
+            spawnMuzzleFlash(pos, dir) {
+                const light = new THREE.PointLight(0xffaa00, 4, 6);
+                light.position.copy(pos).addScaledVector(dir, 0.5);
+                scene.add(light);
+                setTimeout(() => scene.remove(light), 50);
+            }
+
+            update(delta) {
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    const p = this.particles[i];
+                    p.life -= delta;
+                    p.position.addScaledVector(p.velocity, delta);
+                    if (p.life <= 0) {
+                        scene.remove(p);
+                        this.particles.splice(i, 1);
+                    }
+                }
+            }
+        }
+        const effectsManager = new EffectsManager();
+
+        // ==========================================
+        // 12. INSTANTIATION & WAVE STATE LOGIC
+        // ==========================================
+        let player = new Player();
+        let mapManager = new MapManager();
+        let zombies = [];
+        let finalWaveTriggered = false;
+        let unlockedZombieAnnounces = { runner: false, brute: false };
+
+        // 두 마을(4km, 8km)을 지날 때마다 새 종류 해금
+        function pickZombieType(z) {
+            if (z <= -8000) {
+                const r = Math.random();
+                if (r < 0.30) return 'brute';
+                if (r < 0.75) return 'runner';
+                return 'walker';
+            }
+            if (z <= -4000) {
+                return Math.random() < 0.6 ? 'runner' : 'walker';
+            }
+            return 'walker';
+        }
+
+        function spawnZombie(x, z, typeKey) {
+            zombies.push(new Zombie(x, z, typeKey || pickZombieType(z)));
+        }
+
+        function generateTreasureLoot(houseIndex) {
+            const pool = CONFIG.treasurePool;
+            const count = 2 + Math.min(2, houseIndex) + (Math.random() < 0.45 ? 1 : 0);
+            const items = [];
+            for (let i = 0; i < count; i++) {
+                const bias = Math.min(pool.length - 1, houseIndex + Math.floor(Math.random() * 3));
+                const idx = Math.max(0, Math.min(pool.length - 1, bias - Math.floor(Math.random() * 2)));
+                items.push({ ...pool[idx] });
+            }
+            return items;
+        }
+
+        function spawnInitialZombies() {
+            zombies.forEach(z => scene.remove(z.mesh));
+            zombies = [];
+
+            // 10km 사막 코스에 좀비 배치 (폐가 바로 위는 전용 무리로 대체)
+            for (let z = -30; z > -9800; z -= 25) {
+                const count = Math.floor(Math.random() * 3) + 1;
+                for (let i = 0; i < count; i++) {
+                    const x = (Math.random() - 0.5) * (CONFIG.map.width - 6);
+                    const nearHouse = mapManager.treasureHouses.some(h => Math.hypot(x - h.x, z - h.z) < 14);
+                    if (nearHouse) continue;
+                    spawnZombie(x, z);
+                }
+            }
+
+            // 성벽 마을 내부(2km, 4km, 6km, 8km, 10km) 수비 좀비 무리 추가
+            for (let v = 1; v <= 5; v++) {
+                const villageZ = -v * 2000;
+                for (let k = 0; k < 8; k++) {
+                    const vx = (Math.random() - 0.5) * 36;
+                    const vz = villageZ + (Math.random() - 0.5) * 36;
+                    spawnZombie(vx, vz);
+                }
+            }
+
+            // 보물 폐가 주변/내부에 좀비 무리
+            mapManager.treasureHouses.forEach(h => {
+                const towardTracks = h.x > 0 ? -1 : 1;
+                const count = 12 + h.index * 2;
+                for (let i = 0; i < count; i++) {
+                    let zx, zz;
+                    if (i < 3) {
+                        zx = h.x + towardTracks * (Math.random() * 1.6);
+                        zz = h.z + (Math.random() - 0.5) * 3.2;
+                    } else {
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = 5 + Math.random() * 9;
+                        zx = h.x + Math.cos(angle) * r;
+                        zz = h.z + Math.sin(angle) * r;
+                    }
+                    spawnZombie(zx, zz);
+                }
+            });
+        }
+
+        function triggerFinalWave() {
+            finalWaveTriggered = true;
+            showToast("⚠️ 경고: 10km 최종 성벽 마을의 웨이브가 몰려옵니다! 모두 소탕하세요!");
+            
+            // Spawn Horde at Final Zone (후반 종류 위주)
+            for (let i = 0; i < 20; i++) {
+                const x = (Math.random() - 0.5) * (CONFIG.map.width - 4);
+                const z = -10010 + (Math.random() - 0.5) * 15;
+                const type = i < 8 ? 'brute' : (i < 16 ? 'runner' : 'walker');
+                spawnZombie(x, z, type);
+            }
+        }
+
+        function checkZombieTypeUnlocks() {
+            if (!unlockedZombieAnnounces.runner && player.position.z <= -3900) {
+                unlockedZombieAnnounces.runner = true;
+                showToast('⚠️ 두 마을을 통과했습니다! 새로운 좀비: 질주형 — 매우 빠릅니다!');
+            }
+            if (!unlockedZombieAnnounces.brute && player.position.z <= -7900) {
+                unlockedZombieAnnounces.brute = true;
+                showToast('⚠️ 네 마을을 통과했습니다! 새로운 좀비: 거대 좀비 — 체력과 공격력이 압도적입니다!');
+            }
+        }
+
+        function checkTreasureHouseWarning() {
+            mapManager.treasureHouses.forEach(h => {
+                if (h.warned) return;
+                const dist = Math.hypot(player.position.x - h.x, player.position.z - h.z);
+                if (dist < 60) {
+                    h.warned = true;
+                    showToast('🏚️ 좀비가 들끓는 폐가가 보입니다! 안에 보물이 있습니다.');
+                }
+            });
+        }
+
+        // ==========================================
+        // 13. UI & NOTIFICATION SYSTEM
+        // ==========================================
+        const ITEM_ICONS = {
+            crowbar: { icon: '🛠️', name: '빠루' },
+            pistol: { icon: '🔫', name: '권총' },
+            shotgun: { icon: '💥', name: '샷건' },
+            rifle: { icon: '🎯', name: '소총' },
+            corpse: { icon: '🧟', name: '시체' }
+        };
+
+        function updateInventoryUI() {
+            const container = document.getElementById('inventory-bar');
+            if (!container) return;
+            
+            let html = '';
+            for (let i = 0; i < 6; i++) {
+                const itemKey = player.inventory[i];
+                const isActive = (player.activeSlotIndex === i);
+                const activeStyle = isActive 
+                    ? 'border-amber-400 bg-amber-950/60 shadow-[0_0_12px_rgba(245,158,11,0.6)] scale-105 z-10' 
+                    : 'border-zinc-800 bg-zinc-900/80 opacity-70 hover:opacity-100';
+
+                if (itemKey && ITEM_ICONS[itemKey]) {
+                    const info = ITEM_ICONS[itemKey];
+                    html += `
+                        <div onclick="player.selectSlot(${i})" class="inventory-slot w-11 h-11 md:w-13 md:h-13 rounded-lg border-2 flex flex-col items-center justify-center relative cursor-pointer transition-all duration-150 select-none ${activeStyle}">
+                            <span class="absolute top-0.5 left-1 text-[10px] ${isActive ? 'text-amber-400 font-extrabold' : 'text-zinc-500 font-bold'}">${i + 1}</span>
+                            <span class="text-sm md:text-lg leading-none mt-1">${info.icon}</span>
+                            <span class="text-[9px] md:text-[10px] ${isActive ? 'text-amber-300 font-bold' : 'text-zinc-400'} truncate max-w-[42px] leading-tight mt-0.5">${info.name}</span>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div class="inventory-slot w-11 h-11 md:w-13 md:h-13 rounded-lg border flex flex-col items-center justify-center relative bg-zinc-950/40 border-zinc-800/60 opacity-40 select-none">
+                            <span class="absolute top-0.5 left-1 text-[10px] text-zinc-600 font-bold">${i + 1}</span>
+                            <span class="text-[9px] text-zinc-600 font-semibold">비어있음</span>
+                        </div>
+                    `;
+                }
+            }
+            container.innerHTML = html;
+        }
+
+        function updateDayNightCycle(delta) {
+            if (currentState !== GAME_STATE.PLAYING) return;
+            gameTime += delta;
+
+            // 3분(180초)마다 낮과 밤이 교차하도록 설정 (360초 주기 = 0초: 낮 시작 -> 180초: 밤 Peak -> 360초: 낮 Peak)
+            const cycleDuration = 360; 
+            const phase = (Math.cos((gameTime / cycleDuration) * Math.PI * 2) + 1) / 2; // 1 = 낮, 0 = 밤
+
+            // 배경 및 안개 부드러운 보간
+            scene.background.copy(NIGHT_COLOR.bg).lerp(DAY_COLOR.bg, phase);
+            scene.fog.color.copy(NIGHT_COLOR.fog).lerp(DAY_COLOR.fog, phase);
+            scene.fog.density = THREE.MathUtils.lerp(NIGHT_COLOR.fogDensity, DAY_COLOR.fogDensity, phase);
+
+            // 환경광 및 직사광(태양/달) 보간
+            ambientLight.color.copy(NIGHT_COLOR.ambientColor).lerp(DAY_COLOR.ambientColor, phase);
+            ambientLight.intensity = THREE.MathUtils.lerp(NIGHT_COLOR.ambientIntensity, DAY_COLOR.ambientIntensity, phase);
+
+            dirLight.color.copy(NIGHT_COLOR.dirColor).lerp(DAY_COLOR.dirColor, phase);
+            dirLight.intensity = THREE.MathUtils.lerp(NIGHT_COLOR.dirIntensity, DAY_COLOR.dirIntensity, phase);
+
+            // 태양/달 각도 궤적 이동
+            const angle = (gameTime / cycleDuration) * Math.PI * 2;
+            dirLight.position.x = Math.sin(angle) * 40;
+            dirLight.position.y = Math.cos(angle) * 40 + 10;
+
+            // 밤에 가로등 자동 점등
+            const streetLightVal = THREE.MathUtils.lerp(NIGHT_COLOR.streetLightIntensity, DAY_COLOR.streetLightIntensity, phase);
+            streetLights.forEach(light => {
+                light.intensity = streetLightVal;
+            });
+
+            // HUD 시간 텍스트 업데이트
+            const timeText = document.getElementById('time-text');
+            if (timeText) {
+                if (phase > 0.65) {
+                    timeText.innerText = "☀️ 낮";
+                    timeText.className = "text-base font-bold text-amber-400";
+                } else if (phase < 0.35) {
+                    timeText.innerText = "🌙 밤";
+                    timeText.className = "text-base font-bold text-indigo-400 animate-pulse";
+                } else {
+                    timeText.innerText = "🌅 황혼/여명";
+                    timeText.className = "text-base font-bold text-orange-400";
+                }
+            }
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast-message');
+            toast.innerText = msg;
+            toast.style.opacity = '1';
+            setTimeout(() => { toast.style.opacity = '0'; }, 2200);
+        }
+
+        function updateHUD() {
+            // HP & Stamina
+            document.getElementById('hp-bar').style.width = `${Math.max(0, (player.hp / player.maxHp) * 100)}%`;
+            document.getElementById('hp-text').innerText = `${Math.ceil(player.hp)} / ${player.maxHp}`;
+
+            document.getElementById('stamina-bar').style.width = `${Math.max(0, (player.stamina / player.maxStamina) * 100)}%`;
+            document.getElementById('stamina-text').innerText = `${Math.ceil(player.stamina)} / ${player.maxStamina}`;
+
+            document.getElementById('scrap-count').innerText = player.scrap;
+            document.getElementById('treasure-count').innerText = player.treasures.length;
+            document.getElementById('fuel-count').innerText = player.fuelCount || 0;
+
+            // Weapon & Ammo
+            const w = player.weapons[player.currentWeaponKey];
+            document.getElementById('weapon-name').innerText = w.name;
+            if (w.type === 'melee') {
+                document.getElementById('ammo-clip').innerText = '∞';
+                document.getElementById('ammo-reserve').innerText = '∞';
+            } else {
+                document.getElementById('ammo-clip').innerText = w.clipAmmo;
+                document.getElementById('ammo-reserve').innerText = w.reserveAmmo;
+            }
+
+            // Interaction Prompt Check (Workbench, Shop, Treasure Chest, Zombie Corpse, Train Furnace, OR Train Lever)
+            const prompt = document.getElementById('interaction-prompt');
+            let nearWorkbench = false;
+            let nearShop = false;
+            let nearChest = null;
+            mapManager.interactables.forEach(item => {
+                if (item.type === 'workbench' && player.position.distanceTo(item.position) < item.radius) {
+                    nearWorkbench = true;
+                } else if (item.type === 'shop' && player.position.distanceTo(item.position) < item.radius) {
+                    nearShop = true;
+                } else if (item.type === 'treasureChest' && !item.looted && player.position.distanceTo(item.position) < item.radius) {
+                    nearChest = item;
+                }
+            });
+
+            // Check near dead zombie corpse
+            let nearCorpse = null;
+            for (let z of zombies) {
+                if (z.isDead && !z.isCollected) {
+                    if (player.position.distanceTo(z.mesh.position) < 2.5) {
+                        nearCorpse = z;
+                        break;
+                    }
+                }
+            }
+
+            const furnaceWorldPos = train.getFurnaceWorldPosition();
+            const nearFurnace = (player.position.distanceTo(furnaceWorldPos) < 2.8);
+            const distToTrain = player.position.distanceTo(train.position);
+            const nearTrainLever = (distToTrain < 6.5 && !nearFurnace && !nearCorpse && !nearShop && !nearChest);
+
+            if (nearWorkbench) {
+                prompt.innerText = "[E] 키를 눌러 작업대 이용 (돈으로 업그레이드)";
+                prompt.classList.remove('hidden');
+                if (input.eKeyPressed && currentState === GAME_STATE.PLAYING) {
+                    openWorkbenchModal();
+                }
+            } else if (nearShop) {
+                prompt.innerText = "[E] 키를 눌러 마을 상점 (보물 판매 / 무기 구매)";
+                prompt.classList.remove('hidden');
+                if (input.eKeyPressed && currentState === GAME_STATE.PLAYING) {
+                    openShopModal();
+                }
+            } else if (nearChest) {
+                prompt.innerText = "[E] 보물 상자 열기";
+                prompt.classList.remove('hidden');
+                if (input.eKeyPressed && currentState === GAME_STATE.PLAYING) {
+                    lootTreasureChest(nearChest);
+                }
+            } else if (nearCorpse) {
+                prompt.innerText = "[E] 좀비 시체 수습 (인벤토리 추가)";
+                prompt.classList.remove('hidden');
+                if (input.eKeyPressed && currentState === GAME_STATE.PLAYING) {
+                    const emptyIdx = player.inventory.indexOf(null);
+                    if (emptyIdx !== -1) {
+                        player.inventory[emptyIdx] = 'corpse';
+                        nearCorpse.isCollected = true;
+                        scene.remove(nearCorpse.mesh);
+                        soundEngine.playPickup();
+                        showToast("🧟 좀비 시체를 획득했습니다! (화로 연료로 사용 가능)");
+                        updateInventoryUI();
+                    } else {
+                        showToast("❌ 인벤토리가 가득 차 시체를 주울 수 없습니다!");
+                    }
+                }
+            } else if (nearFurnace) {
+                const corpseCount = player.inventory.filter(x => x === 'corpse').length;
+                const fuelPct = Math.floor((train.fuel / train.maxFuel) * 100);
+                prompt.innerText = `[E] 화로 연료 투입 (시체: ${corpseCount}구(+5%) | 연료통: ${player.fuelCount || 0}개 | 화로: ${fuelPct}%)`;
+                prompt.classList.remove('hidden');
+
+                if (input.eKeyPressed && currentState === GAME_STATE.PLAYING) {
+                    if (train.fuel >= train.maxFuel) {
+                        showToast("🔥 화로에 연료가 이미 가득 차 있습니다!");
+                    } else if (player.inventory.includes('corpse')) {
+                        const corpseIdx = player.inventory.indexOf('corpse');
+                        player.inventory[corpseIdx] = null;
+                        train.addFuel(5);
+                        soundEngine.playPickup();
+                        showToast("🔥 좀비 시체를 화로에 넣어 연료 5%를 충전했습니다!");
+                        updateInventoryUI();
+                    } else if (player.fuelCount > 0) {
+                        player.fuelCount--;
+                        train.addFuel(CONFIG.train.fuelPerItem);
+                        soundEngine.playPickup();
+                        showToast(`🔥 화로에 연료통을 넣었습니다! (연료 +${CONFIG.train.fuelPerItem}%)`);
+                    } else if (player.scrap >= 5) {
+                        player.scrap -= 5;
+                        train.addFuel(20);
+                        soundEngine.playPickup();
+                        showToast("🔥 돈 5을 소모하여 대체 연료로 사용했습니다! (연료 +20%)");
+                    } else {
+                        showToast("❌ 연료가 부족합니다! (시체, 연료통 또는 돈 5 필요)");
+                    }
+                }
+            } else if (nearTrainLever) {
+                prompt.innerText = train.isRunning ? "[E] 키를 눌러 기차 정지" : "[E] 키를 눌러 기차 출발";
+                prompt.classList.remove('hidden');
+                if (input.eKeyPressed && currentState === GAME_STATE.PLAYING) {
+                    train.toggleEngine();
+                }
+            } else {
+                prompt.classList.add('hidden');
+            }
+
+            // Objective Text
+            const objText = document.getElementById('objective-text');
+            if (!finalWaveTriggered) {
+                const distKm = Math.max(0, (player.position.z - (-10000)) / 1000).toFixed(1);
+                const nextVillageKm = (Math.ceil((10 - distKm) / 2) * 2);
+                objText.innerText = `황무지 돌파 중 (남은 거리: ${distKm}km / 10km) | 다음 마을: ${nextVillageKm > 10 ? 10 : nextVillageKm}km | 폐가에서 보물을 챙기세요`;
+            } else {
+                const aliveZombies = zombies.filter(z => !z.isDead).length;
+                objText.innerText = `최종 탈출 지점! 잔여 좀비: ${aliveZombies}마리`;
+            }
+
+            updateInventoryUI();
+        }
+
+        // ==========================================
+        // 14. WORKBENCH & UPGRADE MODAL LOGIC
+        // ==========================================
+        function openWorkbenchModal() {
+            currentState = GAME_STATE.WORKBENCH;
+            document.exitPointerLock();
+            document.getElementById('upgrade-modal').classList.remove('hidden');
+            updateUpgradeModalUI();
+        }
+
+        function closeWorkbenchModal() {
+            document.getElementById('upgrade-modal').classList.add('hidden');
+            currentState = GAME_STATE.PLAYING;
+            document.body.requestPointerLock();
+        }
+
+        function updateUpgradeModalUI() {
+            document.getElementById('modal-scrap').innerText = player.scrap;
+            document.getElementById('lvl-damage').innerText = `현재 레벨: Lv.${player.upgradeDamageLvl}`;
+            document.getElementById('lvl-health').innerText = `현재 레벨: Lv.${player.upgradeHealthLvl}`;
+            document.getElementById('lvl-ammo').innerText = `현재 레벨: Lv.${player.upgradeAmmoLvl}`;
+        }
+
+        document.getElementById('btn-up-damage').addEventListener('click', () => {
+            const cost = 15;
+            if (player.scrap >= cost) {
+                player.scrap -= cost;
+                player.upgradeDamageLvl++;
+                soundEngine.playPickup();
+                updateUpgradeModalUI();
+                showToast('무기 공격력이 20% 강화되었습니다!');
+            } else {
+                showToast('돈이 부족합니다! 마을 상점에서 보물을 판매하세요.');
+            }
+        });
+
+        document.getElementById('btn-up-health').addEventListener('click', () => {
+            const cost = 10;
+            if (player.scrap >= cost) {
+                player.scrap -= cost;
+                player.upgradeHealthLvl++;
+                player.maxHp += 25;
+                player.hp = player.maxHp;
+                soundEngine.playPickup();
+                updateUpgradeModalUI();
+                showToast('최대 체력이 증가하고 완전히 회복되었습니다!');
+            } else {
+                showToast('돈이 부족합니다! 마을 상점에서 보물을 판매하세요.');
+            }
+        });
+
+        document.getElementById('btn-up-ammo').addEventListener('click', () => {
+            const cost = 12;
+            if (player.scrap >= cost) {
+                player.scrap -= cost;
+                player.upgradeAmmoLvl++;
+                Object.values(player.weapons).forEach(w => {
+                    if (w.type === 'ranged') {
+                        w.reserveAmmo += w.clipSize * 3;
+                    }
+                });
+                soundEngine.playPickup();
+                updateUpgradeModalUI();
+                showToast('모든 탄약이 완전 보충되었습니다!');
+            } else {
+                showToast('돈이 부족합니다! 마을 상점에서 보물을 판매하세요.');
+            }
+        });
+
+        document.getElementById('btn-close-upgrade').addEventListener('click', closeWorkbenchModal);
+
+        // ==========================================
+        // 14.5 WEAPON SHOP MODAL LOGIC
+        // ==========================================
+        const SHOP_ITEMS = {
+            pistol: { cost: 50, label: '권총' },
+            shotgun: { cost: 100, label: '샷건' }
+        };
+
+        function openShopModal() {
+            currentState = GAME_STATE.SHOP;
+            document.exitPointerLock();
+            document.getElementById('shop-modal').classList.remove('hidden');
+            updateShopModalUI();
+        }
+
+        function closeShopModal() {
+            document.getElementById('shop-modal').classList.add('hidden');
+            currentState = GAME_STATE.PLAYING;
+            document.body.requestPointerLock();
+        }
+
+        function updateShopModalUI() {
+            document.getElementById('shop-coin').innerText = player.scrap;
+            const treasureCount = player.treasures.length;
+            const treasureValue = player.treasures.reduce((sum, t) => sum + t.value, 0);
+            document.getElementById('shop-treasure-info').innerText =
+                `보유 보물 ${treasureCount}개 (예상 판매가: ${treasureValue})`;
+            document.getElementById('shop-treasure-list').innerText = treasureCount
+                ? player.treasures.map(t => `${t.icon} ${t.name}(${t.value})`).join(' · ')
+                : '판매할 보물이 없습니다. 기차 경로의 폐가에서 상자를 찾으세요.';
+
+            const sellBtn = document.getElementById('btn-sell-treasure');
+            sellBtn.disabled = treasureCount === 0;
+            if (treasureCount === 0) {
+                sellBtn.classList.add('opacity-40', 'cursor-not-allowed');
+            } else {
+                sellBtn.classList.remove('opacity-40', 'cursor-not-allowed');
+            }
+
+            ['pistol', 'shotgun'].forEach(key => {
+                const statusEl = document.getElementById(`shop-status-${key}`);
+                const btnEl = document.getElementById(`btn-buy-${key}`);
+                if (player.unlockedWeapons[key]) {
+                    statusEl.innerText = '보유 중 (구매 완료)';
+                    statusEl.className = 'text-xs text-emerald-400 font-semibold mt-1';
+                    btnEl.disabled = true;
+                    btnEl.classList.add('opacity-40', 'cursor-not-allowed');
+                    btnEl.classList.remove('bg-emerald-600', 'hover:bg-emerald-500');
+                } else {
+                    statusEl.innerText = '미보유';
+                    statusEl.className = 'text-xs text-zinc-500 font-semibold mt-1';
+                    btnEl.disabled = false;
+                    btnEl.classList.remove('opacity-40', 'cursor-not-allowed');
+                    btnEl.classList.add('bg-emerald-600', 'hover:bg-emerald-500');
+                }
+            });
+        }
+
+        function buyWeapon(key) {
+            const item = SHOP_ITEMS[key];
+            if (player.unlockedWeapons[key]) {
+                showToast(`이미 ${item.label}을(를) 보유하고 있습니다!`);
+                return;
+            }
+            if (player.scrap < item.cost) {
+                showToast(`돈이 부족합니다! (필요: ${item.cost}) 보물을 판매하세요.`);
+                return;
+            }
+
+            player.scrap -= item.cost;
+            player.unlockedWeapons[key] = true;
+
+            // 인벤토리 빈 슬롯에 장착
+            if (!player.inventory.includes(key)) {
+                const emptyIndex = player.inventory.findIndex(slot => slot === null);
+                if (emptyIndex !== -1) {
+                    player.inventory[emptyIndex] = key;
+                    player.selectSlot(emptyIndex);
+                }
+            }
+            updateInventoryUI();
+
+            soundEngine.playPickup();
+            updateShopModalUI();
+            showToast(`🔫 ${item.label}을(를) 구매했습니다!`);
+        }
+
+        function lootTreasureChest(chest) {
+            if (!chest || chest.looted) return;
+            chest.looted = true;
+            const loot = generateTreasureLoot(chest.houseIndex || 0);
+            player.treasures.push(...loot);
+            if (chest.chestMesh && chest.chestMesh.material) {
+                chest.chestMesh.material.emissiveIntensity = 0.05;
+            }
+            if (chest.glow) chest.glow.intensity = 0.15;
+            soundEngine.playPickup();
+            const names = loot.map(t => `${t.icon}${t.name}`).join(', ');
+            showToast(`💎 보물 획득! ${names} — 마을 상점에 판매하세요.`);
+        }
+
+        function sellAllTreasures() {
+            if (!player.treasures.length) {
+                showToast('판매할 보물이 없습니다!');
+                return;
+            }
+            const value = player.treasures.reduce((sum, t) => sum + t.value, 0);
+            const count = player.treasures.length;
+            player.scrap += value;
+            player.treasures = [];
+            soundEngine.playPickup();
+            updateShopModalUI();
+            showToast(`💰 보물 ${count}개를 팔아 돈 ${value}을 얻었습니다! 작업대에서 업그레이드하세요.`);
+        }
+
+        document.getElementById('btn-buy-pistol').addEventListener('click', () => buyWeapon('pistol'));
+        document.getElementById('btn-buy-shotgun').addEventListener('click', () => buyWeapon('shotgun'));
+        document.getElementById('btn-sell-treasure').addEventListener('click', sellAllTreasures);
+        document.getElementById('btn-close-shop').addEventListener('click', closeShopModal);
+
+        // ==========================================
+        // 15. STATE MACHINE & BUTTON BINDINGS
+        // ==========================================
+        function setGameState(state) {
+            currentState = state;
+            document.getElementById('start-screen').classList.add('hidden');
+            document.getElementById('gameover-screen').classList.add('hidden');
+            document.getElementById('clear-screen').classList.add('hidden');
+            document.getElementById('upgrade-modal').classList.add('hidden');
+            document.getElementById('shop-modal').classList.add('hidden');
+
+            if (state === GAME_STATE.PLAYING) {
+                document.body.requestPointerLock();
+            } else if (state === GAME_STATE.GAMEOVER) {
+                document.exitPointerLock();
+                document.getElementById('gameover-screen').classList.remove('hidden');
+            } else if (state === GAME_STATE.CLEAR) {
+                document.exitPointerLock();
+                document.getElementById('clear-screen').classList.remove('hidden');
+            }
+        }
+
+        function restartGame() {
+            gameTime = 0; // 낮 시간 초기화
+            player.reset();
+            train.reset();
+            mapManager.resetTreasureChests();
+            unlockedZombieAnnounces = { runner: false, brute: false };
+            spawnInitialZombies();
+            finalWaveTriggered = false;
+            setGameState(GAME_STATE.PLAYING);
+        }
+
+        document.getElementById('btn-start').addEventListener('click', () => {
+            soundEngine.init();
+            restartGame();
+        });
+
+        document.getElementById('btn-restart').addEventListener('click', restartGame);
+        document.getElementById('btn-clear-restart').addEventListener('click', restartGame);
+
+        // Resize Event
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // ==========================================
+        // 16. MAIN GAME LOOP
+        // ==========================================
+        let lastTime = performance.now();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const now = performance.now();
+            const delta = Math.min(0.1, (now - lastTime) / 1000); // Frame delta cap
+            lastTime = now;
+
+            if (currentState === GAME_STATE.PLAYING) {
+                // Update Day / Night Cycle
+                updateDayNightCycle(delta);
+
+                // Update Player
+                player.update(delta, mapManager.obstacles);
+
+                // Update Train Vehicle & Rails
+                train.update(delta, player, zombies);
+
+                // Update Zombies
+                zombies.forEach(z => z.update(delta, player.position, player));
+
+                checkZombieTypeUnlocks();
+                checkTreasureHouseWarning();
+
+                // Update Drops & Particles
+                itemManager.update(player);
+                effectsManager.update(delta);
+
+                // Check Final Evac Zone Trigger
+                if (!finalWaveTriggered && player.position.z <= mapManager.evacPosition.z + 5) {
+                    triggerFinalWave();
+                }
+
+                // Check Clear Condition
+                if (finalWaveTriggered) {
+                    const remainingZombies = zombies.filter(z => !z.isDead).length;
+                    if (remainingZombies === 0) {
+                        setGameState(GAME_STATE.CLEAR);
+                    }
+                }
+
+                // HUD Refresh
+                updateHUD();
+            }
+
+            // Input Delta Clean
+            input.resetFrameDeltas();
+
+            // Render 3D Scene
+            renderer.render(scene, camera);
+        }
+
+        // Start Application Loop on window load
+        window.onload = function() {
+            animate();
+        };
+    </script>
+</body>
+</html>
