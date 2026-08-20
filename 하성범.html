@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>저택의 비밀 - 공포 생존 게임</title>
+    <style>
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background-color: #050505;
+            font-family: 'Courier New', Courier, monospace; user-select: none;
+        }
+        #canvas-container { width: 100%; height: 100%; display: block; }
+        .screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(5, 5, 5, 0.95); display: flex; flex-direction: column;
+            justify-content: center; align-items: center; color: #d1d1d1; z-index: 10; text-align: center; padding: 20px; box-sizing: border-box;
+        }
+        .screen h1 { font-size: 2.5rem; color: #8b0000; margin-bottom: 10px; text-shadow: 0 0 10px rgba(139, 0, 0, 0.7); }
+        .screen p { max-width: 600px; line-height: 1.6; color: #a0a0a0; margin-bottom: 25px; }
+        .btn {
+            background: #1a1a1a; color: #e0e0e0; border: 1px solid #444;
+            padding: 12px 24px; font-size: 1.1rem; cursor: pointer; font-family: inherit; transition: all 0.2s;
+        }
+        .btn:hover { background: #8b0000; color: #fff; border-color: #b22222; }
+        #hud { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; display: none; }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 6px; height: 6px; background-color: rgba(255, 255, 255, 0.6); border-radius: 50%;
+        }
+        #interaction-prompt {
+            position: absolute; top: 58%; left: 50%; transform: translate(-50%, -50%);
+            color: #fff; background: rgba(0, 0, 0, 0.8); padding: 6px 14px; font-size: 0.95rem; border: 1px solid #555; display: none;
+        }
+        #hud-panel {
+            position: absolute; top: 20px; left: 20px; color: #ccc; font-size: 0.9rem;
+            background: rgba(0, 0, 0, 0.7); padding: 10px 15px; border-left: 3px solid #8b0000;
+        }
+        #stamina-container {
+            position: absolute; top: 20px; right: 20px; width: 150px; height: 15px;
+            background: rgba(0,0,0,0.7); border: 1px solid #444; padding: 2px;
+        }
+        #stamina-bar { width: 100%; height: 100%; background: #4caf50; transition: width 0.1s; }
+        #clue-log {
+            position: absolute; bottom: 20px; right: 20px; width: 300px; max-height: 150px;
+            background: rgba(0, 0, 0, 0.7); border: 1px solid #333; padding: 10px; color: #bbb; font-size: 0.8rem; overflow-y: auto;
+        }
+        #clue-log h4 { margin: 0 0 5px 0; color: #e06666; border-bottom: 1px solid #444; padding-bottom: 3px; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+</head>
+<body>
+
+    <div id="start-screen" class="screen">
+        <h1>저택의 비밀</h1>
+        <p>괴물이 당신을 쫓아옵니다! 옷장에 숨으면 괴물이 다시 돌아갑니다.<br><b>화염방사기</b>로 괴물을 완전히 쓰러뜨리거나 <b>열쇠</b>를 찾아 탈출하세요!<br><br><b>이동:</b> W,A,S,D | <b>달리기:</b> Shift | <b>발사:</b> 마우스 좌클릭 | <b>조사/줍기:</b> E | <b>문/옷장:</b> F</p>
+        <button class="btn" id="start-btn">게임 시작</button>
+    </div>
+
+    <div id="gameover-screen" class="screen" style="display: none;">
+        <h1 style="color: #b22222;">GAME OVER</h1>
+        <p>괴물에게 잡혔습니다...</p>
+        <button class="btn" id="restart-btn">다시 시도</button>
+    </div>
+
+    <div id="victory-screen" class="screen" style="display: none;">
+        <h1 style="color: #2e8b57;">VICTORY</h1>
+        <p id="victory-text">무사히 정문을 통해 저택을 탈출하셨습니다!</p>
+        <button class="btn" id="victory-restart-btn">다시 하기</button>
+    </div>
+
+    <div id="hud">
+        <div id="crosshair"></div>
+        <div id="interaction-prompt">[E] 조사하기</div>
+        <div id="hud-panel">
+            <div>목표: <span id="objective-text">괴물을 피하며 화염방사기와 열쇠를 찾으세요</span></div>
+            <div>소지품: <span id="inventory-text">없음</span></div>
+        </div>
+        <div id="stamina-container">
+            <div id="stamina-bar"></div>
+        </div>
+        <div id="clue-log">
+            <h4>수집한 단서 및 메모</h4>
+            <div id="clue-list">아직 단서가 없습니다.</div>
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script>
+        const CONFIG = {
+            walkSpeed: 2.2,       
+            runSpeed: 4.6,        
+            mouseSensitivity: 0.002,
+            monsterSpeed: 2.3,
+            fogColor: 0x0a0a0e,
+            viewDistance: 55
+        };
+
+        const GameState = {
+            current: 'START',
+            inventory: [],
+            clues: [],
+            hasMasterKey: false,
+            hasGun: false,
+            hiding: false,
+            stamina: 100,
+            maxStamina: 100,
+            isExhausted: false
+        };
+
+        class SoundSystem {
+            constructor() { this.ctx = null; }
+            init() { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+            playTone(freq, type, duration, vol = 0.1) {
+                if (!this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = type; osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                    gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+                    osc.connect(gain); gain.connect(this.ctx.destination);
+                    osc.start(); osc.stop(this.ctx.currentTime + duration);
+                } catch(e) {}
+            }
+            playClick() { this.playTone(700, 'triangle', 0.06, 0.12); }
+            playFire() { this.playTone(100, 'sawtooth', 0.3, 0.25); }
+        }
+        const sounds = new SoundSystem();
+
+        const input = { moveForward: false, moveBackward: false, moveLeft: false, moveRight: false, run: false };
+
+        window.addEventListener('keydown', (e) => {
+            if (GameState.current !== 'PLAYING') return;
+            switch(e.code) {
+                case 'KeyW': case 'ArrowUp': input.moveForward = true; break;
+                case 'KeyS': case 'ArrowDown': input.moveBackward = true; break;
+                case 'KeyA': case 'ArrowLeft': input.moveLeft = true; break;
+                case 'KeyD': case 'ArrowRight': input.moveRight = true; break;
+                case 'ShiftLeft': case 'ShiftRight': input.run = true; break;
+                case 'KeyE': triggerInteract(); break;
+                case 'KeyF': triggerActionF(); break;
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            switch(e.code) {
+                case 'KeyW': case 'ArrowUp': input.moveForward = false; break;
+                case 'KeyS': case 'ArrowDown': input.moveBackward = false; break;
+                case 'KeyA': case 'ArrowLeft': input.moveLeft = false; break;
+                case 'KeyD': case 'ArrowRight': input.moveRight = false; break;
+                case 'ShiftLeft': case 'ShiftRight': input.run = false; break;
+            }
+        });
+
+        window.addEventListener('mousedown', (e) => {
+            if (GameState.current === 'PLAYING' && GameState.hasGun && e.button === 0 && controls.isLocked) {
+                shootFlame();
+            }
+        });
+
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(CONFIG.fogColor);
+        scene.fog = new THREE.FogExp2(CONFIG.fogColor, 0.03);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, CONFIG.viewDistance);
+        camera.position.set(0, 1.6, 5);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.PointerLockControls(camera, renderer.domElement);
+
+        const ambientLight = new THREE.AmbientLight(0x222233, 1.0);
+        scene.add(ambientLight);
+
+        const flashlight = new THREE.SpotLight(0xfffaed, 3.5, 25, Math.PI / 3, 0.4, 1);
+        flashlight.position.set(0, 0, 0);
+        flashlight.castShadow = true;
+        camera.add(flashlight);
+        flashlight.target.position.set(0, 0, -1);
+        camera.add(flashlight.target);
+        scene.add(camera);
+
+        const playerWeaponGroup = new THREE.Group();
+        const gunBody = new THREE.Mesh(
+            new THREE.BoxGeometry(0.15, 0.15, 0.8),
+            new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.8 })
+        );
+        gunBody.position.set(0.3, -0.25, -0.5);
+        playerWeaponGroup.add(gunBody);
+
+        const flameMat = new THREE.MeshBasicMaterial({ color: 0xff4500, transparent: true, opacity: 0.8 });
+        const flameGeo = new THREE.ConeGeometry(0.5, 3, 8);
+        const flameMesh = new THREE.Mesh(flameGeo, flameMat);
+        flameMesh.rotation.x = Math.PI / 2;
+        flameMesh.position.set(0.3, -0.25, -2.0);
+        flameMesh.visible = false;
+        playerWeaponGroup.add(flameMesh);
+
+        playerWeaponGroup.visible = false;
+        camera.add(playerWeaponGroup);
+
+        const colliders = [];
+        const interactables = [];
+        const doors = [];
+        const hidingSpots = [];
+
+        function createMansion() {
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x221a14, roughness: 0.8 });
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x33333d, roughness: 0.9 });
+            const ceilingMat = new THREE.MeshStandardMaterial({ color: 0x111115, roughness: 1.0 });
+
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(32, 44), floorMat);
+            floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+
+            const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(32, 44), ceilingMat);
+            ceiling.rotation.x = Math.PI / 2; ceiling.position.y = 4; scene.add(ceiling);
+
+            function addWall(x, y, z, w, h, d, ry = 0) {
+                const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+                wall.position.set(x, y, z); wall.rotation.y = ry;
+                wall.castShadow = true; wall.receiveShadow = true;
+                scene.add(wall); colliders.push(wall);
+            }
+
+            addWall(-10, 2, -22, 12, 4, 0.6); 
+            addWall(10, 2, -22, 12, 4, 0.6);  
+            addWall(0, 2, 22, 32, 4, 0.6);   
+            addWall(-16, 2, 0, 0.6, 4, 44);  
+            addWall(16, 2, 0, 0.6, 4, 44);   
+
+            addWall(-6, 2, -6, 0.6, 4, 16);
+            addWall(6, 2, 6, 0.6, 4, 16);
+            addWall(-11, 2, 6, 10, 4, 0.6);
+            addWall(11, 2, -6, 10, 4, 0.6);
+
+            createEnvironmentProps();
+            createDoors();
+            createExitGate();
+        }
+
+        function createExitGate() {
+            const frameMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+            const doorMat = new THREE.MeshStandardMaterial({ color: 0x4a2e18, roughness: 0.5 });
+            const signMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+
+            const gateGroup = new THREE.Group();
+            gateGroup.position.set(0, 0, -22);
+
+            const leftPost = new THREE.Mesh(new THREE.BoxGeometry(0.8, 4, 0.8), frameMat);
+            leftPost.position.set(-2, 2, 0);
+            const rightPost = leftPost.clone(); rightPost.position.x = 2;
+            const topPost = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.8, 0.8), frameMat);
+            topPost.position.set(0, 3.8, 0);
+
+            const doorPanel = new THREE.Mesh(new THREE.BoxGeometry(3.6, 3.6, 0.2), doorMat);
+            doorPanel.position.set(0, 1.8, 0);
+
+            const sign = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.5, 0.1), signMat);
+            sign.position.set(0, 3.8, 0.5);
+
+            gateGroup.add(leftPost, rightPost, topPost, doorPanel, sign);
+            scene.add(gateGroup);
+
+            interactables.push({
+                type: 'exit',
+                position: new THREE.Vector3(0, 1.5, -21.5),
+                prompt: '[E] 정문으로 탈출하기 (저택 현관 열쇠 필요)',
+                action: () => tryEscape()
+            });
+        }
+
+        function createEnvironmentProps() {
+            const woodMat = new THREE.MeshStandardMaterial({ color: 0x4a3319, roughness: 0.7 });
+            const pillarMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.9 });
+
+            [-12, 12].forEach(x => {
+                [-12, 12].forEach(z => {
+                    const pillar = new THREE.Mesh(new THREE.BoxGeometry(1.2, 4, 1.2), pillarMat);
+                    pillar.position.set(x, 2, z);
+                    pillar.castShadow = true; scene.add(pillar);
+                    colliders.push(pillar);
+                });
+            });
+
+            const closetPositions = [
+                { x: -14, z: 16 }, { x: 14, z: -16 }, { x: -14, z: -16 }, { x: 14, z: 16 }
+            ];
+
+            closetPositions.forEach(pos => {
+                const closet = new THREE.Mesh(new THREE.BoxGeometry(2.2, 3.5, 1.5), woodMat);
+                closet.position.set(pos.x, 1.75, pos.z);
+                closet.castShadow = true; scene.add(closet);
+                colliders.push(closet);
+                hidingSpots.push({ x: pos.x, z: pos.z });
+
+                const frontZ = pos.z > 0 ? pos.z - 1.5 : pos.z + 1.5;
+                interactables.push({
+                    type: 'hiding',
+                    position: new THREE.Vector3(pos.x, 1.75, frontZ),
+                    prompt: '[F] 옷장 속에 숨기 / 나오기',
+                    action: () => toggleHiding()
+                });
+            });
+        }
+
+        function createDoors() {
+            const doorMat = new THREE.MeshStandardMaterial({ color: 0x5e3a21, roughness: 0.6 });
+            const doorConfigs = [
+                { x: -6, z: -2, ry: Math.PI / 2 },
+                { x: 6, z: 2, ry: Math.PI / 2 },
+                { x: -6, z: 10, ry: Math.PI / 2 },
+                { x: 6, z: -10, ry: Math.PI / 2 },
+                { x: 0, z: -6, ry: 0 }
+            ];
+
+            doorConfigs.forEach((conf) => {
+                const group = new THREE.Group();
+                group.position.set(conf.x, 0, conf.z);
+                group.rotation.y = conf.ry;
+
+                const panelGroup = new THREE.Group();
+                panelGroup.position.set(-0.9, 0, 0);
+
+                const doorMesh = new THREE.Mesh(new THREE.BoxGeometry(1.8, 3.2, 0.15), doorMat);
+                doorMesh.position.set(0.9, 1.6, 0);
+                doorMesh.castShadow = true;
+                panelGroup.add(doorMesh);
+                group.add(panelGroup);
+                scene.add(group);
+
+                const doorObj = {
+                    group: panelGroup,
+                    isOpen: false,
+                    position: new THREE.Vector3(conf.x, 1.5, conf.z),
+                    action: function() {
+                        this.isOpen = !this.isOpen;
+                        this.group.rotation.y = this.isOpen ? Math.PI / 1.8 : 0;
+                        sounds.playClick();
+                    }
+                };
+
+                doors.push(doorObj);
+                interactables.push({
+                    type: 'door',
+                    position: doorObj.position,
+                    prompt: '[F] 문 열기 / 닫기',
+                    action: () => doorObj.action()
+                });
+            });
+        }
+
+        function spawnItems() {
+            const possibleKeyLocations = [
+                { name: '서재 책상 서랍', pos: new THREE.Vector3(-13, 0.5, -10) },
+                { name: '거실 구석 협탁', pos: new THREE.Vector3(12, 0.5, 18) },
+                { name: '침실 협탁', pos: new THREE.Vector3(-12, 0.5, 18) },
+                { name: '복도 끝 탁자', pos: new THREE.Vector3(12, 0.5, -10) }
+            ];
+
+            const randomIndex = Math.floor(Math.random() * possibleKeyLocations.length);
+            const keyLoc = possibleKeyLocations[randomIndex];
+
+            const itemMat = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0x443300 });
+            const keyMesh = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), itemMat);
+            keyMesh.position.copy(keyLoc.pos);
+            keyMesh.castShadow = true; scene.add(keyMesh);
+
+            const keyItemData = { id: 'master_key', name: '저택 현관 열쇠', type: 'key', text: '북쪽 정문을 열 수 있는 열쇠다!' };
+            interactables.push({
+                type: 'item',
+                itemData: keyItemData,
+                position: keyLoc.pos,
+                prompt: `[E] 저택 현관 열쇠 줍기 (${keyLoc.name}에서 발견)`,
+                action: () => pickUpItem(keyItemData, keyMesh)
+            });
+
+            let gunIndex;
+            do {
+                gunIndex = Math.floor(Math.random() * possibleKeyLocations.length);
+            } while (gunIndex === randomIndex);
+            const gunLoc = possibleKeyLocations[gunIndex];
+
+            const gunMat = new THREE.MeshStandardMaterial({ color: 0x555555, metalness: 0.9 });
+            const gunFloorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.2, 0.3), gunMat);
+            gunFloorMesh.position.copy(gunLoc.pos);
+            gunFloorMesh.castShadow = true; scene.add(gunFloorMesh);
+
+            const gunItemData = { id: 'flame_gun', name: '화염방사기', type: 'gun', text: '괴물을 쓰러뜨릴 수 있는 강력한 무기다!' };
+            interactables.push({
+                type: 'item',
+                itemData: gunItemData,
+                position: gunLoc.pos,
+                prompt: `[E] 화염방사기 줍기 (${gunLoc.name}에서 발견)`,
+                action: () => pickUpItem(gunItemData, gunFloorMesh)
+            });
+
+            possibleKeyLocations.forEach((loc, idx) => {
+                if (idx !== randomIndex && idx !== gunIndex) {
+                    const noteMesh = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.3), new THREE.MeshStandardMaterial({ color: 0xcccccc }));
+                    noteMesh.position.copy(loc.pos);
+                    scene.add(noteMesh);
+                    const noteData = { id: `note_${idx}`, name: '오래된 메모', type: 'clue', text: `메모(${loc.name}): "여긴 아무것도 없다..."` };
+                    interactables.push({
+                        type: 'item',
+                        itemData: noteData,
+                        position: loc.pos,
+                        prompt: `[E] 오래된 메모 읽기`,
+                        action: () => pickUpItem(noteData, noteMesh)
+                    });
+                }
+            });
+        }
+
+        function pickUpItem(item, mesh) {
+            sounds.playClick();
+            scene.remove(mesh);
+            const idx = interactables.findIndex(i => i.itemData === item);
+            if (idx !== -1) interactables.splice(idx, 1);
+
+            GameState.inventory.push(item.name);
+            if (item.id === 'master_key') GameState.hasMasterKey = true;
+            if (item.id === 'flame_gun') {
+                GameState.hasGun = true;
+                playerWeaponGroup.visible = true;
+            }
+            if (item.type === 'clue') GameState.clues.push(item.text);
+
+            updateUI();
+            addLog(item.name, item.text);
+        }
+
+        function shootFlame() {
+            sounds.playFire();
+            flameMesh.visible = true;
+            setTimeout(() => { flameMesh.visible = false; }, 400);
+
+            if (monster && monsterData && !monsterData.isDead) {
+                const pPos = camera.position;
+                const mPos = monster.position;
+                const dist = mPos.distanceTo(pPos);
+
+                if (dist < 6.0) { // 사거리 안에 있으면 괴물을 쓰러뜨림
+                    collapseMonster();
+                }
+            }
+        }
+
+        function addLog(title, desc) {
+            const list = document.getElementById('clue-list');
+            if (list.innerHTML.includes('아직 단서가')) list.innerHTML = '';
+            const div = document.createElement('div');
+            div.style.marginBottom = '8px';
+            div.innerHTML = `<strong>- ${title}</strong><br><span style="color:#888;">${desc}</span>`;
+            list.appendChild(div);
+        }
+
+        function updateUI() {
+            document.getElementById('inventory-text').innerText = GameState.inventory.length > 0 ? GameState.inventory.join(', ') : '없음';
+            if (GameState.hasMasterKey && GameState.hasGun) {
+                document.getElementById('objective-text').innerText = '열쇠와 화염방사기 획득 완료! 정문으로 탈출하세요.';
+            } else if (GameState.hasGun) {
+                document.getElementById('objective-text').innerText = '화염방사기 획득! 괴물을 쓰러뜨리거나 열쇠를 찾으세요.';
+            } else if (GameState.hasMasterKey) {
+                document.getElementById('objective-text').innerText = '현관 열쇠 획득! 북쪽 정문으로 탈출하세요.';
+            }
+            if (GameState.hasMasterKey || GameState.hasGun) {
+                document.getElementById('objective-text').style.color = '#55ff55';
+            }
+        }
+
+        let monster;
+        const monsterData = {
+            mesh: null,
+            isDead: false,
+            state: 'chase', // 'chase' or 'patrol'
+            waypointIdx: 0,
+            waypoints: [
+                new THREE.Vector3(-10, 1, -15),
+                new THREE.Vector3(10, 1, -15),
+                new THREE.Vector3(10, 1, 15),
+                new THREE.Vector3(-10, 1, 15)
+            ]
+        };
+
+        function createMonster() {
+            const group = new THREE.Group();
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.4, emissive: 0x330000 });
+            
+            const torso = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.8, 0.5), bodyMat);
+            torso.position.y = 1.0; torso.castShadow = true; group.add(torso);
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), bodyMat);
+            head.position.y = 2.1; group.add(head);
+
+            const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            const eye1 = new THREE.Mesh(new THREE.SphereGeometry(0.06), eyeMat); eye1.position.set(0.15, 2.15, 0.35);
+            const eye2 = eye1.clone(); eye2.position.set(-0.15, 2.15, 0.35);
+            group.add(eye1); group.add(eye2);
+
+            group.position.set(0, 1, -12);
+            scene.add(group);
+            monsterData.mesh = group;
+            monster = group;
+        }
+
+        function updateMonster(delta) {
+            if (!monster || monsterData.isDead || GameState.current !== 'PLAYING') return;
+
+            const mPos = monster.position;
+
+            // 플레이어가 숨으면 순찰 모드로 전환하여 돌아감
+            if (GameState.hiding) {
+                monsterData.state = 'patrol';
+            } else {
+                monsterData.state = 'chase';
+            }
+
+            if (monsterData.state === 'chase') {
+                const pPos = camera.position;
+                const dir = new THREE.Vector3().subVectors(pPos, mPos).normalize();
+                dir.y = 0;
+                mPos.addScaledVector(dir, CONFIG.monsterSpeed * delta);
+                monster.lookAt(pPos.x, mPos.y, pPos.z);
+
+                // 플레이어와 가까워지면 게임 오버
+                if (mPos.distanceTo(pPos) < 1.3) {
+                    gameOver();
+                }
+            } else if (monsterData.state === 'patrol') {
+                // 원래 순찰 경로로 다시 이동
+                const targetWp = monsterData.waypoints[monsterData.waypointIdx];
+                const dir = new THREE.Vector3().subVectors(targetWp, mPos).normalize();
+                dir.y = 0;
+                mPos.addScaledVector(dir, (CONFIG.monsterSpeed * 0.8) * delta);
+                
+                if (mPos.distanceTo(targetWp) < 1.0) {
+                    monsterData.waypointIdx = (monsterData.waypointIdx + 1) % monsterData.waypoints.length;
+                }
+                monster.lookAt(targetWp.x, mPos.y, targetWp.z);
+            }
+        }
+
+        function collapseMonster() {
+            if (monsterData.isDead) return;
+            monsterData.isDead = true;
+            monster.rotation.x = Math.PI / 2;
+            monster.position.y = 0.3;
+            addLog('괴물 처치', '화염방사기로 괴물을 불태워 쓰러뜨렸습니다!');
+        }
+
+        function toggleHiding() {
+            GameState.hiding = !GameState.hiding;
+            const prompt = document.getElementById('interaction-prompt');
+            if (GameState.hiding) {
+                prompt.innerText = '옷장에 숨었습니다. [F]를 눌러 나오세요.';
+                camera.position.y = 1.0;
+            } else {
+                prompt.innerText = '[E] 조사하기';
+                camera.position.y = 1.6;
+            }
+        }
+
+        function triggerActionF() {
+            hidingSpots.forEach(spot => {
+                if (camera.position.distanceTo(new THREE.Vector3(spot.x, camera.position.y, spot.z)) < 2.5) {
+                    toggleHiding();
+                }
+            });
+        }
+
+        function triggerInteract() {
+            let closest = null;
+            let minDist = 2.5;
+            interactables.forEach(obj => {
+                const dist = camera.position.distanceTo(obj.position);
+                if (dist < minDist) { minDist = dist; closest = obj; }
+            });
+            if (closest) closest.action();
+        }
+
+        function tryEscape() {
+            if (GameState.hasMasterKey) {
+                victory();
+            } else {
+                alert('문이 잠겨 있습니다. [저택 현관 열쇠]를 먼저 찾으세요.');
+            }
+        }
+
+        function startGame() {
+            sounds.init();
+            document.getElementById('start-screen').style.display = 'none';
+            document.getElementById('hud').style.display = 'block';
+            controls.lock();
+            GameState.current = 'PLAYING';
+        }
+
+        function gameOver() {
+            GameState.current = 'GAMEOVER';
+            controls.unlock();
+            document.getElementById('hud').style.display = 'none';
+            document.getElementById('gameover-screen').style.display = 'flex';
+        }
+
+        function victory() {
+            GameState.current = 'VICTORY';
+            controls.unlock();
+            document.getElementById('hud').style.display = 'none';
+            document.getElementById('victory-screen').style.display = 'flex';
+        }
+
+        document.getElementById('start-btn').addEventListener('click', startGame);
+        document.getElementById('restart-btn').addEventListener('click', () => location.reload());
+        document.getElementById('victory-restart-btn').addEventListener('click', () => location.reload());
+
+        createMansion();
+        spawnItems();
+        createMonster();
+
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+
+            if (GameState.current === 'PLAYING') {
+                if (!GameState.hiding && controls.isLocked) {
+                    let isMoving = input.moveForward || input.moveBackward || input.moveLeft || input.moveRight;
+                    let isRunning = input.run && isMoving && !GameState.isExhausted;
+
+                    if (isRunning) {
+                        GameState.stamina = Math.max(0, GameState.stamina - 35 * delta);
+                        if (GameState.stamina === 0) GameState.isExhausted = true;
+                    } else {
+                        GameState.stamina = Math.min(GameState.maxStamina, GameState.stamina + 20 * delta);
+                        if (GameState.stamina > 30) GameState.isExhausted = false;
+                    }
+                    document.getElementById('stamina-bar').style.width = (GameState.stamina / GameState.maxStamina * 100) + '%';
+
+                    const currentSpeed = (isRunning ? CONFIG.runSpeed : CONFIG.walkSpeed) * delta;
+
+                    if (input.moveForward) controls.moveForward(currentSpeed);
+                    if (input.moveBackward) controls.moveForward(-currentSpeed);
+                    if (input.moveLeft) controls.moveRight(-currentSpeed);
+                    if (input.moveRight) controls.moveRight(currentSpeed);
+
+                    camera.position.x = Math.max(-15, Math.min(15, camera.position.x));
+                    camera.position.z = Math.max(-21, Math.min(21, camera.position.z));
+                }
+
+                updateMonster(delta);
+
+                let showPrompt = false;
+                interactables.forEach(obj => {
+                    if (camera.position.distanceTo(obj.position) < 2.5) {
+                        showPrompt = true;
+                        document.getElementById('interaction-prompt').innerText = obj.prompt;
+                    }
+                });
+                document.getElementById('interaction-prompt').style.display = showPrompt ? 'block' : 'none';
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
