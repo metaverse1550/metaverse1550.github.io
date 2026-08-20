@@ -214,6 +214,46 @@
             background: rgba(49, 46, 129, 0.55);
             border-left: 2px solid #818cf8;
         }
+        .chat-unread-badge {
+            min-width: 1.25rem;
+            height: 1.25rem;
+            padding: 0 0.3rem;
+            background: #f43f5e;
+            color: white;
+            font-size: 0.625rem;
+            font-weight: 900;
+            border-radius: 9999px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+            border: 2px solid #0f172a;
+            box-shadow: 0 0 10px rgba(244, 63, 94, 0.45);
+        }
+        .chat-unread-badge.pulse {
+            animation: chatBadgePulse 1.25s ease-in-out infinite;
+        }
+        @keyframes chatBadgePulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.55); }
+            50% { transform: scale(1.1); box-shadow: 0 0 0 5px rgba(244, 63, 94, 0); }
+        }
+        .admin-seat-unread-badge {
+            position: absolute;
+            top: -3px;
+            right: -2px;
+            min-width: 0.95rem;
+            height: 0.95rem;
+            padding: 0 0.2rem;
+            background: #f43f5e;
+            color: white;
+            font-size: 0.5rem;
+            font-weight: 900;
+            border-radius: 9999px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #0f172a;
+        }
     </style>
 </head>
 <body class="min-h-screen flex flex-col antialiased selection:bg-indigo-500 selection:text-white relative overflow-x-hidden">
@@ -225,7 +265,7 @@
         </button>
         <button onclick="toggleStudentChat()" id="seat-chat-btn" class="relative w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-black px-4 py-3 rounded-2xl shadow-2xl border border-white/10 flex items-center justify-center gap-2 transition-all transform hover:scale-[1.02] active:scale-95">
             <span class="text-lg">💬</span> <span class="text-sm">선생님과 채팅</span>
-            <span id="seat-chat-unread-badge" class="hidden absolute -top-1 -right-1 min-w-[1.25rem] h-5 px-1 bg-rose-500 text-white text-[10px] font-black rounded-full flex items-center justify-center">0</span>
+            <span id="seat-chat-unread-badge" class="chat-unread-badge hidden absolute -top-1 -right-1">0</span>
         </button>
         <div id="main-active-users-widget" class="bg-slate-950/90 border border-emerald-500/40 backdrop-blur-md px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-3 transition-all hover:scale-105">
             <span class="relative flex h-3 w-3 flex-shrink-0">
@@ -1046,9 +1086,10 @@
 
     <!-- 관리자 전용: 우하단 학생 1:1 채팅 (FAB → 패널) -->
     <div id="admin-chat-fab-root" class="fixed bottom-6 right-6 z-[10004] hidden">
-        <button type="button" id="admin-chat-fab-btn" onclick="window.toggleAdminChatPanel(true)" class="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-black px-4 py-3 rounded-2xl shadow-2xl border border-white/10 flex items-center gap-2 transition-all transform hover:scale-[1.03] active:scale-95">
+        <button type="button" id="admin-chat-fab-btn" onclick="window.toggleAdminChatPanel(true)" class="relative bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-black px-4 py-3 rounded-2xl shadow-2xl border border-white/10 flex items-center gap-2 transition-all transform hover:scale-[1.03] active:scale-95">
             <span class="text-lg">💬</span>
             <span class="text-sm">학생 채팅</span>
+            <span id="admin-chat-unread-badge" class="chat-unread-badge hidden absolute -top-1.5 -right-1.5">0</span>
         </button>
 
         <div id="admin-chat-panel" class="hidden flex-col w-[min(94vw,420px)] h-[min(75vh,540px)] bg-slate-950 border-2 border-indigo-500/45 rounded-2xl shadow-2xl overflow-hidden">
@@ -1158,11 +1199,16 @@
         const TOTAL_SEATS = 8;
         window.seatsCache = {};
         window.currentAdminChatSeat = null;
+        window.adminUnreadBySeat = {};
+        window.lastStudentUnreadCount = 0;
         window.pendingLocalToasts = new Set();
         let activityLogInitialized = false;
         let lastGamesFingerprint = null;
         let studentChatUnsub = null;
-        let adminChatUnsub = null;
+        let adminChatGlobalUnsub = null;
+        let lastAdminChatSnap = null;
+        let prevAdminUnreadTotal = null;
+        let studentChatSnapInitialized = false;
         let presenceInterval = null;
 
         window.refreshLucideIcons = function(rootEl) {
@@ -1228,7 +1274,7 @@
         window.showActivityToast = function(type, user, detail) {
             const container = document.getElementById("live-toast-container");
             if (!container) return;
-            const icons = { LIKE: "💖", COMMENT: "💬", PET_GACHA: "🎰" };
+            const icons = { LIKE: "💖", COMMENT: "💬", PET_GACHA: "🎰", CHAT: "💬" };
             const el = document.createElement("div");
             el.className = type === "PET_GACHA"
                 ? "toast-gacha-pull bg-slate-900/95 border rounded-xl px-3 py-2.5 shadow-xl text-xs backdrop-blur-md"
@@ -1387,16 +1433,192 @@
             if (label && seat) label.textContent = `${seat}번 자리`;
         }
 
-        function updateStudentUnreadBadge(count) {
-            const badge = document.getElementById("seat-chat-unread-badge");
-            if (!badge) return;
+        function showChatIncomingToast(fromLabel, detail) {
+            const key = `CHAT|${fromLabel}|${detail}`;
+            if (window.pendingLocalToasts.has(key)) return;
+            window.pendingLocalToasts.add(key);
+            window.showActivityToast("CHAT", fromLabel, detail);
+            setTimeout(() => window.pendingLocalToasts.delete(key), 6000);
+        }
+
+        function updateUnreadBadge(badgeEl, count, pulse) {
+            if (!badgeEl) return;
             if (count > 0) {
-                badge.textContent = count > 9 ? "9+" : String(count);
-                badge.classList.remove("hidden");
+                badgeEl.textContent = count > 9 ? "9+" : String(count);
+                badgeEl.classList.remove("hidden");
+                badgeEl.classList.toggle("pulse", !!pulse);
             } else {
-                badge.classList.add("hidden");
+                badgeEl.textContent = "0";
+                badgeEl.classList.add("hidden");
+                badgeEl.classList.remove("pulse");
             }
         }
+
+        function updateStudentUnreadBadge(count, pulse) {
+            updateUnreadBadge(document.getElementById("seat-chat-unread-badge"), count, pulse);
+        }
+
+        function updateAdminUnreadBadge(count, pulse) {
+            updateUnreadBadge(document.getElementById("admin-chat-unread-badge"), count, pulse);
+        }
+
+        function isStudentChatOpen() {
+            const panel = document.getElementById("student-chat-panel");
+            return !!(panel && panel.classList.contains("flex"));
+        }
+
+        function isAdminChatOpen() {
+            const panel = document.getElementById("admin-chat-panel");
+            return !!(panel && panel.classList.contains("flex"));
+        }
+
+        function countUnreadForStudent(snap, seat) {
+            let unread = 0;
+            snap.forEach(d => {
+                const m = d.data();
+                if (Number(m.seat) === Number(seat) && m.sender === "admin" && !m.readByStudent) unread++;
+            });
+            return unread;
+        }
+
+        function countUnreadForAdmin(snap) {
+            const bySeat = {};
+            snap.forEach(d => {
+                const m = d.data();
+                const seat = Number(m.seat);
+                if (seat >= 1 && seat <= TOTAL_SEATS && m.sender === "student" && !m.readByAdmin) {
+                    bySeat[seat] = (bySeat[seat] || 0) + 1;
+                }
+            });
+            return bySeat;
+        }
+
+        async function markStudentMessagesReadForSeat(seatNum, snap) {
+            const refs = [];
+            snap.forEach(d => {
+                const m = d.data();
+                if (Number(m.seat) === Number(seatNum) && m.sender === "admin" && !m.readByStudent) {
+                    refs.push(d.ref);
+                }
+            });
+            if (!refs.length) return;
+            await Promise.all(refs.map(ref => updateDoc(ref, { readByStudent: true })));
+        }
+
+        async function markAdminMessagesReadForSeat(seatNum, snap) {
+            const refs = [];
+            snap.forEach(d => {
+                const m = d.data();
+                if (Number(m.seat) === Number(seatNum) && m.sender === "student" && !m.readByAdmin) {
+                    refs.push(d.ref);
+                }
+            });
+            if (!refs.length) return;
+            await Promise.all(refs.map(ref => updateDoc(ref, { readByAdmin: true })));
+        }
+
+        window.markCurrentStudentChatRead = async function() {
+            const seat = getAssignedSeat();
+            if (!seat) return;
+            try {
+                if (lastAdminChatSnap) {
+                    await markStudentMessagesReadForSeat(seat, lastAdminChatSnap);
+                } else {
+                    const snap = await getDocs(query(collection(db, "chat_messages"), where("seat", "==", Number(seat)), limit(500)));
+                    await markStudentMessagesReadForSeat(seat, snap);
+                }
+                window.lastStudentUnreadCount = 0;
+                updateStudentUnreadBadge(0);
+            } catch (e) {
+                console.error("학생 채팅 읽음 처리 실패", e);
+            }
+        };
+
+        function renderCurrentAdminSeatMessages(snap) {
+            const seat = window.currentAdminChatSeat;
+            if (!seat) return;
+            const msgs = [];
+            snap.forEach(d => {
+                const m = d.data();
+                if (Number(m.seat) === Number(seat)) msgs.push(m);
+            });
+            renderAdminChatMessages(msgs);
+        }
+
+        function updateAdminUnreadUI(pulse) {
+            const total = Object.values(window.adminUnreadBySeat).reduce((sum, n) => sum + n, 0);
+            const fab = document.getElementById("admin-chat-fab-btn");
+            const panelOpen = isAdminChatOpen();
+            if (fab && !panelOpen) {
+                updateAdminUnreadBadge(total, pulse);
+            } else {
+                updateAdminUnreadBadge(0, false);
+            }
+            document.querySelectorAll("#admin-chat-seat-list .admin-chat-seat-btn").forEach((btn, idx) => {
+                const seat = idx + 1;
+                const unread = window.adminUnreadBySeat[seat] || 0;
+                const badge = btn.querySelector(".admin-seat-unread-badge");
+                if (unread > 0) {
+                    if (badge) {
+                        badge.textContent = unread > 9 ? "9+" : String(unread);
+                    } else {
+                        const el = document.createElement("span");
+                        el.className = "admin-seat-unread-badge";
+                        el.textContent = unread > 9 ? "9+" : String(unread);
+                        btn.querySelector(".seat-num-wrap")?.appendChild(el);
+                    }
+                } else if (badge) {
+                    badge.remove();
+                }
+            });
+        }
+
+        function handleAdminChatInboxSnapshot(snap) {
+            lastAdminChatSnap = snap;
+            const prevBySeat = { ...window.adminUnreadBySeat };
+            window.adminUnreadBySeat = countUnreadForAdmin(snap);
+            const totalUnread = Object.values(window.adminUnreadBySeat).reduce((sum, n) => sum + n, 0);
+            const panelOpen = isAdminChatOpen();
+            const currentSeat = window.currentAdminChatSeat;
+
+            if (prevAdminUnreadTotal !== null && totalUnread > prevAdminUnreadTotal) {
+                for (let seat = 1; seat <= TOTAL_SEATS; seat++) {
+                    const now = window.adminUnreadBySeat[seat] || 0;
+                    const prev = prevBySeat[seat] || 0;
+                    if (now > prev && (!panelOpen || Number(seat) !== Number(currentSeat))) {
+                        showChatIncomingToast(`${seat}번 자리`, "새 채팅이 도착했어요!");
+                    }
+                }
+            }
+            const hadIncrease = prevAdminUnreadTotal !== null && totalUnread > prevAdminUnreadTotal;
+            prevAdminUnreadTotal = totalUnread;
+
+            if (panelOpen && currentSeat) {
+                renderCurrentAdminSeatMessages(snap);
+                markAdminMessagesReadForSeat(currentSeat, snap).catch(e => console.error("관리자 채팅 읽음 처리 실패", e));
+            }
+
+            updateAdminUnreadUI(hadIncrease);
+        }
+
+        window.subscribeAdminChatInbox = function() {
+            if (!window.isAdminAuthenticated) return;
+            if (adminChatGlobalUnsub) adminChatGlobalUnsub();
+            prevAdminUnreadTotal = null;
+            const q = query(collection(db, "chat_messages"), orderBy("timestamp", "asc"));
+            adminChatGlobalUnsub = onSnapshot(q, handleAdminChatInboxSnapshot, (err) => console.error("관리자 채팅 리스너 에러:", err));
+        };
+
+        window.unsubscribeAdminChatInbox = function() {
+            if (adminChatGlobalUnsub) {
+                adminChatGlobalUnsub();
+                adminChatGlobalUnsub = null;
+            }
+            lastAdminChatSnap = null;
+            prevAdminUnreadTotal = null;
+            window.adminUnreadBySeat = {};
+            updateAdminUnreadBadge(0);
+        };
 
         function formatChatTime(iso) {
             if (!iso) return "";
@@ -1519,6 +1741,9 @@
             if (isHidden) {
                 panel.classList.remove("hidden");
                 panel.classList.add("flex");
+                updateStudentUnreadBadge(0);
+                window.lastStudentUnreadCount = 0;
+                window.markCurrentStudentChatRead();
             } else {
                 panel.classList.add("hidden");
                 panel.classList.remove("flex");
@@ -1533,8 +1758,14 @@
             if (!root) return;
             if (window.isAdminAuthenticated) {
                 root.classList.remove("hidden");
+                if (typeof window.subscribeAdminChatInbox === "function") {
+                    window.subscribeAdminChatInbox();
+                }
             } else {
                 root.classList.add("hidden");
+                if (typeof window.unsubscribeAdminChatInbox === "function") {
+                    window.unsubscribeAdminChatInbox();
+                }
                 if (panel) {
                     panel.classList.add("hidden");
                     panel.classList.remove("flex");
@@ -1559,6 +1790,7 @@
                 panel.classList.add("hidden");
                 panel.classList.remove("flex");
                 fab.classList.remove("hidden");
+                updateAdminUnreadUI();
             }
             if (typeof window.refreshLucideIcons === "function") {
                 window.refreshLucideIcons(panel.classList.contains("flex") ? panel : fab);
@@ -1769,6 +2001,10 @@
             try {
                 const deleted = await deleteAllChatMessagesFromDb();
                 updateStudentUnreadBadge(0);
+                window.lastStudentUnreadCount = 0;
+                window.adminUnreadBySeat = {};
+                prevAdminUnreadTotal = 0;
+                updateAdminUnreadUI();
                 if (typeof window.logUserAction === "function") {
                     window.logUserAction("CHAT_RESET", `관리자가 전체 1:1 채팅 기록 ${deleted}건을 초기화했습니다.`);
                 }
@@ -1786,17 +2022,13 @@
             document.querySelectorAll("#admin-chat-seat-list .admin-chat-seat-btn").forEach((btn, idx) => {
                 btn.classList.toggle("active", idx + 1 === seatNum);
             });
-            if (adminChatUnsub) adminChatUnsub();
-            adminChatUnsub = null;
-            const q = query(collection(db, "chat_messages"), orderBy("timestamp", "asc"));
-            adminChatUnsub = onSnapshot(q, (snap) => {
-                const msgs = [];
-                snap.forEach(d => {
-                    const m = d.data();
-                    if (Number(m.seat) === Number(seatNum)) msgs.push(m);
-                });
-                renderAdminChatMessages(msgs);
-            });
+            if (lastAdminChatSnap) {
+                renderCurrentAdminSeatMessages(lastAdminChatSnap);
+                if (isAdminChatOpen()) {
+                    markAdminMessagesReadForSeat(seatNum, lastAdminChatSnap).catch(e => console.error("관리자 채팅 읽음 처리 실패", e));
+                }
+            }
+            updateAdminUnreadUI();
         };
 
         window.initAdminChatUI = function() {
@@ -1805,35 +2037,56 @@
             list.innerHTML = "";
             for (let i = 1; i <= TOTAL_SEATS; i++) {
                 const occupied = window.seatsCache[String(i)]?.clientId;
+                const unread = window.adminUnreadBySeat[i] || 0;
                 const btn = document.createElement("button");
                 btn.type = "button";
                 btn.className = "admin-chat-seat-btn w-full text-left px-1.5 py-2 border-b border-slate-800 hover:bg-slate-800/80 transition-colors" + (window.currentAdminChatSeat === i ? " active" : "");
-                btn.innerHTML = `<div class="font-black text-[11px] text-white text-center">${i}</div><div class="text-[9px] text-center ${occupied ? "text-emerald-400" : "text-slate-500"}">${occupied ? "●" : "○"}</div>`;
+                btn.innerHTML = `
+                    <div class="seat-num-wrap relative mx-auto w-fit">
+                        <div class="font-black text-[11px] text-white text-center">${i}</div>
+                        ${unread > 0 ? `<span class="admin-seat-unread-badge">${unread > 9 ? "9+" : unread}</span>` : ""}
+                    </div>
+                    <div class="text-[9px] text-center ${occupied ? "text-emerald-400" : "text-slate-500"}">${occupied ? "●" : "○"}</div>`;
                 btn.onclick = () => window.selectAdminChatSeat(i);
                 list.appendChild(btn);
             }
             if (!window.currentAdminChatSeat) window.selectAdminChatSeat(1);
+            else if (lastAdminChatSnap) renderCurrentAdminSeatMessages(lastAdminChatSnap);
         };
 
         window.subscribeStudentChat = function() {
             const seat = getAssignedSeat();
             if (!seat) return;
             if (studentChatUnsub) studentChatUnsub();
+            studentChatSnapInitialized = false;
             const q = query(collection(db, "chat_messages"), orderBy("timestamp", "asc"));
             studentChatUnsub = onSnapshot(q, (snap) => {
+                lastAdminChatSnap = snap;
                 const msgs = [];
-                let unread = 0;
                 snap.forEach(d => {
                     const m = d.data();
-                    if (Number(m.seat) === Number(seat)) {
-                        msgs.push(m);
-                        if (m.sender === "admin" && !m.readByStudent) unread++;
-                    }
+                    if (Number(m.seat) === Number(seat)) msgs.push(m);
                 });
                 renderStudentChatMessages(msgs);
-                const panel = document.getElementById("student-chat-panel");
-                const panelOpen = panel && panel.classList.contains("flex");
-                if (!panelOpen) updateStudentUnreadBadge(unread);
+
+                const panelOpen = isStudentChatOpen();
+                const unread = countUnreadForStudent(snap, seat);
+                if (panelOpen) {
+                    markStudentMessagesReadForSeat(seat, snap).catch(e => console.error("학생 채팅 읽음 처리 실패", e));
+                    window.lastStudentUnreadCount = 0;
+                    updateStudentUnreadBadge(0);
+                } else if (!studentChatSnapInitialized) {
+                    studentChatSnapInitialized = true;
+                    window.lastStudentUnreadCount = unread;
+                    updateStudentUnreadBadge(unread, false);
+                } else {
+                    const hadNew = unread > window.lastStudentUnreadCount;
+                    if (hadNew) {
+                        showChatIncomingToast("선생님", "새 메시지가 왔어요!");
+                    }
+                    window.lastStudentUnreadCount = unread;
+                    updateStudentUnreadBadge(unread, hadNew);
+                }
             });
         };
 
@@ -2313,13 +2566,20 @@
                 }
             } else {
                 const newId = 'game_' + Date.now();
+                const initialLikes = Math.floor(Math.random() * 2) + 1;
+                const seedComment = {
+                    text: generateRandomComment(),
+                    isAuto: true,
+                    timestamp: new Date().toISOString()
+                };
 
                 try {
                     await setDoc(doc(db, "festival_games", newId), {
                         title, creator, genre, description, image: imagePath, url: urlPath, isCurrentSession, baseFilename, imgExt,
-                        likes: 0,
+                        likes: initialLikes,
+                        initialLikesCount: initialLikes,
                         downloads: 0,
-                        comments: [],
+                        comments: [seedComment],
                         createdAt: new Date().toISOString()
                     });
                     document.getElementById('game-registration-form').reset();
@@ -2362,6 +2622,32 @@
         //  브라우저 콘솔에서 다음을 실행해 새 해시를 구하세요:
         //  crypto.subtle.digest('SHA-256', new TextEncoder().encode('새비밀번호')).then(b=>console.log(Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join('')))
         const ADMIN_PASSWORD_HASH = "94f94c9c97bfa92bd267f70e2abd266b069428c282f30ad521d486a069918925";
+        const ADMIN_SESSION_MS = 3600000;
+        const ADMIN_AUTH_EXPIRES_KEY = "meta_admin_auth_expires";
+
+        function persistAdminSession() {
+            sessionStorage.setItem("isAdminLoggedIn", "true");
+            localStorage.setItem(ADMIN_AUTH_EXPIRES_KEY, String(Date.now() + ADMIN_SESSION_MS));
+        }
+
+        function clearAdminSession() {
+            sessionStorage.removeItem("isAdminLoggedIn");
+            localStorage.removeItem(ADMIN_AUTH_EXPIRES_KEY);
+        }
+
+        function restoreAdminSessionIfValid() {
+            const expiresAt = parseInt(localStorage.getItem(ADMIN_AUTH_EXPIRES_KEY) || "0", 10);
+            if (expiresAt > Date.now()) {
+                if (!window.isAdminAuthenticated) setAdminAuth(true, { restored: true });
+                return true;
+            }
+            if (expiresAt > 0 || sessionStorage.getItem("isAdminLoggedIn") === "true") {
+                clearAdminSession();
+                window.isAdminAuthenticated = false;
+            }
+            return false;
+        }
+        window.restoreAdminSessionIfValid = restoreAdminSessionIfValid;
 
         async function sha256Hex(text) {
             const buf = new TextEncoder().encode(text);
@@ -2466,32 +2752,37 @@
             };
         }
 
+        function getLastActiveTimestamp(state) {
+            return state?.lastActiveTimestamp || state?.lastVisitTimestamp || 0;
+        }
+
+        function isQuestStateExpired(state) {
+            return Date.now() - getLastActiveTimestamp(state) > ONE_HOUR_MS;
+        }
+
+        /** 파트너·퀘스트만 Lv.0 — 자리(meta_assigned_seat) 등 다른 저장값은 건드리지 않음 */
+        function resetQuestProgressOnly() {
+            return getInitialQuestState();
+        }
+
         function persistQuestState(state) {
             state.lastActiveTimestamp = Date.now();
             localStorage.setItem("meta_quest_profile", JSON.stringify(state));
         }
 
-        function loadQuestState(options = {}) {
-            const touchTimestamp = options.touchTimestamp !== false;
+        function loadQuestState() {
             const saved = localStorage.getItem("meta_quest_profile");
-            const now = Date.now();
-
             if (!saved) {
                 const fresh = getInitialQuestState();
                 persistQuestState(fresh);
                 return fresh;
             }
-
             try {
                 const parsed = JSON.parse(saved);
-                if (now - (parsed.lastActiveTimestamp || 0) > ONE_HOUR_MS) {
-                    const resetState = getInitialQuestState();
+                if (isQuestStateExpired(parsed)) {
+                    const resetState = resetQuestProgressOnly();
                     persistQuestState(resetState);
                     return resetState;
-                }
-                if (touchTimestamp) {
-                    parsed.lastActiveTimestamp = now;
-                    persistQuestState(parsed);
                 }
                 return parsed;
             } catch (e) {
@@ -2499,6 +2790,25 @@
                 persistQuestState(fallback);
                 return fallback;
             }
+        }
+
+        function initQuestStateOnVisit() {
+            const state = loadQuestState();
+            persistQuestState(state);
+            return state;
+        }
+
+        function checkQuestStateExpiryOnReturn() {
+            const saved = localStorage.getItem("meta_quest_profile");
+            if (!saved) return null;
+            try {
+                const parsed = JSON.parse(saved);
+                if (!isQuestStateExpired(parsed)) return null;
+                const resetState = resetQuestProgressOnly();
+                persistQuestState(resetState);
+                return resetState;
+            } catch (e) {}
+            return null;
         }
 
         function saveQuestState(state, options = {}) {
@@ -2523,7 +2833,7 @@
         };
 
         window.recordQuestActivity = function(type, count = 1, isSessionGame = false) {
-            const state = loadQuestState({ touchTimestamp: false });
+            const state = loadQuestState();
             if (type === 'reels') state.reelsViews = Math.min(10, (state.reelsViews || 0) + count);
             if (type === 'likes') state.likesCount = Math.max(0, (state.likesCount || 0) + count);
             if (type === 'comments') {
@@ -2588,7 +2898,7 @@
         }
 
         function shouldShowGachaLikeNudge(state) {
-            if (!state) state = loadQuestState({ touchTimestamp: false });
+            if (!state) state = loadQuestState();
             return !state.hasClaimedGacha && !isStep1Complete(state);
         }
         window.shouldShowGachaLikeNudge = shouldShowGachaLikeNudge;
@@ -2598,7 +2908,7 @@
                 el.classList.remove("gacha-like-nudge-card");
                 el.querySelector(".gacha-like-nudge-badge")?.remove();
             });
-            if (!state) state = loadQuestState({ touchTimestamp: false });
+            if (!state) state = loadQuestState();
             if (state.hasClaimedGacha || isStep1Complete(state)) return;
 
             let targetCard = null;
@@ -2656,7 +2966,7 @@
         }
 
         window.maybeTriggerGachaReadyNudge = function() {
-            const state = loadQuestState({ touchTimestamp: false });
+            const state = loadQuestState();
             if (state.hasClaimedGacha || !isStep1Complete(state)) return;
             if (sessionStorage.getItem("meta_gacha_auto_opened") === "1") return;
             sessionStorage.setItem("meta_gacha_auto_opened", "1");
@@ -2684,7 +2994,7 @@
         };
 
         function refreshQuestNudgesOnly() {
-            const state = loadQuestState({ touchTimestamp: false });
+            const state = loadQuestState();
             updateGachaNudgeBanner(state);
             updateQuestProgressRing(state);
             applyGachaLikeNudgeToCards(state);
@@ -2692,7 +3002,7 @@
         window.refreshQuestNudgesOnly = refreshQuestNudgesOnly;
 
         function updateQuestUI(state) {
-            if (!state) state = loadQuestState({ touchTimestamp: false });
+            if (!state) state = loadQuestState();
             const isGachaClaimed = state.hasClaimedGacha && state.characterKey;
             const charData = isGachaClaimed ? (CHARACTER_REGISTRY[state.characterKey] || CHARACTER_REGISTRY.capybara) : null;
             const currentLv = isGachaClaimed ? Math.min(3, Math.max(1, state.characterLevel || 1)) : 0;
@@ -3244,6 +3554,9 @@
         };
 
         function applyAdminAuthUI() {
+            if (typeof window.restoreAdminSessionIfValid === "function") {
+                window.restoreAdminSessionIfValid();
+            }
             if (typeof window.updateAdminChatFabVisibility === 'function') {
                 window.updateAdminChatFabVisibility();
             }
@@ -3256,12 +3569,13 @@
         }
         window.applyAdminAuthUI = applyAdminAuthUI;
 
-        function setAdminAuth(status) {
+        function setAdminAuth(status, opts = {}) {
             window.isAdminAuthenticated = status;
             const lockEl = document.getElementById('admin-lock-status');
             const bulkBtn = document.getElementById('btn-bulk-uncheck');
             if (status) {
-                sessionStorage.setItem('isAdminLoggedIn', 'true');
+                if (!opts.restored) persistAdminSession();
+                else sessionStorage.setItem("isAdminLoggedIn", "true");
                 const modal = document.getElementById('seat-picker-modal');
                 if (modal) {
                     modal.classList.add('hidden');
@@ -3270,7 +3584,7 @@
                 lockEl.innerHTML = `<span class="text-emerald-400"><i data-lucide="unlock" class="w-3 h-3 inline"></i></span>`;
                 if(bulkBtn) bulkBtn.classList.remove('hidden'); 
             } else {
-                sessionStorage.removeItem('isAdminLoggedIn');
+                clearAdminSession();
                 lockEl.innerHTML = `<span class="text-slate-500"><i data-lucide="lock" class="w-3 h-3 inline"></i></span>`;
                 if(bulkBtn) bulkBtn.classList.add('hidden');
             }
@@ -3775,12 +4089,19 @@
         };
 
         document.addEventListener("DOMContentLoaded", () => {
+            initQuestStateOnVisit();
             updateQuestUI();
             applyAdminAuthUI();
             const seat = localStorage.getItem('meta_assigned_seat');
             if (seat && typeof window.subscribeStudentChat === 'function') {
                 window.subscribeStudentChat();
             }
+        });
+
+        document.addEventListener("visibilitychange", () => {
+            if (document.visibilityState !== "visible") return;
+            const resetState = checkQuestStateExpiryOnReturn();
+            if (resetState) updateQuestUI(resetState);
         });
     </script>
 </body>
