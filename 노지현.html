@@ -1,0 +1,2892 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>불꽃의 전사 호구마의 전설 (Hard Edition)</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #050508;
+            font-family: 'Pretendard', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            max-width: 1280px;
+            max-height: 720px;
+            aspect-ratio: 16 / 9;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.95), 0 0 50px rgba(255, 60, 0, 0.25);
+            border-radius: 12px;
+            overflow: hidden;
+            background: #000;
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        
+        .audio-btn {
+            position: absolute;
+            top: 18px;
+            right: 18px;
+            z-index: 60;
+            background: rgba(15, 10, 20, 0.75);
+            border: 1px solid rgba(255, 180, 0, 0.6);
+            color: #ffd700;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: bold;
+            cursor: pointer;
+            backdrop-filter: blur(6px);
+            transition: all 0.2s ease;
+        }
+        .audio-btn:hover {
+            background: rgba(255, 100, 0, 0.3);
+            transform: scale(1.05);
+        }
+
+        .touch-controls {
+            display: none;
+            position: absolute;
+            bottom: 15px;
+            left: 0;
+            right: 0;
+            padding: 0 20px;
+            justify-content: space-between;
+            align-items: flex-end;
+            pointer-events: none;
+            z-index: 50;
+        }
+        .touch-group {
+            display: flex;
+            gap: 10px;
+            pointer-events: auto;
+        }
+        .touch-btn {
+            width: 58px;
+            height: 58px;
+            background: rgba(0, 0, 0, 0.4);
+            border: 2px solid rgba(255, 255, 255, 0.4);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #fff;
+            font-size: 20px;
+            font-weight: bold;
+            backdrop-filter: blur(4px);
+            touch-action: manipulation;
+        }
+        .touch-btn:active {
+            background: rgba(255, 100, 0, 0.7);
+            transform: scale(0.92);
+        }
+        @media (max-width: 1024px) {
+            .touch-controls { display: flex; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <button class="audio-btn" id="audio-toggle">🎵 BGM: ON</button>
+    <canvas id="gameCanvas"></canvas>
+
+    <div class="touch-controls">
+        <div class="touch-group">
+            <div class="touch-btn" id="btn-left">◀</div>
+            <div class="touch-btn" id="btn-right">▶</div>
+        </div>
+        <div class="touch-group">
+            <div class="touch-btn" id="btn-dash" style="background: rgba(255, 140, 0, 0.45);">⚡</div>
+            <div class="touch-btn" id="btn-parry" style="background: rgba(0, 230, 150, 0.55);">🛡️</div>
+            <div class="touch-btn" id="btn-attack" style="background: rgba(255, 40, 0, 0.55);">⚔️</div>
+            <div class="touch-btn" id="btn-skill" style="background: rgba(255, 215, 0, 0.65);">🗡️</div>
+            <div class="touch-btn" id="btn-jump" style="background: rgba(0, 180, 255, 0.55);">▲</div>
+        </div>
+    </div>
+</div>
+
+<script>
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, radii) {
+        let r = typeof radii === 'number' ? radii : (Array.isArray(radii) ? radii[0] : 0);
+        this.beginPath();
+        this.moveTo(x + r, y);
+        this.arcTo(x + w, y, x + w, y + h, r);
+        this.arcTo(x + w, y + h, x, y + h, r);
+        this.arcTo(x, y + h, x, y, r);
+        this.arcTo(x, y, x + w, y, r);
+        this.closePath();
+        return this;
+    };
+}
+
+const CONFIG = {
+    CANVAS_WIDTH: 1280,
+    CANVAS_HEIGHT: 720,
+    GRAVITY: 0.78,
+    FRICTION: 0.82,
+    
+    PLAYER: {
+        NAME: "호구마 (검성)",
+        WIDTH: 48,
+        HEIGHT: 68,
+        BASE_SPEED: 7.8,
+        JUMP_FORCE: -14.8,
+        MAX_HP: 160, // 주인공 최대 체력 상승 (100 -> 160)
+        MAX_ENERGY: 100,
+        BASE_DAMAGE: 45, // 기본 데미지 상승 (일반몹 처치 용이)
+        ATTACK_COOLDOWN: 9,
+        DASH_SPEED: 20,
+        DASH_DURATION: 14,
+        DASH_COOLDOWN: 30,
+        PARRY_COOLDOWN: 150
+    },
+
+    COLORS: {
+        HOGUMA_HAIR: '#ff1a00',
+        HOGUMA_CAPE: '#cc2200',
+        HOGUMA_GLOW: '#ff7700',
+        HOGUMA_ARMOR: '#111116',
+        HOGUMA_GOLD: '#ffcc00',
+        FIRE: '#ff4500',
+        HILICHURL: '#734b32'
+    }
+};
+
+class SoundEngine {
+    constructor() {
+        this.ctx = null;
+        this.bgmEnabled = true;
+        this.bgmInterval = null;
+        this.noteStep = 0;
+    }
+
+    init() {
+        if (!this.ctx) {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (AudioCtx) this.ctx = new AudioCtx();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+            this.ctx.resume();
+        }
+    }
+
+    toggleBGM() {
+        this.bgmEnabled = !this.bgmEnabled;
+        if (!this.bgmEnabled && this.bgmInterval) {
+            clearInterval(this.bgmInterval);
+            this.bgmInterval = null;
+        } else if (this.bgmEnabled) {
+            this.startBGM();
+        }
+        return this.bgmEnabled;
+    }
+
+    startBGM() {
+        if (this.bgmInterval) clearInterval(this.bgmInterval);
+        if (!this.bgmEnabled) return;
+
+        const melody = [220, 261, 293, 329, 392, 329, 293, 261, 440, 392, 329, 293, 329, 261, 220, 196];
+        const bass = [110, 110, 130, 130, 146, 146, 164, 164];
+
+        this.bgmInterval = setInterval(() => {
+            if (!this.ctx || !this.bgmEnabled) return;
+            const now = this.ctx.currentTime;
+
+            const bassOsc = this.ctx.createOscillator();
+            const bassGain = this.ctx.createGain();
+            bassOsc.type = 'sawtooth';
+            bassOsc.frequency.setValueAtTime(bass[this.noteStep % bass.length], now);
+            bassGain.gain.setValueAtTime(0.05, now);
+            bassGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+            bassOsc.connect(bassGain);
+            bassGain.connect(this.ctx.destination);
+            bassOsc.start(now);
+            bassOsc.stop(now + 0.18);
+
+            if (this.noteStep % 2 === 0) {
+                const leadOsc = this.ctx.createOscillator();
+                const leadGain = this.ctx.createGain();
+                leadOsc.type = 'square';
+                leadOsc.frequency.setValueAtTime(melody[(this.noteStep / 2) % melody.length], now);
+                leadGain.gain.setValueAtTime(0.035, now);
+                leadGain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+                leadOsc.connect(leadGain);
+                leadGain.connect(this.ctx.destination);
+                leadOsc.start(now);
+                leadOsc.stop(now + 0.22);
+            }
+
+            this.noteStep++;
+        }, 140);
+    }
+
+    playParry() {
+        if (!this.ctx) return;
+        try {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(1600, this.ctx.currentTime + 0.2);
+            gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start();
+            osc.stop(this.ctx.currentTime + 0.2);
+        } catch (e) {
+            console.warn(e);
+        }
+    }
+
+    playUltimateBlast() {
+        if (!this.ctx) return;
+        try {
+            const osc1 = this.ctx.createOscillator();
+            const osc2 = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+
+            osc1.type = 'sawtooth';
+            osc2.type = 'square';
+            osc1.frequency.setValueAtTime(80, this.ctx.currentTime);
+            osc1.frequency.exponentialRampToValueAtTime(1200, this.ctx.currentTime + 0.6);
+            osc2.frequency.setValueAtTime(160, this.ctx.currentTime);
+            osc2.frequency.exponentialRampToValueAtTime(800, this.ctx.currentTime + 0.6);
+
+            gain.gain.setValueAtTime(0.5, this.ctx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.6);
+
+            osc1.connect(gain);
+            osc2.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc1.start(); osc2.start();
+            osc1.stop(this.ctx.currentTime + 0.6);
+            osc2.stop(this.ctx.currentTime + 0.6);
+        } catch (e) {
+            console.warn(e);
+        }
+    }
+
+    playJump() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(220, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(620, this.ctx.currentTime + 0.12);
+        gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.12);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.12);
+    }
+
+    playDash() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(500, this.ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(120, this.ctx.currentTime + 0.16);
+        gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.16);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.16);
+    }
+
+    playSlash(combo = 0) {
+        if (!this.ctx) return;
+        const bufferSize = this.ctx.sampleRate * 0.12;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = 1200 + combo * 500;
+
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.12);
+
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+        noise.start();
+    }
+
+    playSkill() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(900, this.ctx.currentTime + 0.5);
+        gain.gain.setValueAtTime(0.45, this.ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.5);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.5);
+    }
+
+    playHit() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(180, this.ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(40, this.ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.15);
+    }
+
+    playCoin() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1046.50, this.ctx.currentTime);
+        osc.frequency.setValueAtTime(1396.91, this.ctx.currentTime + 0.08);
+        gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.22);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.22);
+    }
+
+    playBuff() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(440, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(880, this.ctx.currentTime + 0.25);
+        gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.25);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.25);
+    }
+
+    playHeal() {
+        if (!this.ctx) return;
+        const osc1 = this.ctx.createOscillator();
+        const osc2 = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc1.type = 'sine';
+        osc2.type = 'sine';
+        osc1.frequency.setValueAtTime(523.25, this.ctx.currentTime);
+        osc2.frequency.setValueAtTime(659.25, this.ctx.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.35);
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc1.start(); osc2.start(this.ctx.currentTime + 0.1);
+        osc1.stop(this.ctx.currentTime + 0.35);
+        osc2.stop(this.ctx.currentTime + 0.35);
+    }
+
+    playExplosion() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(25, this.ctx.currentTime + 0.7);
+        gain.gain.setValueAtTime(0.55, this.ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.7);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.7);
+    }
+}
+
+const sound = new SoundEngine();
+
+class InputHandler {
+    constructor() {
+        this.keys = {
+            left: false,
+            right: false,
+            jump: false,
+            dash: false,
+            parry: false,
+            attack: false,
+            skill: false,
+            restart: false,
+            restartClick: false
+        };
+
+        window.addEventListener('keydown', (e) => this.handleKey(e.code, true));
+        window.addEventListener('keyup', (e) => this.handleKey(e.code, false));
+        window.addEventListener('mousedown', (e) => {
+            sound.init();
+            if (e.button === 0) this.keys.attack = true;
+            if (e.button === 2) this.keys.skill = true;
+        });
+        window.addEventListener('mouseup', (e) => {
+            if (e.button === 0) this.keys.attack = false;
+            if (e.button === 2) this.keys.skill = false;
+        });
+        window.addEventListener('contextmenu', e => e.preventDefault());
+
+        this.setupTouch('btn-left', 'left');
+        this.setupTouch('btn-right', 'right');
+        this.setupTouch('btn-jump', 'jump');
+        this.setupTouch('btn-dash', 'dash');
+        this.setupTouch('btn-parry', 'parry');
+        this.setupTouch('btn-attack', 'attack');
+        this.setupTouch('btn-skill', 'skill');
+    }
+
+    handleKey(code, isDown) {
+        sound.init();
+        if (code === 'KeyA' || code === 'ArrowLeft') this.keys.left = isDown;
+        if (code === 'KeyD' || code === 'ArrowRight') this.keys.right = isDown;
+        if (code === 'KeyW' || code === 'Space' || code === 'ArrowUp') this.keys.jump = isDown;
+        if (code === 'ShiftLeft' || code === 'KeyK') this.keys.dash = isDown;
+        if (code === 'KeyE') this.keys.parry = isDown;
+        if (code === 'KeyJ') this.keys.attack = isDown;
+        if (code === 'KeyQ') this.keys.skill = isDown;
+        if (code === 'KeyR') this.keys.restart = isDown;
+    }
+
+    setupTouch(id, keyName) {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            sound.init();
+            this.keys[keyName] = true;
+        });
+        btn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            this.keys[keyName] = false;
+        });
+    }
+}
+
+class ParticleSystem {
+    constructor() {
+        this.particles = [];
+        this.shockwaves = [];
+        this.texts = [];
+        this.ambientEmbers = [];
+        this.swordSlashes = []; // 거대 검기 휘두르기 이펙트 저장 배열
+
+        for (let i = 0; i < 70; i++) {
+            this.ambientEmbers.push({
+                x: Math.random() * CONFIG.CANVAS_WIDTH,
+                y: Math.random() * CONFIG.CANVAS_HEIGHT,
+                size: 1 + Math.random() * 4,
+                speedY: -0.8 - Math.random() * 1.8,
+                speedX: (Math.random() - 0.5) * 1.2,
+                alpha: Math.random()
+            });
+        }
+    }
+
+    addGiantSwordSlash(x, y, facingRight) {
+        // 검기를 크게 휘두르는 3연속 거대 검기 아크 참격 이펙트 생성
+        const dir = facingRight ? 1 : -1;
+        for (let i = 0; i < 4; i++) {
+            this.swordSlashes.push({
+                x: x + dir * (i * 70),
+                y: y + (Math.random() - 0.5) * 60,
+                radius: 120 + i * 30,
+                angleStart: facingRight ? -0.85 * Math.PI : -0.15 * Math.PI,
+                angleEnd: facingRight ? 0.35 * Math.PI : 1.15 * Math.PI,
+                dir: dir,
+                lineWidth: 18 - i * 3,
+                color: i % 2 === 0 ? '#00e5ff' : '#ffffff',
+                glowColor: '#00aaff',
+                life: 1.0,
+                decay: 0.05
+            });
+        }
+
+        // 검기 산란 입자
+        for (let i = 0; i < 45; i++) {
+            const angle = (facingRight ? 0 : Math.PI) + (Math.random() - 0.5) * 1.4;
+            const speed = 12 + Math.random() * 18;
+            this.particles.push({
+                x, y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                size: 3 + Math.random() * 7,
+                color: Math.random() > 0.4 ? '#00ffff' : '#ffffff',
+                life: 1,
+                decay: 0.03 + Math.random() * 0.02
+            });
+        }
+        this.addShockwave(x, y, 180, '#00e5ff');
+    }
+
+    addShockwave(x, y, maxRadius = 120, color = '#ff4500') {
+        this.shockwaves.push({
+            x, y,
+            radius: 5,
+            maxRadius,
+            color,
+            alpha: 1,
+            lineWidth: 8
+        });
+    }
+
+    addSlashEffect(x, y, facingRight, combo = 0) {
+        const colors = ['#00e5ff', '#ff8800', '#ffd700', '#ffffff'];
+        for (let i = 0; i < 25; i++) {
+            const angle = (facingRight ? -0.35 : 0.35) * Math.PI + (Math.random() - 0.5) * 1.1;
+            const speed = 8 + Math.random() * 16;
+            this.particles.push({
+                x, y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                size: 3 + Math.random() * 7,
+                color: colors[combo % colors.length],
+                life: 1,
+                decay: 0.04 + Math.random() * 0.03
+            });
+        }
+        this.addShockwave(x, y, 60 + combo * 25, colors[combo % colors.length]);
+    }
+
+    addFlameExplosion(x, y, radius = 90) {
+        this.addShockwave(x, y, radius * 1.8, '#ff3300');
+        this.addShockwave(x, y, radius * 1.2, '#ffd700');
+
+        for (let i = 0; i < 90; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 4 + Math.random() * 18;
+            this.particles.push({
+                x, y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                size: 5 + Math.random() * 12,
+                color: Math.random() > 0.3 ? '#ff1a00' : (Math.random() > 0.5 ? '#ffcc00' : '#ffffff'),
+                life: 1,
+                decay: 0.02 + Math.random() * 0.03
+            });
+        }
+    }
+
+    addSparkles(x, y, color = '#ffffff', count = 16) {
+        for (let i = 0; i < count; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 2 + Math.random() * 8;
+            this.particles.push({
+                x, y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                size: 2.5 + Math.random() * 6,
+                color: color,
+                life: 1,
+                decay: 0.035
+            });
+        }
+    }
+
+    addFloatingText(x, y, text, color = '#ffffff', fontSize = 22, isCrit = false) {
+        this.texts.push({
+            x, y,
+            text, color, fontSize, isCrit,
+            vy: -2.5,
+            life: 1,
+            decay: 0.016
+        });
+    }
+
+    update() {
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            const p = this.particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life -= p.decay;
+            if (p.life <= 0) this.particles.splice(i, 1);
+        }
+
+        for (let i = this.swordSlashes.length - 1; i >= 0; i--) {
+            const ss = this.swordSlashes[i];
+            ss.life -= ss.decay;
+            ss.x += ss.dir * 8; // 검기가 앞으로 전진
+            if (ss.life <= 0) this.swordSlashes.splice(i, 1);
+        }
+
+        for (let i = this.shockwaves.length - 1; i >= 0; i--) {
+            const sw = this.shockwaves[i];
+            sw.radius += (sw.maxRadius - sw.radius) * 0.2 + 2;
+            sw.alpha -= 0.04;
+            if (sw.alpha <= 0 || sw.radius >= sw.maxRadius) this.shockwaves.splice(i, 1);
+        }
+
+        for (let i = this.texts.length - 1; i >= 0; i--) {
+            const t = this.texts[i];
+            t.y += t.vy;
+            t.life -= t.decay;
+            if (t.life <= 0) this.texts.splice(i, 1);
+        }
+
+        for (const e of this.ambientEmbers) {
+            e.y += e.speedY;
+            e.x += e.speedX;
+            if (e.y < 0) e.y = CONFIG.CANVAS_HEIGHT;
+            if (e.x < 0) e.x = CONFIG.CANVAS_WIDTH;
+            if (e.x > CONFIG.CANVAS_WIDTH) e.x = 0;
+        }
+    }
+
+    draw(ctx, camera) {
+        ctx.save();
+
+        // 거대 검기 참격 (Sword Slashes) 렌더링
+        for (const ss of this.swordSlashes) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = Math.max(0, ss.life);
+            ctx.strokeStyle = ss.color;
+            ctx.shadowColor = ss.glowColor;
+            ctx.shadowBlur = 25;
+            ctx.lineWidth = ss.lineWidth;
+            ctx.beginPath();
+            ctx.arc(ss.x - camera.x, ss.y - camera.y, ss.radius, ss.angleStart, ss.angleEnd);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        ctx.globalCompositeOperation = 'lighter';
+
+        // Expanding Shockwaves
+        for (const sw of this.shockwaves) {
+            ctx.save();
+            ctx.globalAlpha = Math.max(0, sw.alpha);
+            ctx.strokeStyle = sw.color;
+            ctx.lineWidth = sw.lineWidth;
+            ctx.beginPath();
+            ctx.arc(sw.x - camera.x, sw.y - camera.y, sw.radius, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // Particle Bursts
+        for (const p of this.particles) {
+            ctx.globalAlpha = Math.max(0, p.life);
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x - camera.x, p.y - camera.y, p.size, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+
+        // Floating Damage / Status Text
+        ctx.save();
+        for (const t of this.texts) {
+            ctx.globalAlpha = Math.max(0, t.life);
+            ctx.fillStyle = t.color;
+            ctx.font = `black ${t.isCrit ? t.fontSize + 10 : t.fontSize}px sans-serif`;
+            ctx.shadowColor = 'black';
+            ctx.shadowBlur = 10;
+            ctx.fillText(t.text, t.x - camera.x, t.y - camera.y);
+        }
+        ctx.restore();
+    }
+
+    drawAmbient(ctx) {
+        ctx.save();
+        ctx.fillStyle = '#fff6d8';
+        for (const e of this.ambientEmbers) {
+            ctx.globalAlpha = e.alpha * 0.6;
+            ctx.beginPath();
+            ctx.arc(e.x, e.y, e.size, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+}
+
+class Camera {
+    constructor() {
+        this.x = 0;
+        this.y = 0;
+        this.width = CONFIG.CANVAS_WIDTH;
+        this.height = CONFIG.CANVAS_HEIGHT;
+        this.shakeTimer = 0;
+        this.shakeIntensity = 0;
+    }
+
+    shake(intensity, duration) {
+        this.shakeIntensity = intensity;
+        this.shakeTimer = duration;
+    }
+
+    update(target, mapWidth, mapHeight) {
+        const targetX = target.x + target.width / 2 - this.width / 2;
+        const targetY = target.y + target.height / 2 - this.height / 2;
+
+        this.x += (targetX - this.x) * 0.09;
+        this.y += (targetY - this.y) * 0.09;
+
+        this.x = Math.max(0, Math.min(this.x, mapWidth - this.width));
+        this.y = Math.max(0, Math.min(this.y, mapHeight - this.height));
+
+        if (this.shakeTimer > 0) {
+            this.x += (Math.random() - 0.5) * this.shakeIntensity;
+            this.y += (Math.random() - 0.5) * this.shakeIntensity;
+            this.shakeTimer--;
+        }
+    }
+}
+
+class GameMap {
+    constructor(stageIndex) {
+        this.stageIndex = stageIndex;
+        this.platforms = [];
+        this.collectibles = [];
+        this.checkpoints = [];
+        this.height = 720;
+
+        // 필드 길이 대폭 상승: 기존 5600 폭 구간을 하나의 블록으로 삼아 3배로 반복 확장
+        this.blockWidth = 5600;
+        this.blockCount = 3;
+        this.width = this.blockWidth * this.blockCount + 1400; // 마지막에 보스 아레나 여유 공간 추가
+        this.bossZoneX = this.width - 800;
+
+        this.buildStage();
+    }
+
+    // 한 블록(기존 스테이지 1개 분량)의 지형/수집품 배치를 offset만큼 밀어서 생성
+    buildBlock(offset) {
+        // Main Platforms
+        this.platforms.push({ x: offset + 0, y: 620, width: 1250, height: 100 });
+        this.platforms.push({ x: offset + 1380, y: 620, width: 850, height: 100 });
+        this.platforms.push({ x: offset + 2350, y: 620, width: 1450, height: 100 });
+        this.platforms.push({ x: offset + 3950, y: 620, width: 1650, height: 100 });
+
+        // Jump Platforms
+        const platformData = [
+            { x: 320, y: 480, w: 200, h: 25 },
+            { x: 600, y: 360, w: 220, h: 25 },
+            { x: 900, y: 460, w: 180, h: 25 },
+            { x: 1200, y: 350, w: 200, h: 25 },
+            { x: 1520, y: 480, w: 220, h: 25 },
+            { x: 1820, y: 370, w: 200, h: 25 },
+            { x: 1650, y: 210, w: 320, h: 25, secret: true },
+            { x: 2120, y: 480, w: 220, h: 25 },
+            { x: 2480, y: 360, w: 220, h: 25 },
+            { x: 2820, y: 480, w: 220, h: 25 },
+            { x: 3150, y: 400, w: 220, h: 25 },
+            { x: 3450, y: 280, w: 200, h: 25 },
+            { x: 3750, y: 460, w: 220, h: 25 },
+            { x: 3950, y: 190, w: 300, h: 25, secret: true },
+            { x: 4300, y: 480, w: 220, h: 25 },
+            { x: 4620, y: 360, w: 220, h: 25 }
+        ];
+
+        for (const p of platformData) {
+            this.platforms.push({ x: offset + p.x, y: p.y, width: p.w, height: p.h, secret: p.secret || false });
+        }
+
+        // Collectibles
+        for (let x = 250; x < 4550; x += 130) {
+            if (Math.random() > 0.25) {
+                this.collectibles.push({
+                    x: offset + x + Math.random() * 30,
+                    y: 530 - Math.random() * 150,
+                    type: Math.random() > 0.75 ? 'gem' : 'coin',
+                    collected: false,
+                    bobOffset: Math.random() * Math.PI * 2
+                });
+            }
+        }
+
+        this.collectibles.push({ x: offset + 1800, y: 160, type: 'star', collected: false, bobOffset: 0 });
+        this.collectibles.push({ x: offset + 2920, y: 290, type: 'star', collected: false, bobOffset: 1 });
+        this.collectibles.push({ x: offset + 4150, y: 300, type: 'star', collected: false, bobOffset: 2 });
+
+        // 회복 아이템 (고정 배치 - 필드를 진행하며 체력 관리 가능하도록)
+        this.collectibles.push({ x: offset + 700, y: 550, type: 'heal', collected: false, bobOffset: 0.5 });
+        this.collectibles.push({ x: offset + 1650, y: 550, type: 'heal', collected: false, bobOffset: 1.5 });
+        this.collectibles.push({ x: offset + 2650, y: 550, type: 'heal', collected: false, bobOffset: 2.5 });
+        this.collectibles.push({ x: offset + 3600, y: 550, type: 'heal', collected: false, bobOffset: 3.5 });
+        this.collectibles.push({ x: offset + 4450, y: 550, type: 'heal', collected: false, bobOffset: 4.5 });
+    }
+
+    buildStage() {
+        this.platforms = [];
+        this.collectibles = [];
+        this.checkpoints = [];
+
+        for (let b = 0; b < this.blockCount; b++) {
+            this.buildBlock(b * this.blockWidth);
+        }
+
+        // 마지막 보스 아레나용 바닥 (블록들이 끝나는 지점부터 필드 끝까지)
+        const arenaStart = this.blockWidth * this.blockCount;
+        this.platforms.push({ x: arenaStart, y: 620, width: this.width - arenaStart, height: 100 });
+
+        // 체크포인트 빈도 대폭 하향: 전체 필드를 통틀어 단 2개만 배치
+        this.checkpoints.push({ x: Math.floor(this.width * 0.34), activated: false });
+        this.checkpoints.push({ x: Math.floor(this.width * 0.68), activated: false });
+    }
+
+    drawCheckpoints(ctx, camera) {
+        for (const cp of this.checkpoints) {
+            if (cp.x < camera.x - 60 || cp.x > camera.x + camera.width + 60) continue;
+            const rx = cp.x - camera.x;
+            const ry = 620 - camera.y;
+
+            ctx.save();
+            // Flag pole
+            ctx.strokeStyle = cp.activated ? '#ffd700' : '#888888';
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.moveTo(rx, ry);
+            ctx.lineTo(rx, ry - 90);
+            ctx.stroke();
+
+            // Flag banner
+            ctx.fillStyle = cp.activated ? '#ffcc00' : '#555555';
+            if (cp.activated) {
+                ctx.shadowColor = '#ffaa00';
+                ctx.shadowBlur = 14;
+            }
+            ctx.beginPath();
+            ctx.moveTo(rx, ry - 90);
+            ctx.lineTo(rx + 42, ry - 76);
+            ctx.lineTo(rx, ry - 62);
+            ctx.closePath();
+            ctx.fill();
+
+            if (cp.activated) {
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 11px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('CHECKPOINT', rx, ry - 100);
+                ctx.textAlign = 'left';
+            }
+            ctx.restore();
+        }
+    }
+
+    drawParallaxBackground(ctx, camera, gameTime) {
+        const isStage2 = this.stageIndex === 2;
+        const t = gameTime || 0;
+
+        // 스테이지1: 몬드 스타일 맑은 한낮 하늘 / 스테이지2: 리월항 스타일 황금빛 노을 하늘
+        const skyGrad = ctx.createLinearGradient(0, 0, 0, CONFIG.CANVAS_HEIGHT);
+        if (!isStage2) {
+            skyGrad.addColorStop(0, '#3d7fd6');
+            skyGrad.addColorStop(0.4, '#7fb8e8');
+            skyGrad.addColorStop(0.72, '#cfe8f5');
+            skyGrad.addColorStop(1, '#eaf6e0');
+        } else {
+            skyGrad.addColorStop(0, '#2a4a78');
+            skyGrad.addColorStop(0.32, '#a06a6a');
+            skyGrad.addColorStop(0.62, '#e8a44e');
+            skyGrad.addColorStop(0.85, '#ffcf7a');
+            skyGrad.addColorStop(1, '#fff0c2');
+        }
+        ctx.fillStyle = skyGrad;
+        ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+        // Sun glow
+        ctx.save();
+        const sunX = CONFIG.CANVAS_WIDTH * 0.75 - camera.x * 0.04;
+        const sunY = isStage2 ? 220 : 140;
+        const sunGrad = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 220);
+        if (!isStage2) {
+            sunGrad.addColorStop(0, 'rgba(255, 255, 235, 0.95)');
+            sunGrad.addColorStop(0.4, 'rgba(255, 245, 200, 0.35)');
+            sunGrad.addColorStop(1, 'rgba(255, 240, 180, 0)');
+        } else {
+            sunGrad.addColorStop(0, 'rgba(255, 220, 150, 0.9)');
+            sunGrad.addColorStop(0.4, 'rgba(255, 160, 90, 0.4)');
+            sunGrad.addColorStop(1, 'rgba(255, 120, 60, 0)');
+        }
+        ctx.fillStyle = sunGrad;
+        ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+        ctx.restore();
+
+        // Drifting clouds (parallax layer)
+        ctx.save();
+        ctx.fillStyle = isStage2 ? 'rgba(255,235,220,0.75)' : 'rgba(255,255,255,0.85)';
+        const cloudOffset = (camera.x * 0.06) % 900;
+        for (let i = -900; i < CONFIG.CANVAS_WIDTH + 900; i += 450) {
+            const cx = i - cloudOffset;
+            const cy = 90 + (i % 3 === 0 ? 30 : 0);
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, 70, 22, 0, 0, Math.PI * 2);
+            ctx.ellipse(cx + 55, cy + 8, 50, 18, 0, 0, Math.PI * 2);
+            ctx.ellipse(cx - 55, cy + 10, 45, 16, 0, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+
+        // 먼 산 실루엣: 스테이지1은 몬드 뒤편의 완만한 산, 스테이지2는 리월의 뾰족한 옥빛 카르스트 봉우리
+        ctx.save();
+        if (!isStage2) {
+            const mountGrad = ctx.createLinearGradient(0, 260, 0, 620);
+            mountGrad.addColorStop(0, '#8fa8c8');
+            mountGrad.addColorStop(1, '#5f7a9c');
+            ctx.fillStyle = mountGrad;
+            const mountOffset = (camera.x * 0.15) % 800;
+            for (let i = -800; i < CONFIG.CANVAS_WIDTH + 800; i += 400) {
+                ctx.beginPath();
+                ctx.moveTo(i - mountOffset, 620);
+                ctx.lineTo(i + 200 - mountOffset, 260);
+                ctx.lineTo(i + 400 - mountOffset, 620);
+                ctx.fill();
+            }
+        } else {
+            const mountGrad = ctx.createLinearGradient(0, 190, 0, 620);
+            mountGrad.addColorStop(0, '#6fa088');
+            mountGrad.addColorStop(0.5, '#3f7566');
+            mountGrad.addColorStop(1, '#264a42');
+            ctx.fillStyle = mountGrad;
+            const mountOffset = (camera.x * 0.15) % 700;
+            for (let i = -700; i < CONFIG.CANVAS_WIDTH + 700; i += 350) {
+                const bx = i - mountOffset;
+                // 여러 개의 뾰족한 첨봉이 이어진 카르스트 산맥 실루엣
+                ctx.beginPath();
+                ctx.moveTo(bx, 620);
+                ctx.lineTo(bx + 40, 300);
+                ctx.lineTo(bx + 70, 400);
+                ctx.lineTo(bx + 110, 190);
+                ctx.lineTo(bx + 150, 380);
+                ctx.lineTo(bx + 185, 260);
+                ctx.lineTo(bx + 230, 430);
+                ctx.lineTo(bx + 280, 300);
+                ctx.lineTo(bx + 350, 620);
+                ctx.closePath();
+                ctx.fill();
+                // 봉우리 능선에 은은한 금빛 테두리
+                ctx.save();
+                ctx.strokeStyle = 'rgba(255, 210, 130, 0.45)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(bx, 620);
+                ctx.lineTo(bx + 40, 300);
+                ctx.lineTo(bx + 70, 400);
+                ctx.lineTo(bx + 110, 190);
+                ctx.lineTo(bx + 150, 380);
+                ctx.lineTo(bx + 185, 260);
+                ctx.lineTo(bx + 230, 430);
+                ctx.lineTo(bx + 280, 300);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+        ctx.restore();
+
+        // 스테이지1: 절벽 위 몬드 성벽 도시 / 스테이지2: 리월항의 누각 지붕과 정박한 배들
+        ctx.save();
+        if (!isStage2) {
+            ctx.fillStyle = 'rgba(120,130,150,0.5)';
+            const cityOffset = (camera.x * 0.22) % 1600;
+            for (let i = -1600; i < CONFIG.CANVAS_WIDTH + 1600; i += 1600) {
+                const bx = i - cityOffset + 300;
+                ctx.fillRect(bx, 430, 260, 90);
+                ctx.beginPath();
+                ctx.moveTo(bx + 20, 430);
+                ctx.lineTo(bx + 45, 390);
+                ctx.lineTo(bx + 70, 430);
+                ctx.fill();
+                ctx.fillRect(bx + 90, 400, 30, 120);
+                ctx.beginPath();
+                ctx.arc(bx + 105, 398, 16, Math.PI, 0);
+                ctx.fill();
+                ctx.fillRect(bx + 170, 415, 26, 105);
+                ctx.beginPath();
+                ctx.arc(bx + 183, 413, 14, Math.PI, 0);
+                ctx.fill();
+            }
+        } else {
+            ctx.fillStyle = 'rgba(120,60,45,0.55)';
+            const cityOffset = (camera.x * 0.22) % 1600;
+            for (let i = -1600; i < CONFIG.CANVAS_WIDTH + 1600; i += 1600) {
+                const bx = i - cityOffset + 260;
+                // 리월항 누각(전통 목조 건물) 2채 - 층마다 살짝 넓어지는 처마
+                for (let k = 0; k < 2; k++) {
+                    const px = bx + k * 150;
+                    for (let tier = 0; tier < 3; tier++) {
+                        const ty = 500 - tier * 34;
+                        const tw = 90 - tier * 14;
+                        ctx.beginPath();
+                        ctx.moveTo(px - tw / 2 - 10, ty);
+                        ctx.lineTo(px, ty - 26);
+                        ctx.lineTo(px + tw / 2 + 10, ty);
+                        ctx.lineTo(px + tw / 2, ty + 10);
+                        ctx.lineTo(px - tw / 2, ty + 10);
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                    ctx.fillRect(px - 14, 500, 28, 40);
+                }
+                // 항구에 정박한 배의 돛대들
+                for (let s = 0; s < 3; s++) {
+                    const sx = bx - 120 + s * 60;
+                    ctx.fillRect(sx, 470, 4, 70);
+                    ctx.beginPath();
+                    ctx.moveTo(sx, 475);
+                    ctx.lineTo(sx + 34, 490);
+                    ctx.lineTo(sx, 510);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+            }
+        }
+        ctx.restore();
+
+        // Rolling hills / cliffs (closer parallax layer)
+        ctx.save();
+        const hillGrad = ctx.createLinearGradient(0, 470, 0, 650);
+        hillGrad.addColorStop(0, isStage2 ? '#a8834a' : '#6fae4a');
+        hillGrad.addColorStop(1, isStage2 ? '#6b4a28' : '#3f7a34');
+        ctx.fillStyle = hillGrad;
+        const hillOffset = (camera.x * 0.38) % 500;
+        for (let i = -500; i < CONFIG.CANVAS_WIDTH + 500; i += 250) {
+            ctx.beginPath();
+            ctx.arc(i + 125 - hillOffset, 650, 180, 0, Math.PI, true);
+            ctx.fill();
+        }
+        ctx.restore();
+
+        // 언덕 위 랜드마크: 스테이지1은 회전하는 풍차, 스테이지2는 등불이 흔들리는 리월식 홍루(紅樓)
+        ctx.save();
+        const millOffset = (camera.x * 0.38) % 500;
+        for (let i = -500; i < CONFIG.CANVAS_WIDTH + 500; i += 500) {
+            const mx = i + 60 - millOffset;
+            const my = 500;
+
+            if (!isStage2) {
+                // tower
+                ctx.fillStyle = '#e8ddc8';
+                ctx.beginPath();
+                ctx.moveTo(mx - 14, my + 70);
+                ctx.lineTo(mx + 14, my + 70);
+                ctx.lineTo(mx + 8, my);
+                ctx.lineTo(mx - 8, my);
+                ctx.closePath();
+                ctx.fill();
+                // roof
+                ctx.fillStyle = '#a85c3a';
+                ctx.beginPath();
+                ctx.moveTo(mx - 10, my);
+                ctx.lineTo(mx + 10, my);
+                ctx.lineTo(mx, my - 18);
+                ctx.closePath();
+                ctx.fill();
+                // rotating sails
+                ctx.save();
+                ctx.translate(mx, my - 14);
+                ctx.rotate((t * 0.01) + i);
+                ctx.strokeStyle = 'rgba(230,220,200,0.9)';
+                ctx.lineWidth = 5;
+                for (let s = 0; s < 4; s++) {
+                    ctx.save();
+                    ctx.rotate((Math.PI / 2) * s);
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.lineTo(0, -46);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+                ctx.restore();
+            } else {
+                // 붉은 목조 기둥
+                ctx.fillStyle = '#5c2a20';
+                ctx.fillRect(mx - 6, my - 20, 12, 90);
+                // 처마가 있는 붉은 지붕 두 겹
+                ctx.fillStyle = '#8c2a20';
+                for (let r = 0; r < 2; r++) {
+                    const ry = my - 20 - r * 30;
+                    const rw = 46 - r * 10;
+                    ctx.beginPath();
+                    ctx.moveTo(mx - rw, ry);
+                    ctx.lineTo(mx, ry - 20);
+                    ctx.lineTo(mx + rw, ry);
+                    ctx.lineTo(mx + rw - 8, ry + 8);
+                    ctx.lineTo(mx - rw + 8, ry + 8);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+                ctx.fillStyle = '#ffcc55';
+                ctx.beginPath();
+                ctx.arc(mx, my - 72, 4, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 바람에 살랑이는 홍등(붉은 등불)
+                const swing = Math.sin(t * 0.03 + i) * 8;
+                const lx = mx + 34 + swing * 0.3;
+                const ly = my - 6;
+                ctx.strokeStyle = 'rgba(80,40,20,0.8)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(mx + 6, my - 6);
+                ctx.lineTo(lx, ly);
+                ctx.stroke();
+
+                ctx.save();
+                ctx.translate(lx, ly);
+                ctx.fillStyle = '#e8482f';
+                ctx.beginPath();
+                ctx.ellipse(0, 12, 10, 14, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#ffd27a';
+                ctx.fillRect(-3, -1, 6, 4);
+                ctx.fillRect(-2, 24, 4, 6);
+                ctx.restore();
+            }
+        }
+        ctx.restore();
+
+        // Warm horizon haze where sky meets the fields
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const horizonGrad = ctx.createLinearGradient(0, 590, 0, 630);
+        horizonGrad.addColorStop(0, 'rgba(255,220,150,0)');
+        horizonGrad.addColorStop(1, isStage2 ? 'rgba(255,160,90,0.35)' : 'rgba(255,240,200,0.3)');
+        ctx.fillStyle = horizonGrad;
+        ctx.fillRect(0, 590, CONFIG.CANVAS_WIDTH, 40);
+        ctx.restore();
+    }
+
+    drawPlatforms(ctx, camera) {
+        const isStage2 = this.stageIndex === 2;
+
+        for (const p of this.platforms) {
+            if (p.x + p.width < camera.x || p.x > camera.x + camera.width) continue;
+
+            const rx = p.x - camera.x;
+            const ry = p.y - camera.y;
+
+            ctx.save();
+            const bodyGrad = ctx.createLinearGradient(0, ry, 0, ry + p.height);
+            if (isStage2) {
+                bodyGrad.addColorStop(0, '#3a1815');
+                bodyGrad.addColorStop(1, '#170807');
+            } else {
+                bodyGrad.addColorStop(0, '#453027');
+                bodyGrad.addColorStop(1, '#1c130f');
+            }
+            ctx.fillStyle = bodyGrad;
+            ctx.beginPath();
+            ctx.roundRect(rx, ry, p.width, p.height, 8);
+            ctx.fill();
+
+            // Subtle rock texture cracks
+            ctx.save();
+            ctx.clip();
+            ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+            ctx.lineWidth = 2;
+            for (let cx = 20; cx < p.width; cx += 65) {
+                ctx.beginPath();
+                ctx.moveTo(rx + cx, ry + 8);
+                ctx.lineTo(rx + cx - 10, ry + p.height * 0.6);
+                ctx.stroke();
+            }
+            ctx.restore();
+
+            // Glowing top rim (gradient emissive edge)
+            const rimGrad = ctx.createLinearGradient(rx, 0, rx + p.width, 0);
+            const rimColor = isStage2 ? '#ff4400' : '#ffaa00';
+            rimGrad.addColorStop(0, rimColor);
+            rimGrad.addColorStop(0.5, isStage2 ? '#ffcc66' : '#fff4cc');
+            rimGrad.addColorStop(1, rimColor);
+            ctx.save();
+            ctx.shadowColor = rimColor;
+            ctx.shadowBlur = 10;
+            ctx.fillStyle = rimGrad;
+            ctx.beginPath();
+            ctx.roundRect(rx, ry, p.width, 6, [8, 8, 0, 0]);
+            ctx.fill();
+            ctx.restore();
+
+            if (p.secret) {
+                ctx.strokeStyle = '#ffd700';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(rx, ry, p.width, p.height);
+            }
+
+            ctx.restore();
+        }
+    }
+
+    drawCollectibles(ctx, camera, gameTime) {
+        for (const c of this.collectibles) {
+            if (c.collected) continue;
+            if (c.x < camera.x - 50 || c.x > camera.x + camera.width + 50) continue;
+
+            const bob = Math.sin(gameTime * 0.08 + c.bobOffset) * 6;
+            const rx = c.x - camera.x;
+            const ry = c.y + bob - camera.y;
+
+            ctx.save();
+            ctx.shadowBlur = 12;
+            if (c.type === 'coin') {
+                ctx.shadowColor = '#ffd700';
+                ctx.fillStyle = '#ffd700';
+                ctx.beginPath();
+                ctx.arc(rx, ry, 11, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#000';
+                ctx.font = 'bold 12px sans-serif';
+                ctx.fillText('$', rx - 3, ry + 4);
+            } else if (c.type === 'gem') {
+                ctx.shadowColor = '#00ffff';
+                ctx.fillStyle = '#00ffff';
+                ctx.beginPath();
+                ctx.moveTo(rx, ry - 14);
+                ctx.lineTo(rx + 11, ry);
+                ctx.lineTo(rx, ry + 14);
+                ctx.lineTo(rx - 11, ry);
+                ctx.fill();
+            } else if (c.type === 'star') {
+                ctx.shadowColor = '#ff007f';
+                ctx.fillStyle = '#ff007f';
+                ctx.beginPath();
+                ctx.arc(rx, ry, 15, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 15px sans-serif';
+                ctx.fillText('★', rx - 6, ry + 5);
+            } else if (c.type === 'heal') {
+                ctx.shadowColor = '#22ff66';
+                ctx.fillStyle = '#0f5c2a';
+                ctx.beginPath();
+                ctx.arc(rx, ry, 15, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#33ff77';
+                ctx.beginPath();
+                ctx.arc(rx, ry, 12, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(rx - 2, ry - 7, 4, 14);
+                ctx.fillRect(rx - 7, ry - 2, 14, 4);
+            }
+            ctx.restore();
+        }
+    }
+}
+
+class Player {
+    constructor(x, y) {
+        this.name = CONFIG.PLAYER.NAME;
+        this.x = x;
+        this.y = y;
+        this.width = CONFIG.PLAYER.WIDTH;
+        this.height = CONFIG.PLAYER.HEIGHT;
+        this.vx = 0;
+        this.vy = 0;
+        
+        this.hp = CONFIG.PLAYER.MAX_HP;
+        this.maxHp = CONFIG.PLAYER.MAX_HP;
+        this.energy = 0;
+        this.maxEnergy = CONFIG.PLAYER.MAX_ENERGY;
+
+        this.isGrounded = false;
+        this.facingRight = true;
+        this.jumpCount = 0;
+
+        // Dash & Parry State
+        this.isDashing = false;
+        this.dashTimer = 0;
+        this.dashCooldownTimer = 0;
+
+        this.parryTimer = 0;
+        this.parryCooldownTimer = 0;
+        this.isParrying = false;
+
+        // Air Dive Slam
+        this.isDiving = false;
+
+        // Attack & Skill State
+        this.isAttacking = false;
+        this.attackTimer = 0;
+        this.attackCombo = 0;
+        this.invulnerableTimer = 0;
+
+        // Buff System
+        this.buffs = { atk: 0, spd: 0, aspd: 0 };
+
+        // Visuals
+        this.scaleX = 1;
+        this.scaleY = 1;
+        this.animFrame = 0;
+        this.afterImages = [];
+    }
+
+    addEnergy(amount) {
+        this.energy = Math.min(this.maxEnergy, this.energy + amount);
+    }
+
+    applyBuff(type, duration = 400) {
+        this.buffs[type] = duration;
+        sound.playBuff();
+    }
+
+    update(input, map, particles, camera) {
+        this.animFrame++;
+
+        if (this.invulnerableTimer > 0) this.invulnerableTimer--;
+        if (this.dashCooldownTimer > 0) this.dashCooldownTimer--;
+        if (this.parryCooldownTimer > 0) this.parryCooldownTimer--;
+
+        for (const key in this.buffs) {
+            if (this.buffs[key] > 0) this.buffs[key]--;
+        }
+
+        const moveSpeed = CONFIG.PLAYER.BASE_SPEED * (this.buffs.spd > 0 ? 1.4 : 1.0);
+        const attackCd = Math.floor(CONFIG.PLAYER.ATTACK_COOLDOWN * (this.buffs.aspd > 0 ? 0.55 : 1.0));
+
+        // Parry Barrier (E Key)
+        if (input.keys.parry && this.parryCooldownTimer <= 0 && !this.isParrying) {
+            this.isParrying = true;
+            this.parryTimer = 22;
+            this.parryCooldownTimer = CONFIG.PLAYER.PARRY_COOLDOWN;
+            this.invulnerableTimer = 24;
+            sound.playParry();
+            particles.addShockwave(this.x + this.width / 2, this.y + this.height / 2, 70, '#00ffaa');
+        }
+
+        if (this.isParrying) {
+            this.parryTimer--;
+            if (this.parryTimer <= 0) this.isParrying = false;
+        }
+
+        // Dash Logic
+        if (input.keys.dash && this.dashCooldownTimer <= 0 && !this.isDashing) {
+            this.isDashing = true;
+            this.dashTimer = CONFIG.PLAYER.DASH_DURATION;
+            this.dashCooldownTimer = CONFIG.PLAYER.DASH_COOLDOWN;
+            this.invulnerableTimer = CONFIG.PLAYER.DASH_DURATION + 4;
+            sound.playDash();
+            particles.addSparkles(this.x + this.width / 2, this.y + this.height / 2, '#ffaa00', 16);
+            particles.addShockwave(this.x + this.width / 2, this.y + this.height / 2, 50, '#ffbb00');
+        }
+
+        if (this.isDashing) {
+            this.vx = (this.facingRight ? 1 : -1) * CONFIG.PLAYER.DASH_SPEED;
+            this.vy = 0;
+            this.dashTimer--;
+            
+            if (this.animFrame % 2 === 0) {
+                this.afterImages.push({ x: this.x, y: this.y, alpha: 0.85 });
+            }
+
+            if (this.dashTimer <= 0) this.isDashing = false;
+        } else {
+            // Air Meteor Dive Slam
+            if (!this.isGrounded && input.keys.attack && !this.isDiving) {
+                this.isDiving = true;
+                this.vy = 22;
+                sound.playSlash(2);
+            }
+
+            if (this.isDiving) {
+                this.vy = 24;
+                particles.addSparkles(this.x + this.width / 2, this.y + this.height, '#00ffff', 6);
+            } else {
+                if (input.keys.left) {
+                    this.vx = -moveSpeed;
+                    this.facingRight = false;
+                } else if (input.keys.right) {
+                    this.vx = moveSpeed;
+                    this.facingRight = true;
+                } else {
+                    this.vx *= CONFIG.FRICTION;
+                }
+
+                if (input.keys.jump && !this.prevJumpKey) {
+                    if (this.isGrounded) {
+                        this.vy = CONFIG.PLAYER.JUMP_FORCE;
+                        this.isGrounded = false;
+                        this.jumpCount = 1;
+                        this.scaleX = 0.7; this.scaleY = 1.3;
+                        sound.playJump();
+                        particles.addSparkles(this.x + this.width / 2, this.y + this.height, '#ffffff', 10);
+                    } else if (this.jumpCount < 2) {
+                        this.vy = CONFIG.PLAYER.JUMP_FORCE * 0.9;
+                        this.jumpCount = 2;
+                        this.scaleX = 0.8; this.scaleY = 1.25;
+                        sound.playJump();
+                        particles.addFlameExplosion(this.x + this.width / 2, this.y + this.height / 2, 45);
+                    }
+                }
+
+                this.vy += CONFIG.GRAVITY;
+            }
+        }
+
+        this.prevJumpKey = input.keys.jump;
+
+        this.x += this.vx;
+        this.checkMapCollision(map, 'x', particles, camera);
+
+        this.y += this.vy;
+        this.isGrounded = false;
+        this.checkMapCollision(map, 'y', particles, camera);
+
+        this.scaleX += (1 - this.scaleX) * 0.15;
+        this.scaleY += (1 - this.scaleY) * 0.15;
+
+        // Normal Attack Logic
+        if (this.attackTimer > 0) this.attackTimer--;
+
+        if (input.keys.attack && this.attackTimer <= 0 && !this.isDashing && !this.isDiving) {
+            this.isAttacking = true;
+            this.attackTimer = attackCd;
+            this.attackCombo = (this.attackCombo + 1) % 3;
+            sound.playSlash(this.attackCombo);
+
+            const slashX = this.facingRight ? this.x + this.width : this.x - 65;
+            particles.addSlashEffect(slashX + 25, this.y + this.height / 2, this.facingRight, this.attackCombo);
+        } else if (this.attackTimer < attackCd - 7) {
+            this.isAttacking = false;
+        }
+
+        // Ultimate Skill (Q) - 거대 검기 휘두르기 (Sword Slash Sweep)
+        if (input.keys.skill && this.energy >= CONFIG.PLAYER.MAX_ENERGY) {
+            this.energy = 0;
+            this.invulnerableTimer = 65;
+            camera.shake(30, 40);
+            sound.playUltimateBlast();
+
+            // 거대 검기 휘두르기 이펙트 발사
+            const originX = this.facingRight ? this.x + this.width : this.x - 120;
+            particles.addGiantSwordSlash(originX, this.y + 10, this.facingRight);
+            return true;
+        }
+
+        for (let i = this.afterImages.length - 1; i >= 0; i--) {
+            this.afterImages[i].alpha -= 0.12;
+            if (this.afterImages[i].alpha <= 0) this.afterImages.splice(i, 1);
+        }
+
+        if (this.y > map.height + 100) this.takeDamage(100);
+
+        return false;
+    }
+
+    checkMapCollision(map, axis, particles, camera) {
+        for (const p of map.platforms) {
+            if (this.x < p.x + p.width &&
+                this.x + this.width > p.x &&
+                this.y < p.y + p.height &&
+                this.y + this.height > p.y) {
+                
+                if (axis === 'x') {
+                    if (this.vx > 0) this.x = p.x - this.width;
+                    else if (this.vx < 0) this.x = p.x + p.width;
+                } else if (axis === 'y') {
+                    if (this.vy > 0) {
+                        this.y = p.y - this.height;
+                        this.vy = 0;
+                        if (!this.isGrounded) {
+                            this.scaleX = 1.25; this.scaleY = 0.75;
+                        }
+
+                        // Trigger Dive Impact Shockwave
+                        if (this.isDiving) {
+                            this.isDiving = false;
+                            camera.shake(16, 20);
+                            sound.playExplosion();
+                            particles.addFlameExplosion(this.x + this.width / 2, this.y + this.height, 110);
+                        }
+
+                        this.isGrounded = true;
+                        this.jumpCount = 0;
+                    } else if (this.vy < 0) {
+                        this.y = p.y + p.height;
+                        this.vy = 0;
+                    }
+                }
+            }
+        }
+    }
+
+    takeDamage(amount) {
+        if (this.invulnerableTimer > 0) return;
+        
+        // Counter-Attack on Parry
+        if (this.isParrying) {
+            sound.playParry();
+            this.invulnerableTimer = 30;
+            this.addEnergy(25);
+            return;
+        }
+
+        this.hp = Math.max(0, this.hp - amount);
+        this.invulnerableTimer = 45;
+        sound.playHit();
+    }
+
+    draw(ctx, camera) {
+        const rx = this.x - camera.x;
+        const ry = this.y - camera.y;
+
+        ctx.save();
+
+        // Dash Afterimages
+        for (const img of this.afterImages) {
+            ctx.save();
+            ctx.globalAlpha = img.alpha * 0.6;
+            ctx.fillStyle = CONFIG.COLORS.HOGUMA_HAIR;
+            ctx.fillRect(img.x - camera.x, img.y - camera.y, this.width, this.height);
+            ctx.restore();
+        }
+
+        // Parry Barrier Aura
+        if (this.isParrying) {
+            ctx.save();
+            ctx.strokeStyle = '#00ffcc';
+            ctx.lineWidth = 4;
+            ctx.shadowColor = '#00ffcc';
+            ctx.shadowBlur = 20;
+            ctx.beginPath();
+            ctx.arc(rx + this.width / 2, ry + this.height / 2, 48, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        if (this.invulnerableTimer > 0 && Math.floor(this.invulnerableTimer / 4) % 2 === 0) {
+            ctx.globalAlpha = 0.35;
+        }
+
+        ctx.translate(rx + this.width / 2, ry + this.height);
+        ctx.scale(this.facingRight ? this.scaleX : -this.scaleX, this.scaleY);
+
+        ctx.shadowColor = CONFIG.COLORS.HOGUMA_GLOW;
+        ctx.shadowBlur = this.buffs.atk > 0 ? 25 : 15;
+
+        // Waist Flame Trail (fluttering embers around the hips, Mavuika-style skirt flames)
+        const flameWave = Math.sin(this.animFrame * 0.3) * 6;
+        for (let i = 0; i < 3; i++) {
+            const fx = -14 + i * 14;
+            const flameGrad = ctx.createLinearGradient(fx, -6, fx, 20 + i * 4);
+            flameGrad.addColorStop(0, '#ffdd66');
+            flameGrad.addColorStop(0.5, '#ff6a00');
+            flameGrad.addColorStop(1, 'rgba(180, 20, 0, 0)');
+            ctx.fillStyle = flameGrad;
+            ctx.beginPath();
+            ctx.moveTo(fx - 6, -8);
+            ctx.quadraticCurveTo(fx + flameWave * (i % 2 === 0 ? 1 : -1), 6 + i * 3, fx, 20 + i * 4);
+            ctx.quadraticCurveTo(fx - flameWave * (i % 2 === 0 ? 1 : -1), 6 + i * 3, fx + 6, -8);
+            ctx.fill();
+        }
+
+        // Greatsword strapped across the back (Mavuika's signature 양손검)
+        ctx.save();
+        ctx.translate(-6, -34);
+        ctx.rotate(-0.55);
+        const bladeGrad = ctx.createLinearGradient(0, -58, 0, 14);
+        bladeGrad.addColorStop(0, '#e8f6ff');
+        bladeGrad.addColorStop(0.5, '#8fd8e8');
+        bladeGrad.addColorStop(1, '#2a2a34');
+        ctx.fillStyle = bladeGrad;
+        ctx.beginPath();
+        ctx.moveTo(-6, 14);
+        ctx.lineTo(-6, -46);
+        ctx.lineTo(0, -58);
+        ctx.lineTo(6, -46);
+        ctx.lineTo(6, 14);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = CONFIG.COLORS.HOGUMA_GOLD;
+        ctx.fillRect(-11, 10, 22, 7);
+        ctx.fillStyle = '#2a2a2e';
+        ctx.fillRect(-3.5, 10, 7, 22);
+        ctx.restore();
+
+        // Animated Flame Cape (gradient: bright core fading to deep red edge)
+        const capeWave = Math.sin(this.animFrame * 0.25) * 8;
+        const capeGrad = ctx.createLinearGradient(-35, -40, -6, 0);
+        capeGrad.addColorStop(0, '#ff6a00');
+        capeGrad.addColorStop(0.55, CONFIG.COLORS.HOGUMA_CAPE);
+        capeGrad.addColorStop(1, '#5c0f00');
+        ctx.fillStyle = capeGrad;
+        ctx.beginPath();
+        ctx.moveTo(-10, -42);
+        ctx.quadraticCurveTo(-35 + capeWave, -25, -25, 2);
+        ctx.lineTo(-6, -10);
+        ctx.fill();
+
+        // Long Flowing Twin-Lock Hair (Mavuika-style swept mane, gradient tips glowing brighter)
+        const hairWave = Math.cos(this.animFrame * 0.2) * 6;
+        const hairGrad = ctx.createLinearGradient(-46, -58, 4, 20);
+        hairGrad.addColorStop(0, '#ffd23c');
+        hairGrad.addColorStop(0.35, '#ff5a1a');
+        hairGrad.addColorStop(1, '#7c0a00');
+        ctx.fillStyle = hairGrad;
+        // Back lock (long, swept behind)
+        ctx.beginPath();
+        ctx.moveTo(-16, -55);
+        ctx.quadraticCurveTo(-48 + hairWave, -30, -34, 22);
+        ctx.quadraticCurveTo(-20, 24, -14, 4);
+        ctx.quadraticCurveTo(-8, -20, -16, -55);
+        ctx.fill();
+        // Front lock (shorter, frames the face)
+        ctx.beginPath();
+        ctx.moveTo(-16, -54);
+        ctx.quadraticCurveTo(-38 + hairWave * 0.6, -32, -24, 8);
+        ctx.quadraticCurveTo(-10, -14, 0, -52);
+        ctx.fill();
+        // Gold hair-tie accent
+        ctx.fillStyle = CONFIG.COLORS.HOGUMA_GOLD;
+        ctx.fillRect(-20, -30, 8, 5);
+
+        // Rider-Jacket Torso (angular sun-warrior armor with squared shoulder plates)
+        const armorGrad = ctx.createLinearGradient(-16, -48, 16, -8);
+        armorGrad.addColorStop(0, '#2c2c34');
+        armorGrad.addColorStop(0.45, CONFIG.COLORS.HOGUMA_ARMOR);
+        armorGrad.addColorStop(1, '#000000');
+        ctx.fillStyle = armorGrad;
+        ctx.beginPath();
+        ctx.moveTo(-18, -46);
+        ctx.lineTo(18, -46);
+        ctx.lineTo(15, -38);
+        ctx.lineTo(15, -10);
+        ctx.lineTo(-15, -10);
+        ctx.lineTo(-15, -38);
+        ctx.closePath();
+        ctx.fill();
+        // Squared shoulder plates
+        ctx.fillStyle = '#1a1a20';
+        ctx.fillRect(-19, -47, 12, 9);
+        ctx.fillRect(7, -47, 12, 9);
+        ctx.fillStyle = 'rgba(255,255,255,0.08)';
+        ctx.fillRect(-13, -44, 5, 32);
+
+        // Sun Emblem Badge on chest (Mavuika's solar motif)
+        ctx.save();
+        ctx.translate(0, -28);
+        ctx.shadowColor = '#ffaa00';
+        ctx.shadowBlur = 10;
+        ctx.strokeStyle = CONFIG.COLORS.HOGUMA_GOLD;
+        ctx.lineWidth = 1.6;
+        for (let r = 0; r < 8; r++) {
+            const ang = (Math.PI / 4) * r;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(ang) * 4, Math.sin(ang) * 4);
+            ctx.lineTo(Math.cos(ang) * 9, Math.sin(ang) * 9);
+            ctx.stroke();
+        }
+        ctx.fillStyle = CONFIG.COLORS.HOGUMA_GOLD;
+        ctx.beginPath();
+        ctx.arc(0, 0, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        const goldGrad = ctx.createLinearGradient(-15, -46, 15, -42);
+        goldGrad.addColorStop(0, '#fff2b0');
+        goldGrad.addColorStop(0.5, CONFIG.COLORS.HOGUMA_GOLD);
+        goldGrad.addColorStop(1, '#b8860b');
+        ctx.fillStyle = goldGrad;
+        ctx.fillRect(-15, -46, 30, 4);
+
+        // Face
+        const faceGrad = ctx.createRadialGradient(0, -56, 2, 0, -53, 14);
+        faceGrad.addColorStop(0, '#ffe9d6');
+        faceGrad.addColorStop(1, '#e8c9a0');
+        ctx.fillStyle = faceGrad;
+        ctx.beginPath();
+        ctx.arc(0, -53, 14, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Tinted Visor/Sunglasses (signature accessory)
+        ctx.fillStyle = '#3a0a0a';
+        ctx.beginPath();
+        ctx.roundRect(-9, -58, 18, 7, 3);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,150,80,0.55)';
+        ctx.fillRect(-8, -57, 7, 5);
+        ctx.fillRect(2, -57, 7, 5);
+
+        ctx.fillStyle = CONFIG.COLORS.HOGUMA_HAIR;
+        ctx.beginPath();
+        ctx.arc(0, -59, 15, Math.PI, 0);
+        ctx.fill();
+
+        // 날카로운 검 휘두르기 모션 (Sword Swing Animation)
+        if (this.isAttacking) {
+            ctx.save();
+            ctx.strokeStyle = '#00e5ff';
+            ctx.fillStyle = 'rgba(0, 229, 255, 0.35)';
+            ctx.lineWidth = 6;
+            ctx.shadowColor = '#00ffff';
+            ctx.shadowBlur = 18;
+            ctx.beginPath();
+            ctx.arc(10, -32, 65, -0.9 + this.attackCombo * 0.3, 0.9 + this.attackCombo * 0.3);
+            ctx.lineTo(10, -32);
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        ctx.restore();
+    }
+}
+
+class DropItem {
+    constructor(x, y, type) {
+        this.x = x;
+        this.y = y;
+        this.type = type; // 'atk', 'spd', 'aspd'
+        this.vy = -4;
+        this.life = 400;
+        this.bobOffset = Math.random() * Math.PI * 2;
+    }
+
+    update(map) {
+        this.vy += CONFIG.GRAVITY * 0.5;
+        this.y += this.vy;
+        this.life--;
+
+        for (const p of map.platforms) {
+            if (this.x > p.x && this.x < p.x + p.width &&
+                this.y >= p.y - 12 && this.y <= p.y + 12) {
+                this.y = p.y - 12;
+                this.vy = 0;
+            }
+        }
+    }
+
+    draw(ctx, camera, gameTime) {
+        const rx = this.x - camera.x;
+        const ry = this.y + Math.sin(gameTime * 0.1 + this.bobOffset) * 4 - camera.y;
+
+        ctx.save();
+        ctx.shadowBlur = 12;
+        if (this.type === 'atk') {
+            ctx.shadowColor = '#ff2200';
+            ctx.fillStyle = '#ff2200';
+            ctx.beginPath(); ctx.arc(rx, ry, 12, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.fillText('⚔️', rx - 6, ry + 4);
+        } else if (this.type === 'spd') {
+            ctx.shadowColor = '#00aaff';
+            ctx.fillStyle = '#00aaff';
+            ctx.beginPath(); ctx.arc(rx, ry, 12, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.fillText('⚡', rx - 6, ry + 4);
+        } else if (this.type === 'aspd') {
+            ctx.shadowColor = '#00ff66';
+            ctx.fillStyle = '#00ff66';
+            ctx.beginPath(); ctx.arc(rx, ry, 12, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.font = 'bold 11px sans-serif'; ctx.fillText('🏹', rx - 6, ry + 4);
+        } else if (this.type === 'heal') {
+            ctx.shadowColor = '#22ff66';
+            ctx.fillStyle = '#0f5c2a';
+            ctx.beginPath(); ctx.arc(rx, ry, 13, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(rx - 2, ry - 6, 4, 12);
+            ctx.fillRect(rx - 6, ry - 2, 12, 4);
+        }
+        ctx.restore();
+    }
+}
+
+class Enemy {
+    constructor(x, y, type) {
+        this.x = x;
+        this.y = y;
+        this.type = type;
+        this.width = 46;
+        this.height = 54;
+        this.vx = (Math.random() > 0.5 ? 1 : -1) * 1.8;
+        this.vy = 0;
+        // 일반몹 HP 추가 하향 (필드 난이도 완화)
+        this.hp = type === 'shield' ? 45 : 30;
+        this.maxHp = this.hp;
+        this.facingRight = true;
+        this.shootTimer = 0;
+        this.dead = false;
+        this.projectiles = [];
+    }
+
+    update(player, map, particles) {
+        if (this.dead) return;
+
+        const distToPlayer = Math.abs(player.x - this.x);
+
+        if (this.type === 'melee' || this.type === 'shield') {
+            if (distToPlayer < 280) { // 추격 발동 거리 완화 (350 -> 280)
+                this.vx = player.x > this.x ? 1.5 : -1.5; // 추격 속도 완화 (2.0 -> 1.5)
+            }
+        } else if (this.type === 'ranged') {
+            this.vx = 0;
+            this.facingRight = player.x > this.x;
+            
+            this.shootTimer++;
+            // 발사 간격 추가 연장 (피하기 쉬움)
+            if (this.shootTimer > 140) {
+                this.shootTimer = 0;
+                const dir = this.facingRight ? 1 : -1;
+                this.projectiles.push({
+                    x: this.x + (this.facingRight ? this.width : 0),
+                    y: this.y + 16,
+                    vx: dir * 5.0,
+                    vy: 0,
+                    life: 120
+                });
+            }
+        }
+
+        this.facingRight = this.vx >= 0;
+        this.vy += CONFIG.GRAVITY;
+        this.x += this.vx;
+        this.y += this.vy;
+
+        for (const p of map.platforms) {
+            if (this.x < p.x + p.width &&
+                this.x + this.width > p.x &&
+                this.y + this.height >= p.y &&
+                this.y + this.height <= p.y + 20) {
+                this.y = p.y - this.height;
+                this.vy = 0;
+            }
+        }
+
+        for (let i = this.projectiles.length - 1; i >= 0; i--) {
+            const proj = this.projectiles[i];
+            proj.x += proj.vx;
+            proj.y += proj.vy;
+            proj.life--;
+
+            if (proj.x > player.x && proj.x < player.x + player.width &&
+                proj.y > player.y && proj.y < player.y + player.height) {
+                player.takeDamage(5); // 일반몹 피격 데미지 추가 하향 (20 -> 8 -> 5)
+                this.projectiles.splice(i, 1);
+                continue;
+            }
+
+            if (proj.life <= 0) this.projectiles.splice(i, 1);
+        }
+    }
+
+    takeDamage(amount, particles) {
+        this.hp -= amount;
+        particles.addSparkles(this.x + this.width / 2, this.y + this.height / 2, '#ffcc00', 10);
+        if (this.hp <= 0) {
+            this.dead = true;
+        }
+    }
+
+    draw(ctx, camera) {
+        if (this.dead) return;
+
+        const rx = this.x - camera.x;
+        const ry = this.y - camera.y;
+
+        ctx.save();
+        const bodyGrad = ctx.createLinearGradient(rx, ry + 12, rx, ry + this.height);
+        bodyGrad.addColorStop(0, '#8a5c3c');
+        bodyGrad.addColorStop(1, '#4a2f1c');
+        ctx.fillStyle = bodyGrad;
+        ctx.beginPath();
+        ctx.roundRect(rx, ry + 12, this.width, this.height - 12, 10);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';
+        ctx.beginPath();
+        ctx.roundRect(rx, ry + this.height - 16, this.width, 16, [0, 0, 10, 10]);
+        ctx.fill();
+
+        const faceGrad = ctx.createRadialGradient(
+            rx + (this.facingRight ? 30 : 16), ry + 18, 2,
+            rx + (this.facingRight ? 30 : 16), ry + 22, 13
+        );
+        faceGrad.addColorStop(0, '#ffffff');
+        faceGrad.addColorStop(1, '#e0c9a6');
+        ctx.fillStyle = faceGrad;
+        ctx.beginPath();
+        ctx.arc(rx + (this.facingRight ? 30 : 16), ry + 22, 13, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.save();
+        ctx.shadowColor = '#ff3300';
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = '#ff2200';
+        ctx.fillRect(rx + (this.facingRight ? 32 : 12), ry + 20, 4, 4);
+        ctx.restore();
+
+        if (this.type === 'shield') {
+            ctx.fillStyle = '#8b4513';
+            ctx.strokeStyle = '#ffd700';
+            ctx.lineWidth = 2;
+            const shieldX = this.facingRight ? rx + this.width - 6 : rx - 10;
+            ctx.fillRect(shieldX, ry + 8, 16, 40);
+            ctx.strokeRect(shieldX, ry + 8, 16, 40);
+        }
+
+        if (this.hp < this.maxHp) {
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(rx, ry - 12, this.width, 6);
+            ctx.fillStyle = '#ff3333';
+            ctx.fillRect(rx, ry - 12, (this.hp / this.maxHp) * this.width, 6);
+        }
+
+        ctx.restore();
+
+        for (const proj of this.projectiles) {
+            ctx.fillStyle = '#ff4500';
+            ctx.beginPath();
+            ctx.arc(proj.x - camera.x, proj.y - camera.y, 6, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+}
+
+class Boss {
+    constructor(x, y, stageIndex) {
+        this.x = x;
+        this.y = y;
+        this.stageIndex = stageIndex;
+        this.width = stageIndex === 1 ? 160 : 220;
+        this.height = stageIndex === 1 ? 170 : 190;
+        // 보스 체력 추가 상승 (패턴/데미지는 그대로, 맷집만 강화)
+        this.maxHp = stageIndex === 1 ? 4400 : 7200;
+        this.hp = this.maxHp;
+        
+        this.state = 'idle';
+        this.phase = 1;
+        this.timer = 0;
+        this.facingRight = false;
+        this.vulnerableTimer = 0;
+        this.dead = false;
+        this.bossAttacks = [];
+        this.telegraphs = [];
+    }
+
+    update(player, map, particles, camera, enemiesList) {
+        if (this.dead) return;
+
+        this.timer++;
+        this.facingRight = player.x > this.x;
+
+        if (this.phase === 1 && this.hp < this.maxHp * 0.5) {
+            this.phase = 2;
+            camera.shake(30, 45);
+            sound.playExplosion();
+            particles.addFlameExplosion(this.x + this.width / 2, this.y + this.height / 2, 260);
+        }
+
+        const isEnraged = this.phase === 2;
+        const speedMult = isEnraged ? 1.5 : 1.1; // 필드 난이도 대폭 하향: 보스 패턴 속도 완화
+
+        if (this.stageIndex === 1) {
+            if (this.state === 'idle') {
+                if (this.timer > (isEnraged ? 30 : 48)) {
+                    this.timer = 0;
+                    const rand = Math.random();
+                    if (rand < 0.35) this.state = 'slam_prep';
+                    else if (rand < 0.7) this.state = 'jump_crush';
+                    else this.state = 'geyser_prep';
+                }
+            } else if (this.state === 'slam_prep') {
+                if (this.timer === 1) {
+                    this.telegraphs.push({
+                        x: this.x - 500, y: 610, w: 1200, h: 18, timer: Math.floor(18 / speedMult)
+                    });
+                }
+                if (this.timer > 18 / speedMult) {
+                    this.state = 'slam';
+                    this.timer = 0;
+                }
+            } else if (this.state === 'slam') {
+                camera.shake(20, 24);
+                sound.playExplosion();
+                // 슬램 충격파 사거리를 필드 전체가 아닌 보스 주변으로 대폭 축소
+                this.bossAttacks.push({
+                    x: this.x - 260, y: this.y + this.height - 35,
+                    vx: -7 * speedMult, vy: 0, width: 85, height: 35, life: 26
+                });
+                this.bossAttacks.push({
+                    x: this.x + this.width, y: this.y + this.height - 35,
+                    vx: 7 * speedMult, vy: 0, width: 85, height: 35, life: 26
+                });
+                
+                this.state = 'vulnerable';
+                this.timer = 0;
+                this.vulnerableTimer = Math.floor(35 / speedMult); // 취약 타임 대폭 감소
+            } else if (this.state === 'geyser_prep') {
+                if (this.timer === 1) {
+                    this.telegraphs.push({
+                        x: player.x - 70, y: 610, w: 140, h: 18, timer: Math.floor(16 / speedMult)
+                    });
+                }
+                if (this.timer > 16 / speedMult) {
+                    sound.playExplosion();
+                    this.bossAttacks.push({
+                        x: player.x - 60, y: 200,
+                        vx: 0, vy: 0, width: 120, height: 420, life: 50, isLava: true
+                    });
+                    this.state = 'idle';
+                    this.timer = 0;
+                }
+            } else if (this.state === 'jump_crush') {
+                if (this.timer === 1) this.vy = -22;
+                this.y += this.vy || 0;
+                this.vy = (this.vy || -22) + CONFIG.GRAVITY * 1.2;
+
+                if (this.y >= 620 - this.height) {
+                    this.y = 620 - this.height;
+                    camera.shake(32, 35);
+                    sound.playExplosion();
+                    particles.addFlameExplosion(this.x + this.width / 2, this.y + this.height, 220);
+                    this.state = 'idle';
+                    this.timer = 0;
+                }
+            } else if (this.state === 'vulnerable') {
+                this.vulnerableTimer--;
+                if (this.vulnerableTimer <= 0) {
+                    this.state = 'idle';
+                    this.timer = 0;
+                }
+            }
+        } 
+        else {
+            if (this.state === 'idle') {
+                if (this.timer > (isEnraged ? 26 : 42)) {
+                    this.timer = 0;
+                    const rand = Math.random();
+                    if (rand < 0.35) this.state = 'fire_breath';
+                    else if (rand < 0.7) this.state = 'meteor_prep';
+                    else this.state = 'lava_beam_prep';
+                }
+            } else if (this.state === 'meteor_prep') {
+                if (this.timer === 1) {
+                    const count = isEnraged ? 5 : 3;
+                    for (let c = 0; c < count; c++) {
+                        this.telegraphs.push({
+                            x: player.x - 180 + (c - 3) * 120, y: 610, w: 110, h: 18, timer: Math.floor(16 / speedMult)
+                        });
+                    }
+                }
+                if (this.timer > 16 / speedMult) {
+                    this.state = 'meteor';
+                    this.timer = 0;
+                }
+            } else if (this.state === 'meteor') {
+                const count = isEnraged ? 5 : 3;
+                for (let c = 0; c < count; c++) {
+                    this.bossAttacks.push({
+                        x: player.x + (c - 3) * 120, y: player.y - 550,
+                        vx: 0, vy: 19, width: 60, height: 60, life: 85, isFire: true
+                    });
+                }
+                this.state = 'idle';
+                this.timer = 0;
+            } else if (this.state === 'lava_beam_prep') {
+                if (this.timer === 1) {
+                    // 용암빔 위치를 고정 좌표가 아닌 보스의 현재 위치 기준으로 생성 (필드 전역까지 뻗어나가던 문제 수정)
+                    this.beamX = this.x - 500;
+                    this.telegraphs.push({
+                        x: this.beamX, y: 540, w: 1000, h: 80, timer: Math.floor(20 / speedMult)
+                    });
+                }
+                if (this.timer > 20 / speedMult) {
+                    sound.playExplosion();
+                    camera.shake(24, 28);
+                    this.bossAttacks.push({
+                        x: this.beamX, y: 540, vx: 0, vy: 0, width: 1000, height: 80, life: 60, isBeam: true
+                    });
+                    this.state = 'vulnerable';
+                    this.timer = 0;
+                    this.vulnerableTimer = 40;
+                }
+            } else if (this.state === 'fire_breath') {
+                if (this.timer % 3 === 0 && this.timer < 90) {
+                    const dir = this.facingRight ? 1 : -1;
+                    this.bossAttacks.push({
+                        x: this.x + (this.facingRight ? this.width : 0),
+                        y: this.y + 35 + (Math.random() - 0.5) * 60,
+                        vx: dir * (14 + Math.random() * 8) * speedMult,
+                        vy: (Math.random() - 0.5) * 4,
+                        width: 42, height: 42, life: 60, isFire: true
+                    });
+                }
+                if (this.timer > 95) {
+                    this.state = 'vulnerable';
+                    this.timer = 0;
+                    this.vulnerableTimer = 45;
+                }
+            } else if (this.state === 'vulnerable') {
+                this.vulnerableTimer--;
+                if (this.vulnerableTimer <= 0) {
+                    this.state = 'idle';
+                    this.timer = 0;
+                }
+            }
+        }
+
+        for (let i = this.telegraphs.length - 1; i >= 0; i--) {
+            this.telegraphs[i].timer--;
+            if (this.telegraphs[i].timer <= 0) this.telegraphs.splice(i, 1);
+        }
+
+        for (let i = this.bossAttacks.length - 1; i >= 0; i--) {
+            const atk = this.bossAttacks[i];
+            atk.x += atk.vx;
+            atk.y += atk.vy;
+            atk.life--;
+
+            if (atk.x < player.x + player.width &&
+                atk.x + atk.width > player.x &&
+                atk.y < player.y + player.height &&
+                atk.y + atk.height > player.y) {
+                player.takeDamage(22); // 필드 난이도 대폭 하향: 보스 피격 데미지 완화 (38 -> 22)
+                this.bossAttacks.splice(i, 1);
+                continue;
+            }
+
+            if (atk.life <= 0) this.bossAttacks.splice(i, 1);
+        }
+    }
+
+    takeDamage(amount, particles) {
+        const isCrit = this.state === 'vulnerable';
+        const totalDamage = Math.floor(amount * (isCrit ? 2.5 : 1.0));
+        
+        this.hp -= totalDamage;
+        particles.addFloatingText(
+            this.x + this.width / 2, this.y - 10,
+            `-${totalDamage}` + (isCrit ? ' CRIT!' : ''),
+            isCrit ? '#ff0055' : '#ffffff',
+            isCrit ? 32 : 22,
+            isCrit
+        );
+
+        if (this.hp <= 0) {
+            this.dead = true;
+            sound.playExplosion();
+        }
+    }
+
+    draw(ctx, camera) {
+        if (this.dead) return;
+
+        const rx = this.x - camera.x;
+        const ry = this.y - camera.y;
+
+        for (const t of this.telegraphs) {
+            ctx.save();
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.55)';
+            ctx.fillRect(t.x - camera.x, t.y - camera.y, t.w, t.h);
+            ctx.strokeStyle = '#ff0000';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(t.x - camera.x, t.y - camera.y, t.w, t.h);
+            ctx.restore();
+        }
+
+        ctx.save();
+        if (this.phase === 2) {
+            ctx.shadowColor = '#ff0000';
+            ctx.shadowBlur = 35;
+        } else if (this.state === 'vulnerable') {
+            ctx.shadowColor = '#ffff00';
+            ctx.shadowBlur = 30;
+        }
+
+        if (this.stageIndex === 1) {
+            const bodyGrad = ctx.createLinearGradient(rx, ry, rx, ry + this.height);
+            if (this.phase === 2) {
+                bodyGrad.addColorStop(0, '#a83300');
+                bodyGrad.addColorStop(1, '#3a0d00');
+            } else {
+                bodyGrad.addColorStop(0, '#6b4a34');
+                bodyGrad.addColorStop(1, '#2a1c12');
+            }
+            ctx.fillStyle = bodyGrad;
+            ctx.beginPath();
+            ctx.roundRect(rx, ry, this.width, this.height, 24);
+            ctx.fill();
+
+            const crownGrad = ctx.createLinearGradient(rx + 20, ry - 40, rx + 130, ry);
+            crownGrad.addColorStop(0, '#fff2b0');
+            crownGrad.addColorStop(0.5, '#ffd700');
+            crownGrad.addColorStop(1, '#b8860b');
+            ctx.fillStyle = crownGrad;
+            ctx.beginPath();
+            ctx.moveTo(rx + 20, ry);
+            ctx.lineTo(rx + 50, ry - 40);
+            ctx.lineTo(rx + 75, ry - 12);
+            ctx.lineTo(rx + 100, ry - 40);
+            ctx.lineTo(rx + 130, ry);
+            ctx.fill();
+
+            const eyeColor = this.state === 'vulnerable' ? '#00ffff' : '#ff0000';
+            const eyeX = rx + (this.facingRight ? 115 : 45);
+            const eyeY = ry + 50;
+            const eyeGrad = ctx.createRadialGradient(eyeX, eyeY, 2, eyeX, eyeY, 20);
+            eyeGrad.addColorStop(0, '#ffffff');
+            eyeGrad.addColorStop(0.4, eyeColor);
+            eyeGrad.addColorStop(1, eyeColor);
+            ctx.save();
+            ctx.shadowColor = eyeColor;
+            ctx.shadowBlur = 18;
+            ctx.fillStyle = eyeGrad;
+            ctx.beginPath();
+            ctx.arc(eyeX, eyeY, 20, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        } else {
+            const bodyGrad = ctx.createLinearGradient(rx, ry, rx, ry + this.height);
+            if (this.phase === 2) {
+                bodyGrad.addColorStop(0, '#c81800');
+                bodyGrad.addColorStop(1, '#450000');
+            } else {
+                bodyGrad.addColorStop(0, '#8f0d0d');
+                bodyGrad.addColorStop(1, '#380202');
+            }
+            ctx.fillStyle = bodyGrad;
+            ctx.beginPath();
+            ctx.moveTo(rx, ry + this.height);
+            ctx.lineTo(rx + this.width / 2, ry);
+            ctx.lineTo(rx + this.width, ry + this.height);
+            ctx.fill();
+
+            const coreGrad = ctx.createRadialGradient(
+                rx + this.width / 2, ry + this.height / 2, 4,
+                rx + this.width / 2, ry + this.height / 2, 50
+            );
+            coreGrad.addColorStop(0, '#ffe08a');
+            coreGrad.addColorStop(0.5, '#ff4500');
+            coreGrad.addColorStop(1, '#8a1500');
+            ctx.save();
+            ctx.shadowColor = '#ff4500';
+            ctx.shadowBlur = 22;
+            ctx.fillStyle = coreGrad;
+            ctx.beginPath();
+            ctx.arc(rx + this.width / 2, ry + this.height / 2, 50, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        ctx.restore();
+
+        for (const atk of this.bossAttacks) {
+            ctx.fillStyle = atk.isBeam ? '#ff0055' : (atk.isLava ? '#ff3300' : '#ff6600');
+            ctx.fillRect(atk.x - camera.x, atk.y - camera.y, atk.width, atk.height);
+        }
+    }
+}
+
+class Game {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.canvas.width = CONFIG.CANVAS_WIDTH;
+        this.canvas.height = CONFIG.CANVAS_HEIGHT;
+
+        this.input = new InputHandler();
+        this.camera = new Camera();
+        this.particles = new ParticleSystem();
+
+        this.state = 'START';
+        this.currentStage = 1;
+        this.score = 0;
+        this.coins = 0;
+        this.gems = 0;
+        this.stars = 0;
+        this.combo = 0;
+        this.comboTimer = 0;
+        this.gameTime = 0;
+        this.dropItems = [];
+        this.restartButton = null; // GAME_OVER / VICTORY 화면에 그려지는 버튼의 클릭 판정 영역
+
+        this.initStage(this.currentStage);
+        this.setupAudioButton();
+        this.setupRestartButton();
+
+        this.loop = this.loop.bind(this);
+        requestAnimationFrame(this.loop);
+    }
+
+    setupAudioButton() {
+        const btn = document.getElementById('audio-toggle');
+        btn.addEventListener('click', () => {
+            const enabled = sound.toggleBGM();
+            btn.innerText = enabled ? '🎵 BGM: ON' : '🔇 BGM: OFF';
+        });
+    }
+
+    // 캔버스에 그려진 "다시 시작" 버튼을 클릭/터치로도 누를 수 있게 처리
+    setupRestartButton() {
+        const handleTap = (clientX, clientY) => {
+            if (!this.restartButton) return;
+            if (this.state !== 'GAME_OVER' && this.state !== 'VICTORY') return;
+
+            const rect = this.canvas.getBoundingClientRect();
+            const scaleX = CONFIG.CANVAS_WIDTH / rect.width;
+            const scaleY = CONFIG.CANVAS_HEIGHT / rect.height;
+            const x = (clientX - rect.left) * scaleX;
+            const y = (clientY - rect.top) * scaleY;
+
+            const b = this.restartButton;
+            if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+                sound.init();
+                this.input.keys.restartClick = true;
+            }
+        };
+
+        this.canvas.addEventListener('click', (e) => handleTap(e.clientX, e.clientY));
+        this.canvas.addEventListener('touchend', (e) => {
+            if (e.changedTouches && e.changedTouches[0]) {
+                const t = e.changedTouches[0];
+                handleTap(t.clientX, t.clientY);
+            }
+        });
+    }
+
+    initStage(stageNum) {
+        this.map = new GameMap(stageNum);
+        this.player = new Player(120, 400);
+        this.bossX = this.map.bossZoneX + 100;
+        this.bossY = 460;
+        this.boss = new Boss(this.bossX, this.bossY, stageNum);
+        this.dropItems = [];
+        this.checkpointX = 120; // 현재 스테이지의 마지막 체크포인트 (기본값: 시작 지점)
+
+        // 몹 배치 패턴을 블록마다 반복 배치 (필드 난이도 대폭 하향: 밀도를 절반 가까이 축소)
+        const enemyPattern = [
+            { x: 550, y: 500, type: 'melee' },
+            { x: 1200, y: 300, type: 'ranged' },
+            { x: 1800, y: 370, type: 'shield' },
+            { x: 2450, y: 500, type: 'melee' },
+            { x: 3100, y: 500, type: 'ranged' },
+            { x: 3700, y: 500, type: 'shield' },
+            { x: 4350, y: 500, type: 'melee' }
+        ];
+
+        this.enemies = [];
+        for (let b = 0; b < this.map.blockCount; b++) {
+            const offset = b * this.map.blockWidth;
+            for (const e of enemyPattern) {
+                this.enemies.push(new Enemy(offset + e.x, e.y, e.type));
+            }
+        }
+    }
+
+    // 사망 시 마지막 체크포인트에서 재시작 (진행 상황은 유지, 보스는 재생성)
+    respawnAtCheckpoint() {
+        this.player = new Player(this.checkpointX, 400);
+        this.boss = new Boss(this.bossX, this.bossY, this.currentStage);
+        this.dropItems = [];
+        this.combo = 0;
+        this.comboTimer = 0;
+    }
+
+    registerHit() {
+        this.combo++;
+        this.comboTimer = 120;
+        this.score += 60 * this.combo;
+        this.player.addEnergy(14);
+    }
+
+    fullRestart() {
+        this.score = 0;
+        this.coins = 0;
+        this.gems = 0;
+        this.stars = 0;
+        this.combo = 0;
+        this.currentStage = 1;
+        this.initStage(1);
+        this.state = 'PLAYING';
+    }
+
+    update() {
+        this.gameTime++;
+
+        if ((this.input.keys.restart || this.input.keys.restartClick) && this.state === 'VICTORY') {
+            this.input.keys.restartClick = false;
+            this.fullRestart();
+            return;
+        }
+
+        if ((this.input.keys.restart || this.input.keys.restartClick) && this.state === 'GAME_OVER') {
+            this.input.keys.restartClick = false;
+            this.respawnAtCheckpoint();
+            this.state = 'PLAYING';
+            return;
+        }
+
+        if (this.state === 'START') {
+            if (this.input.keys.jump || this.input.keys.attack) {
+                this.state = 'PLAYING';
+                sound.startBGM();
+            }
+            return;
+        }
+
+        if (this.state !== 'PLAYING') {
+            this.particles.update();
+            return;
+        }
+
+        if (this.comboTimer > 0) {
+            this.comboTimer--;
+            if (this.comboTimer <= 0) this.combo = 0;
+        }
+
+        const skillTriggered = this.player.update(this.input, this.map, this.particles, this.camera);
+        this.camera.update(this.player, this.map.width, this.map.height);
+        this.particles.update();
+
+        for (let i = this.dropItems.length - 1; i >= 0; i--) {
+            const item = this.dropItems[i];
+
+            item.update(this.map);
+
+            const dx = (this.player.x + this.player.width / 2) - item.x;
+            const dy = (this.player.y + this.player.height / 2) - item.y;
+            if (Math.sqrt(dx * dx + dy * dy) < 30) {
+                if (item.type === 'heal') {
+                    this.player.hp = Math.min(this.player.maxHp, this.player.hp + 30);
+                    sound.playHeal();
+                    this.particles.addSparkles(item.x, item.y, '#33ff77', 16);
+                    this.particles.addFloatingText(item.x, item.y - 20, '+30 HP', '#33ff77', 20);
+                } else {
+                    this.player.applyBuff(item.type, 450);
+                    this.particles.addSparkles(item.x, item.y, '#ffffff', 14);
+                }
+                this.dropItems.splice(i, 1);
+                continue;
+            }
+
+            if (item.life <= 0) this.dropItems.splice(i, 1);
+        }
+
+        if (skillTriggered) {
+            const baseDmg = CONFIG.PLAYER.BASE_DAMAGE * (this.player.buffs.atk > 0 ? 1.7 : 1.0);
+            for (const e of this.enemies) {
+                if (!e.dead && Math.abs(e.x - this.player.x) < 320) {
+                    e.takeDamage(baseDmg * 4.0, this.particles);
+                    this.registerHit();
+                }
+            }
+            if (!this.boss.dead && Math.abs(this.boss.x - this.player.x) < 380) {
+                this.boss.takeDamage(baseDmg * 5.5, this.particles);
+                this.registerHit();
+            }
+        }
+
+        if (this.player.hp <= 0) {
+            this.state = 'GAME_OVER';
+            sound.playExplosion();
+        }
+
+        // 체크포인트 도달 체크 (진행한 지점을 저장해두고, 사망 시 여기서 재시작)
+        for (const cp of this.map.checkpoints) {
+            if (!cp.activated && this.player.isGrounded && this.player.x >= cp.x) {
+                cp.activated = true;
+                this.checkpointX = cp.x;
+                this.player.hp = Math.min(this.player.maxHp, this.player.hp + 20);
+                sound.playHeal();
+                this.particles.addShockwave(this.player.x + this.player.width / 2, this.player.y + this.player.height / 2, 90, '#ffd700');
+                this.particles.addFloatingText(this.player.x, this.player.y - 30, '체크포인트 도달!', '#ffd700', 22);
+            }
+        }
+
+        for (const c of this.map.collectibles) {
+            if (c.collected) continue;
+            const dx = (this.player.x + this.player.width / 2) - c.x;
+            const dy = (this.player.y + this.player.height / 2) - c.y;
+            if (Math.sqrt(dx * dx + dy * dy) < 32) {
+                c.collected = true;
+                sound.playCoin();
+                if (c.type === 'coin') { this.coins++; this.score += 100; this.player.addEnergy(6); }
+                if (c.type === 'gem') { this.gems++; this.score += 300; this.player.addEnergy(16); }
+                if (c.type === 'star') { this.stars++; this.score += 1000; this.player.addEnergy(32); }
+                if (c.type === 'heal') {
+                    this.player.hp = Math.min(this.player.maxHp, this.player.hp + 50);
+                    sound.playHeal();
+                    this.particles.addFloatingText(c.x, c.y - 20, '+50 HP', '#33ff77', 22);
+                }
+                this.particles.addSparkles(c.x, c.y, c.type === 'heal' ? '#33ff77' : '#ffd700', 8);
+            }
+        }
+
+        const currentAtkDmg = CONFIG.PLAYER.BASE_DAMAGE * (this.player.buffs.atk > 0 ? 1.7 : 1.0);
+
+        for (const enemy of this.enemies) {
+            if (enemy.dead) continue;
+            enemy.update(this.player, this.map, this.particles);
+
+            if (this.player.isAttacking) {
+                const atkBox = {
+                    x: this.player.facingRight ? this.player.x + this.player.width : this.player.x - 60,
+                    y: this.player.y,
+                    width: 60,
+                    height: this.player.height
+                };
+
+                if (atkBox.x < enemy.x + enemy.width &&
+                    atkBox.x + atkBox.width > enemy.x &&
+                    atkBox.y < enemy.y + enemy.height &&
+                    atkBox.y + atkBox.height > enemy.y) {
+                    
+                    enemy.takeDamage(currentAtkDmg, this.particles);
+                    this.camera.shake(4, 5);
+                    this.registerHit();
+
+                    if (enemy.dead && Math.random() < 0.6) {
+                        const types = ['atk', 'spd', 'aspd', 'heal'];
+                        this.dropItems.push(new DropItem(enemy.x, enemy.y, types[Math.floor(Math.random() * types.length)]));
+                    }
+                }
+            }
+
+            if (!enemy.dead &&
+                this.player.x < enemy.x + enemy.width &&
+                this.player.x + this.player.width > enemy.x &&
+                this.player.y < enemy.y + enemy.height &&
+                this.player.y + this.player.height > enemy.y) {
+                this.player.takeDamage(5); // 필드 난이도 대폭 하향: 일반몹 접촉 데미지 완화 (8 -> 5)
+            }
+        }
+
+        if (!this.boss.dead) {
+            this.boss.update(this.player, this.map, this.particles, this.camera, this.enemies);
+
+            if (this.player.isAttacking) {
+                const atkBox = {
+                    x: this.player.facingRight ? this.player.x + this.player.width : this.player.x - 60,
+                    y: this.player.y,
+                    width: 60,
+                    height: this.player.height
+                };
+
+                if (atkBox.x < this.boss.x + this.boss.width &&
+                    atkBox.x + atkBox.width > this.boss.x &&
+                    atkBox.y < this.boss.y + this.boss.height &&
+                    atkBox.y + atkBox.height > this.boss.y) {
+                    
+                    this.boss.takeDamage(currentAtkDmg, this.particles);
+                    this.camera.shake(6, 6);
+                    this.registerHit();
+                }
+            }
+
+            if (this.boss.dead) {
+                if (this.currentStage === 1) {
+                    this.state = 'STAGE_CLEAR';
+                    setTimeout(() => {
+                        this.currentStage = 2;
+                        this.initStage(2);
+                        this.state = 'PLAYING';
+                    }, 2500);
+                } else {
+                    this.state = 'VICTORY';
+                    sound.playHeal();
+                }
+            }
+        }
+    }
+
+    drawUI() {
+        this.ctx.save();
+
+        // Low HP Red Vignette Screen Overlay
+        if (this.player.hp < this.player.maxHp * 0.35) {
+            const pulse = Math.sin(this.gameTime * 0.15) * 0.2 + 0.35;
+            this.ctx.fillStyle = `rgba(255, 0, 0, ${pulse})`;
+            this.ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+        }
+
+        // Player HP Bar
+        this.ctx.fillStyle = 'rgba(0,0,0,0.65)';
+        this.ctx.roundRect(20, 20, 260, 26, 6);
+        this.ctx.fill();
+
+        const hpPct = Math.max(0, this.player.hp / this.player.maxHp);
+        const hpGrad = this.ctx.createLinearGradient(22, 22, 22, 44);
+        if (hpPct > 0.35) {
+            hpGrad.addColorStop(0, '#ff8855');
+            hpGrad.addColorStop(1, '#cc2200');
+        } else {
+            hpGrad.addColorStop(0, '#ff5533');
+            hpGrad.addColorStop(1, '#aa0000');
+        }
+        this.ctx.fillStyle = hpGrad;
+        this.ctx.roundRect(22, 22, 256 * hpPct, 22, 4);
+        this.ctx.fill();
+
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 13px sans-serif';
+        this.ctx.fillText(`🔥 ${this.player.name} HP: ${Math.ceil(this.player.hp)} / ${this.player.maxHp}`, 30, 37);
+
+        // Nightsoul Skill Gauge
+        this.ctx.fillStyle = 'rgba(0,0,0,0.65)';
+        this.ctx.roundRect(20, 52, 260, 18, 6);
+        this.ctx.fill();
+
+        const energyPct = Math.max(0, this.player.energy / this.player.maxEnergy);
+        const enGrad = this.ctx.createLinearGradient(22, 54, 22, 68);
+        if (energyPct >= 1) {
+            enGrad.addColorStop(0, '#fff2b0');
+            enGrad.addColorStop(1, '#ffb300');
+        } else {
+            enGrad.addColorStop(0, '#ffbb55');
+            enGrad.addColorStop(1, '#cc5500');
+        }
+        this.ctx.fillStyle = enGrad;
+        this.ctx.roundRect(22, 54, 256 * energyPct, 14, 4);
+        this.ctx.fill();
+
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 11px sans-serif';
+        this.ctx.fillText(energyPct >= 1 ? '🗡️ 필살기 준비 완료! (Q)' : `필살기 게이지 ${Math.floor(energyPct * 100)}%`, 30, 66);
+
+
+        // Active Buffs
+        let buffX = 20;
+        if (this.player.buffs.atk > 0) {
+            this.ctx.fillStyle = '#ff2200';
+            this.ctx.fillRect(buffX, 76, 75, 18);
+            this.ctx.fillStyle = '#fff';
+            this.ctx.font = 'bold 10px sans-serif';
+            this.ctx.fillText(`⚔️ ATK ${Math.ceil(this.player.buffs.atk / 60)}s`, buffX + 5, 89);
+            buffX += 80;
+        }
+        if (this.player.buffs.spd > 0) {
+            this.ctx.fillStyle = '#00aaff';
+            this.ctx.fillRect(buffX, 76, 75, 18);
+            this.ctx.fillStyle = '#fff';
+            this.ctx.font = 'bold 10px sans-serif';
+            this.ctx.fillText(`⚡ SPD ${Math.ceil(this.player.buffs.spd / 60)}s`, buffX + 5, 89);
+            buffX += 80;
+        }
+        if (this.player.buffs.aspd > 0) {
+            this.ctx.fillStyle = '#00ff66';
+            this.ctx.fillRect(buffX, 76, 82, 18);
+            this.ctx.fillStyle = '#000';
+            this.ctx.font = 'bold 10px sans-serif';
+            this.ctx.fillText(`🏹 ASPD ${Math.ceil(this.player.buffs.aspd / 60)}s`, buffX + 5, 89);
+        }
+
+        // Stats & Skill Keys Guide
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 16px sans-serif';
+        this.ctx.fillText(
+            this.player.parryCooldownTimer > 0
+                ? `🛡️ 패리(E) 대기: ${Math.ceil(this.player.parryCooldownTimer / 60)}초`
+                : '🛡️ 패리(E) 사용 가능!',
+            300, 38
+        );
+        this.ctx.fillText(`SCORE: ${this.score}`, CONFIG.CANVAS_WIDTH - 210, 38);
+
+        if (this.combo > 1) {
+            this.ctx.fillStyle = '#ffaa00';
+            this.ctx.font = 'italic bold 26px sans-serif';
+            this.ctx.fillText(`${this.combo} HITS COMBO!`, 300, 75);
+        }
+
+        // Boss Health Bar
+        if (this.player.x > this.map.bossZoneX - 300 && !this.boss.dead) {
+            this.ctx.fillStyle = 'rgba(0,0,0,0.85)';
+            this.ctx.roundRect(CONFIG.CANVAS_WIDTH / 2 - 270, 65, 540, 28, 8);
+            this.ctx.fill();
+
+            const bossPct = Math.max(0, this.boss.hp / this.boss.maxHp);
+            const bossGrad = this.ctx.createLinearGradient(0, 68, 0, 90);
+            if (this.boss.phase === 2) {
+                bossGrad.addColorStop(0, '#ff6644');
+                bossGrad.addColorStop(1, '#aa0000');
+            } else {
+                bossGrad.addColorStop(0, '#ff5599');
+                bossGrad.addColorStop(1, '#aa0044');
+            }
+            this.ctx.fillStyle = bossGrad;
+            this.ctx.roundRect(CONFIG.CANVAS_WIDTH / 2 - 266, 68, 532 * bossPct, 22, 6);
+            this.ctx.fill();
+
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.font = 'bold 13px sans-serif';
+            const bossTitle = (this.currentStage === 1 ? 'BOSS: 화염의 제왕 츄츄' : 'BOSS: 염화의 고신 블레이즈드렉') + (this.boss.phase === 2 ? ' [HARD PHASE 2]' : '');
+            this.ctx.fillText(bossTitle, CONFIG.CANVAS_WIDTH / 2 - 120, 83);
+        }
+
+        // Overlays
+        if (this.state === 'START') {
+            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.88)';
+            this.ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+            this.ctx.fillStyle = '#ff2200';
+            this.ctx.font = 'bold 46px sans-serif';
+            this.ctx.textAlign = 'center';
+            this.ctx.fillText('불꽃의 검성 호구마 (BOSS HARD)', CONFIG.CANVAS_WIDTH / 2, 170);
+
+            this.ctx.fillStyle = '#ffd700';
+            this.ctx.font = 'bold 16px sans-serif';
+            this.ctx.fillText('▽ 조작법 (게임 중에도 언제든 확인 가능) ▽', CONFIG.CANVAS_WIDTH / 2, 210);
+
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.font = '16px sans-serif';
+            const controlLines = [
+                '🏃 A / D : 좌우 이동',
+                '⬆️ Space / W : 점프 (공중에서 한 번 더 누르면 2단 점프)',
+                '💨 Shift / K : 대시로 짧게 빠르게 돌진 (돌진 중 무적)',
+                '🛡️ E : 패리 - 공격받기 직전에 사용하면 무적 + 반격 기회',
+                '⚔️ J / 좌클릭 : 검 공격 (공중에서 사용하면 내려찍기)',
+                '🌟 Q / 우클릭 : 필살기 - 게이지가 다 차면 강력한 광역 공격',
+                '❤️ 초록색 아이템을 먹으면 체력 회복',
+                '🚩 노란 깃발(체크포인트)을 지나면 죽어도 그 지점부터 재시작'
+            ];
+            let lineY = 244;
+            for (const line of controlLines) {
+                this.ctx.fillText(line, CONFIG.CANVAS_WIDTH / 2, lineY);
+                lineY += 27;
+            }
+
+            this.ctx.fillStyle = '#ffd700';
+            this.ctx.font = 'bold 24px sans-serif';
+            this.ctx.fillText('▶ 화면을 클릭하거나 점프 키를 눌러 게임 시작', CONFIG.CANVAS_WIDTH / 2, lineY + 20);
+            this.ctx.textAlign = 'left';
+        } else if (this.state === 'GAME_OVER') {
+            this.ctx.fillStyle = 'rgba(20, 0, 0, 0.85)';
+            this.ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+            this.ctx.textAlign = 'center';
+            this.ctx.fillStyle = '#ff2222';
+            this.ctx.font = 'bold 60px sans-serif';
+            this.ctx.fillText('GAME OVER', CONFIG.CANVAS_WIDTH / 2, 260);
+
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.font = '22px sans-serif';
+            this.ctx.fillText(`최종 점수: ${this.score}  |  획득 코인: ${this.coins}`, CONFIG.CANVAS_WIDTH / 2, 340);
+
+            this.drawButton(CONFIG.CANVAS_WIDTH / 2 - 140, 400, 280, 64, '↻ 체크포인트에서 다시 시작', '#ffd700');
+            this.ctx.textAlign = 'left';
+        } else if (this.state === 'STAGE_CLEAR') {
+            this.ctx.fillStyle = 'rgba(0, 20, 10, 0.80)';
+            this.ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+            this.ctx.textAlign = 'center';
+            this.ctx.fillStyle = '#00ffaa';
+            this.ctx.font = 'bold 54px sans-serif';
+            this.ctx.fillText('STAGE 1 CLEAR!', CONFIG.CANVAS_WIDTH / 2, 300);
+
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.font = '22px sans-serif';
+            this.ctx.fillText('다음 스테이지로 이동하고 있습니다...', CONFIG.CANVAS_WIDTH / 2, 380);
+            this.ctx.textAlign = 'left';
+        } else if (this.state === 'VICTORY') {
+            this.ctx.fillStyle = 'rgba(8, 10, 26, 0.92)';
+            this.ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+            // 은은한 황금빛 후광 연출
+            const glow = this.ctx.createRadialGradient(
+                CONFIG.CANVAS_WIDTH / 2, 260, 40,
+                CONFIG.CANVAS_WIDTH / 2, 260, 420
+            );
+            glow.addColorStop(0, 'rgba(255, 215, 0, 0.25)');
+            glow.addColorStop(1, 'rgba(255, 215, 0, 0)');
+            this.ctx.fillStyle = glow;
+            this.ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+            this.ctx.textAlign = 'center';
+            this.ctx.fillStyle = '#ffd700';
+            this.ctx.font = 'bold 52px sans-serif';
+            this.ctx.fillText('🔥 불꽃의 검성, 전설이 되다 🔥', CONFIG.CANVAS_WIDTH / 2, 180);
+
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.font = 'bold 28px sans-serif';
+            this.ctx.fillText('두 화신을 모두 쓰러뜨리고 대륙에 평화를 되찾았다', CONFIG.CANVAS_WIDTH / 2, 230);
+
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.font = '22px sans-serif';
+            this.ctx.fillText(`최종 점수: ${this.score}`, CONFIG.CANVAS_WIDTH / 2, 320);
+            this.ctx.fillText(`획득 아이템: 💰${this.coins}  💎${this.gems}  ⭐${this.stars}`, CONFIG.CANVAS_WIDTH / 2, 355);
+
+            this.drawButton(CONFIG.CANVAS_WIDTH / 2 - 150, 410, 300, 66, '↻ 처음부터 다시 시작', '#00ffaa');
+            this.ctx.textAlign = 'left';
+        }
+
+        this.ctx.restore();
+    }
+
+    // 캔버스 위에 실제로 클릭/터치 가능한 버튼을 그리고, 위치를 저장해 클릭 판정에 사용
+    drawButton(x, y, w, h, label, color) {
+        this.restartButton = { x, y, w, h };
+
+        this.ctx.save();
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+        this.ctx.roundRect(x, y, w, h, 14);
+        this.ctx.fill();
+        this.ctx.strokeStyle = color;
+        this.ctx.lineWidth = 3;
+        this.ctx.roundRect(x, y, w, h, 14);
+        this.ctx.stroke();
+
+        this.ctx.fillStyle = color;
+        this.ctx.font = 'bold 22px sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(label, x + w / 2, y + h / 2 + 2);
+        this.ctx.textBaseline = 'alphabetic';
+        this.ctx.restore();
+    }
+
+    draw() {
+        this.ctx.clearRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+        this.map.drawParallaxBackground(this.ctx, this.camera, this.gameTime);
+        this.particles.drawAmbient(this.ctx);
+
+        this.map.drawPlatforms(this.ctx, this.camera);
+        this.map.drawCheckpoints(this.ctx, this.camera);
+        this.map.drawCollectibles(this.ctx, this.camera, this.gameTime);
+
+        for (const item of this.dropItems) item.draw(this.ctx, this.camera, this.gameTime);
+        for (const enemy of this.enemies) enemy.draw(this.ctx, this.camera);
+        this.boss.draw(this.ctx, this.camera);
+        this.player.draw(this.ctx, this.camera);
+
+        this.particles.draw(this.ctx, this.camera);
+
+        this.drawUI();
+    }
+
+    loop() {
+        this.update();
+        this.draw();
+        requestAnimationFrame(this.loop);
+    }
+}
+
+window.onload = () => {
+    new Game();
+};
+</script>
+</body>
+</html>
