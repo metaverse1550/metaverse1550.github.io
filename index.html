@@ -152,6 +152,22 @@
             padding-bottom: 0.2rem;
             line-height: 1;
         }
+        .chat-meta-col {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 0.12rem;
+            flex-shrink: 0;
+            padding-bottom: 0.1rem;
+        }
+        .chat-read-status {
+            font-size: 0.58rem;
+            font-weight: 800;
+            white-space: nowrap;
+            line-height: 1;
+        }
+        .chat-read-status.read { color: #a5b4fc; }
+        .chat-read-status.unread { color: #64748b; }
         #student-chat-messages .chat-bubble.mine {
             background: linear-gradient(135deg, #059669, #0d9488);
             border-bottom-right-radius: 0.3rem;
@@ -1114,8 +1130,9 @@
                 <div id="admin-chat-seat-list" class="w-[5.5rem] flex-shrink-0 border-r border-slate-800 overflow-y-auto bg-slate-900/80"></div>
                 <div class="flex-1 flex flex-col min-w-0 bg-slate-900/60">
                     <div id="admin-chat-messages" class="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-0.5"></div>
-                    <div id="admin-chat-input-row" class="p-2.5 border-t border-slate-800 flex gap-2 bg-slate-950 flex-shrink-0">
-                        <input type="text" id="admin-chat-input" onkeydown="if(event.key==='Enter') window.sendAdminChatMessage()" placeholder="메시지..." class="flex-grow min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                    <div id="admin-chat-input-row" class="p-2.5 border-t border-slate-800 flex gap-1.5 bg-slate-950 flex-shrink-0">
+                        <input type="text" id="admin-chat-input" onkeydown="if(event.key==='Enter'&&!event.shiftKey) window.sendAdminChatMessage()" placeholder="메시지..." class="flex-grow min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                        <button type="button" onclick="window.sendAdminBroadcastMessage()" class="px-2.5 py-2.5 bg-violet-700 hover:bg-violet-600 text-white text-[11px] font-black rounded-xl transition-all flex-shrink-0" title="1~8번 전체 자리에 동시 전송">📢 전체</button>
                         <button type="button" onclick="window.sendAdminChatMessage()" class="px-3 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all flex-shrink-0">전송</button>
                     </div>
                     <button type="button" onclick="window.clearAllChatMessages()" class="w-full py-2 bg-rose-950/80 hover:bg-rose-900 border-t border-rose-500/30 text-rose-300 text-[11px] font-black flex items-center justify-center gap-1.5 transition-colors flex-shrink-0">
@@ -1657,6 +1674,25 @@
             container.scrollTop = container.scrollHeight;
         }
 
+        function appendAdminChatBubble(container, message) {
+            const isMine = message.sender === "admin";
+            const row = document.createElement("div");
+            row.className = `chat-bubble-row ${isMine ? "mine" : "theirs"}`;
+            const time = formatChatTime(message.timestamp);
+            const readHtml = isMine
+                ? `<span class="chat-read-status ${message.readByStudent ? "read" : "unread"}">${message.readByStudent ? "읽음" : "안읽음"}</span>`
+                : "";
+            const metaHtml = (readHtml || time)
+                ? `<div class="chat-meta-col">${readHtml}${time ? `<span class="chat-time">${time}</span>` : ""}</div>`
+                : "";
+            row.innerHTML = `
+                <div class="chat-bubble-wrap ${isMine ? "mine" : "theirs"}">
+                    <div class="chat-bubble ${isMine ? "mine" : "theirs"}">${escapeChatText(message.text)}</div>
+                    ${isMine ? metaHtml : (time ? `<span class="chat-time">${time}</span>` : "")}
+                </div>`;
+            container.appendChild(row);
+        }
+
         function renderAdminChatMessages(messages) {
             const container = document.getElementById("admin-chat-messages");
             if (!container) return;
@@ -1666,7 +1702,7 @@
                 container.innerHTML = `<div class="text-xs text-slate-500 italic text-center py-10">아직 대화가 없습니다.</div>`;
                 return;
             }
-            messages.forEach(m => appendChatBubble(container, m, "admin"));
+            messages.forEach(m => appendAdminChatBubble(container, m));
             container.scrollTop = container.scrollHeight;
         }
 
@@ -1937,6 +1973,45 @@
                 input.value = "";
             } catch (e) {
                 console.error("관리자 채팅 전송 실패", e);
+            }
+        };
+
+        window.sendAdminBroadcastMessage = async function() {
+            if (!window.isAdminAuthenticated) {
+                window.showAdminAlert("관리자만 전체 전송할 수 있습니다.", "error");
+                return;
+            }
+            const input = document.getElementById("admin-chat-input");
+            const text = input?.value?.trim();
+            if (!text) {
+                window.showAdminAlert("보낼 메시지를 입력하세요.", "error");
+                return;
+            }
+            if (!confirm(`📢 1~${TOTAL_SEATS}번 전체 자리에 이 메시지를 보낼까요?\n\n"${text}"`)) return;
+
+            try {
+                const ts = new Date().toISOString();
+                await Promise.all(
+                    Array.from({ length: TOTAL_SEATS }, (_, i) =>
+                        addDoc(collection(db, "chat_messages"), {
+                            seat: i + 1,
+                            sender: "admin",
+                            text,
+                            timestamp: ts,
+                            readByAdmin: true,
+                            readByStudent: false,
+                            isBroadcast: true
+                        })
+                    )
+                );
+                input.value = "";
+                if (typeof window.logUserAction === "function") {
+                    window.logUserAction("CHAT_BROADCAST", `관리자가 전체 ${TOTAL_SEATS}개 자리에 공지 채팅을 보냈습니다.`);
+                }
+                window.showAdminAlert(`전체 ${TOTAL_SEATS}개 자리에 메시지를 보냈습니다.`, "success");
+            } catch (e) {
+                console.error("전체 채팅 전송 실패", e);
+                window.showAdminAlert("전체 전송에 실패했습니다.", "error");
             }
         };
 
