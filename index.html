@@ -370,6 +370,43 @@
 
         <!-- ==================== GALLERY VIEW ==================== -->
         <section id="view-gallery" class="space-y-8">
+
+            <!-- 관리자 전용: 실시간 수업 요약 + 수업 시작 -->
+            <div id="admin-summary-dashboard" class="hidden bg-slate-900/90 border border-indigo-500/35 rounded-2xl p-4 md:p-5 shadow-xl space-y-4">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                        <h3 class="text-base font-black text-white flex items-center gap-2">
+                            <span>📊</span> 실시간 수업 현황
+                        </h3>
+                        <p class="text-[11px] text-slate-400 mt-0.5">관리자만 보입니다 · 게임 좋아요·댓글 숫자는 유지됩니다</p>
+                    </div>
+                    <button type="button" onclick="window.startNewClassSession()" class="px-4 py-2.5 bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white text-xs font-black rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 flex-shrink-0">
+                        🔔 수업 시작 (전체 리셋)
+                    </button>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-2.5">
+                    <div class="bg-slate-950 border border-emerald-500/30 rounded-xl p-3">
+                        <div class="text-[10px] text-emerald-400 font-bold">접속 중</div>
+                        <div id="admin-sum-online" class="text-xl font-black text-white font-orbitron mt-0.5">0</div>
+                    </div>
+                    <div class="bg-slate-950 border border-teal-500/30 rounded-xl p-3">
+                        <div class="text-[10px] text-teal-400 font-bold">자리 점유</div>
+                        <div id="admin-sum-seats" class="text-xl font-black text-white font-orbitron mt-0.5">0/8</div>
+                    </div>
+                    <div class="bg-slate-950 border border-sky-500/30 rounded-xl p-3">
+                        <div class="text-[10px] text-sky-400 font-bold">미확인 호출</div>
+                        <div id="admin-sum-calls" class="text-xl font-black text-white font-orbitron mt-0.5">0</div>
+                    </div>
+                    <div class="bg-slate-950 border border-violet-500/30 rounded-xl p-3">
+                        <div class="text-[10px] text-violet-400 font-bold">미읽음 채팅</div>
+                        <div id="admin-sum-chat" class="text-xl font-black text-white font-orbitron mt-0.5">0</div>
+                    </div>
+                    <div class="bg-slate-950 border border-amber-500/30 rounded-xl p-3 col-span-2 md:col-span-1">
+                        <div class="text-[10px] text-amber-400 font-bold">오늘 펫 뽑기</div>
+                        <div id="admin-sum-gacha" class="text-xl font-black text-white font-orbitron mt-0.5">0</div>
+                    </div>
+                </div>
+            </div>
             
             <!-- 메인 히어로 배너 좌측 파트너 캐릭터 배치 -->
             <div class="relative rounded-3xl overflow-hidden bg-slate-900 border border-slate-800/80 shadow-2xl p-6 md:p-8 flex flex-col md:flex-row items-center justify-between gap-8">
@@ -612,6 +649,9 @@
                         </div>
                         <div class="flex items-center gap-3">
                             <span id="log-timer-countdown" class="text-[11px] font-mono text-slate-400 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">자동 갱신: 60s</span>
+                            <button onclick="window.exportActivityLogs()" class="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md">
+                                <i data-lucide="download" class="w-3.5 h-3.5"></i> CSV 내보내기
+                            </button>
                             <button onclick="refreshLiveLogsUI()" class="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md">
                                 <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> 지금 새로고침
                             </button>
@@ -1220,6 +1260,9 @@
         window.currentAdminChatSeat = null;
         window.adminUnreadBySeat = {};
         window.lastStudentUnreadCount = 0;
+        window.unresolvedCallsCount = 0;
+        window.pendingClassResetAt = null;
+        window.presenceOnlineCount = 0;
         window.pendingLocalToasts = new Set();
         let activityLogInitialized = false;
         let lastGamesFingerprint = null;
@@ -1684,6 +1727,7 @@
             }
 
             updateAdminUnreadUI(hadIncrease);
+            if (typeof window.updateAdminSummaryCard === "function") window.updateAdminSummaryCard();
         }
 
         window.subscribeAdminChatInbox = function() {
@@ -1988,6 +2032,8 @@
                     }
                 });
             }
+            window.unresolvedCallsCount = snapshot.size;
+            if (typeof window.updateAdminSummaryCard === "function") window.updateAdminSummaryCard();
             teacherCallInitialized = true;
         }, (err) => console.error("호출 리스너 에러:", err));
 
@@ -2122,6 +2168,146 @@
             }
         };
 
+        function countTodayPetGachaPulls() {
+            if (!window.latestLogsCache) return 0;
+            const today = new Date();
+            const y = today.getFullYear(), m = today.getMonth(), d = today.getDate();
+            return window.latestLogsCache.filter(item => {
+                if (item.type !== "PET_GACHA" || !item.detail?.includes("획득")) return false;
+                if (!item.timestamp) return false;
+                const dt = new Date(item.timestamp);
+                return dt.getFullYear() === y && dt.getMonth() === m && dt.getDate() === d;
+            }).length;
+        }
+
+        window.updateAdminSummaryCard = function() {
+            const dash = document.getElementById("admin-summary-dashboard");
+            if (!dash) return;
+            if (!window.isAdminAuthenticated) {
+                dash.classList.add("hidden");
+                return;
+            }
+            dash.classList.remove("hidden");
+
+            const onlineEl = document.getElementById("admin-sum-online");
+            const seatsEl = document.getElementById("admin-sum-seats");
+            const callsEl = document.getElementById("admin-sum-calls");
+            const chatEl = document.getElementById("admin-sum-chat");
+            const gachaEl = document.getElementById("admin-sum-gacha");
+
+            let occupied = 0;
+            for (let i = 1; i <= TOTAL_SEATS; i++) {
+                if (window.seatsCache[String(i)]?.clientId) occupied++;
+            }
+            const unreadChat = Object.values(window.adminUnreadBySeat || {}).reduce((s, n) => s + n, 0);
+
+            if (onlineEl) onlineEl.textContent = String(window.presenceOnlineCount || 0);
+            if (seatsEl) seatsEl.textContent = `${occupied}/${TOTAL_SEATS}`;
+            if (callsEl) callsEl.textContent = String(window.unresolvedCallsCount || 0);
+            if (chatEl) chatEl.textContent = String(unreadChat);
+            if (gachaEl) gachaEl.textContent = String(countTodayPetGachaPulls());
+        };
+
+        window.exportActivityLogs = function() {
+            const logs = window.latestLogsCache || [];
+            if (!logs.length) {
+                window.showAdminAlert("내보낼 로그가 없습니다.", "error");
+                return;
+            }
+            const header = "timestamp,user,type,detail";
+            const rows = logs.map(item => {
+                const detail = (item.detail || "").replace(/"/g, '""');
+                return `"${item.timestamp || ""}","${item.user || ""}","${item.type || ""}","${detail}"`;
+            });
+            const csv = "\uFEFF" + [header, ...rows].join("\n");
+            const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            const stamp = new Date().toISOString().slice(0, 10);
+            a.href = url;
+            a.download = `메타게임센터_활동로그_${stamp}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+            window.showAdminAlert(`활동 로그 ${logs.length}건을 CSV로 내보냈습니다.`, "success");
+        };
+
+        async function deleteAllSeatsFromDb() {
+            await Promise.all(
+                Array.from({ length: TOTAL_SEATS }, (_, i) =>
+                    deleteDoc(doc(db, "seats", String(i + 1))).catch(() => {})
+                )
+            );
+        }
+
+        async function deleteAllTeacherCallsFromDb() {
+            const colRef = collection(db, "teacher_calls");
+            while (true) {
+                const snap = await getDocs(query(colRef, limit(500)));
+                if (snap.empty) break;
+                await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+                if (snap.size < 500) break;
+            }
+        }
+
+        function handleClassSessionSnapshot(snap) {
+            if (!snap.exists()) return;
+            const resetAt = snap.data().resetAt;
+            if (!resetAt) return;
+            const ack = localStorage.getItem("meta_class_reset_ack");
+            if (ack === resetAt) return;
+            if (typeof window.applyLocalClassSessionReset === "function") {
+                window.applyLocalClassSessionReset(resetAt);
+            } else {
+                window.pendingClassResetAt = resetAt;
+            }
+        }
+
+        window.startNewClassSession = async function() {
+            if (!window.isAdminAuthenticated) {
+                window.showAdminAlert("관리자만 수업 리셋할 수 있습니다.", "error");
+                return;
+            }
+            if (!confirm(
+                "🔔 새 수업을 시작할까요?\n\n" +
+                "✅ 리셋: 자리·채팅·호출·퀘스트·펫·좋아요 누름 표시\n" +
+                "❌ 유지: 게임 좋아요 숫자·댓글 내용\n\n" +
+                "모든 학생 화면이 곧 초기화됩니다."
+            )) return;
+
+            const resetAt = new Date().toISOString();
+            try {
+                await Promise.all([
+                    deleteAllSeatsFromDb(),
+                    deleteAllChatMessagesFromDb(),
+                    deleteAllTeacherCallsFromDb(),
+                    setDoc(doc(db, "system", "class_session"), { resetAt, resetBy: "관리자" }, { merge: true })
+                ]);
+
+                window.seatsCache = {};
+                window.unresolvedCallsCount = 0;
+                window.adminUnreadBySeat = {};
+                prevAdminUnreadTotal = 0;
+                updateStudentUnreadBadge(0);
+                updateAdminUnreadUI();
+                const callContainer = document.getElementById("teacher-call-banner-container");
+                if (callContainer) callContainer.innerHTML = "";
+
+                if (typeof window.applyLocalClassSessionReset === "function") {
+                    window.applyLocalClassSessionReset(resetAt);
+                } else {
+                    localStorage.setItem("meta_class_reset_ack", resetAt);
+                }
+
+                window.logUserAction("CLASS_RESET", "새 수업 세션을 시작했습니다. (자리·채팅·퀘스트 리셋 / 게임 좋아요·댓글 유지)");
+                window.showAdminAlert("수업 리셋 완료! 학생들은 자리를 다시 선택하게 됩니다.", "success");
+                window.updateAdminSummaryCard();
+                if (typeof window.refreshSeatUIs === "function") window.refreshSeatUIs();
+            } catch (e) {
+                console.error("수업 리셋 실패", e);
+                window.showAdminAlert("수업 리셋에 실패했습니다.", "error");
+            }
+        };
+
         window.clearAllChatMessages = async function() {
             if (!window.isAdminAuthenticated) {
                 window.showAdminAlert("관리자만 채팅을 초기화할 수 있습니다.", "error");
@@ -2242,6 +2428,7 @@
             window.seatsCache = {};
             snap.forEach(d => { window.seatsCache[d.id] = d.data(); });
             refreshSeatUIs();
+            if (typeof window.updateAdminSummaryCard === "function") window.updateAdminSummaryCard();
         });
 
         onSnapshot(collection(db, "presence"), (snap) => {
@@ -2251,8 +2438,14 @@
                 const ls = d.data().lastSeen;
                 if (ls && (now - new Date(ls).getTime()) < 90000) count++;
             });
+            window.presenceOnlineCount = count;
             const el = document.getElementById("stat-active-users-main");
             if (el) el.innerText = count > 0 ? `실시간 ${count}명 접속 중` : "실시간 접속 집계 중...";
+            if (typeof window.updateAdminSummaryCard === "function") window.updateAdminSummaryCard();
+        });
+
+        onSnapshot(doc(db, "system", "class_session"), handleClassSessionSnapshot, (err) => {
+            console.error("수업 세션 리스너 에러:", err);
         });
 
         function getLogUserTag() {
@@ -2396,6 +2589,7 @@
 
             window.latestLogsCache = logs;
             renderLiveLogsList();
+            if (typeof window.updateAdminSummaryCard === "function") window.updateAdminSummaryCard();
         }, (err) => {
             console.error("로그 수신 리스너 에러:", err);
         });
@@ -2411,7 +2605,8 @@
             { id: "VISIT", label: "👋 접속/자리", types: ["SITE_VISIT", "SEAT_CLAIM"] },
             { id: "CALL", label: "🙋 호출", types: ["CALL_TEACHER"] },
             { id: "CHAT", label: "💬 채팅", types: ["CHAT_BROADCAST", "CHAT_RESET", "CHAT_RESET_SEAT"] },
-            { id: "REGISTER", label: "⚙️ 관리", types: ["REGISTER"] }
+            { id: "REGISTER", label: "⚙️ 관리", types: ["REGISTER"] },
+            { id: "SESSION", label: "🔔 수업", types: ["CLASS_RESET"] }
         ];
 
         function getLogTypeMeta(type) {
@@ -2428,7 +2623,8 @@
                 PET_RESET: { badgeClass: "text-rose-500 border-rose-600/40 bg-rose-950/50", emoji: "🔄" },
                 CHAT_BROADCAST: { badgeClass: "text-violet-400 border-violet-500/30 bg-violet-950/40", emoji: "📢" },
                 CHAT_RESET: { badgeClass: "text-sky-400 border-sky-500/30 bg-sky-950/40", emoji: "🗑️" },
-                CHAT_RESET_SEAT: { badgeClass: "text-sky-400 border-sky-500/30 bg-sky-950/40", emoji: "🗑️" }
+                CHAT_RESET_SEAT: { badgeClass: "text-sky-400 border-sky-500/30 bg-sky-950/40", emoji: "🗑️" },
+                CLASS_RESET: { badgeClass: "text-orange-400 border-orange-500/30 bg-orange-950/40", emoji: "🔔" }
             };
             return map[type] || { badgeClass: "text-slate-400 border-slate-700 bg-slate-900", emoji: "📋" };
         }
@@ -2946,7 +3142,25 @@
         }
 
         /** 파트너·퀘스트만 Lv.0 — 자리(meta_assigned_seat) 등 다른 저장값은 건드리지 않음 */
+        function clearLocalGameLikeMarks() {
+            let removed = false;
+            for (let i = localStorage.length - 1; i >= 0; i--) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith("game_liked_")) {
+                    localStorage.removeItem(key);
+                    removed = true;
+                }
+            }
+            if (removed) {
+                if (typeof window.renderPortal === "function") window.renderPortal();
+                if (window.activeDetailGameId && typeof window.openGameDetailModal === "function") {
+                    window.openGameDetailModal(window.activeDetailGameId);
+                }
+            }
+        }
+
         function resetQuestProgressOnly() {
+            clearLocalGameLikeMarks();
             return getInitialQuestState();
         }
 
@@ -3005,7 +3219,7 @@
 
         window.resetQuestProgressManually = function() {
             if (confirm("정말로 퀘스트 진행도와 파트너 캐릭터를 초기화하시겠습니까?")) {
-                const fresh = getInitialQuestState();
+                const fresh = resetQuestProgressOnly();
                 saveQuestState(fresh);
                 
                 // 🌟 관리자 로그 기록: 캐릭터/퀘스트 초기화
@@ -3015,6 +3229,29 @@
 
                 showAdminAlert("퀘스트와 캐릭터가 Lv.0으로 초기화되었습니다!", "success");
             }
+        };
+
+        window.applyLocalClassSessionReset = function(resetAtIso) {
+            const fresh = resetQuestProgressOnly();
+            persistQuestState(fresh);
+            localStorage.removeItem("meta_assigned_seat");
+            localStorage.setItem("meta_class_reset_ack", resetAtIso || new Date().toISOString());
+            sessionStorage.removeItem("meta_gacha_nudge_dismissed");
+            sessionStorage.removeItem("meta_gacha_auto_opened");
+            window.lastStudentUnreadCount = 0;
+            updateQuestUI(fresh);
+            if (!window.isAdminAuthenticated) {
+                const stack = document.getElementById("student-right-stack");
+                if (stack) stack.classList.add("hidden");
+                const chatPanel = document.getElementById("student-chat-panel");
+                if (chatPanel) {
+                    chatPanel.classList.add("hidden");
+                    chatPanel.classList.remove("flex");
+                }
+                updateStudentUnreadBadge(0);
+                if (typeof showSeatPicker === "function") showSeatPicker();
+            }
+            if (typeof window.renderPortal === "function") window.renderPortal();
         };
 
         window.recordQuestActivity = function(type, count = 1, isSessionGame = false) {
@@ -3751,6 +3988,9 @@
             if (typeof window.checkSeatAssignmentOnLoad === 'function') {
                 window.checkSeatAssignmentOnLoad();
             }
+            if (typeof window.updateAdminSummaryCard === 'function') {
+                window.updateAdminSummaryCard();
+            }
         }
         window.applyAdminAuthUI = applyAdminAuthUI;
 
@@ -4274,6 +4514,10 @@
         };
 
         document.addEventListener("DOMContentLoaded", () => {
+            if (window.pendingClassResetAt && typeof window.applyLocalClassSessionReset === "function") {
+                window.applyLocalClassSessionReset(window.pendingClassResetAt);
+                window.pendingClassResetAt = null;
+            }
             initQuestStateOnVisit();
             updateQuestUI();
             applyAdminAuthUI();
