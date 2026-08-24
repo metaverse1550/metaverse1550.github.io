@@ -1,0 +1,2023 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>외계인 공원 탈출 게임 (Alien Park Escape)</title>
+    <!-- Tailwind CSS for UI styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome for crisp icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Jua&family=Nunito:wght@700;800;900&display=swap');
+        
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body {
+            font-family: 'Jua', 'Nunito', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #game-container {
+            position: relative;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+            border-radius: 1rem;
+            overflow: hidden;
+            background: #1e293b;
+        }
+
+        canvas {
+            display: block;
+            cursor: crosshair;
+        }
+
+        /* Pulse Animations for Stealth / Alert UI */
+        @keyframes pulse-red {
+            0%, 100% { box-shadow: inset 0 0 30px rgba(239, 68, 68, 0.8); }
+            50% { box-shadow: inset 0 0 60px rgba(239, 68, 68, 1); }
+        }
+
+        @keyframes pulse-green {
+            0%, 100% { box-shadow: inset 0 0 20px rgba(34, 197, 94, 0.3); }
+            50% { box-shadow: inset 0 0 40px rgba(34, 197, 94, 0.6); }
+        }
+
+        .alert-screen {
+            animation: pulse-red 1s infinite;
+        }
+
+        .stealth-screen {
+            animation: pulse-green 2s infinite;
+        }
+
+        /* Tooltip styling */
+        .interaction-prompt {
+            transform: translate(-50%, -100%);
+            transition: all 0.2s ease-out;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 flex flex-col justify-center items-center h-screen overflow-hidden">
+
+    <!-- Main Game Container -->
+    <div id="game-container" class="relative w-[1000px] h-[700px] rounded-2xl overflow-hidden border-2 border-slate-700 bg-slate-900">
+        
+        <!-- Game Canvas -->
+        <canvas id="gameCanvas" width="1000" height="700"></canvas>
+
+        <!-- Stealth / Detection Overlay Vignette -->
+        <div id="vignette-overlay" class="absolute inset-0 pointer-events-none transition-all duration-300"></div>
+
+        <!-- Ultra-Compact Top HUD Bar -->
+        <div class="absolute top-2 left-2 right-2 flex items-center justify-between gap-2 px-3 py-1.5 bg-slate-900/60 hover:bg-slate-900/90 backdrop-blur-md rounded-xl border border-slate-700/50 shadow-md transition-all z-10 pointer-events-auto text-xs">
+            
+            <!-- Left Stats: Collected Parts & Repair Bar -->
+            <div class="flex items-center gap-2">
+                <div class="flex items-center gap-1.5 text-amber-400 font-bold">
+                    <i class="fa-solid fa-gears text-sm animate-spin-slow"></i>
+                    <span class="text-slate-300 hidden sm:inline">부품:</span>
+                    <span id="parts-count" class="text-sm font-extrabold text-amber-400">0 / 6</span>
+                </div>
+
+                <!-- Compact Inventory Slot Bar -->
+                <div id="parts-inventory" class="flex gap-1 ml-1 border-l border-slate-700/60 pl-2">
+                    <!-- 6 slots rendered via JavaScript -->
+                </div>
+
+                <div class="h-4 w-px bg-slate-700/80 mx-1"></div>
+
+                <!-- Ship Repair Progress -->
+                <div class="flex items-center gap-1.5">
+                    <i id="ship-icon" class="fa-solid fa-shuttle-space text-cyan-400 text-xs"></i>
+                    <div class="w-16 bg-slate-800 h-2 rounded-full overflow-hidden border border-slate-700/80">
+                        <div id="repair-bar" class="bg-gradient-to-r from-cyan-500 to-emerald-400 h-full w-0% transition-all duration-300"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Center Objective Banner (Compact) -->
+            <div id="objective-banner" class="hidden md:flex items-center gap-2 bg-slate-950/40 px-3 py-1 rounded-lg border border-cyan-500/30 max-w-sm truncate">
+                <span class="text-[10px] text-cyan-400 font-bold uppercase tracking-wider shrink-0">목표:</span>
+                <span id="objective-text" class="text-xs font-medium text-slate-200 truncate">우주선 부품을 찾으세요!</span>
+            </div>
+
+            <!-- Right: Clock, Stealth Status & Integrated AI Buttons -->
+            <div class="flex items-center gap-2">
+                <!-- Clock & Status -->
+                <div class="flex items-center gap-1.5 bg-slate-950/40 px-2 py-1 rounded-lg border border-slate-800">
+                    <i id="time-icon" class="fa-solid fa-sun text-yellow-400 text-xs animate-pulse"></i>
+                    <span id="time-text" class="font-bold text-slate-200 hidden sm:inline">낮</span>
+                    <span id="phase-timer" class="font-mono text-[11px] font-bold text-amber-300">29s</span>
+                    <span id="stealth-status" class="text-[11px] text-emerald-400 font-bold border-l border-slate-700 pl-1.5 ml-0.5">안전</span>
+                </div>
+
+                <!-- Integrated AI Feature Buttons -->
+                <div class="flex items-center gap-1">
+                    <button id="ai-scan-btn" title="주변 오브젝트 스캔 (F키)" class="bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-500/50 text-cyan-300 px-2 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-all active:scale-95">
+                        <i class="fa-solid fa-expand text-cyan-400 text-[10px]"></i> 스캔(F)
+                    </button>
+                    <button id="ai-command-btn" title="외계 본부 교신 (C키)" class="bg-purple-950/70 hover:bg-purple-900 border border-purple-500/50 text-purple-300 px-2 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition-all active:scale-95">
+                        <i class="fa-solid fa-satellite-dish text-purple-400 text-[10px]"></i> 교신(C)
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controls Guide overlay (Bottom-Left) -->
+        <div class="absolute bottom-4 left-4 bg-slate-900/70 backdrop-blur-sm px-3 py-2 rounded-lg border border-slate-800 text-xs text-slate-400 pointer-events-none flex items-center gap-3">
+            <span><strong class="text-slate-200">WASD / 방향키 / 마우스 클릭</strong> : 이동</span>
+            <span><strong class="text-slate-200">E / Space / 클릭</strong> : 상호작용</span>
+            <span><strong class="text-emerald-400">풀숲</strong> : 은신</span>
+            <span><strong class="text-cyan-400">F</strong> : 스캐너</span>
+            <span><strong class="text-purple-400">C</strong> : 본부 통신</span>
+        </div>
+
+        <!-- Virtual Touch D-Pad for Mobile/Touch devices -->
+        <div id="touch-controls" class="absolute bottom-16 right-4 flex flex-col items-center gap-1 sm:hidden pointer-events-auto opacity-80 z-30">
+            <button id="btn-up" class="w-12 h-12 bg-slate-800/90 border border-slate-600 rounded-xl text-white font-bold text-lg active:bg-cyan-600 select-none flex items-center justify-center">▲</button>
+            <div class="flex gap-2">
+                <button id="btn-left" class="w-12 h-12 bg-slate-800/90 border border-slate-600 rounded-xl text-white font-bold text-lg active:bg-cyan-600 select-none flex items-center justify-center">◀</button>
+                <button id="btn-action" class="w-12 h-12 bg-amber-600/90 border border-amber-400 rounded-xl text-white font-bold text-sm active:bg-amber-500 select-none flex items-center justify-center">E</button>
+                <button id="btn-right" class="w-12 h-12 bg-slate-800/90 border border-slate-600 rounded-xl text-white font-bold text-lg active:bg-cyan-600 select-none flex items-center justify-center">▶</button>
+            </div>
+            <button id="btn-down" class="w-12 h-12 bg-slate-800/90 border border-slate-600 rounded-xl text-white font-bold text-lg active:bg-cyan-600 select-none flex items-center justify-center">▼</button>
+        </div>
+
+        <!-- AI Feature HUD Buttons (Top Right Sub-Bar) -->
+        <div class="absolute top-16 right-4 flex gap-2 pointer-events-auto">
+            <button id="ai-scan-btn" title="주변 오브젝트 스캔 (F키)" class="bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/50 text-cyan-300 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg backdrop-blur-md transition-all active:scale-95">
+                <i class="fa-solid fa-expand text-cyan-400 animate-pulse"></i> AI 스캐너 (F)
+            </button>
+            <button id="ai-command-btn" title="외계 본부 교신 (C키)" class="bg-purple-950/80 hover:bg-purple-900 border border-purple-500/50 text-purple-300 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg backdrop-blur-md transition-all active:scale-95">
+                <i class="fa-solid fa-satellite-dish text-purple-400"></i> 본부 교신 (C)
+            </button>
+        </div>
+
+        <!-- Guard Radio Eavesdrop Ticker (Bottom Right) -->
+        <div id="guard-radio-ticker" class="absolute bottom-4 right-4 max-w-xs bg-slate-900/85 backdrop-blur-md border border-slate-700 p-2.5 rounded-xl text-xs shadow-xl hidden transition-all duration-300">
+            <div class="flex items-center gap-2 text-rose-400 font-bold mb-1">
+                <i class="fa-solid fa-walkie-talkie animate-bounce"></i>
+                <span>경비원 주파수 도청 중...</span>
+            </div>
+            <p id="radio-text" class="text-slate-300 italic text-[11px] leading-tight">"1구역 이상 무. 특이사항 없음."</p>
+        </div>
+
+        <!-- Dynamic Interaction Prompt Overlay -->
+        <div id="interaction-prompt" class="interaction-prompt absolute hidden bg-amber-500 text-slate-950 font-black px-3 py-1.5 rounded-lg shadow-xl text-xs flex items-center gap-2 border-2 border-white pointer-events-none">
+            <span id="prompt-icon"><i class="fa-solid fa-hand-pointer"></i></span>
+            <span id="prompt-text">E키를 눌러 부품 획득</span>
+        </div>
+
+        <!-- AI Scanner Overlay Banner (Adjusted Top Position) -->
+        <div id="scanner-modal" class="absolute top-12 left-3 max-w-xs w-72 bg-slate-900/90 border border-cyan-400/60 p-2.5 rounded-xl shadow-xl backdrop-blur-md hidden pointer-events-auto transition-all z-20">
+            <div class="flex items-center justify-between gap-2 border-b border-cyan-500/30 pb-1.5 mb-1.5">
+                <div class="flex items-center gap-1.5 text-cyan-400 font-bold text-xs">
+                    <i class="fa-solid fa-microchip animate-pulse"></i>
+                    <span>AI 스캐너 (Scan Log)</span>
+                </div>
+                <button id="close-scanner-btn" class="text-slate-400 hover:text-white text-xs px-1"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="scanner-content" class="text-[11px] text-cyan-100 leading-snug font-mono">
+                스캐닝 중...
+            </div>
+        </div>
+
+        <!-- AI High Command Holo-Com Modal -->
+        <div id="command-modal" class="absolute inset-0 bg-slate-950/80 backdrop-blur-md flex flex-col justify-center items-center z-40 hidden p-4">
+            <div class="bg-slate-900 border-2 border-purple-500/60 p-6 rounded-2xl max-w-lg w-full text-left shadow-2xl relative">
+                <div class="flex items-center justify-between border-b border-purple-500/30 pb-3 mb-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-400 flex items-center justify-center text-purple-300 text-xl">
+                            <i class="fa-solid fa-satellite-dish animate-pulse"></i>
+                        </div>
+                        <div>
+                            <h3 class="font-extrabold text-purple-300 text-base">외계 최고 사령부 (High Command)</h3>
+                            <p class="text-[11px] text-purple-400/80">실시간 전술 통신 채널 연결됨</p>
+                        </div>
+                    </div>
+                    <button id="close-command-btn" class="text-slate-400 hover:text-white p-2 text-base"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+
+                <!-- Chat History / Advice Area -->
+                <div id="command-chat-box" class="bg-slate-950/80 border border-purple-900/50 rounded-xl p-3 h-48 overflow-y-auto text-xs text-slate-200 mb-4 space-y-2">
+                    <div class="bg-purple-950/50 border border-purple-800/40 p-2.5 rounded-lg">
+                        <span class="text-purple-400 font-bold block mb-1">📡 사령부:</span>
+                        <p>파이 대원, 현재 상태 보고서를 보내라. 적절한 탈출 전술을 지원하겠다!</p>
+                    </div>
+                </div>
+
+                <!-- Action Controls -->
+                <div class="flex gap-2">
+                    <button id="ask-advice-btn" class="flex-1 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> 전술 조언 요청하기
+                    </button>
+                    <button id="play-tts-btn" class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-purple-300 border border-purple-500/40 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-volume-high"></i> 음성 재생
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Start / Game Over / Victory Modal Screens -->
+        <div id="modal-screen" class="absolute inset-0 bg-slate-950/85 backdrop-blur-md flex flex-col justify-center items-center z-50 p-6">
+            <div id="modal-content" class="bg-slate-900 border-2 border-cyan-500/50 p-8 rounded-2xl max-w-lg w-full text-center shadow-2xl relative overflow-hidden">
+                <div class="absolute -top-12 -right-12 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl"></div>
+                <div class="absolute -bottom-12 -left-12 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl"></div>
+
+                <div id="modal-icon-box" class="w-20 h-20 bg-cyan-500/20 text-cyan-400 rounded-2xl flex items-center justify-center text-4xl mx-auto mb-4 border border-cyan-500/40 shadow-inner">
+                    <i class="fa-solid fa-user-astronaut"></i>
+                </div>
+
+                <h1 id="modal-title" class="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-emerald-400 mb-2">
+                    외계인 공원 탈출
+                </h1>
+                
+                <p id="modal-description" class="text-slate-300 text-sm leading-relaxed mb-6">
+                    공원에 불시착한 귀여운 외계인 '파이(Pie)'! <br>
+                    우주선 부품 6개를 찾아 수리하고 고향 별로 무사히 돌아가세요.<br>
+                    <span class="text-amber-400 font-bold">주의:</span> 밤이 되면 공원 경비원이 순찰을 시작합니다. 경비원의 손전등 시야를 피해 풀숲에 숨으세요!
+                </p>
+
+                <button id="modal-btn" class="w-full py-3.5 bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-extrabold text-lg rounded-xl shadow-lg hover:shadow-cyan-500/25 transition-all transform hover:-translate-y-0.5 active:translate-y-0">
+                    게임 시작하기
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // Global Game Configuration parameters
+        const CONFIG = {
+            CANVAS_WIDTH: 1000,
+            CANVAS_HEIGHT: 700,
+            PLAYER_SPEED: 3.2,
+            PLAYER_RADIUS: 14,
+            GUARD_SPEED_PATROL: 1.4,
+            GUARD_SPEED_CHASE: 2.8,
+            GUARD_RADIUS: 16,
+            GUARD_VISION_ANGLE: Math.PI / 3.2, // ~56 degrees
+            GUARD_VISION_DIST: 180,
+            GUARD_LOST_DIST: 260, // Distance to lose interest in chase
+            DAY_DURATION_SEC: 35, // 낮 시간
+            NIGHT_DURATION_SEC: 15, // 밤 시간
+            TOTAL_PARTS_REQUIRED: 6,
+            ZONE_UNLOCK_PARTS: [0, 2, 4]
+        };
+
+        // Diverse Spaceship Part Definitions with unique colors, names, and shapes
+        const PART_TYPES = [
+            { id: 'engine', name: '플라즈마 엔진 코어', icon: 'fa-fire-flame-curved', color: '#f97316', glowColor: '#ff2d55', desc: '초고속추진 장치' },
+            { id: 'battery', name: '양자 축전지 배터리', icon: 'fa-car-battery', color: '#06b6d4', glowColor: '#38bdf8', desc: '고연량 동력원' },
+            { id: 'reflector', name: '광자 굴절 반사경', icon: 'fa-gem', color: '#10b981', glowColor: '#34d399', desc: '에너지 집속기' },
+            { id: 'gyro', name: '중력 제어 자이로', icon: 'fa-atom', color: '#a855f7', glowColor: '#c084fc', desc: '비행 안정장치' },
+            { id: 'shield', name: '차원 보호막 발생기', icon: 'fa-shield-halved', color: '#ec4899', glowColor: '#f472b6', desc: '방어막 모듈' },
+            { id: 'antenna', name: '초시공 양자 안테나', icon: 'fa-satellite-dish', color: '#eab308', glowColor: '#fde047', desc: '본부 통신장치' }
+        ];
+
+        class InputHandler {
+            constructor() {
+                this.keys = { w: false, a: false, s: false, d: false, e: false, f: false, c: false };
+                this.mouse = { x: 0, y: 0, clicked: false };
+                this.targetPos = null; // Target destination for click/tap to move
+                this.interactPressed = false;
+                this.scanPressed = false;
+                this.commandPressed = false;
+
+                const handleKeyDown = (e) => {
+                    const code = e.code || '';
+                    const keyCode = e.keyCode || e.which;
+                    const key = e.key ? e.key.toLowerCase() : '';
+
+                    // Start game on Enter / Space if start modal is visible
+                    const modal = document.getElementById('modal-screen');
+                    if (modal && !modal.classList.contains('hidden')) {
+                        if (code === 'Enter' || code === 'Space' || keyCode === 13 || keyCode === 32) {
+                            document.getElementById('modal-btn')?.click();
+                            e.preventDefault();
+                            return;
+                        }
+                    }
+
+                    // Prevent scrolling on key press
+                    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(code) || [37, 38, 39, 40, 32].includes(keyCode)) {
+                        e.preventDefault();
+                    }
+
+                    // KeyCode & Key name fallbacks for 100% compatibility across Korean IME and mobile viewports
+                    if (code === 'KeyW' || code === 'ArrowUp' || keyCode === 87 || keyCode === 38 || key === 'w' || key === 'ㅈ') { this.keys.w = true; this.targetPos = null; }
+                    if (code === 'KeyA' || code === 'ArrowLeft' || keyCode === 65 || keyCode === 37 || key === 'a' || key === 'ㅁ') { this.keys.a = true; this.targetPos = null; }
+                    if (code === 'KeyS' || code === 'ArrowDown' || keyCode === 83 || keyCode === 40 || key === 's' || key === 'ㄴ') { this.keys.s = true; this.targetPos = null; }
+                    if (code === 'KeyD' || code === 'ArrowRight' || keyCode === 68 || keyCode === 39 || key === 'd' || key === 'ㅇ') { this.keys.d = true; this.targetPos = null; }
+                    
+                    if (code === 'KeyE' || code === 'Space' || keyCode === 69 || keyCode === 32 || key === 'e' || key === 'ㄷ') {
+                        if (!this.keys.e) this.interactPressed = true;
+                        this.keys.e = true;
+                    }
+                    if (code === 'KeyF' || keyCode === 70 || key === 'f' || key === 'ㄹ') {
+                        if (!this.keys.f) this.scanPressed = true;
+                        this.keys.f = true;
+                    }
+                    if (code === 'KeyC' || keyCode === 67 || key === 'c' || key === 'ㅊ') {
+                        if (!this.keys.c) this.commandPressed = true;
+                        this.keys.c = true;
+                    }
+                };
+
+                const handleKeyUp = (e) => {
+                    const code = e.code || '';
+                    const keyCode = e.keyCode || e.which;
+                    const key = e.key ? e.key.toLowerCase() : '';
+
+                    if (code === 'KeyW' || code === 'ArrowUp' || keyCode === 87 || keyCode === 38 || key === 'w' || key === 'ㅈ') this.keys.w = false;
+                    if (code === 'KeyA' || code === 'ArrowLeft' || keyCode === 65 || keyCode === 37 || key === 'a' || key === 'ㅁ') this.keys.a = false;
+                    if (code === 'KeyS' || code === 'ArrowDown' || keyCode === 83 || keyCode === 40 || key === 's' || key === 'ㄴ') this.keys.s = false;
+                    if (code === 'KeyD' || code === 'ArrowRight' || keyCode === 68 || keyCode === 39 || key === 'd' || key === 'ㅇ') this.keys.d = false;
+                    if (code === 'KeyE' || code === 'Space' || keyCode === 69 || keyCode === 32 || key === 'e' || key === 'ㄷ') this.keys.e = false;
+                    if (code === 'KeyF' || keyCode === 70 || key === 'f' || key === 'ㄹ') this.keys.f = false;
+                    if (code === 'KeyC' || keyCode === 67 || key === 'c' || key === 'ㅊ') this.keys.c = false;
+                };
+
+                window.addEventListener('keydown', handleKeyDown);
+                window.addEventListener('keyup', handleKeyUp);
+                window.addEventListener('blur', () => {
+                    this.keys = { w: false, a: false, s: false, d: false, e: false, f: false, c: false };
+                });
+
+                // Focus window when clicking anywhere inside game container
+                const gameContainer = document.getElementById('game-container');
+                if (gameContainer) {
+                    gameContainer.addEventListener('click', () => window.focus());
+                }
+
+                const canvas = document.getElementById('gameCanvas');
+
+                const updatePointer = (clientX, clientY) => {
+                    const rect = canvas.getBoundingClientRect();
+                    const scaleX = canvas.width / rect.width;
+                    const scaleY = canvas.height / rect.height;
+                    this.mouse.x = (clientX - rect.left) * scaleX;
+                    this.mouse.y = (clientY - rect.top) * scaleY;
+                };
+
+                canvas.addEventListener('mousemove', (e) => {
+                    updatePointer(e.clientX, e.clientY);
+                    if (this.mouse.clicked) {
+                        this.targetPos = { x: this.mouse.x, y: this.mouse.y };
+                    }
+                });
+
+                canvas.addEventListener('mousedown', (e) => {
+                    window.focus();
+                    if (e.button === 0) {
+                        updatePointer(e.clientX, e.clientY);
+                        this.mouse.clicked = true;
+                        this.interactPressed = true;
+                        // Set destination for click-to-move
+                        this.targetPos = { x: this.mouse.x, y: this.mouse.y };
+                    }
+                });
+
+                window.addEventListener('mouseup', () => {
+                    this.mouse.clicked = false;
+                });
+
+                // Touch support on canvas
+                canvas.addEventListener('touchstart', (e) => {
+                    window.focus();
+                    if (e.touches.length > 0) {
+                        updatePointer(e.touches[0].clientX, e.touches[0].clientY);
+                        this.mouse.clicked = true;
+                        this.interactPressed = true;
+                        this.targetPos = { x: this.mouse.x, y: this.mouse.y };
+                    }
+                }, { passive: true });
+
+                canvas.addEventListener('touchmove', (e) => {
+                    if (e.touches.length > 0) {
+                        updatePointer(e.touches[0].clientX, e.touches[0].clientY);
+                        if (this.mouse.clicked) {
+                            this.targetPos = { x: this.mouse.x, y: this.mouse.y };
+                        }
+                    }
+                }, { passive: true });
+
+                canvas.addEventListener('touchend', () => {
+                    this.mouse.clicked = false;
+                });
+
+                this.setupTouchDPad();
+            }
+
+            reset() {
+                this.keys = { w: false, a: false, s: false, d: false, e: false, f: false, c: false };
+                this.targetPos = null;
+                this.mouse.clicked = false;
+                this.interactPressed = false;
+                this.scanPressed = false;
+                this.commandPressed = false;
+            }
+
+            setupTouchDPad() {
+                const bindBtn = (id, keyName) => {
+                    const btn = document.getElementById(id);
+                    if (!btn) return;
+                    const start = (e) => {
+                        e.preventDefault();
+                        this.keys[keyName] = true;
+                        this.targetPos = null;
+                        if (keyName === 'e') this.interactPressed = true;
+                    };
+                    const end = (e) => {
+                        e.preventDefault();
+                        this.keys[keyName] = false;
+                    };
+                    btn.addEventListener('touchstart', start);
+                    btn.addEventListener('touchend', end);
+                    btn.addEventListener('mousedown', start);
+                    btn.addEventListener('mouseup', end);
+                };
+
+                bindBtn('btn-up', 'w');
+                bindBtn('btn-down', 's');
+                bindBtn('btn-left', 'a');
+                bindBtn('btn-right', 'd');
+                bindBtn('btn-action', 'e');
+            }
+
+            consumeInteract() {
+                const val = this.interactPressed;
+                this.interactPressed = false;
+                return val;
+            }
+
+            consumeScan() {
+                const val = this.scanPressed;
+                this.scanPressed = false;
+                return val;
+            }
+
+            consumeCommand() {
+                const val = this.commandPressed;
+                this.commandPressed = false;
+                return val;
+            }
+        }
+
+        // Gemini API Helper for Text Generation and Audio TTS
+        class GeminiService {
+            constructor() {
+                this.apiKey = ""; // Uses runtime window API Key if provided
+                this.lastAudioUrl = null;
+            }
+
+            async generateContent(prompt, systemInstruction = "") {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${this.apiKey}`;
+                const payload = {
+                    contents: [{ parts: [{ text: prompt }] }]
+                };
+                if (systemInstruction) {
+                    payload.systemInstruction = { parts: [{ text: systemInstruction }] };
+                }
+
+                try {
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    return data.candidates?.[0]?.content?.parts?.[0]?.text || "통신 신호가 불안정합니다.";
+                } catch (err) {
+                    console.error("Gemini API Error:", err);
+                    return "지구의 전파 방해로 통신이 차단되었습니다.";
+                }
+            }
+
+            async speakText(text) {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${this.apiKey}`;
+                const payload = {
+                    contents: [{ parts: [{ text: `Say with futuristic alien commander urgency: ${text}` }] }],
+                    generationConfig: {
+                        responseModalities: ["AUDIO"],
+                        speechConfig: {
+                            voiceConfig: {
+                                prebuiltVoiceConfig: { voiceName: "Zephyr" }
+                            }
+                        }
+                    }
+                };
+
+                try {
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    const part = data.candidates?.[0]?.content?.parts?.[0];
+                    if (part && part.inlineData && part.inlineData.data) {
+                        const sampleRate = parseInt(part.inlineData.mimeType.match(/rate=(\d+)/)?.[1] || "24000", 10);
+                        const pcmData = this.base64ToArrayBuffer(part.inlineData.data);
+                        const pcm16 = new Int16Array(pcmData);
+                        const wavBlob = this.pcmToWav(pcm16, sampleRate);
+                        
+                        if (this.lastAudioUrl) URL.revokeObjectURL(this.lastAudioUrl);
+                        this.lastAudioUrl = URL.createObjectURL(wavBlob);
+                        const audio = new Audio(this.lastAudioUrl);
+                        audio.play();
+                    }
+                } catch (err) {
+                    console.error("Gemini TTS Error:", err);
+                }
+            }
+
+            base64ToArrayBuffer(base64) {
+                const binary = window.atob(base64);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) {
+                    bytes[i] = binary.charCodeAt(i);
+                }
+                return bytes.buffer;
+            }
+
+            pcmToWav(pcm16Data, sampleRate) {
+                const numChannels = 1;
+                const byteRate = sampleRate * numChannels * 2;
+                const blockAlign = numChannels * 2;
+                const buffer = new ArrayBuffer(44 + pcm16Data.length * 2);
+                const view = new DataView(buffer);
+
+                const writeString = (v, offset, str) => {
+                    for (let i = 0; i < str.length; i++) v.setUint8(offset + i, str.charCodeAt(i));
+                };
+
+                writeString(view, 0, 'RIFF');
+                view.setUint32(4, 36 + pcm16Data.length * 2, true);
+                writeString(view, 8, 'WAVE');
+                writeString(view, 12, 'fmt ');
+                view.setUint32(16, 16, true);
+                view.setUint16(20, 1, true);
+                view.setUint16(22, numChannels, true);
+                view.setUint32(24, sampleRate, true);
+                view.setUint32(28, byteRate, true);
+                view.setUint16(32, blockAlign, true);
+                view.setUint16(34, 16, true);
+                writeString(view, 36, 'data');
+                view.setUint32(40, pcm16Data.length * 2, true);
+
+                for (let i = 0; i < pcm16Data.length; i++) {
+                    view.setInt16(44 + i * 2, pcm16Data[i], true);
+                }
+
+                return new Blob([buffer], { type: 'audio/wav' });
+            }
+        }
+
+        const gemini = new GeminiService();
+
+        class SoundEffects {
+            constructor() {
+                this.ctx = null;
+            }
+            init() {
+                if (!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    if (AudioContext) this.ctx = new AudioContext();
+                }
+            }
+            playAlert() {
+                try {
+                    this.init();
+                    if (!this.ctx) return;
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(300, this.ctx.currentTime + 0.3);
+                    gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + 0.3);
+                } catch(e) {}
+            }
+            playLaunch() {
+                try {
+                    this.init();
+                    if (!this.ctx) return;
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(1200, this.ctx.currentTime + 2.0);
+                    gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 2.0);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + 2.0);
+                } catch(e) {}
+            }
+        }
+        const soundFX = new SoundEffects();
+
+        class ParticleEffects {
+            constructor() {
+                this.particles = [];
+            }
+
+            spawn(x, y, color, count = 8, speedScale = 1) {
+                for (let i = 0; i < count; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = (Math.random() * 2 + 1) * speedScale;
+                    this.particles.push({
+                        x, y,
+                        vx: Math.cos(angle) * speed,
+                        vy: Math.sin(angle) * speed,
+                        radius: Math.random() * 3 + 2,
+                        color: color,
+                        alpha: 1,
+                        decay: Math.random() * 0.03 + 0.015
+                    });
+                }
+            }
+
+            update() {
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    const p = this.particles[i];
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.alpha -= p.decay;
+                    if (p.alpha <= 0) {
+                        this.particles.splice(i, 1);
+                    }
+                }
+            }
+
+            draw(ctx) {
+                ctx.save();
+                for (const p of this.particles) {
+                    ctx.globalAlpha = Math.max(0, p.alpha);
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+        }
+
+        class MapManager {
+            constructor() {
+                this.width = CONFIG.CANVAS_WIDTH;
+                this.height = CONFIG.CANVAS_HEIGHT;
+
+                // Environment Bush / Hideout zones
+                this.bushes = [
+                    { x: 100, y: 150, r: 35 },
+                    { x: 140, y: 550, r: 38 },
+                    { x: 860, y: 150, r: 35 },
+                    { x: 900, y: 550, r: 38 },
+                    { x: 300, y: 120, r: 38 },
+                    { x: 700, y: 120, r: 38 },
+                    { x: 300, y: 580, r: 38 },
+                    { x: 700, y: 580, r: 38 }
+                ];
+
+                // Solid obstacles (trees, benches, monuments, play structures)
+                this.obstacles = [
+                    // Outer walls
+                    { x: 0, y: 0, w: this.width, h: 20 },
+                    { x: 0, y: this.height - 20, w: this.width, h: 20 },
+                    { x: 0, y: 0, w: 20, h: this.height },
+                    { x: this.width - 20, y: 0, w: 20, h: this.height },
+
+                    // Central Plaza Fountain Wall Surroundings (Widened central area)
+                    { x: 380, y: 180, w: 240, h: 12, type: 'bench' },
+                    { x: 380, y: 520, w: 240, h: 12, type: 'bench' },
+
+                    // Structures in West Area (Playground)
+                    { x: 90, y: 320, w: 50, h: 50, type: 'tree' },
+
+                    // Promenade Structures in East Area
+                    { x: 860, y: 320, w: 50, h: 50, type: 'tree' },
+
+                    // North Garden Fountain Structure
+                    { x: 470, y: 60, w: 60, h: 60, type: 'fountain' }
+                ];
+
+                // Zone Gates that unlock as player collects parts (Extended to cover full top-to-bottom height)
+                this.gates = [
+                    { id: 'west_zone', name: '서쪽 놀이터 구역', x: 220, y: 20, w: 20, h: 660, partsNeeded: 2, unlocked: false },
+                    { id: 'east_zone', name: '동쪽 산책로 구역', x: 760, y: 20, w: 20, h: 660, partsNeeded: 4, unlocked: false }
+                ];
+            }
+
+            updateGates(collectedCount) {
+                for (const gate of this.gates) {
+                    gate.unlocked = collectedCount >= gate.partsNeeded;
+                }
+            }
+
+            hasLineOfSight(x1, y1, x2, y2) {
+                const checkLineBox = (px1, py1, px2, py2, box) => {
+                    const minX = Math.min(px1, px2);
+                    const maxX = Math.max(px1, px2);
+                    const minY = Math.min(py1, py2);
+                    const maxY = Math.max(py1, py2);
+
+                    if (maxX < box.x || minX > box.x + box.w || maxY < box.y || minY > box.y + box.h) {
+                        return false;
+                    }
+
+                    let tmin = 0;
+                    let tmax = 1;
+                    const dx = px2 - px1;
+                    const dy = py2 - py1;
+
+                    if (Math.abs(dx) > 0.0001) {
+                        const tx1 = (box.x - px1) / dx;
+                        const tx2 = (box.x + box.w - px1) / dx;
+                        tmin = Math.max(tmin, Math.min(tx1, tx2));
+                        tmax = Math.min(tmax, Math.max(tx1, tx2));
+                    } else if (px1 < box.x || px1 > box.x + box.w) {
+                        return false;
+                    }
+
+                    if (Math.abs(dy) > 0.0001) {
+                        const ty1 = (box.y - py1) / dy;
+                        const ty2 = (box.y + box.h - py1) / dy;
+                        tmin = Math.max(tmin, Math.min(ty1, ty2));
+                        tmax = Math.min(tmax, Math.max(ty1, ty2));
+                    } else if (py1 < box.y || py1 > box.y + box.h) {
+                        return false;
+                    }
+
+                    return tmax >= tmin;
+                };
+
+                for (const gate of this.gates) {
+                    if (!gate.unlocked) {
+                        if (checkLineBox(x1, y1, x2, y2, gate)) return false;
+                    }
+                }
+
+                for (const obs of this.obstacles) {
+                    if (checkLineBox(x1, y1, x2, y2, obs)) return false;
+                }
+
+                return true;
+            }
+
+            // Checks circle vs rectangle collisions
+            checkObstacleCollision(x, y, radius) {
+                // Check map bounds
+                if (x - radius < 20 || x + radius > this.width - 20 ||
+                    y - radius < 20 || y + radius > this.height - 20) {
+                    return true;
+                }
+
+                // Check locked gates
+                for (const gate of this.gates) {
+                    if (!gate.unlocked) {
+                        if (x + radius > gate.x && x - radius < gate.x + gate.w &&
+                            y + radius > gate.y && y - radius < gate.y + gate.h) {
+                            return true;
+                        }
+                    }
+                }
+
+                // Check static obstacles
+                for (const obs of this.obstacles) {
+                    const closestX = Math.max(obs.x, Math.min(x, obs.x + obs.w));
+                    const closestY = Math.max(obs.y, Math.min(y, obs.y + obs.h));
+                    const distX = x - closestX;
+                    const distY = y - closestY;
+                    if ((distX * distX + distY * distY) < (radius * radius)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            // Check if player is currently hiding inside any bush
+            isInBush(x, y) {
+                for (const bush of this.bushes) {
+                    const dx = x - bush.x;
+                    const dy = y - bush.y;
+                    if (dx * dx + dy * dy <= bush.r * bush.r) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            draw(ctx, isNight) {
+                // Ground Grass Base
+                ctx.fillStyle = isNight ? '#0a231c' : '#22543d';
+                ctx.fillRect(0, 0, this.width, this.height);
+
+                // Pathways
+                ctx.fillStyle = isNight ? '#1e293b' : '#d97706';
+                ctx.globalAlpha = isNight ? 0.4 : 0.25;
+                
+                // Main Plaza Path Ring (Widened radius from 170 to 230)
+                ctx.beginPath();
+                ctx.arc(this.width/2, this.height/2, 230, 0, Math.PI*2);
+                ctx.fill();
+
+                // Cross Pathways
+                ctx.fillRect(100, this.height/2 - 35, 800, 70);
+                ctx.fillRect(this.width/2 - 35, 70, 70, 560);
+                ctx.globalAlpha = 1.0;
+
+                // Zone Area Grid Highlights / Labels
+                ctx.font = '700 14px Jua';
+                ctx.fillStyle = isNight ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)';
+                ctx.fillText('중앙 우주선 넓은 광장', 430, 210);
+                ctx.fillText('서쪽 놀이터', 80, 100);
+                ctx.fillText('동쪽 산책로', 820, 100);
+                ctx.fillText('북쪽 정원', 460, 45);
+
+                // Draw Gates (Full-height Laser/Fence Gate)
+                for (const gate of this.gates) {
+                    if (!gate.unlocked) {
+                        // Locked Laser Barrier
+                        ctx.fillStyle = 'rgba(239, 68, 68, 0.45)';
+                        ctx.fillRect(gate.x, gate.y, gate.w, gate.h);
+                        ctx.strokeStyle = '#ef4444';
+                        ctx.lineWidth = 3;
+                        ctx.strokeRect(gate.x, gate.y, gate.w, gate.h);
+
+                        // Lock Text Icon at Center
+                        ctx.fillStyle = '#f8fafc';
+                        ctx.font = 'bold 13px Jua';
+                        ctx.fillText(`🔒 ${gate.partsNeeded}개 필요`, gate.x - 22, gate.y + gate.h/2);
+                    } else {
+                        // Open Gate Gateway Pillars & Floor Threshold Guide
+                        ctx.fillStyle = '#059669';
+                        ctx.fillRect(gate.x - 2, gate.y, gate.w + 4, 35);
+                        ctx.fillRect(gate.x - 2, gate.y + gate.h - 35, gate.w + 4, 35);
+
+                        ctx.fillStyle = '#10b981';
+                        ctx.fillRect(gate.x + 2, gate.y + 5, gate.w - 4, 25);
+                        ctx.fillRect(gate.x + 2, gate.y + gate.h - 30, gate.w - 4, 25);
+
+                        // Open Gateway Center Dotted Line
+                        ctx.strokeStyle = 'rgba(52, 211, 153, 0.45)';
+                        ctx.lineWidth = 2;
+                        ctx.setLineDash([8, 8]);
+                        ctx.beginPath();
+                        ctx.moveTo(gate.x + gate.w / 2, gate.y + 35);
+                        ctx.lineTo(gate.x + gate.w / 2, gate.y + gate.h - 35);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+
+                        // Open Status Indicator at Center
+                        ctx.fillStyle = '#34d399';
+                        ctx.font = 'bold 12px Jua';
+                        ctx.fillText('🔓 개방됨', gate.x - 16, gate.y + gate.h / 2);
+                    }
+                }
+
+                // Draw Static Obstacles
+                for (const obs of this.obstacles) {
+                    if (obs.type === 'bench') {
+                        ctx.fillStyle = '#78350f';
+                        ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+                    } else if (obs.type === 'tree') {
+                        ctx.fillStyle = isNight ? '#022c22' : '#15803d';
+                        ctx.beginPath();
+                        ctx.arc(obs.x + obs.w/2, obs.y + obs.h/2, obs.w/2, 0, Math.PI*2);
+                        ctx.fill();
+                        ctx.fillStyle = '#451a03';
+                        ctx.fillRect(obs.x + obs.w/2 - 4, obs.y + obs.h/2 - 4, 8, 8);
+                    } else if (obs.type === 'fountain') {
+                        ctx.fillStyle = '#0284c7';
+                        ctx.beginPath();
+                        ctx.arc(obs.x + obs.w/2, obs.y + obs.h/2, obs.w/2, 0, Math.PI*2);
+                        ctx.fill();
+                        ctx.strokeStyle = '#e0f2fe';
+                        ctx.lineWidth = 3;
+                        ctx.stroke();
+                    } else if (obs.type === 'structure') {
+                        ctx.fillStyle = '#475569';
+                        ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+                    }
+                }
+
+                // Draw Bushes (Hideouts)
+                for (const bush of this.bushes) {
+                    ctx.fillStyle = isNight ? '#064e3b' : '#16a34a';
+                    ctx.beginPath();
+                    ctx.arc(bush.x, bush.y, bush.r, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Leafy detail textures
+                    ctx.fillStyle = isNight ? '#022c22' : '#22c55e';
+                    ctx.beginPath();
+                    ctx.arc(bush.x - bush.r/3, bush.y - bush.r/3, bush.r/2.2, 0, Math.PI * 2);
+                    ctx.arc(bush.x + bush.r/4, bush.y + bush.r/4, bush.r/2.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+
+        class Player {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.radius = CONFIG.PLAYER_RADIUS;
+                this.speed = CONFIG.PLAYER_SPEED;
+                this.angle = 0; // facing direction in radians
+                this.isHiding = false;
+                this.carryingPart = false;
+                this.animFrame = 0;
+            }
+
+            update(input, map) {
+                // Always face toward the cursor position in 360 degrees
+                if (input.mouse.x !== 0 || input.mouse.y !== 0) {
+                    this.angle = Math.atan2(input.mouse.y - this.y, input.mouse.x - this.x);
+                }
+
+                let dx = 0;
+                let dy = 0;
+
+                if (input.keys.w) dy -= 1;
+                if (input.keys.s) dy += 1;
+                if (input.keys.a) dx -= 1;
+                if (input.keys.d) dx += 1;
+
+                const isKeyboardMoving = (dx !== 0 || dy !== 0);
+
+                if (isKeyboardMoving) {
+                    // Normalize speed diagonally
+                    if (dx !== 0 && dy !== 0) {
+                        dx *= 0.7071;
+                        dy *= 0.7071;
+                    }
+
+                    const nextX = this.x + dx * this.speed;
+                    const nextY = this.y + dy * this.speed;
+
+                    if (!map.checkObstacleCollision(nextX, this.y, this.radius)) {
+                        this.x = nextX;
+                    }
+                    if (!map.checkObstacleCollision(this.x, nextY, this.radius)) {
+                        this.y = nextY;
+                    }
+                } else if (input.targetPos) {
+                    // Click / Tap to move navigation
+                    const distToTarget = Math.hypot(input.targetPos.x - this.x, input.targetPos.y - this.y);
+                    if (distToTarget > 6) {
+                        this.angle = Math.atan2(input.targetPos.y - this.y, input.targetPos.x - this.x);
+                        const moveX = Math.cos(this.angle) * this.speed;
+                        const moveY = Math.sin(this.angle) * this.speed;
+
+                        const nextX = this.x + moveX;
+                        const nextY = this.y + moveY;
+
+                        let movedX = false;
+                        let movedY = false;
+
+                        if (!map.checkObstacleCollision(nextX, this.y, this.radius)) {
+                            this.x = nextX;
+                            movedX = true;
+                        }
+                        if (!map.checkObstacleCollision(this.x, nextY, this.radius)) {
+                            this.y = nextY;
+                            movedY = true;
+                        }
+
+                        // Clear target only when completely stuck in both axes
+                        if (!movedX && !movedY) {
+                            input.targetPos = null;
+                        }
+                    } else {
+                        input.targetPos = null;
+                    }
+                }
+
+                // Hiding status
+                this.isHiding = map.isInBush(this.x, this.y);
+                this.animFrame += 0.1;
+            }
+
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                // Stealth Translucency Effect
+                if (this.isHiding) {
+                    ctx.globalAlpha = 0.45;
+                }
+
+                // Directional rotation
+                ctx.rotate(this.angle);
+
+                // Cute Alien Body (Lime Green Head)
+                ctx.fillStyle = '#a3e635';
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Antennae
+                ctx.strokeStyle = '#a3e635';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(-this.radius - 4, -8);
+                ctx.stroke();
+
+                ctx.fillStyle = '#38bdf8'; // Glowing antenna tip
+                ctx.beginPath();
+                ctx.arc(-this.radius - 5, -8, 4, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Cute Big Expressive Eyes
+                ctx.fillStyle = '#0f172a';
+                ctx.beginPath();
+                ctx.ellipse(4, -5, 5, 3, 0, 0, Math.PI * 2);
+                ctx.ellipse(4, 5, 5, 3, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Eye highlights
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(5, -6, 1.5, 0, Math.PI * 2);
+                ctx.arc(5, 4, 1.5, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.restore();
+
+                // If carrying a part, draw it orbiting around alien
+                if (this.carryingPart) {
+                    const orbX = this.x + Math.cos(this.animFrame * 2) * 20;
+                    const orbY = this.y + Math.sin(this.animFrame * 2) * 20;
+                    ctx.fillStyle = '#f59e0b';
+                    ctx.beginPath();
+                    ctx.arc(orbX, orbY, 6, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#fef08a';
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                }
+
+                // Stealth Icon overhead when hiding
+                if (this.isHiding) {
+                    ctx.fillStyle = '#4ade80';
+                    ctx.font = '900 13px "Font Awesome 6 Free"';
+                    ctx.fillText('\uf06c 은신중', this.x - 22, this.y - this.radius - 8);
+                }
+            }
+        }
+
+        class PartsManager {
+            constructor() {
+                this.parts = [];
+                this.collectedCount = 0;
+                this.scanPingTime = 0;
+                
+                this.zone0Pool = [
+                    { x: 320, y: 150 },
+                    { x: 680, y: 150 },
+                    { x: 400, y: 580 },
+                    { x: 600, y: 580 }
+                ];
+                this.zone1Pool = [
+                    { x: 80, y: 180 },
+                    { x: 120, y: 440 },
+                    { x: 90, y: 620 },
+                    { x: 150, y: 300 }
+                ];
+                this.zone2Pool = [
+                    { x: 910, y: 180 },
+                    { x: 860, y: 480 },
+                    { x: 910, y: 620 },
+                    { x: 840, y: 300 }
+                ];
+                this.initParts();
+            }
+
+            initParts() {
+                this.parts = [];
+                const getRandomTwo = (arr) => [...arr].sort(() => Math.random() - 0.5).slice(0, 2);
+
+                const selectedPositions = [
+                    ...getRandomTwo(this.zone0Pool),
+                    ...getRandomTwo(this.zone1Pool),
+                    ...getRandomTwo(this.zone2Pool)
+                ];
+
+                // Shuffle part types so they spawn in different locations each playthrough
+                const shuffledTypes = [...PART_TYPES].sort(() => Math.random() - 0.5);
+
+                selectedPositions.forEach((pt, index) => {
+                    this.parts.push({
+                        id: index,
+                        typeInfo: shuffledTypes[index],
+                        x: pt.x,
+                        y: pt.y,
+                        radius: 12,
+                        collected: false,
+                        pulse: Math.random() * Math.PI
+                    });
+                });
+            }
+
+            triggerScanPing() {
+                this.scanPingTime = 150;
+            }
+
+            update() {
+                this.parts.forEach(p => p.pulse += 0.05);
+                if (this.scanPingTime > 0) this.scanPingTime--;
+            }
+
+            drawPartShape(ctx, x, y, typeInfo, size, isNear) {
+                ctx.save();
+                ctx.translate(x, y);
+
+                const color = isNear ? typeInfo.color : '#1e382b';
+                const strokeColor = isNear ? typeInfo.glowColor : '#14291f';
+
+                ctx.fillStyle = color;
+                ctx.strokeStyle = strokeColor;
+                ctx.lineWidth = 2;
+
+                switch (typeInfo.id) {
+                    case 'engine': // Flame / Core Circle with rotating teeth
+                        ctx.beginPath();
+                        ctx.arc(0, 0, size, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.stroke();
+                        if (isNear) {
+                            ctx.fillStyle = '#fff';
+                            ctx.beginPath();
+                            ctx.arc(0, 0, size * 0.4, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                        break;
+
+                    case 'battery': // Rectangular Battery Block
+                        ctx.beginPath();
+                        ctx.roundRect(-size, -size * 0.7, size * 2, size * 1.4, 3);
+                        ctx.fill();
+                        ctx.stroke();
+                        if (isNear) {
+                            ctx.fillStyle = '#ffffff';
+                            ctx.fillRect(-size * 0.5, -2, size, 4);
+                        }
+                        break;
+
+                    case 'reflector': // Diamond Crystal
+                        ctx.beginPath();
+                        ctx.moveTo(0, -size * 1.2);
+                        ctx.lineTo(size, 0);
+                        ctx.moveTo(0, -size * 1.2);
+                        ctx.lineTo(size * 1.1, 0);
+                        ctx.lineTo(0, size * 1.2);
+                        ctx.lineTo(-size * 1.1, 0);
+                        ctx.closePath();
+                        ctx.fill();
+                        ctx.stroke();
+                        break;
+
+                    case 'gyro': // Concentric Ring Gyroscope
+                        ctx.beginPath();
+                        ctx.arc(0, 0, size, 0, Math.PI * 2);
+                        ctx.stroke();
+                        ctx.beginPath();
+                        ctx.arc(0, 0, size * 0.5, 0, Math.PI * 2);
+                        ctx.fill();
+                        break;
+
+                    case 'shield': // Shield Crest Shape
+                        ctx.beginPath();
+                        ctx.moveTo(0, -size * 1.1);
+                        ctx.lineTo(size, -size * 0.5);
+                        ctx.lineTo(size * 0.8, size * 0.6);
+                        ctx.lineTo(0, size * 1.1);
+                        ctx.lineTo(-size * 0.8, size * 0.6);
+                        ctx.lineTo(-size, -size * 0.5);
+                        ctx.closePath();
+                        ctx.fill();
+                        ctx.stroke();
+                        break;
+
+                    case 'antenna': // Dish Arc & Transmitter Tip
+                        ctx.beginPath();
+                        ctx.arc(0, size * 0.2, size, Math.PI * 1.2, Math.PI * 1.8);
+                        ctx.stroke();
+                        ctx.beginPath();
+                        ctx.arc(0, -size * 0.4, size * 0.4, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.stroke();
+                        break;
+
+                    default:
+                        ctx.beginPath();
+                        ctx.arc(0, 0, size, 0, Math.PI * 2);
+                        ctx.fill();
+                }
+
+                ctx.restore();
+            }
+
+            draw(ctx, player) {
+                for (const p of this.parts) {
+                    if (p.collected) continue;
+
+                    ctx.save();
+                    
+                    const distToPlayer = player ? Math.hypot(player.x - p.x, player.y - p.y) : 999;
+                    const isNear = distToPlayer < 70;
+                    const isScanActive = this.scanPingTime > 0;
+                    
+                    let alpha = 0.03;
+                    if (isNear) {
+                        alpha = 0.3 + (1 - distToPlayer / 70) * 0.7;
+                    } else if (isScanActive) {
+                        alpha = 0.85;
+                    }
+
+                    ctx.globalAlpha = Math.min(1.0, Math.max(0.03, alpha));
+
+                    const glowRadius = p.radius + Math.sin(p.pulse) * 2;
+
+                    // Sonar Pulse Ring on AI Scan
+                    if (isScanActive) {
+                        ctx.strokeStyle = p.typeInfo.color;
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, glowRadius + (150 - this.scanPingTime) % 28, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+
+                    // Intense glowing aura when close
+                    if (isNear) {
+                        ctx.fillStyle = p.typeInfo.color;
+                        ctx.globalAlpha = 0.25;
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, glowRadius + 8, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.globalAlpha = 1.0;
+                    }
+
+                    // Draw custom part geometry
+                    this.drawPartShape(ctx, p.x, p.y, p.typeInfo, isNear ? p.radius : p.radius * 0.6, isNear || isScanActive);
+
+                    // Floating Part Label when close
+                    if (isNear) {
+                        ctx.fillStyle = p.typeInfo.color;
+                        ctx.font = 'bold 12px Jua';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(p.typeInfo.name, p.x, p.y - p.radius - 8);
+                    }
+
+                    ctx.restore();
+                }
+            }
+
+            getNearbyPart(px, py, maxDist = 35) {
+                for (const p of this.parts) {
+                    if (p.collected) continue;
+                    const dist = Math.hypot(px - p.x, py - p.y);
+                    if (dist <= maxDist) return p;
+                }
+                return null;
+            }
+        }
+
+        class Guard {
+            constructor(id, waypoints) {
+                this.id = id;
+                this.waypoints = waypoints;
+                this.currentWP = 0;
+                this.x = waypoints[0].x;
+                this.y = waypoints[0].y;
+                this.radius = CONFIG.GUARD_RADIUS;
+                this.angle = 0;
+                this.state = 'PATROL'; // 'PATROL', 'ALERT', 'CHASE'
+                this.speed = CONFIG.GUARD_SPEED_PATROL;
+                this.alertTimer = 0;
+            }
+
+            update(player, isNight, map, effects) {
+                // 낮 동안에는 경비원이 움직이지 않고 휴식
+                if (!isNight) {
+                    this.state = 'PATROL';
+                    return;
+                }
+
+                const distToPlayer = Math.hypot(player.x - this.x, player.y - this.y);
+                const angleToPlayer = Math.atan2(player.y - this.y, player.x - this.x);
+
+                // Angle difference calculation
+                let angleDiff = Math.abs(this.angle - angleToPlayer);
+                if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
+
+                // Detection check: Night time + inside flashlight cone + NOT hiding in bush + HAS LINE OF SIGHT
+                const canSeePlayer = isNight &&
+                                    (!player.isHiding) &&
+                                    (distToPlayer <= CONFIG.GUARD_VISION_DIST) &&
+                                    (angleDiff <= CONFIG.GUARD_VISION_ANGLE / 2) &&
+                                    map.hasLineOfSight(this.x, this.y, player.x, player.y);
+
+                if (canSeePlayer) {
+                    if (this.state !== 'CHASE') {
+                        soundFX.playAlert();
+                        effects.spawn(this.x, this.y, '#ef4444', 12);
+                    }
+                    this.state = 'CHASE';
+                }
+
+                // AI State Machine Logic
+                if (this.state === 'CHASE') {
+                    this.speed = CONFIG.GUARD_SPEED_CHASE;
+                    this.angle = angleToPlayer;
+
+                    // Move directly toward player
+                    const nextX = this.x + Math.cos(this.angle) * this.speed;
+                    const nextY = this.y + Math.sin(this.angle) * this.speed;
+
+                    if (!map.checkObstacleCollision(nextX, nextY, this.radius)) {
+                        this.x = nextX;
+                        this.y = nextY;
+                    }
+
+                    // Lose interest if player hides in bush or gets far away
+                    if (player.isHiding || distToPlayer > CONFIG.GUARD_LOST_DIST) {
+                        this.state = 'PATROL';
+                    }
+                } else {
+                    // PATROL mode following waypoints
+                    this.speed = CONFIG.GUARD_SPEED_PATROL;
+                    const target = this.waypoints[this.currentWP];
+                    const distToTarget = Math.hypot(target.x - this.x, target.y - this.y);
+
+                    if (distToTarget < 10) {
+                        this.currentWP = (this.currentWP + 1) % this.waypoints.length;
+                    } else {
+                        const targetAngle = Math.atan2(target.y - this.y, target.x - this.x);
+                        // Smoothly rotate toward target
+                        this.angle = targetAngle;
+                        
+                        const nextX = this.x + Math.cos(this.angle) * this.speed;
+                        const nextY = this.y + Math.sin(this.angle) * this.speed;
+
+                        this.x = nextX;
+                        this.y = nextY;
+                    }
+                }
+            }
+
+            draw(ctx, isNight) {
+                // Flashlight Vision Cone (Only active during Night)
+                if (isNight) {
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.moveTo(this.x, this.y);
+                    ctx.arc(
+                        this.x, this.y,
+                        CONFIG.GUARD_VISION_DIST,
+                        this.angle - CONFIG.GUARD_VISION_ANGLE / 2,
+                        this.angle + CONFIG.GUARD_VISION_ANGLE / 2
+                    );
+                    ctx.closePath();
+
+                    if (this.state === 'CHASE') {
+                        ctx.fillStyle = 'rgba(239, 68, 68, 0.45)'; // Red pursuit cone
+                    } else {
+                        ctx.fillStyle = 'rgba(254, 240, 138, 0.25)'; // Yellow patrol cone
+                    }
+                    ctx.fill();
+                    ctx.restore();
+                }
+
+                // Guard Body
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+
+                // Body circle
+                ctx.fillStyle = (this.state === 'CHASE') ? '#dc2626' : '#1e3a8a';
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Cap / Shoulders
+                ctx.fillStyle = '#0f172a';
+                ctx.fillRect(-2, -this.radius, 6, this.radius * 2);
+
+                // Flashlight tool in hand
+                ctx.fillStyle = '#64748b';
+                ctx.fillRect(8, 4, 10, 4);
+
+                ctx.restore();
+
+                // 낮시간 휴식 상태 표시 및 밤시간 경고 아이콘
+                if (!isNight) {
+                    ctx.fillStyle = '#94a3b8';
+                    ctx.font = '12px Jua';
+                    ctx.fillText('💤 휴식 중', this.x - 22, this.y - this.radius - 6);
+                } else if (this.state === 'CHASE') {
+                    ctx.fillStyle = '#ef4444';
+                    ctx.font = '900 18px "Font Awesome 6 Free"';
+                    ctx.fillText('\uf12a', this.x - 4, this.y - this.radius - 8);
+                }
+            }
+        }
+
+        class Spaceship {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.radius = 42;
+                this.repairProgress = 0; // 0 to 100%
+                this.isPlayerBoarded = false;
+                this.isLaunching = false;
+                this.launchY = y;
+            }
+
+            update(effects) {
+                if (this.isLaunching) {
+                    this.launchY -= 4; // Fly up to outer space
+                    effects.spawn(this.x, this.launchY + 30, '#f97316', 6, 2);
+                    effects.spawn(this.x, this.launchY + 30, '#38bdf8', 4, 1.5);
+                }
+            }
+
+            draw(ctx) {
+                const currentY = this.isLaunching ? this.launchY : this.y;
+
+                ctx.save();
+                ctx.translate(this.x, currentY);
+
+                // Launch pad platform beneath
+                ctx.fillStyle = '#334155';
+                ctx.beginPath();
+                ctx.ellipse(0, 10, 50, 20, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Outer Ring Glow
+                ctx.strokeStyle = this.repairProgress === 100 ? '#38bdf8' : '#f59e0b';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+
+                // Saucer Metallic Body
+                ctx.fillStyle = '#94a3b8';
+                ctx.beginPath();
+                ctx.ellipse(0, 0, 42, 22, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Glass Dome Glass Canopy
+                ctx.fillStyle = 'rgba(56, 189, 248, 0.7)';
+                ctx.beginPath();
+                ctx.arc(0, -6, 20, Math.PI, 0);
+                ctx.fill();
+
+                // Saucer lights
+                const lightColors = ['#ef4444', '#3b82f6', '#10b981', '#eab308'];
+                for (let i = -3; i <= 3; i++) {
+                    ctx.fillStyle = lightColors[Math.abs(i) % lightColors.length];
+                    ctx.beginPath();
+                    ctx.arc(i * 11, 8, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                ctx.restore();
+            }
+        }
+
+        class Game {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+
+                this.input = new InputHandler();
+                this.effects = new ParticleEffects();
+                this.map = new MapManager();
+                this.partsManager = new PartsManager();
+                this.player = new Player(CONFIG.CANVAS_WIDTH / 2, CONFIG.CANVAS_HEIGHT / 2 + 60);
+                this.spaceship = new Spaceship(CONFIG.CANVAS_WIDTH / 2, CONFIG.CANVAS_HEIGHT / 2);
+
+                // Guards (중앙 광장 및 전 구역 순찰 경로)
+                this.guards = this.initGuards();
+
+                // Day / Night Cycle System
+                this.gameTime = 0; // In seconds
+                this.isNight = false;
+
+                // Game State
+                this.state = 'START'; // 'START', 'PLAYING', 'CLEAR', 'GAMEOVER'
+                this.lastRadioTime = 0;
+                this.latestCommandText = "파이 대원, 현장 상황을 파악하고 전술 조언을 요청하라.";
+
+                // DOM UI Elements
+                this.uiParts = document.getElementById('parts-count');
+                this.uiRepairBar = document.getElementById('repair-bar');
+                this.uiObjective = document.getElementById('objective-text');
+                this.uiTimeText = document.getElementById('time-text');
+                this.uiPhaseTimer = document.getElementById('phase-timer');
+                this.uiTimeIcon = document.getElementById('time-icon');
+                this.uiStealthStatus = document.getElementById('stealth-status');
+                this.uiVignette = document.getElementById('vignette-overlay');
+                this.uiPrompt = document.getElementById('interaction-prompt');
+                this.uiPromptText = document.getElementById('prompt-text');
+
+                this.modalScreen = document.getElementById('modal-screen');
+                this.modalTitle = document.getElementById('modal-title');
+                this.modalDesc = document.getElementById('modal-description');
+                this.modalBtn = document.getElementById('modal-btn');
+
+                // AI UI Elements
+                this.scannerModal = document.getElementById('scanner-modal');
+                this.scannerContent = document.getElementById('scanner-content');
+                this.closeScannerBtn = document.getElementById('close-scanner-btn');
+
+                this.commandModal = document.getElementById('command-modal');
+                this.commandChatBox = document.getElementById('command-chat-box');
+                this.closeCommandBtn = document.getElementById('close-command-btn');
+                this.askAdviceBtn = document.getElementById('ask-advice-btn');
+                this.playTtsBtn = document.getElementById('play-tts-btn');
+
+                this.radioTicker = document.getElementById('guard-radio-ticker');
+                this.radioText = document.getElementById('radio-text');
+
+                this.aiScanBtn = document.getElementById('ai-scan-btn');
+                this.aiCommandBtn = document.getElementById('ai-command-btn');
+
+                this.modalBtn.addEventListener('click', () => this.handleModalClick());
+
+                this.setupAIEventListeners();
+            }
+
+            initGuards() {
+                return [
+                    new Guard(1, [
+                        { x: 100, y: 120 },
+                        { x: 450, y: 200 },
+                        { x: 450, y: 500 },
+                        { x: 100, y: 580 }
+                    ]),
+                    new Guard(2, [
+                        { x: 900, y: 580 },
+                        { x: 550, y: 500 },
+                        { x: 550, y: 200 },
+                        { x: 900, y: 120 }
+                    ]),
+                    new Guard(3, [
+                        { x: 350, y: 350 },
+                        { x: 500, y: 160 },
+                        { x: 650, y: 350 },
+                        { x: 500, y: 540 }
+                    ])
+                ];
+            }
+
+            handleInteractions() {
+                const nearPart = this.partsManager.getNearbyPart(this.player.x, this.player.y, 40);
+                const distToShip = Math.hypot(this.spaceship.x - this.player.x, this.spaceship.y - this.player.y);
+                const nearShip = distToShip < 60;
+                const isInteracting = this.input.consumeInteract();
+
+                if (!this.player.carryingPart && nearPart) {
+                    this.uiPrompt.style.left = `${(nearPart.x / CONFIG.CANVAS_WIDTH) * 100}%`;
+                    this.uiPrompt.style.top = `${(nearPart.y / CONFIG.CANVAS_HEIGHT) * 100}%`;
+                    
+                    this.uiPromptText.innerHTML = `E / 클릭: <span style="color:${nearPart.typeInfo.color}">[${nearPart.typeInfo.name}]</span> 획득`;
+                    this.uiPrompt.classList.remove('hidden');
+
+                    if (isInteracting) {
+                        nearPart.collected = true;
+                        this.player.carryingPart = nearPart; // Store whole part object
+                        this.partsManager.collectedCount++;
+                        this.effects.spawn(nearPart.x, nearPart.y, nearPart.typeInfo.color, 18);
+                        this.uiPrompt.classList.add('hidden');
+                        this.renderInventoryUI();
+                    }
+                } else if (this.player.carryingPart && nearShip) {
+                    const carryingInfo = this.player.carryingPart.typeInfo;
+                    this.uiPrompt.style.left = `${(this.spaceship.x / CONFIG.CANVAS_WIDTH) * 100}%`;
+                    this.uiPrompt.style.top = `${(this.spaceship.y / CONFIG.CANVAS_HEIGHT) * 100}%`;
+                    this.uiPromptText.innerHTML = `E / 클릭: <span style="color:${carryingInfo.color}">[${carryingInfo.name}]</span> 우주선 장착`;
+                    this.uiPrompt.classList.remove('hidden');
+
+                    if (isInteracting) {
+                        this.player.carryingPart = null;
+                        this.spaceship.repairProgress = Math.min(100, this.spaceship.repairProgress + Math.round(100 / CONFIG.TOTAL_PARTS_REQUIRED));
+                        this.effects.spawn(this.spaceship.x, this.spaceship.y, carryingInfo.color, 25);
+                        this.uiPrompt.classList.add('hidden');
+                        this.renderInventoryUI();
+                    }
+                } else if (this.spaceship.repairProgress === 100 && nearShip) {
+                    this.uiPrompt.style.left = `${(this.spaceship.x / CONFIG.CANVAS_WIDTH) * 100}%`;
+                    this.uiPrompt.style.top = `${(this.spaceship.y / CONFIG.CANVAS_HEIGHT) * 100}%`;
+                    this.uiPromptText.innerHTML = `E / 클릭: 우주선 탑승 및 이륙!`;
+                    this.uiPrompt.classList.remove('hidden');
+
+                    if (isInteracting) {
+                        this.triggerGameClear();
+                        this.uiPrompt.classList.add('hidden');
+                    }
+                } else {
+                    this.uiPrompt.classList.add('hidden');
+                }
+            }
+
+            updateGuardRadio(isChasing) {
+                if (this.isNight) {
+                    this.radioTicker.classList.remove('hidden');
+                    if (Date.now() - this.lastRadioTime > 6000) {
+                        this.lastRadioTime = Date.now();
+                        if (isChasing) {
+                            const lines = [
+                                '"비상! 침입자 발견! 3구역 방향으로 추격 중!"',
+                                '"녹색 생명체를 발견했다! 지원 요청 바란다!"',
+                                '"빠르다! 놓치지 마라, 수풀 쪽을 수색해!"'
+                            ];
+                            this.radioText.textContent = lines[Math.floor(Math.random() * lines.length)];
+                        } else {
+                            const lines = [
+                                '"1구역 이상 무. 특이사항 없음."',
+                                '"이상한 빛을 본 것 같은데... 기분 탓인가?"',
+                                '"손전등 배터리 교체 시기 확인 요망."',
+                                '"2구역 순찰 이상 무. 정적 유지 중."'
+                            ];
+                            this.radioText.textContent = lines[Math.floor(Math.random() * lines.length)];
+                        }
+                    }
+                } else {
+                    this.radioTicker.classList.add('hidden');
+                }
+            }
+
+            async triggerAIScan() {
+                this.partsManager.triggerScanPing();
+                this.scannerModal.classList.remove('hidden');
+                this.scannerContent.textContent = "🔍 주변 특수 부품 서명 분석 중...";
+
+                if (this.scannerTimer) clearTimeout(this.scannerTimer);
+
+                let nearestDist = Infinity;
+                let targetPart = null;
+
+                for (const p of this.partsManager.parts) {
+                    if (!p.collected) {
+                        const d = Math.hypot(p.x - this.player.x, p.y - this.player.y);
+                        if (d < nearestDist) {
+                            nearestDist = d;
+                            targetPart = p;
+                        }
+                    }
+                }
+
+                let targetDesc = "주변에 미수집 부품 없음";
+                if (targetPart) {
+                    targetDesc = `${targetPart.typeInfo.name} (${targetPart.typeInfo.desc}, 거리: ${Math.round(nearestDist)}m)`;
+                }
+
+                const prompt = `당신은 외계인 탐사선 파이(Pie)의 AI 스캐너입니다. 가장 가까이 탐지된 부품: ${targetDesc}, 수집 현황: ${this.partsManager.collectedCount}/${CONFIG.TOTAL_PARTS_REQUIRED}. 이 부품의 성능과 수색 힌트를 포함한 재치 넘치는 외계 분석 보고서 1문장을 한국어로 작성해주세요.`;
+
+                const result = await gemini.generateContent(prompt);
+                this.scannerContent.textContent = result;
+
+                this.scannerTimer = setTimeout(() => {
+                    this.scannerModal.classList.add('hidden');
+                }, 4500);
+            }
+
+            renderInventoryUI() {
+                const container = document.getElementById('parts-inventory');
+                if (!container) return;
+
+                container.innerHTML = '';
+                
+                // Render 6 inventory slots in streamlined size
+                this.partsManager.parts.forEach((p) => {
+                    const slot = document.createElement('div');
+                    slot.className = `w-5 h-5 rounded border flex items-center justify-center text-[10px] transition-all ${
+                        p.collected 
+                            ? 'border-emerald-400/80 bg-slate-800/90 shadow-sm shadow-emerald-500/30' 
+                            : 'border-slate-700/80 bg-slate-950/60 opacity-40'
+                    }`;
+                    
+                    if (p.collected) {
+                        slot.style.color = p.typeInfo.color;
+                        slot.innerHTML = `<i class="fa-solid ${p.typeInfo.icon}"></i>`;
+                        slot.title = `수집됨: ${p.typeInfo.name}`;
+                    } else {
+                        slot.innerHTML = `<i class="fa-solid fa-lock text-[8px] text-slate-500"></i>`;
+                        slot.title = `미수집: ${p.typeInfo.name}`;
+                    }
+                    
+                    container.appendChild(slot);
+                });
+            }
+
+        openCommandModal() {
+            this.commandModal.classList.remove('hidden');
+        }
+
+        async requestAICommandAdvice() {
+            const chatBox = this.commandChatBox;
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'bg-purple-950/50 border border-purple-800/40 p-2.5 rounded-lg text-purple-300 italic';
+            loadingDiv.textContent = "📡 본부 신호 수신 중...";
+            chatBox.appendChild(loadingDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            const prompt = `플레이어 상황: 부품 ${this.partsManager.collectedCount}/${CONFIG.TOTAL_PARTS_REQUIRED} 수집됨. 우주선 수리율 ${this.spaceship.repairProgress}%. 현재 시간: ${this.isNight ? '밤 (경비원 순찰 중)' : '낮 (안전함)'}. 외계 최고 사령부로서 파이 대원에게 격려와 구체적인 탈출 전술 팁 2문장을 긴박하면서도 재치있게 전달해주세요.`;
+
+            const advice = await gemini.generateContent(prompt);
+            loadingDiv.remove();
+
+            this.latestCommandText = advice;
+
+            const adviceDiv = document.createElement('div');
+            adviceDiv.className = 'bg-purple-950/50 border border-purple-800/40 p-2.5 rounded-lg';
+            adviceDiv.innerHTML = `<span class="text-purple-400 font-bold block mb-1">📡 사령부:</span><p>${advice}</p>`;
+            chatBox.appendChild(adviceDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        setupAIEventListeners() {
+                this.aiScanBtn.addEventListener('click', () => this.triggerAIScan());
+                this.aiCommandBtn.addEventListener('click', () => this.openCommandModal());
+                
+                this.closeScannerBtn.addEventListener('click', () => this.scannerModal.classList.add('hidden'));
+                this.closeCommandBtn.addEventListener('click', () => this.commandModal.classList.add('hidden'));
+
+                this.askAdviceBtn.addEventListener('click', () => this.requestAICommandAdvice());
+                this.playTtsBtn.addEventListener('click', () => {
+                    if (this.latestCommandText) gemini.speakText(this.latestCommandText);
+                });
+            }
+
+            start() {
+                requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
+            }
+
+            handleModalClick() {
+                if (this.state === 'START' || this.state === 'CLEAR' || this.state === 'GAMEOVER') {
+                    this.resetGame();
+                    this.state = 'PLAYING';
+                    this.modalScreen.classList.add('hidden');
+                    window.focus();
+                }
+            }
+
+            resetGame() {
+                this.gameTime = 0;
+                this.isNight = false;
+                this.input.reset();
+                this.player = new Player(CONFIG.CANVAS_WIDTH / 2, CONFIG.CANVAS_HEIGHT / 2 + 60);
+                this.spaceship = new Spaceship(CONFIG.CANVAS_WIDTH / 2, CONFIG.CANVAS_HEIGHT / 2);
+                this.partsManager.initParts();
+                this.partsManager.collectedCount = 0;
+                this.partsManager.scanPingTime = 0;
+                this.effects.particles = [];
+                this.map.updateGates(0);
+                this.guards = this.initGuards();
+                this.lastRadioTime = 0;
+                this.radioTicker.classList.add('hidden');
+                this.scannerModal.classList.add('hidden');
+                this.commandModal.classList.add('hidden');
+                this.uiVignette.className = 'absolute inset-0 pointer-events-none';
+                this.state = 'PLAYING';
+            }
+
+            triggerGameOver() {
+                if (this.state === 'GAMEOVER') return;
+                this.state = 'GAMEOVER';
+                soundFX.playAlert();
+
+                this.modalTitle.textContent = "🚨 경비원에게 발각되었습니다!";
+                this.modalTitle.className = "text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-rose-500 to-amber-500 mb-2";
+                this.modalDesc.innerHTML = "야간 순찰 중인 경비원의 시야에 걸려 포획되었습니다!<br><span class='text-emerald-400 font-bold'>팁:</span> 밤에는 손전등 범위에서 벗어나 풀숲(덤불) 속으로 들어가 은신하세요.";
+                this.modalBtn.textContent = "다시 시도하기";
+                this.modalScreen.classList.remove('hidden');
+            }
+
+            update(dt) {
+                if (this.state !== 'PLAYING') {
+                    if (this.state === 'CLEAR') {
+                        this.spaceship.update(this.effects);
+                    }
+                    this.effects.update();
+                    return;
+                }
+
+                // Handle Hotkeys for AI Features
+                if (this.input.consumeScan()) {
+                    this.triggerAIScan();
+                }
+                if (this.input.consumeCommand()) {
+                    this.openCommandModal();
+                }
+
+                // Update Day / Night Timer
+                this.gameTime += dt;
+                const totalCycle = CONFIG.DAY_DURATION_SEC + CONFIG.NIGHT_DURATION_SEC;
+                const currentCycleTime = this.gameTime % totalCycle;
+                this.isNight = currentCycleTime >= CONFIG.DAY_DURATION_SEC;
+
+                // Update Player
+                this.player.update(this.input, this.map);
+
+                // Update Gate Locks
+                this.map.updateGates(this.partsManager.collectedCount);
+
+                // Update Parts
+                this.partsManager.update();
+
+                // Update Guards & check guard capture collision
+                let anyGuardChasing = false;
+                for (const guard of this.guards) {
+                    guard.update(this.player, this.isNight, this.map, this.effects);
+                    if (guard.state === 'CHASE') {
+                        anyGuardChasing = true;
+                        const catchDist = Math.hypot(this.player.x - guard.x, this.player.y - guard.y);
+                        if (catchDist < (this.player.radius + guard.radius - 2)) {
+                            this.triggerGameOver();
+                            return;
+                        }
+                    }
+                }
+
+                // Update AI Guard Radio Interceptor
+                this.updateGuardRadio(anyGuardChasing);
+
+                // Update Particle FX
+                this.effects.update();
+
+                // Handle Interaction checks
+                this.handleInteractions();
+
+                // Update HUD UI
+                this.updateUI(anyGuardChasing);
+            }
+
+            triggerGameClear() {
+                this.state = 'CLEAR';
+                this.spaceship.isPlayerBoarded = true;
+                this.spaceship.isLaunching = true;
+                soundFX.playLaunch();
+
+                setTimeout(() => {
+                    this.modalTitle.textContent = "🚀 공원 탈출 성공!";
+                    this.modalTitle.className = "text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-emerald-400 mb-2";
+                    this.modalDesc.innerHTML = "우주선 수리를 완료하고 고향 별로 무사히 발사했습니다!<br>경비원의 시야를 완벽하게 따돌렸습니다.";
+                    this.modalBtn.textContent = "다시 플레이하기";
+                    this.modalScreen.classList.remove('hidden');
+                }, 2500);
+            }
+
+            updateUI(anyGuardChasing) {
+                // Update Parts & Progress
+                this.uiParts.textContent = `${this.partsManager.collectedCount} / ${CONFIG.TOTAL_PARTS_REQUIRED}`;
+                this.uiRepairBar.style.width = `${this.spaceship.repairProgress}%`;
+
+                // Update Objective Banner
+                if (this.player.carryingPart) {
+                    this.uiObjective.textContent = "부품을 들고 중앙 우주선으로 돌아가 수리하세요!";
+                } else if (this.spaceship.repairProgress === 100) {
+                    this.uiObjective.textContent = "우주선 수리 완료! 우주선으로 이동해 탑승하세요!";
+                } else if (this.partsManager.collectedCount < 2) {
+                    this.uiObjective.textContent = "공원 구역에서 부품을 탐색하세요!";
+                } else if (this.partsManager.collectedCount < 4) {
+                    this.uiObjective.textContent = "서쪽 놀이터 구역이 해금되었습니다! 추가 부품을 찾으세요.";
+                } else {
+                    this.uiObjective.textContent = "동쪽 산책로 구역이 해금되었습니다! 남은 부품을 수집하세요.";
+                }
+
+                // Update Day / Night Indicator & Countdown Timer
+                const totalCycle = CONFIG.DAY_DURATION_SEC + CONFIG.NIGHT_DURATION_SEC;
+                const currentCycleTime = this.gameTime % totalCycle;
+
+                if (this.isNight) {
+                    const remainingToDay = Math.max(0, Math.ceil(totalCycle - currentCycleTime));
+                    this.uiTimeText.textContent = "밤 (Night)";
+                    this.uiTimeIcon.className = "fa-solid fa-moon text-indigo-400 animate-pulse";
+                    if (this.uiPhaseTimer) {
+                        this.uiPhaseTimer.textContent = `낮까지 ${remainingToDay}초`;
+                        this.uiPhaseTimer.className = "text-xs font-mono font-bold text-indigo-300 bg-indigo-950/80 px-1.5 py-0.5 rounded border border-indigo-700/60";
+                    }
+                } else {
+                    const remainingToNight = Math.max(0, Math.ceil(CONFIG.DAY_DURATION_SEC - currentCycleTime));
+                    this.uiTimeText.textContent = "낮 (Day)";
+                    this.uiTimeIcon.className = "fa-solid fa-sun text-yellow-400 animate-spin-slow";
+                    if (this.uiPhaseTimer) {
+                        this.uiPhaseTimer.textContent = `밤까지 ${remainingToNight}초`;
+                        this.uiPhaseTimer.className = "text-xs font-mono font-bold text-amber-300 bg-amber-950/80 px-1.5 py-0.5 rounded border border-amber-700/60";
+                    }
+                }
+
+                // Stealth Status Vignette Effects
+                if (anyGuardChasing) {
+                    this.uiStealthStatus.textContent = "🚨 추격당하는 중!";
+                    this.uiStealthStatus.className = "text-xs text-red-500 font-black animate-bounce";
+                    this.uiVignette.className = "absolute inset-0 pointer-events-none alert-screen";
+                } else if (this.player.isHiding) {
+                    this.uiStealthStatus.textContent = "🌿 풀숲 은신중";
+                    this.uiStealthStatus.className = "text-xs text-emerald-400 font-bold";
+                    this.uiVignette.className = "absolute inset-0 pointer-events-none stealth-screen";
+                } else {
+                    this.uiStealthStatus.textContent = "안전함";
+                    this.uiStealthStatus.className = "text-xs text-slate-400 font-bold";
+                    this.uiVignette.className = "absolute inset-0 pointer-events-none";
+                }
+            }
+
+            draw() {
+                this.ctx.clearRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+                // 1. Draw Map & Environment
+                this.map.draw(this.ctx, this.isNight);
+
+                // Draw Click-to-Move Target Marker if active
+                if (this.input.targetPos) {
+                    this.ctx.save();
+                    this.ctx.strokeStyle = '#38bdf8';
+                    this.ctx.lineWidth = 2;
+                    this.ctx.beginPath();
+                    this.ctx.arc(this.input.targetPos.x, this.input.targetPos.y, 8 + Math.sin(Date.now() / 120) * 3, 0, Math.PI * 2);
+                    this.ctx.stroke();
+                    this.ctx.restore();
+                }
+
+                // 2. Draw Parts (플레이어 위치를 전달하여 근접 위장 효과 계산)
+                this.partsManager.draw(this.ctx, this.player);
+
+                // 3. Draw Spaceship
+                this.spaceship.draw(this.ctx);
+
+                // 4. Draw Player
+                if (!this.spaceship.isPlayerBoarded) {
+                    this.player.draw(this.ctx);
+                }
+
+                // 5. Draw Guards
+                for (const guard of this.guards) {
+                    guard.draw(this.ctx, this.isNight);
+                }
+
+                // 6. Draw Night Overlay Dimness
+                if (this.isNight) {
+                    this.ctx.save();
+                    this.ctx.fillStyle = 'rgba(15, 23, 42, 0.55)'; // Night darkness tint
+                    this.ctx.fillRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+
+                    // Player Torch / Ambient Radial Light around Alien
+                    const radGlow = this.ctx.createRadialGradient(
+                        this.player.x, this.player.y, 10,
+                        this.player.x, this.player.y, 120
+                    );
+                    radGlow.addColorStop(0, 'rgba(255, 255, 255, 0.25)');
+                    radGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                    this.ctx.fillStyle = radGlow;
+                    this.ctx.beginPath();
+                    this.ctx.arc(this.player.x, this.player.y, 120, 0, Math.PI * 2);
+                    this.ctx.fill();
+
+                    this.ctx.restore();
+                }
+
+                // 7. Draw Visual Particles
+                this.effects.draw(this.ctx);
+            }
+
+            gameLoop(timestamp) {
+                if (!this.lastTime) this.lastTime = timestamp;
+                const dt = (timestamp - this.lastTime) / 1000;
+                this.lastTime = timestamp;
+
+                this.update(dt);
+                this.draw();
+
+                requestAnimationFrame((ts) => this.gameLoop(ts));
+            }
+        }
+
+        window.onload = () => {
+            const game = new Game();
+            game.start();
+        };
+    </script>
+</body>
+</html>
