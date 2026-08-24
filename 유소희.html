@@ -1,0 +1,1993 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>폐모텔 실종사건 (The Motel Disappearance Case)</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Noto+Sans+KR:wght@300;400;700&display=swap');
+        
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #050505;
+            color: #e0e0e0;
+            font-family: 'Noto Sans KR', sans-serif;
+            user-select: none;
+        }
+
+        .serif-font {
+            font-family: 'Gowun Batang', serif;
+        }
+
+        /* Scanline CRT overlay for camera viewfinder */
+        .vhs-overlay {
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.4) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+            background-size: 100% 4px, 6px 100%;
+            pointer-events: none;
+        }
+
+        @keyframes rec-blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+        .rec-dot {
+            animation: rec-blink 1s infinite;
+        }
+
+        @keyframes static-noise {
+            0% { transform: translate(0, 0); }
+            10% { transform: translate(-3%, -3%); }
+            20% { transform: translate(3%, 3%); }
+            30% { transform: translate(-2%, 4%); }
+            40% { transform: translate(4%, -2%); }
+            50% { transform: translate(-3%, 3%); }
+            60% { transform: translate(3%, -1%); }
+            70% { transform: translate(-4%, 2%); }
+            80% { transform: translate(2%, 3%); }
+            90% { transform: translate(-1%, -3%); }
+            100% { transform: translate(0, 0); }
+        }
+
+        .glitch-active {
+            animation: static-noise 0.2s infinite;
+        }
+
+        .vignette {
+            box-shadow: inset 0 0 120px rgba(0,0,0,0.95);
+        }
+
+        @keyframes screen-shake-anim {
+            0% { transform: translate(0, 0) rotate(0deg); }
+            20% { transform: translate(-8px, 6px) rotate(-1deg); }
+            40% { transform: translate(8px, -6px) rotate(1.5deg); }
+            60% { transform: translate(-6px, -4px) rotate(-1deg); }
+            80% { transform: translate(6px, 4px) rotate(0.5deg); }
+            100% { transform: translate(0, 0) rotate(0deg); }
+        }
+
+        .screen-shake {
+            animation: screen-shake-anim 0.35s ease-in-out;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #111;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body class="relative w-screen h-screen overflow-hidden bg-black text-gray-200">
+
+    <!-- 3D Canvas Container -->
+    <div id="canvas-container" class="w-full h-full absolute inset-0 cursor-crosshair"></div>
+
+    <!-- Screen Vignette & Flash effect layer -->
+    <div id="vignette-overlay" class="vignette absolute inset-0 pointer-events-none z-10"></div>
+    <div id="flash-overlay" class="absolute inset-0 bg-white opacity-0 pointer-events-none z-30 transition-opacity duration-150"></div>
+    <div id="scare-overlay" class="absolute inset-0 bg-red-950/40 opacity-0 pointer-events-none z-20 transition-opacity duration-300"></div>
+
+    <!-- Camera Viewfinder Viewport UI -->
+    <div id="camera-hud" class="vhs-overlay absolute inset-0 hidden flex-col justify-between p-6 pointer-events-none z-20 border-[12px] border-black/40">
+        <!-- Top HUD Bar -->
+        <div class="flex justify-between items-center text-sm font-mono text-red-500 font-bold tracking-widest">
+            <div class="flex items-center space-x-2 bg-black/70 px-3 py-1 rounded border border-red-900/50">
+                <span class="w-3 h-3 bg-red-600 rounded-full rec-dot"></span>
+                <span>IR SPECTRAL REC</span>
+                <span id="camera-time" class="text-white ml-2">00:00:00</span>
+            </div>
+            <div class="flex items-center space-x-4 bg-black/70 px-3 py-1 rounded border border-gray-800 text-gray-300">
+                <div class="flex items-center space-x-1.5">
+                    <i class="fa-solid fa-satellite-dish text-xs text-red-400" id="radar-icon"></i>
+                    <span id="radar-text" class="text-xs text-gray-400">신호 탐색 중...</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <span class="text-xs">배터리</span>
+                    <div class="w-16 h-3 border border-gray-400 p-0.5 rounded-sm bg-black">
+                        <div id="battery-bar" class="h-full bg-emerald-500 transition-all duration-300" style="width: 100%;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center Crosshair & Target Frame -->
+        <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div id="crosshair-box" class="w-28 h-28 border border-emerald-500/40 rounded-lg flex items-center justify-center transition-all duration-200">
+                <div class="w-2 h-2 bg-emerald-400/80 rounded-full"></div>
+            </div>
+            <!-- Target Lock Alert -->
+            <div id="target-lock-label" class="absolute mt-36 text-xs text-yellow-300 bg-black/80 px-3 py-1 rounded-full border border-yellow-500/60 hidden tracking-wider animate-pulse shadow-lg">
+                [ 🔍 심령 이상현상 포착됨 - [좌클릭] 사진 촬영 ]
+            </div>
+        </div>
+
+        <!-- Bottom HUD Bar -->
+        <div class="flex justify-between items-end font-mono text-xs text-gray-400 bg-black/60 p-2.5 rounded border border-gray-800">
+            <div>
+                <div>MODE: FULL-SPECTRUM INFRARED</div>
+                <div>DETECTION: SPECTRAL SPECTROGRAPH ACTIVE</div>
+            </div>
+            <div class="text-right text-yellow-400 font-sans font-medium">
+                [우클릭] 카메라 끄기 | [좌클릭] 이상현상 촬영
+            </div>
+        </div>
+    </div>
+
+    <!-- Standard Normal View HUD -->
+    <div id="normal-hud" class="absolute inset-0 pointer-events-none z-20 flex flex-col justify-between p-6">
+        <!-- Center Dot Crosshair -->
+        <div class="absolute inset-0 flex items-center justify-center">
+            <div id="normal-crosshair" class="w-1.5 h-1.5 bg-white/70 rounded-full"></div>
+        </div>
+
+        <!-- Top HUD Row: Left Clues Quick Panel & Right Quick Controls -->
+        <div class="flex justify-between items-start w-full">
+            <!-- Top Left Collected Clues Quick Tracker -->
+            <div id="clues-hud-panel" class="bg-black/85 backdrop-blur border border-yellow-600/40 rounded-xl p-3 max-w-xs pointer-events-auto shadow-2xl transition-all duration-300">
+                <div class="flex items-center justify-between text-yellow-400 font-bold text-xs mb-2 pb-1 border-b border-stone-800 space-x-2">
+                    <span class="flex items-center space-x-1.5">
+                        <i class="fa-solid fa-folder-open text-yellow-500"></i>
+                        <span>수집한 단서 (<span id="clues-count-hud">0</span>/4)</span>
+                    </span>
+                    <button id="toggle-clues-hud-btn" class="text-stone-400 hover:text-white text-xs px-1 focus:outline-none">
+                        <i id="clues-hud-icon" class="fa-solid fa-chevron-up"></i>
+                    </button>
+                </div>
+                <div id="clues-hud-list" class="space-y-2 text-xs max-h-52 overflow-y-auto pr-1">
+                    <div id="clues-hud-empty" class="text-stone-500 italic py-1 text-[11px]">
+                        맨눈으로는 이상현상이 보이지 않습니다.<br>적외선 카메라(우클릭)를 켜서 찾아내세요.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Top Right Mini Quick Controls -->
+            <div class="flex items-center space-x-3">
+                <!-- Actionable Deduction HUD Button (Unlocked when 4/4 collected) -->
+                <button id="btn-deduction-hud" class="hidden pointer-events-auto animate-bounce bg-red-700 hover:bg-red-600 text-yellow-200 font-bold px-4 py-2 rounded-xl border border-red-500 shadow-2xl text-xs flex items-center space-x-2 transition transform hover:scale-105">
+                    <i class="fa-solid fa-brain text-yellow-400"></i>
+                    <span>진실 추리 시작하기</span>
+                </button>
+
+                <div class="bg-black/70 backdrop-blur border border-gray-700/60 rounded-xl p-3 flex space-x-3 pointer-events-auto text-xs text-gray-300 shadow-xl">
+                    <button id="btn-album" class="hover:text-yellow-400 transition flex items-center space-x-1">
+                        <i class="fa-solid fa-images"></i>
+                        <span>사진첩 (J)</span>
+                    </button>
+                    <span class="text-gray-600">|</span>
+                    <button id="btn-clues" class="hover:text-yellow-400 transition flex items-center space-x-1">
+                        <i class="fa-solid fa-book-bookmark"></i>
+                        <span>사건기록 (K)</span>
+                    </button>
+                    <span class="text-gray-600">|</span>
+                    <button id="btn-pause" class="hover:text-yellow-400 transition flex items-center space-x-1">
+                        <i class="fa-solid fa-circle-pause"></i>
+                        <span>메뉴 (ESC)</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Interaction Prompt Box -->
+        <div class="absolute inset-x-0 bottom-24 flex justify-center pointer-events-none">
+            <div id="interaction-prompt" class="bg-black/85 text-white px-5 py-2.5 rounded-xl border border-stone-600 text-sm hidden flex-col items-center space-y-1 shadow-2xl backdrop-blur">
+                <span id="interaction-text" class="font-bold text-yellow-400"></span>
+                <span class="text-xs text-stone-300">[E] 키를 눌러 상호작용</span>
+            </div>
+        </div>
+
+        <!-- Bottom Left Controls Guide -->
+        <div class="self-start bg-black/70 backdrop-blur border border-stone-800 rounded-xl p-3 text-xs text-gray-400 space-y-1 shadow-lg">
+            <div><span class="text-white font-bold">WASD:</span> 이동</div>
+            <div><span class="text-white font-bold">마우스:</span> 시점 회전 (클릭 시 고정)</div>
+            <div><span class="text-white font-bold">우클릭:</span> 적외선 심령 카메라 On/Off</div>
+            <div><span class="text-white font-bold">E:</span> 상호작용 / 문 열기 / 진실 추리</div>
+        </div>
+    </div>
+
+    <!-- Notification Banner Overlay -->
+    <div id="toast-banner" class="absolute top-8 left-1/2 -translate-x-1/2 bg-stone-900/95 border border-yellow-500/80 text-yellow-200 px-6 py-3.5 rounded-xl shadow-2xl z-40 transition-all duration-300 -translate-y-20 opacity-0 pointer-events-none flex items-center space-x-3 backdrop-blur">
+        <i class="fa-solid fa-triangle-exclamation text-yellow-400 text-lg"></i>
+        <div id="toast-text" class="text-xs md:text-sm font-medium">새로운 이상현상이 사진첩에 수집되었습니다!</div>
+    </div>
+
+    <!-- Photo Album & Clues Modal (J / K) -->
+    <div id="journal-modal" class="absolute inset-0 bg-black/90 backdrop-blur-md z-50 hidden flex-col items-center justify-center p-6">
+        <div class="w-full max-w-4xl bg-stone-900 border border-stone-800 rounded-2xl flex flex-col h-[85vh] overflow-hidden shadow-2xl">
+            <!-- Modal Header -->
+            <div class="flex justify-between items-center px-6 py-4 border-b border-stone-800 bg-black/40">
+                <div class="flex space-x-4">
+                    <button id="tab-album-btn" class="text-lg font-bold text-yellow-500 border-b-2 border-yellow-500 pb-1 flex items-center space-x-2">
+                        <i class="fa-solid fa-camera"></i>
+                        <span>심령 사진첩 (<span id="album-count">0</span>/4)</span>
+                    </button>
+                    <button id="tab-clues-btn" class="text-lg font-bold text-gray-400 hover:text-gray-200 pb-1 flex items-center space-x-2">
+                        <i class="fa-solid fa-file-lines"></i>
+                        <span>사건 기록 단서</span>
+                    </button>
+                </div>
+                <button id="close-journal-btn" class="text-gray-400 hover:text-white text-2xl">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- Tab 1: Photo Album -->
+            <div id="tab-album-content" class="flex-1 p-6 overflow-y-auto">
+                <div id="album-grid" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Photo cards injected dynamically -->
+                </div>
+                <div id="album-empty" class="h-full flex flex-col items-center justify-center text-stone-500 space-y-2">
+                    <i class="fa-regular fa-image text-5xl mb-2"></i>
+                    <div>아직 촬영한 심령 이상현상이 없습니다.</div>
+                    <div class="text-xs text-stone-600">맨눈에는 보이지 않으므로 적외선 카메라(우클릭)를 활성화하세요.</div>
+                </div>
+            </div>
+
+            <!-- Tab 2: Case Clues Log -->
+            <div id="tab-clues-content" class="flex-1 p-6 overflow-y-auto hidden">
+                <div id="clues-list" class="space-y-4">
+                    <!-- Clue entries injected dynamically -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Final Deduction / Decision Modal -->
+    <div id="deduction-modal" class="absolute inset-0 bg-black/95 backdrop-blur-xl z-50 hidden flex-col items-center justify-center p-6">
+        <div class="w-full max-w-2xl bg-stone-900 border border-stone-700 rounded-2xl p-8 space-y-6 shadow-2xl">
+            <div class="text-center space-y-2">
+                <span class="text-xs font-mono tracking-widest text-red-500 uppercase">Final Investigation Phase</span>
+                <h2 class="text-2xl font-bold text-stone-100 serif-font">폐모텔 실종사건 최종 사건 추리</h2>
+                <p class="text-sm text-stone-400">수집한 4개의 심령 단서와 이상현상 사진을 바탕으로 사건의 진실을 확정하십시오.</p>
+            </div>
+
+            <div class="space-y-4 text-sm bg-black/50 p-5 rounded-xl border border-stone-800">
+                <div class="font-semibold text-yellow-400 mb-2">Q1. 101호 실종 유튜버는 어떻게 사라졌는가?</div>
+                <div class="space-y-2">
+                    <label class="flex items-start space-x-3 p-3 rounded-lg bg-stone-800/60 hover:bg-stone-800 cursor-pointer border border-stone-700 transition">
+                        <input type="radio" name="q1" value="A" class="mt-1 accent-yellow-500" checked>
+                        <span>모텔 주인의 강도 살인 사건으로 시신이 벽 뒤에 은닉되었다.</span>
+                    </label>
+                    <label class="flex items-start space-x-3 p-3 rounded-lg bg-stone-800/60 hover:bg-stone-800 cursor-pointer border border-stone-700 transition">
+                        <input type="radio" name="q1" value="B" class="mt-1 accent-yellow-500">
+                        <span>거울 속 초자연적 이면 공간의 주술 의식에 사로잡혀 미궁 속에 갇혔다.</span>
+                    </label>
+                </div>
+
+                <div class="font-semibold text-yellow-400 mb-2 mt-4">Q2. 당신이 확보한 카메라 영상과 증거를 어떻게 처리할 것인가?</div>
+                <div class="space-y-2">
+                    <label class="flex items-start space-x-3 p-3 rounded-lg bg-stone-800/60 hover:bg-stone-800 cursor-pointer border border-stone-700 transition">
+                        <input type="radio" name="q2" value="A" class="mt-1 accent-yellow-500" checked>
+                        <span>모텔의 비극을 세상에 알리기 위해 생방송으로 라이브 송출하고 탈출한다.</span>
+                    </label>
+                    <label class="flex items-start space-x-3 p-3 rounded-lg bg-stone-800/60 hover:bg-stone-800 cursor-pointer border border-stone-700 transition">
+                        <input type="radio" name="q2" value="B" class="mt-1 accent-yellow-500">
+                        <span>거울 이면 세계의 위험성을 깨닫고 카메라 메모리카드를 파괴한 뒤 피신한다.</span>
+                    </label>
+                    <label class="flex items-start space-x-3 p-3 rounded-lg bg-stone-800/60 hover:bg-stone-800 cursor-pointer border border-stone-700 transition">
+                        <input type="radio" name="q2" value="C" class="mt-1 accent-yellow-500">
+                        <span>거울 속 존재의 목소리에 이끌려 이면 공간의 문 안으로 걸어 들어간다.</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="flex justify-between items-center pt-2">
+                <button id="close-deduction-btn" class="bg-stone-800 hover:bg-stone-700 text-stone-300 font-medium px-5 py-2.5 rounded-xl border border-stone-600 text-xs">
+                    단서 더 검토하기
+                </button>
+                <button id="submit-deduction-btn" class="bg-red-800 hover:bg-red-700 text-yellow-200 font-bold px-8 py-3 rounded-xl transition shadow-xl border border-red-600 text-sm">
+                    결론 확정 및 사건 마감
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pause / Start Overlay Screen -->
+    <div id="start-menu" class="absolute inset-0 bg-black/95 z-50 flex flex-col items-center justify-center p-6 text-center space-y-6">
+        <div class="space-y-3 max-w-xl">
+            <span class="text-xs font-mono text-red-600 tracking-widest uppercase">Psychological Investigation Horror</span>
+            <h1 class="text-4xl md:text-5xl font-bold text-gray-100 serif-font tracking-wide">폐모텔 실종사건</h1>
+            <p class="text-stone-400 text-sm leading-relaxed">
+                구일모텔 101호에서 탐방 방송 중 실종된 심야 유튜버.<br>
+                당신은 그의 행방을 추적하기 위해 밤깊은 폐모텔에 홀로 진입했습니다.<br>
+                <span class="text-red-400 font-semibold">맨눈으로는 벽과 가구 외에 아무것도 보이지 않습니다.</span><br>
+                적외선 카메라를 켜서 은폐된 심령 이상현상을 찾아내고 진실을 밝히십시오.
+            </p>
+        </div>
+
+        <div class="bg-stone-900/80 border border-stone-800 p-4 rounded-xl text-xs text-stone-300 max-w-md text-left space-y-2">
+            <div class="font-bold text-yellow-500 mb-1">🎮 조작 및 조사 방법:</div>
+            <div>• <span class="text-white">마우스 클릭:</span> 조사 시작 & 1인칭 시점 고정</div>
+            <div>• <span class="text-white">WASD:</span> 이동 (벽 및 잠긴 문에 막힙니다)</div>
+            <div>• <span class="text-white">마우스 우클릭:</span> 적외선 카메라 On / Off</div>
+            <div>• <span class="text-white">마우스 좌클릭:</span> 이상현상 촬영 (카메라 모드 시)</div>
+            <div>• <span class="text-white">E:</span> 문 열기 / 상호작용 / 최종 진실 추리</div>
+        </div>
+
+        <button id="start-btn" class="bg-red-800 hover:bg-red-700 text-white font-bold px-10 py-4 rounded-2xl text-lg transition duration-200 shadow-2xl border border-red-500 transform hover:scale-105">
+            조사 시작하기
+        </button>
+    </div>
+
+    <!-- Ending Screen Overlay -->
+    <div id="ending-screen" class="absolute inset-0 bg-black z-50 hidden flex-col items-center justify-center p-8 text-center space-y-6 overflow-y-auto">
+        <div class="max-w-2xl space-y-4">
+            <span id="ending-code" class="text-xs font-mono tracking-widest text-red-500 uppercase">ENDING A</span>
+            <h1 id="ending-title" class="text-3xl md:text-4xl font-bold text-white serif-font">진실의 폭로</h1>
+            <div id="ending-body" class="text-stone-300 text-sm md:text-base leading-relaxed bg-stone-900/80 p-6 rounded-2xl border border-stone-800 text-left space-y-3 shadow-2xl">
+                <!-- Ending text injected here -->
+            </div>
+            <div class="pt-4">
+                <button id="restart-btn" class="bg-stone-800 hover:bg-stone-700 text-stone-200 font-bold px-8 py-3 rounded-xl border border-stone-600 transition">
+                    처음부터 다시 조사하기
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /* =========================================================================
+           1. CONFIGURATION & GLOBAL GAME STATE
+           ========================================================================= */
+        const CONFIG = {
+            PLAYER_SPEED: 3.8,
+            MOUSE_SENSITIVITY: 0.0022,
+            CAMERA_BATTERY_MAX: 100,
+            CAMERA_BATTERY_DRAIN_RATE: 2.2, // % per sec
+            CAMERA_BATTERY_RECHARGE_RATE: 4.5,
+            ANOMALY_CAPTURE_DIST: 7.0,
+            ANOMALY_CAPTURE_ANGLE: 0.88
+        };
+
+        const GAME_STATE = {
+            isStarted: false,
+            isPaused: false,
+            isCameraActive: false,
+            battery: 100,
+            currentRoom: 1, // 1: Lobby, 2: Room 101, 3: Mirror Corridor, 4: Ritual Room
+            unlockedRooms: { 1: true, 2: false, 3: false, 4: false },
+            capturedAnomalies: new Set(),
+            photos: [],
+            clues: [],
+            threatActive: false,
+            threatPosition: new THREE.Vector3(0, -100, 0),
+            ended: false,
+            canDeduce: false
+        };
+
+        /* =========================================================================
+           2. WEB AUDIO API SYNTHESIZER
+           ========================================================================= */
+        class SoundEngine {
+            constructor() {
+                this.ctx = null;
+                this.heartbeatTimer = null;
+            }
+
+            init() {
+                if (this.ctx) return;
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                this.ctx = new AudioCtx();
+                this.startAmbientDrone();
+            }
+
+            startAmbientDrone() {
+                if (!this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(40, this.ctx.currentTime); // Dark low hum
+
+                    const filter = this.ctx.createBiquadFilter();
+                    filter.type = 'lowpass';
+                    filter.frequency.setValueAtTime(100, this.ctx.currentTime);
+
+                    gain.gain.setValueAtTime(0.09, this.ctx.currentTime);
+
+                    osc.connect(filter);
+                    filter.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                } catch(e){}
+            }
+
+            playStaticWhisper() {
+                if (!this.ctx) return;
+                try {
+                    const bufferSize = this.ctx.sampleRate * 0.15;
+                    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                    const data = buffer.getChannelData(0);
+                    for (let i = 0; i < bufferSize; i++) {
+                        data[i] = Math.random() * 2 - 1;
+                    }
+                    const noise = this.ctx.createBufferSource();
+                    noise.buffer = buffer;
+                    const filter = this.ctx.createBiquadFilter();
+                    filter.type = 'bandpass';
+                    filter.frequency.value = 1200 + Math.random() * 800;
+                    
+                    const gain = this.ctx.createGain();
+                    gain.gain.setValueAtTime(0.06, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.15);
+
+                    noise.connect(filter);
+                    filter.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    noise.start();
+                } catch(e){}
+            }
+
+            playJumpScareStinger() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                
+                // Low drone impact
+                const osc1 = this.ctx.createOscillator();
+                const gain1 = this.ctx.createGain();
+                osc1.type = 'sawtooth';
+                osc1.frequency.setValueAtTime(220, now);
+                osc1.frequency.exponentialRampToValueAtTime(35, now + 0.6);
+                gain1.gain.setValueAtTime(0.6, now);
+                gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+                osc1.connect(gain1);
+                gain1.connect(this.ctx.destination);
+                osc1.start(now);
+                osc1.stop(now + 0.6);
+
+                // High metallic screech
+                const osc2 = this.ctx.createOscillator();
+                const gain2 = this.ctx.createGain();
+                osc2.type = 'square';
+                osc2.frequency.setValueAtTime(1400, now);
+                osc2.frequency.linearRampToValueAtTime(300, now + 0.4);
+                gain2.gain.setValueAtTime(0.3, now);
+                gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+                osc2.connect(gain2);
+                gain2.connect(this.ctx.destination);
+                osc2.start(now);
+                osc2.stop(now + 0.4);
+            }
+
+            playHeartbeat() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(65, now);
+                osc.frequency.exponentialRampToValueAtTime(30, now + 0.12);
+
+                gain.gain.setValueAtTime(0.35, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.15);
+            }
+
+            playShutterSound() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(900, now);
+                osc.frequency.exponentialRampToValueAtTime(150, now + 0.12);
+
+                gain.gain.setValueAtTime(0.25, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.12);
+            }
+
+            playRadarBeep(pitch = 600) {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(pitch, now);
+
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.08);
+            }
+
+            playScareStinger() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(180, now);
+                osc.frequency.linearRampToValueAtTime(45, now + 0.9);
+
+                gain.gain.setValueAtTime(0.5, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.9);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.9);
+            }
+        }
+
+        const audio = new SoundEngine();
+
+        /* =========================================================================
+           3. PROCEDURAL TEXTURES & MATERIALS
+           ========================================================================= */
+        function createProceduralTexture(type) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+
+            if (type === 'wall') {
+                ctx.fillStyle = '#22201e';
+                ctx.fillRect(0, 0, 512, 512);
+                ctx.fillStyle = '#161514';
+                for (let i = 0; i < 700; i++) {
+                    ctx.fillRect(Math.random() * 512, Math.random() * 512, Math.random() * 4 + 1, Math.random() * 15 + 3);
+                }
+            } else if (type === 'carpet') {
+                ctx.fillStyle = '#2e1414';
+                ctx.fillRect(0, 0, 512, 512);
+                ctx.fillStyle = '#1b0b0b';
+                for (let x = 0; x < 512; x += 32) {
+                    for (let y = 0; y < 512; y += 32) {
+                        if ((x + y) % 64 === 0) ctx.fillRect(x, y, 32, 32);
+                    }
+                }
+            } else if (type === 'wood') {
+                ctx.fillStyle = '#2b1b12';
+                ctx.fillRect(0, 0, 512, 512);
+                ctx.fillStyle = '#1a100a';
+                for (let y = 0; y < 512; y += 24) {
+                    ctx.fillRect(0, y, 512, 2);
+                }
+            } else if (type === 'crate') {
+                ctx.fillStyle = '#4a321a';
+                ctx.fillRect(0, 0, 512, 512);
+                ctx.strokeStyle = '#281a0c';
+                ctx.lineWidth = 12;
+                ctx.strokeRect(10, 10, 492, 492);
+                ctx.beginPath();
+                ctx.moveTo(10, 10); ctx.lineTo(502, 502);
+                ctx.moveTo(502, 10); ctx.lineTo(10, 502);
+                ctx.stroke();
+            } else if (type === 'blood_symbol') {
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(0, 0, 512, 512);
+                ctx.strokeStyle = '#a00000';
+                ctx.lineWidth = 14;
+                ctx.beginPath();
+                ctx.arc(256, 256, 170, 0, Math.PI * 2);
+                ctx.moveTo(130, 150); ctx.lineTo(380, 350);
+                ctx.moveTo(380, 150); ctx.lineTo(130, 350);
+                ctx.stroke();
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            return texture;
+        }
+
+        const TEXTURES = {
+            wall: createProceduralTexture('wall'),
+            carpet: createProceduralTexture('carpet'),
+            wood: createProceduralTexture('wood'),
+            crate: createProceduralTexture('crate'),
+            bloodSymbol: createProceduralTexture('blood_symbol')
+        };
+        TEXTURES.wall.repeat.set(3, 2);
+        TEXTURES.carpet.repeat.set(4, 4);
+
+        const MATS = {
+            wall: new THREE.MeshStandardMaterial({ map: TEXTURES.wall, roughness: 0.85 }),
+            floor: new THREE.MeshStandardMaterial({ map: TEXTURES.carpet, roughness: 0.7 }),
+            wood: new THREE.MeshStandardMaterial({ map: TEXTURES.wood, roughness: 0.6 }),
+            crate: new THREE.MeshStandardMaterial({ map: TEXTURES.crate, roughness: 0.8 }),
+            leather: new THREE.MeshStandardMaterial({ color: 0x1f140e, roughness: 0.4 }),
+            ceiling: new THREE.MeshStandardMaterial({ color: 0x121212, roughness: 0.9 }),
+            doorUnlocked: new THREE.MeshStandardMaterial({ color: 0x3d271d, roughness: 0.5 }),
+            doorLocked: new THREE.MeshStandardMaterial({ color: 0x501b1b, roughness: 0.5 }),
+            metal: new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.8, roughness: 0.3 }),
+            pipe: new THREE.MeshStandardMaterial({ color: 0x555555, metalness: 0.9, roughness: 0.2 }),
+            skull: new THREE.MeshStandardMaterial({ color: 0xddddcc, roughness: 0.7 }),
+            mirrorFrame: new THREE.MeshStandardMaterial({ color: 0x1a1a1a, metalness: 0.6 }),
+            mirrorGlass: new THREE.MeshStandardMaterial({ color: 0x111620, metalness: 0.95, roughness: 0.05 }),
+            white: new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 0.4 }),
+            red: new THREE.MeshStandardMaterial({ color: 0x990000, roughness: 0.3 }),
+            gold: new THREE.MeshStandardMaterial({ color: 0xb8860b, metalness: 0.8 })
+        };
+
+        /* =========================================================================
+        // Helper to register prop collision bounding boxes
+        function registerPropCollider(meshOrGroup) {
+            const box = new THREE.Box3().setFromObject(meshOrGroup);
+            wallColliders.push(box);
+            return box;
+        }
+
+        // Doors Creation
+        function createDoor(id, position, targetRoom) {
+            const doorGroup = new THREE.Group();
+            doorGroup.position.copy(position);
+
+            const frameMesh = new THREE.Mesh(new THREE.BoxGeometry(1.8, 2.7, 0.25), MATS.metal);
+            frameMesh.position.y = 1.35;
+            doorGroup.add(frameMesh);
+
+            const doorMesh = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.6, 0.12), MATS.doorLocked);
+            doorMesh.position.set(0.7, 1.3, 0); // Pivot on side
+            doorMesh.geometry.translate(-0.7, 0, 0);
+            doorGroup.add(doorMesh);
+
+            scene.add(doorGroup);
+
+            // Bounding box for locked door
+            const colliderMesh = new THREE.Mesh(new THREE.BoxGeometry(1.8, 2.8, 0.3), MATS.doorLocked);
+            colliderMesh.position.set(position.x, 1.4, position.z);
+            colliderMesh.visible = false;
+            scene.add(colliderMesh);
+
+            const colliderBox = new THREE.Box3().setFromObject(colliderMesh);
+            wallColliders.push(colliderBox);
+
+            doors.push({
+                id: id,
+                group: doorGroup,
+                mesh: doorMesh,
+                colliderBox: colliderBox,
+                targetRoom: targetRoom,
+                unlocked: false,
+                isOpen: false,
+                currentRotation: 0,
+                targetRotation: 0,
+                position: position
+            });
+        }
+
+        createDoor('door-101', new THREE.Vector3(0, 0, 0), 2);
+        createDoor('door-corridor', new THREE.Vector3(0, 0, -6), 3);
+        createDoor('door-ritual', new THREE.Vector3(0, 0, -14), 4);
+
+
+        // --- LOBBY PROPS & COLLIDERS ---
+        // Reception Counter Desk
+        const deskGroup = new THREE.Group();
+        const counterMesh = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.1, 1.2), MATS.wood);
+        counterMesh.position.set(0, 0.55, 3.2);
+        deskGroup.add(counterMesh);
+
+        // Old Rotary Telephone on desk
+        const phoneMesh = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.3), MATS.metal);
+        phoneMesh.position.set(-0.8, 1.2, 3.2);
+        deskGroup.add(phoneMesh);
+
+        // Guest Register Book
+        const bookMesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 0.4), MATS.white);
+        bookMesh.position.set(0.4, 1.12, 3.2);
+        deskGroup.add(bookMesh);
+
+        // Key Rack behind counter
+        const keyRack = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.8, 0.08), MATS.wood);
+        keyRack.position.set(0, 1.8, 3.88);
+        deskGroup.add(keyRack);
+
+        // Lobby Leather Sofa
+        const sofaGroup = new THREE.Group();
+        sofaGroup.position.set(-2.6, 0, 5.5);
+        sofaGroup.rotation.y = Math.PI / 2;
+        const sofaSeat = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.4, 0.9), MATS.leather);
+        sofaSeat.position.y = 0.2;
+        const sofaBack = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.8, 0.3), MATS.leather);
+        sofaBack.position.set(0, 0.6, -0.3);
+        const sofaArmL = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.6, 0.9), MATS.leather);
+        sofaArmL.position.set(-1.0, 0.4, 0);
+        const sofaArmR = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.6, 0.9), MATS.leather);
+        sofaArmR.position.set(1.0, 0.4, 0);
+        sofaGroup.add(sofaSeat, sofaBack, sofaArmL, sofaArmR);
+        scene.add(sofaGroup);
+        registerPropCollider(sofaGroup);
+
+        scene.add(deskGroup);
+        registerPropCollider(counterMesh);
+
+        // --- ROOM 101 PROPS & COLLIDERS ---
+        // Bed with Headboard
+        const bedGroup = new THREE.Group();
+        bedGroup.position.set(-2.5, 0, -3.5);
+        const headboard = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.2, 0.15), MATS.wood);
+        headboard.position.set(0, 0.6, 1.2);
+        const bedFrame = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.4, 2.4), MATS.wood);
+        bedFrame.position.y = 0.2;
+        const mattress = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.35, 2.2), MATS.white);
+        mattress.position.y = 0.5;
+        const blanket = new THREE.Mesh(new THREE.BoxGeometry(1.82, 0.1, 1.5), MATS.red);
+        blanket.position.set(0, 0.68, -0.3);
+        const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.15, 0.4), MATS.white);
+        pillow.position.set(0, 0.72, 0.8);
+        bedGroup.add(headboard, bedFrame, mattress, blanket, pillow);
+        scene.add(bedGroup);
+        registerPropCollider(bedGroup);
+
+        // Nightstand beside bed
+        const nightstand = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), MATS.wood);
+        nightstand.position.set(-1.1, 0.3, -2.4);
+        scene.add(nightstand);
+        registerPropCollider(nightstand);
+
+        // Wardrobe Closet
+        const wardrobe = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.4, 0.7), MATS.wood);
+        wardrobe.position.set(-2.8, 1.2, -1.2);
+        scene.add(wardrobe);
+        registerPropCollider(wardrobe);
+
+        // TV Stand & TV
+        const tvTable = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.7, 0.8), MATS.wood);
+        tvTable.position.set(2.5, 0.35, -2.5);
+        scene.add(tvTable);
+        registerPropCollider(tvTable);
+
+        const tvSet = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 0.5), MATS.metal);
+        tvSet.position.set(2.5, 1.0, -2.5);
+        scene.add(tvSet);
+
+        // Large Mirror in 101
+        const mirrorFrameGeo = new THREE.BoxGeometry(1.6, 2.2, 0.1);
+        const mirrorFrame = new THREE.Mesh(mirrorFrameGeo, MATS.mirrorFrame);
+        mirrorFrame.position.set(2.5, 1.6, -5.85);
+        scene.add(mirrorFrame);
+
+        const mirrorGlass = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 2.0), MATS.mirrorGlass);
+        mirrorGlass.position.set(2.5, 1.6, -5.79);
+        scene.add(mirrorGlass);
+
+        // --- ROOM 3: CORRIDOR PROPS & COLLIDERS ---
+        // Industrial Ceiling Pipes
+        const pipe1 = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 7.8, 8), MATS.pipe);
+        pipe1.rotation.x = Math.PI / 2;
+        pipe1.position.set(-1.7, 3.0, -10);
+        scene.add(pipe1);
+
+        const pipe2 = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 7.8, 8), MATS.pipe);
+        pipe2.rotation.x = Math.PI / 2;
+        pipe2.position.set(-1.6, 2.85, -10);
+        scene.add(pipe2);
+
+        // Stacked Crate Obstacles in Corridor
+        const crate1 = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), MATS.crate);
+        crate1.position.set(1.4, 0.4, -8.5);
+        scene.add(crate1);
+        registerPropCollider(crate1);
+
+        const crate2 = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), MATS.crate);
+        crate2.position.set(1.4, 1.15, -8.5);
+        crate2.rotation.y = 0.3;
+        scene.add(crate2);
+
+        // --- RITUAL ROOM PROPS & COLLIDERS ---
+        // Ritual Altar
+        const altarGroup = new THREE.Group();
+        altarGroup.position.set(0, 0, -17.5);
+        const altarBase = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.5, 0.9, 8), MATS.wood);
+        altarBase.position.y = 0.45;
+        altarGroup.add(altarBase);
+
+        // Procedural Skull Model on Altar
+        const skullGroup = new THREE.Group();
+        const cranium = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 10), MATS.skull);
+        cranium.scale.set(1, 1.1, 1);
+        const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, 0.1), MATS.skull);
+        jaw.position.set(0, -0.09, 0.02);
+        skullGroup.add(cranium, jaw);
+        skullGroup.position.set(0, 0.98, 0);
+        altarGroup.add(skullGroup);
+
+        // Dangling Chains
+        for (let c = -1; c <= 1; c += 2) {
+            const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 2.2, 6), MATS.metal);
+            chain.position.set(c * 1.8, 2.1, -17.5);
+            scene.add(chain);
+        }
+
+        // Candles on Altar
+        for (let i = 0; i < 5; i++) {
+            const angle = (i / 5) * Math.PI * 2;
+            const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.3, 8), MATS.white);
+            candle.position.set(Math.cos(angle) * 0.9, 1.05, Math.sin(angle) * 0.9);
+            altarGroup.add(candle);
+
+            // Candle flame red light dot
+            const flame = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), new THREE.MeshBasicMaterial({ color: 0xff3300 }));
+            flame.position.set(Math.cos(angle) * 0.9, 1.22, Math.sin(angle) * 0.9);
+            altarGroup.add(flame);
+        }
+
+        // Pentagram Floor Decal
+        const symbolDecal = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4), new THREE.MeshBasicMaterial({ map: TEXTURES.bloodSymbol, transparent: true }));
+        symbolDecal.position.set(0, 0.02, -17.5);
+        symbolDecal.rotation.x = -Math.PI / 2;
+        scene.add(symbolDecal);
+        scene.add(altarGroup);
+        registerPropCollider(altarGroup);
+
+           ========================================================================= */
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050507, 0.085);
+
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 50);
+        camera.position.set(0, 1.6, 5);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        // Flashlight
+        const flashlight = new THREE.SpotLight(0xfff0dd, 2.5, 14, Math.PI / 5, 0.4, 1);
+        flashlight.position.set(0, 0, 0);
+        flashlight.target.position.set(0, 0, -1);
+        camera.add(flashlight);
+        camera.add(flashlight.target);
+        scene.add(camera);
+
+        const ambientLight = new THREE.AmbientLight(0x181822, 0.3);
+        scene.add(ambientLight);
+
+        /* =========================================================================
+           5. SOLID ROOM WALLS, DOORS & COLLISION BOXES
+           ========================================================================= */
+        const wallColliders = [];
+        const doors = [];
+        const anomalyObjects = [];
+
+        // Helper function to build solid wall blocks
+        function createWall(x, z, width, height, depth) {
+            const geo = new THREE.BoxGeometry(width, height, depth);
+            const wall = new THREE.Mesh(geo, MATS.wall);
+            wall.position.set(x, height / 2, z);
+            wall.castShadow = true;
+            wall.receiveShadow = true;
+            scene.add(wall);
+
+            // Bounding box for physical collision
+            const box = new THREE.Box3().setFromObject(wall);
+            wallColliders.push(box);
+            return wall;
+        }
+
+        // Room Floors & Ceilings
+        function buildRoomFloorsCeilings(x, z, width, depth, height = 3.2) {
+            const floorGeo = new THREE.PlaneGeometry(width, depth);
+            const floor = new THREE.Mesh(floorGeo, MATS.floor);
+            floor.position.set(x, 0, z);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            const ceil = new THREE.Mesh(floorGeo, MATS.ceiling);
+            ceil.position.set(x, height, z);
+            ceil.rotation.x = Math.PI / 2;
+            scene.add(ceil);
+        }
+
+        // --- ROOM 1: LOBBY (z: 0 to 8, x: -4 to 4) ---
+        buildRoomFloorsCeilings(0, 4, 8, 8);
+        createWall(-4, 4, 0.3, 3.2, 8); // West Wall
+        createWall(4, 4, 0.3, 3.2, 8);  // East Wall
+        createWall(0, 8, 8, 3.2, 0.3);  // South Wall
+        // North Wall (with Doorway at center x [-0.9 to 0.9])
+        createWall(-2.45, 0, 3.1, 3.2, 0.3);
+        createWall(2.45, 0, 3.1, 3.2, 0.3);
+
+        // Lobby Point Light
+        const lobbyLight = new THREE.PointLight(0xffa844, 1.2, 8);
+        lobbyLight.position.set(0, 2.8, 4);
+        scene.add(lobbyLight);
+
+        // --- ROOM 2: ROOM 101 (z: -6 to 0, x: -4 to 4) ---
+        buildRoomFloorsCeilings(0, -3, 8, 6);
+        createWall(-4, -3, 0.3, 3.2, 6); // West Wall
+        createWall(4, -3, 0.3, 3.2, 6);  // East Wall
+        // North Wall (with Doorway at center x [-0.9 to 0.9])
+        createWall(-2.45, -6, 3.1, 3.2, 0.3);
+        createWall(2.45, -6, 3.1, 3.2, 0.3);
+
+        // --- ROOM 3: MIRROR CORRIDOR (z: -14 to -6, x: -2 to 2) ---
+        buildRoomFloorsCeilings(0, -10, 4, 8);
+        createWall(-2, -10, 0.3, 3.2, 8); // West Wall
+        createWall(2, -10, 0.3, 3.2, 8);  // East Wall
+        // South partition closing off width 8 -> 4
+        createWall(-3, -6, 2.3, 3.2, 0.3);
+        createWall(3, -6, 2.3, 3.2, 0.3);
+        // North Wall (with Doorway at center x [-0.9 to 0.9])
+        createWall(-1.45, -14, 1.1, 3.2, 0.3);
+        createWall(1.45, -14, 1.1, 3.2, 0.3);
+
+        // Corridor Flickering Lamp
+        const corridorLight = new THREE.PointLight(0x4466ff, 0.8, 7);
+        corridorLight.position.set(0, 2.6, -10);
+        scene.add(corridorLight);
+
+        // --- ROOM 4: RITUAL CHAMBER (z: -20 to -14, x: -4 to 4) ---
+        buildRoomFloorsCeilings(0, -17, 8, 6);
+        createWall(-4, -17, 0.3, 3.2, 6); // West Wall
+        createWall(4, -17, 0.3, 3.2, 6);  // East Wall
+        createWall(0, -20, 8, 3.2, 0.3);  // North Wall
+        createWall(-2.95, -14, 2.1, 3.2, 0.3);
+        createWall(2.95, -14, 2.1, 3.2, 0.3);
+
+        // Ritual Candle Point Light
+        const ritualLight = new THREE.PointLight(0xff3300, 1.8, 9);
+        ritualLight.position.set(0, 1.2, -17);
+        scene.add(ritualLight);
+
+        // Doors Creation
+        function createDoor(id, position, targetRoom) {
+            const doorGroup = new THREE.Group();
+            doorGroup.position.copy(position);
+
+            const frameMesh = new THREE.Mesh(new THREE.BoxGeometry(1.8, 2.7, 0.25), MATS.metal);
+            frameMesh.position.y = 1.35;
+            doorGroup.add(frameMesh);
+
+            const doorMesh = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.6, 0.12), MATS.doorLocked);
+            doorMesh.position.set(0.7, 1.3, 0); // Pivot on side
+            doorMesh.geometry.translate(-0.7, 0, 0);
+            doorGroup.add(doorMesh);
+
+            scene.add(doorGroup);
+
+            // Bounding box for locked door
+            const colliderMesh = new THREE.Mesh(new THREE.BoxGeometry(1.8, 2.8, 0.3), MATS.doorLocked);
+            colliderMesh.position.set(position.x, 1.4, position.z);
+            colliderMesh.visible = false;
+            scene.add(colliderMesh);
+
+            const colliderBox = new THREE.Box3().setFromObject(colliderMesh);
+            wallColliders.push(colliderBox);
+
+            doors.push({
+                id: id,
+                group: doorGroup,
+                mesh: doorMesh,
+                colliderBox: colliderBox,
+                targetRoom: targetRoom,
+                unlocked: false,
+                position: position
+            });
+        }
+
+        createDoor('door-101', new THREE.Vector3(0, 0, 0), 2);
+        createDoor('door-corridor', new THREE.Vector3(0, 0, -6), 3);
+        createDoor('door-ritual', new THREE.Vector3(0, 0, -14), 4);
+
+
+        /* =========================================================================
+           6. DETAILED 3D PROPS & FURNITURE
+           ========================================================================= */
+        // --- LOBBY PROPS ---
+        // Reception Counter Desk
+        const deskGroup = new THREE.Group();
+        const counterMesh = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.1, 1.2), MATS.wood);
+        counterMesh.position.set(0, 0.55, 3.2);
+        deskGroup.add(counterMesh);
+
+        // Old Rotary Telephone on desk
+        const phoneMesh = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.3), MATS.metal);
+        phoneMesh.position.set(-0.8, 1.2, 3.2);
+        deskGroup.add(phoneMesh);
+
+        // Guest Register Book
+        const bookMesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 0.4), MATS.white);
+        bookMesh.position.set(0.4, 1.12, 3.2);
+        deskGroup.add(bookMesh);
+
+        scene.add(deskGroup);
+
+        // --- ROOM 101 PROPS ---
+        // Bed
+        const bedGroup = new THREE.Group();
+        bedGroup.position.set(-2.5, 0, -3.5);
+        const bedFrame = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.4, 2.6), MATS.wood);
+        bedFrame.position.y = 0.2;
+        const mattress = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.35, 2.4), MATS.white);
+        mattress.position.y = 0.5;
+        const blanket = new THREE.Mesh(new THREE.BoxGeometry(1.82, 0.1, 1.6), MATS.red);
+        blanket.position.set(0, 0.68, -0.4);
+        const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.15, 0.4), MATS.white);
+        pillow.position.set(0, 0.72, 0.8);
+        bedGroup.add(bedFrame, mattress, blanket, pillow);
+        scene.add(bedGroup);
+
+        // Nightstand & TV
+        const tvTable = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.7, 0.8), MATS.wood);
+        tvTable.position.set(2.5, 0.35, -2.5);
+        scene.add(tvTable);
+
+        const tvSet = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 0.5), MATS.metal);
+        tvSet.position.set(2.5, 1.0, -2.5);
+        scene.add(tvSet);
+
+        // Large Mirror in 101
+        const mirrorFrameGeo = new THREE.BoxGeometry(1.6, 2.2, 0.1);
+        const mirrorFrame = new THREE.Mesh(mirrorFrameGeo, MATS.mirrorFrame);
+        mirrorFrame.position.set(2.5, 1.6, -5.85);
+        scene.add(mirrorFrame);
+
+        const mirrorGlass = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 2.0), MATS.mirrorGlass);
+        mirrorGlass.position.set(2.5, 1.6, -5.79);
+        scene.add(mirrorGlass);
+
+        // --- RITUAL ROOM PROPS ---
+        // Ritual Altar
+        const altarGroup = new THREE.Group();
+        altarGroup.position.set(0, 0, -17.5);
+        const altarBase = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.5, 0.9, 8), MATS.wood);
+        altarBase.position.y = 0.45;
+        altarGroup.add(altarBase);
+
+        // Candles on Altar
+        for (let i = 0; i < 5; i++) {
+            const angle = (i / 5) * Math.PI * 2;
+            const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.3, 8), MATS.white);
+            candle.position.set(Math.cos(angle) * 0.9, 1.05, Math.sin(angle) * 0.9);
+            altarGroup.add(candle);
+
+            // Candle flame red light dot
+            const flame = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), new THREE.MeshBasicMaterial({ color: 0xff3300 }));
+            flame.position.set(Math.cos(angle) * 0.9, 1.22, Math.sin(angle) * 0.9);
+            altarGroup.add(flame);
+        }
+
+        // Pentagram Floor Decal
+        const symbolDecal = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4), new THREE.MeshBasicMaterial({ map: TEXTURES.bloodSymbol, transparent: true }));
+        symbolDecal.position.set(0, 0.02, -17.5);
+        symbolDecal.rotation.x = -Math.PI / 2;
+        scene.add(symbolDecal);
+        scene.add(altarGroup);
+
+
+        /* =========================================================================
+           7. ANOMALIES (STRICTLY INVISIBLE IN NORMAL VIEW)
+           ========================================================================= */
+        const ANOMALIES_DATA = [
+            {
+                id: 'anomaly-1',
+                room: 1,
+                name: '카운터의 핏빛 실루엣',
+                desc: '맨눈에는 비어있는 카운터 뒤편에 목이 비틀린 실종 유튜버의 붉은 혼령 잔상이 서있다.',
+                clue: '단서 #1: 카운터 장부 속 기록. "101호 거울을 응시한 순간부터 그 사람이 아니었다."',
+                pos: new THREE.Vector3(0, 1.4, 3.2),
+                unlockedDoor: 'door-101'
+            },
+            {
+                id: 'anomaly-2',
+                room: 2,
+                name: '101호 거울 속 붉은 혈서',
+                desc: '깨끗해 보이던 거울 유리에 피로 쓰여진 문구가 적외선 카메라에 선명히 드러난다. "4028... 이 복도는 닫혀있다."',
+                clue: '단서 #2: 거울 뒤 유서 조각. "거울 속 내가 먼저 웃었다. 나를 이곳에서 끌어당기고 있다."',
+                pos: new THREE.Vector3(2.5, 1.6, -5.7),
+                unlockedDoor: 'door-corridor'
+            },
+            {
+                id: 'anomaly-3',
+                room: 3,
+                name: '복도 벽면의 이면 차원문',
+                desc: '막힌 콘크리트 벽면에 적외선 카메라 필터를 통해서만 소름끼치는 피 묻은 손자국과 문 윤곽이 보인다.',
+                clue: '단서 #3: 모텔 주인의 비밀 일지. "지하 제단의 의식은 거울 이면 세계의 문을 연다."',
+                pos: new THREE.Vector3(0, 1.5, -13.8),
+                unlockedDoor: 'door-ritual'
+            },
+            {
+                id: 'anomaly-4',
+                room: 4,
+                name: '제단에 공중 포박된 영혼',
+                desc: '의식 제단 위 공중에 사슬에 묶인 채 비명을 지르는 실종 유튜버의 수펙트럼 형상이 잔상으로 남아있다.',
+                clue: '단서 #4: 파손된 캠코더 메모리카드. 실종자는 주술 의식에 의해 거울 이면 공간에 사로잡혔다.',
+                pos: new THREE.Vector3(0, 1.6, -17.5),
+                unlockedDoor: null
+            }
+        ];
+
+        // Construct Detailed Procedural Horror 3D Models for Anomalies
+        ANOMALIES_DATA.forEach(data => {
+            const group = new THREE.Group();
+            group.position.copy(data.pos);
+
+            const spectralRedMat = new THREE.MeshBasicMaterial({ color: 0xff0033, wireframe: true, transparent: true, opacity: 0.75 });
+            const darkSpiritMat = new THREE.MeshBasicMaterial({ color: 0x110005, transparent: true, opacity: 0.85 });
+            const glowGlowMat = new THREE.MeshBasicMaterial({ color: 0xff3300, transparent: true, opacity: 0.9 });
+
+            if (data.id === 'anomaly-1') {
+                // ANOMALY 1: Creepy Twisted Ghost Silhouette behind reception counter
+                const body = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.15, 1.4, 8), darkSpiritMat);
+                body.position.y = 0.2;
+                group.add(body);
+
+                const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 10), spectralRedMat);
+                head.position.set(0.05, 1.0, 0);
+                head.rotation.z = 0.4; // Tilted creepy head angle
+                group.add(head);
+
+                // Glowing eerie eye dots
+                const eye1 = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), glowGlowMat);
+                const eye2 = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), glowGlowMat);
+                eye1.position.set(-0.08, 1.02, 0.16);
+                eye2.position.set(0.08, 1.02, 0.16);
+                group.add(eye1, eye2);
+
+                // Elongated claw arms
+                const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.02, 0.9, 6), spectralRedMat);
+                armL.position.set(-0.35, 0.4, 0.1);
+                armL.rotation.z = 0.5;
+                armL.rotation.x = -0.3;
+
+                const armR = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.02, 1.1, 6), spectralRedMat);
+                armR.position.set(0.38, 0.3, 0.2);
+                armR.rotation.z = -0.7;
+                armR.rotation.x = 0.4;
+
+                group.add(armL, armR);
+                group.name = "anim_ghost1";
+
+            } else if (data.id === 'anomaly-2') {
+                // ANOMALY 2: Blood writing & Distorted horror face trapped inside Mirror 101
+                const textCanvas = document.createElement('canvas');
+                textCanvas.width = 256; textCanvas.height = 256;
+                const ctx = textCanvas.getContext('2d');
+                ctx.fillStyle = '#000'; ctx.fillRect(0,0,256,256);
+                ctx.fillStyle = '#ff0000'; ctx.font = 'bold 28px sans-serif';
+                ctx.fillText('HELP ME', 65, 80);
+                ctx.fillText('4028', 90, 130);
+                ctx.fillStyle = '#aa0000'; ctx.font = '20px sans-serif';
+                ctx.fillText('LOOK BEHIND YOU', 45, 180);
+
+                const textTex = new THREE.CanvasTexture(textCanvas);
+                const textPlane = new THREE.Mesh(
+                    new THREE.PlaneGeometry(1.2, 1.5),
+                    new THREE.MeshBasicMaterial({ map: textTex, transparent: true, opacity: 0.9, depthWrite: false })
+                );
+                textPlane.position.z = 0.05;
+                group.add(textPlane);
+
+                // Distorted head pressing through mirror surface
+                const mirrorHead = new THREE.Mesh(new THREE.SphereGeometry(0.25, 12, 12), spectralRedMat);
+                mirrorHead.scale.set(1, 1.3, 0.5);
+                mirrorHead.position.set(0, 0.1, 0.02);
+                group.add(mirrorHead);
+
+                group.name = "anim_ghost2";
+
+            } else if (data.id === 'anomaly-3') {
+                // ANOMALY 3: Portal on wall with writhing shadow arms
+                const portalRing = new THREE.Mesh(
+                    new THREE.TorusGeometry(0.75, 0.08, 12, 24),
+                    new THREE.MeshBasicMaterial({ color: 0xff0044, wireframe: true })
+                );
+                group.add(portalRing);
+
+                // Shadow Arms protruding from portal
+                const tentaclesGroup = new THREE.Group();
+                for (let i = 0; i < 6; i++) {
+                    const angle = (i / 6) * Math.PI * 2;
+                    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.01, 0.8, 6), darkSpiritMat);
+                    arm.position.set(Math.cos(angle) * 0.5, Math.sin(angle) * 0.5, 0.2);
+                    arm.rotation.x = Math.PI / 2;
+                    arm.rotation.z = angle;
+                    tentaclesGroup.add(arm);
+                }
+                group.add(tentaclesGroup);
+                group.name = "anim_ghost3";
+
+            } else {
+                // ANOMALY 4: Chained Soul suspended over Altar
+                const soulTorso = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.1, 1.0, 8), darkSpiritMat);
+                const soulHead = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 10), spectralRedMat);
+                soulHead.position.y = 0.7;
+
+                // Chains wrapping around soul
+                const chainRing1 = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.03, 8, 16), glowGlowMat);
+                chainRing1.rotation.x = Math.PI / 3;
+                const chainRing2 = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.03, 8, 16), glowGlowMat);
+                chainRing2.rotation.x = -Math.PI / 4;
+                chainRing2.position.y = 0.3;
+
+                group.add(soulTorso, soulHead, chainRing1, chainRing2);
+                group.name = "anim_ghost4";
+            }
+
+            group.visible = false; // MUST BE 100% INVISIBLE IN NORMAL EYE VIEW!
+            scene.add(group);
+
+            anomalyObjects.push({
+                data: data,
+                group: group,
+                solved: false
+            });
+        });
+
+        // Stalker Threat Entity (Room 3 Chase Event)
+        const stalkerGroup = new THREE.Group();
+        const stalkerMesh = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.4, 0.15, 2.4, 10),
+            new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true })
+        );
+        stalkerMesh.position.y = 1.2;
+        stalkerGroup.add(stalkerMesh);
+
+        // Stalker glowing eyes
+        const stalkerEye1 = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffff00 }));
+        const stalkerEye2 = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 6), new THREE.MeshBasicMaterial({ color: 0xffff00 }));
+        stalkerEye1.position.set(-0.1, 2.1, 0.3);
+        stalkerEye2.position.set(0.1, 2.1, 0.3);
+        stalkerGroup.add(stalkerEye1, stalkerEye2);
+
+        stalkerGroup.position.set(0, -50, 0);
+        scene.add(stalkerGroup);
+
+
+        /* =========================================================================
+           8. CONTROLS, PHYSICS & WALL COLLISION
+           ========================================================================= */
+        let pitch = 0, yaw = 0;
+        const keys = { w: false, a: false, s: false, d: false };
+
+        document.addEventListener('keydown', (e) => {
+            if (!GAME_STATE.isStarted || GAME_STATE.isPaused || GAME_STATE.ended) return;
+            const k = e.key.toLowerCase();
+            if (k === 'w') keys.w = true;
+            if (k === 'a') keys.a = true;
+            if (k === 's') keys.s = true;
+            if (k === 'd') keys.d = true;
+
+            if (k === 'e') handleInteraction();
+            if (k === 'j') toggleJournal('album');
+            if (k === 'k') toggleJournal('clues');
+            if (e.key === 'Escape') togglePauseMenu();
+        });
+
+        document.addEventListener('keyup', (e) => {
+            const k = e.key.toLowerCase();
+            if (k === 'w') keys.w = false;
+            if (k === 'a') keys.a = false;
+            if (k === 's') keys.s = false;
+            if (k === 'd') keys.d = false;
+        });
+
+        // Mouse Look
+        document.addEventListener('mousemove', (e) => {
+            if (document.pointerLockElement !== container) return;
+            yaw -= e.movementX * CONFIG.MOUSE_SENSITIVITY;
+            pitch -= e.movementY * CONFIG.MOUSE_SENSITIVITY;
+            pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, pitch));
+
+            camera.rotation.order = 'YXZ';
+            camera.rotation.y = yaw;
+            camera.rotation.x = pitch;
+        });
+
+        // Clicks
+        container.addEventListener('mousedown', (e) => {
+            audio.init();
+            if (!GAME_STATE.isStarted) return;
+
+            if (document.pointerLockElement !== container) {
+                container.requestPointerLock();
+                return;
+            }
+
+            // Right Click = Toggle Camera Mode
+            if (e.button === 2) {
+                e.preventDefault();
+                toggleCameraMode();
+            }
+            // Left Click = Capture Photo if Camera Active
+            else if (e.button === 0 && GAME_STATE.isCameraActive) {
+                attemptPhotoCapture();
+            }
+        });
+
+        container.addEventListener('contextmenu', e => e.preventDefault());
+
+        // Check if proposed player bounding box collides with any solid wall or locked door
+        function checkWallCollision(newPos) {
+            const playerRadius = 0.45;
+            const playerBox = new THREE.Box3(
+                new THREE.Vector3(newPos.x - playerRadius, 0.2, newPos.z - playerRadius),
+                new THREE.Vector3(newPos.x + playerRadius, 2.5, newPos.z + playerRadius)
+            );
+
+            for (let collider of wallColliders) {
+                if (playerBox.intersectsBox(collider)) {
+                    return true; // Collision detected!
+                }
+            }
+            return false;
+        }
+
+
+        /* =========================================================================
+           9. CAMERA MODE & PHOTOGRAPHY
+           ========================================================================= */
+        function toggleCameraMode() {
+            if (GAME_STATE.battery <= 0 && !GAME_STATE.isCameraActive) {
+                showToast("배터리가 부족하여 카메라를 켤 수 없습니다!");
+                return;
+            }
+
+            GAME_STATE.isCameraActive = !GAME_STATE.isCameraActive;
+            const hud = document.getElementById('camera-hud');
+            const normHud = document.getElementById('normal-hud');
+
+            if (GAME_STATE.isCameraActive) {
+                hud.classList.remove('hidden');
+                hud.classList.add('flex');
+                normHud.classList.add('opacity-20');
+                flashlight.color.setHex(0x33ffaa); // Full-Spectrum Green/Cyan IR Tint
+                flashlight.intensity = 3.8;
+            } else {
+                hud.classList.add('hidden');
+                hud.classList.remove('flex');
+                normHud.classList.remove('opacity-20');
+                flashlight.color.setHex(0xfff0dd);
+                flashlight.intensity = 2.5;
+            }
+
+            updateAnomalyVisibilities();
+        }
+
+        function updateAnomalyVisibilities() {
+            anomalyObjects.forEach(item => {
+                // ANOMALIES ARE ONLY VISIBLE WHEN CAMERA MODE IS ACTIVE AND NOT YET SOLVED
+                item.group.visible = GAME_STATE.isCameraActive && !item.solved;
+            });
+        }
+
+        function attemptPhotoCapture() {
+            audio.playShutterSound();
+
+            // Screen Flash & Screen Shake
+            const flash = document.getElementById('flash-overlay');
+            flash.style.opacity = '0.9';
+            document.body.classList.add('screen-shake');
+            setTimeout(() => { 
+                flash.style.opacity = '0'; 
+                document.body.classList.remove('screen-shake');
+            }, 300);
+
+            // Check if aiming at anomaly
+            const camDir = new THREE.Vector3();
+            camera.getWorldDirection(camDir);
+
+            let capturedTarget = null;
+
+            anomalyObjects.forEach(item => {
+                if (item.solved) return;
+                if (item.data.room !== GAME_STATE.currentRoom) return;
+
+                const toTarget = new THREE.Vector3().subVectors(item.group.position, camera.position);
+                const dist = toTarget.length();
+
+                if (dist <= CONFIG.ANOMALY_CAPTURE_DIST) {
+                    toTarget.normalize();
+                    const dot = camDir.dot(toTarget);
+
+                    if (dot >= CONFIG.ANOMALY_CAPTURE_ANGLE) {
+                        capturedTarget = item;
+                    }
+                }
+            });
+
+            if (capturedTarget) {
+                audio.playJumpScareStinger();
+                onAnomalyCaptured(capturedTarget);
+            }
+        }
+
+        function onAnomalyCaptured(anomalyItem) {
+            anomalyItem.solved = true;
+            anomalyItem.group.visible = false;
+            GAME_STATE.capturedAnomalies.add(anomalyItem.data.id);
+
+            // Generate photo snapshot thumbnail from 3D Canvas
+            const dataUrl = renderer.domElement.toDataURL('image/jpeg', 0.6);
+
+            // Save Photo & Clue
+            GAME_STATE.photos.push({
+                id: anomalyItem.data.id,
+                title: anomalyItem.data.name,
+                desc: anomalyItem.data.desc,
+                dataUrl: dataUrl,
+                time: new Date().toLocaleTimeString()
+            });
+
+            GAME_STATE.clues.push({
+                title: `사건 기록 #${GAME_STATE.clues.length + 1}`,
+                content: anomalyItem.data.clue
+            });
+
+            // Smooth Door Swing Unlock (105 degrees rotation)
+            if (anomalyItem.data.unlockedDoor) {
+                const doorObj = doors.find(d => d.id === anomalyItem.data.unlockedDoor);
+                if (doorObj) {
+                    doorObj.unlocked = true;
+                    doorObj.isOpen = true;
+                    doorObj.targetRotation = -Math.PI * (105 / 180); // 105 degrees smooth rotation swing
+                    doorObj.mesh.material = MATS.doorUnlocked;
+
+                    // Remove physical door collider box so player can pass cleanly
+                    const idx = wallColliders.indexOf(doorObj.colliderBox);
+                    if (idx !== -1) wallColliders.splice(idx, 1);
+
+                    GAME_STATE.unlockedRooms[doorObj.targetRoom] = true;
+                }
+            }
+
+            // Trigger Chase Event in Corridor
+            if (anomalyItem.data.id === 'anomaly-3') {
+                triggerThreatEvent();
+            }
+
+            showToast(`이상현상 촬영 성공! [${anomalyItem.data.name}] 수집됨`);
+            updateJournalUI();
+            updateCluesHUD();
+
+            // IF ALL 4 ANOMALIES CAPTURED -> DO NOT FORCE DEDUCTION IMMEDIATELY! UNLOCK BUTTON & INTERACTION
+            if (GAME_STATE.capturedAnomalies.size === 4) {
+                GAME_STATE.canDeduce = true;
+                document.getElementById('btn-deduction-hud').classList.remove('hidden');
+                setTimeout(() => {
+                    showToast("🎉 모든 이상현상(4/4) 수집 완료! 상단 [진실 추리 시작하기] 버튼을 누르거나 제단을 조사하십시오.");
+                }, 1500);
+            }
+        }
+
+
+        /* =========================================================================
+           10. THREAT & STALKER EVENT
+           ========================================================================= */
+        function triggerThreatEvent() {
+            GAME_STATE.threatActive = true;
+            stalkerGroup.position.set(0, 0, -13.5);
+            audio.playScareStinger();
+
+            const scareOverlay = document.getElementById('scare-overlay');
+            scareOverlay.style.opacity = '1';
+            setTimeout(() => { scareOverlay.style.opacity = '0'; }, 600);
+
+            showToast("⚠️ 위협 경고: 거울 속 그림자가 나타났습니다! 101호로 도망치세요!");
+        }
+
+        function updateThreatLogic(delta) {
+            if (!GAME_STATE.threatActive) return;
+
+            const dir = new THREE.Vector3().subVectors(camera.position, stalkerGroup.position);
+            dir.y = 0;
+            const dist = dir.length();
+
+            if (dist > 0.5) {
+                dir.normalize();
+                stalkerGroup.position.addScaledVector(dir, delta * 2.0);
+            }
+
+            if (camera.position.z > -5.5) {
+                GAME_STATE.threatActive = false;
+                stalkerGroup.position.set(0, -50, 0);
+                showToast("그림자가 복도 너머로 사라졌습니다.");
+            } else if (dist < 1.3) {
+                audio.playScareStinger();
+                camera.position.set(0, 1.6, -3); // Push back to Room 101
+                showToast("충격과 함께 101호로 뒤튕겨 나갔습니다!");
+            }
+        }
+
+
+        /* =========================================================================
+           11. INTERACTION & DEDUCTION PROMPTS
+           ========================================================================= */
+        function handleInteraction() {
+            // Check Ritual Altar for Final Deduction
+            if (GAME_STATE.canDeduce && camera.position.distanceTo(new THREE.Vector3(0, 1.6, -17.5)) < 3.0) {
+                openDeductionModal();
+                return;
+            }
+
+            // Check Doors
+            doors.forEach(door => {
+                const dist = camera.position.distanceTo(door.position);
+                if (dist < 2.5) {
+                    if (door.unlocked) {
+                        showToast("열린 문을 통과하십시오.");
+                    } else {
+                        showToast("문이 굳게 잠겨있습니다. 적외선 카메라(우클릭)로 숨겨진 이상현상을 찾아 촬영하세요.");
+                    }
+                }
+            });
+        }
+
+        function checkInteractionPrompts() {
+            const promptBox = document.getElementById('interaction-prompt');
+            const promptText = document.getElementById('interaction-text');
+            let near = false;
+
+            // Altar Deduction check
+            if (GAME_STATE.canDeduce && camera.position.distanceTo(new THREE.Vector3(0, 1.6, -17.5)) < 3.0) {
+                near = true;
+                promptText.innerText = "🧠 제단 조사: 사건의 진실 추리하기";
+            } else {
+                doors.forEach(door => {
+                    const dist = camera.position.distanceTo(door.position);
+                    if (dist < 2.2) {
+                        near = true;
+                        if (door.unlocked) {
+                            promptText.innerText = "열린 문";
+                        } else {
+                            promptText.innerText = "🔒 잠긴 문 (이상현상 촬영 필요)";
+                        }
+                    }
+                });
+            }
+
+            if (near) promptBox.classList.remove('hidden');
+            else promptBox.classList.add('hidden');
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast-banner');
+            const text = document.getElementById('toast-text');
+            text.innerText = msg;
+            toast.classList.remove('-translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('-translate-y-20', 'opacity-0');
+            }, 3800);
+        }
+
+        function toggleJournal(defaultTab = 'album') {
+            const modal = document.getElementById('journal-modal');
+            const isHidden = modal.classList.contains('hidden');
+
+            if (isHidden) {
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                GAME_STATE.isPaused = true;
+                if (document.pointerLockElement) document.exitPointerLock();
+                switchTab(defaultTab);
+            } else {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+                GAME_STATE.isPaused = false;
+            }
+        }
+
+        function switchTab(tab) {
+            const albumBtn = document.getElementById('tab-album-btn');
+            const cluesBtn = document.getElementById('tab-clues-btn');
+            const albumContent = document.getElementById('tab-album-content');
+            const cluesContent = document.getElementById('tab-clues-content');
+
+            if (tab === 'album') {
+                albumBtn.className = 'text-lg font-bold text-yellow-500 border-b-2 border-yellow-500 pb-1 flex items-center space-x-2';
+                cluesBtn.className = 'text-lg font-bold text-gray-400 hover:text-gray-200 pb-1 flex items-center space-x-2';
+                albumContent.classList.remove('hidden');
+                cluesContent.classList.add('hidden');
+            } else {
+                cluesBtn.className = 'text-lg font-bold text-yellow-500 border-b-2 border-yellow-500 pb-1 flex items-center space-x-2';
+                albumBtn.className = 'text-lg font-bold text-gray-400 hover:text-gray-200 pb-1 flex items-center space-x-2';
+                cluesContent.classList.remove('hidden');
+                albumContent.classList.add('hidden');
+            }
+        }
+
+        function updateJournalUI() {
+            document.getElementById('album-count').innerText = GAME_STATE.photos.length;
+
+            const grid = document.getElementById('album-grid');
+            const empty = document.getElementById('album-empty');
+            grid.innerHTML = '';
+
+            if (GAME_STATE.photos.length > 0) empty.classList.add('hidden');
+
+            GAME_STATE.photos.forEach(photo => {
+                const card = document.createElement('div');
+                card.className = 'bg-black/60 border border-stone-800 rounded-xl overflow-hidden shadow-lg';
+                card.innerHTML = `
+                    <div class="h-44 bg-gray-950 overflow-hidden relative">
+                        <img src="${photo.dataUrl}" class="w-full h-full object-cover">
+                        <span class="absolute bottom-2 right-2 bg-black/80 text-yellow-400 text-[10px] font-mono px-2 py-0.5 rounded">${photo.time}</span>
+                    </div>
+                    <div class="p-4 space-y-1">
+                        <div class="font-bold text-sm text-yellow-400">${photo.title}</div>
+                        <div class="text-xs text-stone-300 leading-relaxed">${photo.desc}</div>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+
+            const cluesList = document.getElementById('clues-list');
+            cluesList.innerHTML = '';
+            GAME_STATE.clues.forEach(clue => {
+                const item = document.createElement('div');
+                item.className = 'bg-stone-900/90 border border-stone-800 p-4 rounded-xl space-y-1';
+                item.innerHTML = `
+                    <div class="text-xs font-mono text-yellow-500 font-bold">${clue.title}</div>
+                    <div class="text-sm text-stone-200">${clue.content}</div>
+                `;
+                cluesList.appendChild(item);
+            });
+        }
+
+        function updateCluesHUD() {
+            const listEl = document.getElementById('clues-hud-list');
+            const countEl = document.getElementById('clues-count-hud');
+            if (!listEl || !countEl) return;
+
+            countEl.innerText = GAME_STATE.clues.length;
+
+            if (GAME_STATE.clues.length === 0) {
+                listEl.innerHTML = `
+                    <div id="clues-hud-empty" class="text-stone-500 italic py-1 text-[11px]">
+                        맨눈으로는 이상현상이 보이지 않습니다.<br>적외선 카메라(우클릭)를 켜서 찾아내세요.
+                    </div>
+                `;
+                return;
+            }
+
+            listEl.innerHTML = '';
+            GAME_STATE.clues.forEach((clue, idx) => {
+                const item = document.createElement('div');
+                item.className = 'bg-stone-900/90 border border-yellow-900/50 p-2.5 rounded-lg space-y-0.5 text-left shadow-md';
+                item.innerHTML = `
+                    <div class="text-[11px] font-bold text-yellow-400 flex items-center justify-between">
+                        <span>🔍 ${clue.title}</span>
+                        <span class="text-[9px] text-stone-500 font-mono">#0${idx + 1}</span>
+                    </div>
+                    <div class="text-[11px] text-stone-300 leading-snug">${clue.content}</div>
+                `;
+                listEl.appendChild(item);
+            });
+        }
+
+        function openDeductionModal() {
+            if (document.pointerLockElement) document.exitPointerLock();
+            GAME_STATE.isPaused = true;
+            const modal = document.getElementById('deduction-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function togglePauseMenu() {
+            if (!GAME_STATE.isStarted || GAME_STATE.ended) return;
+            const startMenu = document.getElementById('start-menu');
+            if (startMenu.classList.contains('hidden')) {
+                startMenu.classList.remove('hidden');
+                GAME_STATE.isPaused = true;
+                if (document.pointerLockElement) document.exitPointerLock();
+            } else {
+                startMenu.classList.add('hidden');
+                GAME_STATE.isPaused = false;
+            }
+        }
+
+        // Deduction Submit Handlers
+        document.getElementById('submit-deduction-btn').addEventListener('click', () => {
+            const q1 = document.querySelector('input[name="q1"]:checked').value;
+            const q2 = document.querySelector('input[name="q2"]:checked').value;
+
+            document.getElementById('deduction-modal').classList.add('hidden');
+
+            if (q1 === 'B' && q2 === 'A') {
+                triggerEnding('A');
+            } else if (q1 === 'B' && q2 === 'B') {
+                triggerEnding('B');
+            } else {
+                triggerEnding('C');
+            }
+        });
+
+        document.getElementById('close-deduction-btn').addEventListener('click', () => {
+            document.getElementById('deduction-modal').classList.add('hidden');
+            GAME_STATE.isPaused = false;
+            container.requestPointerLock();
+        });
+
+        document.getElementById('btn-deduction-hud').addEventListener('click', openDeductionModal);
+
+        function triggerEnding(type) {
+            GAME_STATE.ended = true;
+            if (document.pointerLockElement) document.exitPointerLock();
+
+            const screen = document.getElementById('ending-screen');
+            const code = document.getElementById('ending-code');
+            const title = document.getElementById('ending-title');
+            const body = document.getElementById('ending-body');
+
+            screen.classList.remove('hidden');
+            screen.classList.add('flex');
+
+            if (type === 'A') {
+                code.innerText = 'ENDING A - TRUE ENDING';
+                title.innerText = '진실의 폭로 (Exposing the Reality)';
+                body.innerHTML = `
+                    <p class="text-yellow-400 font-bold">진실을 규명하고 거울 이면의 비밀을 세상에 알렸습니다.</p>
+                    <p>당신이 유튜브 생방송 라이브로 송출한 적외선 카메라 영상은 전국에 큰 충격을 주었습니다. 구일모텔 지하의 의식 흔적과 거울 속 차원의 왜곡 현상은 정식 수사 대상이 되었고, 실종 유튜버의 유품이 회수되었습니다.</p>
+                    <p>당신은 폐모텔을 무사히 탈출했지만, 밤마다 거울을 볼 때마다 적외선 신호음이 환청처럼 들려옵니다...</p>
+                `;
+            } else if (type === 'B') {
+                code.innerText = 'ENDING B - NORMAL ENDING';
+                title.innerText = '반쪽짜리 진실 (Fragmented Truth)';
+                body.innerHTML = `
+                    <p class="text-stone-300 font-bold">당신은 비극을 뒤로 한 채 무사히 폐모텔을 탈출했습니다.</p>
+                    <p>메모리카드를 파괴하고 폐모텔에서 빠져나온 당신은 목숨을 건졌지만, 구일모텔 실종사건은 영원히 미제 사건으로 남았습니다. 실종된 유튜버의 행방은 여전히 묘연하며, 당신은 그날 밤 카메라에서 보았던 기괴한 환영에 대한 악몽을 매일 밤 꿉니다.</p>
+                `;
+            } else {
+                code.innerText = 'ENDING C - BAD ENDING';
+                title.innerText = '거울 속으로 (Consumed by the Mirror)';
+                body.innerHTML = `
+                    <p class="text-red-500 font-bold">잘못된 추리와 이면 공간의 유혹으로 모텔의 이상현상에 휘말렸습니다.</p>
+                    <p>거울 속 인물의 속삭임에 이끌려 벽면의 붉은 문 안으로 발을 들인 순간, 당신 뒤로 문이 영원히 닫혔습니다. 다음 날 폐모텔을 찾아온 조사관들이 발견한 것은 바닥에 떨어진 배터리가 나간 당신의 카메라뿐이었습니다...</p>
+                `;
+            }
+        }
+
+
+        /* =========================================================================
+           12. GAME LOOP & MAIN UPDATES
+           ========================================================================= */
+        const clock = new THREE.Clock();
+
+        function update() {
+            if (!GAME_STATE.isStarted || GAME_STATE.isPaused || GAME_STATE.ended) return;
+
+            const delta = clock.getDelta();
+
+            // 1. Smooth Door Swing Rotation Animation
+            doors.forEach(door => {
+                if (door.isOpen && Math.abs(door.currentRotation - door.targetRotation) > 0.005) {
+                    door.currentRotation += (door.targetRotation - door.currentRotation) * delta * 3.5;
+                    door.mesh.rotation.y = door.currentRotation;
+                }
+            });
+
+            // 2. Player Movement Physics with Solid Wall & Prop Collision
+            const moveDir = new THREE.Vector3();
+            if (keys.w) moveDir.z -= 1;
+            if (keys.s) moveDir.z += 1;
+            if (keys.a) moveDir.x -= 1;
+            if (keys.d) moveDir.x += 1;
+            moveDir.normalize();
+
+            if (moveDir.length() > 0) {
+                moveDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+                
+                const step = CONFIG.PLAYER_SPEED * delta;
+                
+                // Try X movement
+                const nextPosX = camera.position.clone();
+                nextPosX.x += moveDir.x * step;
+                if (!checkWallCollision(nextPosX)) {
+                    camera.position.x = nextPosX.x;
+                }
+
+                // Try Z movement
+                const nextPosZ = camera.position.clone();
+                nextPosZ.z += moveDir.z * step;
+                if (!checkWallCollision(nextPosZ)) {
+                    camera.position.z = nextPosZ.z;
+                }
+            }
+
+            camera.position.y = 1.6;
+
+            // Update Current Room Tracker based on position z
+            if (camera.position.z > 0) GAME_STATE.currentRoom = 1;
+            else if (camera.position.z > -6) GAME_STATE.currentRoom = 2;
+            else if (camera.position.z > -14) GAME_STATE.currentRoom = 3;
+            else GAME_STATE.currentRoom = 4;
+
+            // 2. Camera Battery Management
+            const batteryBar = document.getElementById('battery-bar');
+            if (GAME_STATE.isCameraActive) {
+                GAME_STATE.battery = Math.max(0, GAME_STATE.battery - CONFIG.CAMERA_BATTERY_DRAIN_RATE * delta);
+                if (GAME_STATE.battery <= 0) {
+                    toggleCameraMode();
+                    showToast("카메라 배터리가 방전되었습니다!");
+                }
+            } else {
+                GAME_STATE.battery = Math.min(CONFIG.CAMERA_BATTERY_MAX, GAME_STATE.battery + CONFIG.CAMERA_BATTERY_RECHARGE_RATE * delta);
+            }
+            batteryBar.style.width = `${GAME_STATE.battery}%`;
+
+            // 3. Anomaly Radar & Audio Signals
+            if (GAME_STATE.isCameraActive) {
+                let closestDist = 999;
+                anomalyObjects.forEach(item => {
+                    if (item.solved || item.data.room !== GAME_STATE.currentRoom) return;
+                    const d = camera.position.distanceTo(item.group.position);
+                    if (d < closestDist) closestDist = d;
+                });
+
+                // Anomaly Procedural Animation Loop
+                const time = clock.getElapsedTime();
+                anomalyObjects.forEach(item => {
+                    if (!item.solved && item.group.visible) {
+                        if (item.group.name === "anim_ghost1") {
+                            item.group.rotation.y = Math.sin(time * 2) * 0.15;
+                            item.group.position.y = item.data.pos.y + Math.sin(time * 3) * 0.05;
+                        } else if (item.group.name === "anim_ghost2") {
+                            item.group.children[1].scale.z = 0.5 + Math.sin(time * 4) * 0.2;
+                        } else if (item.group.name === "anim_ghost3") {
+                            item.group.rotation.z = time * 0.5;
+                        } else if (item.group.name === "anim_ghost4") {
+                            item.group.position.y = item.data.pos.y + Math.sin(time * 2.5) * 0.12;
+                            item.group.rotation.y = Math.sin(time * 1.5) * 0.3;
+                        }
+                    }
+                });
+
+                const radarText = document.getElementById('radar-text');
+                const lockLabel = document.getElementById('target-lock-label');
+
+                if (closestDist < CONFIG.ANOMALY_CAPTURE_DIST) {
+                    radarText.innerText = `심령 감지 (${closestDist.toFixed(1)}m)`;
+                    radarText.className = 'text-xs text-yellow-300 font-bold';
+                    lockLabel.classList.remove('hidden');
+
+                    if (Math.random() < delta * (12 / closestDist)) {
+                        audio.playRadarBeep(850 - closestDist * 60);
+                        audio.playStaticWhisper();
+                    }
+                } else {
+                    radarText.innerText = '신호 탐색 중...';
+                    radarText.className = 'text-xs text-gray-400';
+                    lockLabel.classList.add('hidden');
+                }
+            }
+
+            // 4. Light Flickers & Heartbeat Horror Effects
+            if (Math.random() < 0.05) {
+                lobbyLight.intensity = Math.random() * 1.5;
+                corridorLight.intensity = Math.random() * 1.2;
+                ritualLight.intensity = 1.2 + Math.random() * 0.8;
+            }
+
+            if (GAME_STATE.threatActive && Math.random() < 0.08) {
+                audio.playHeartbeat();
+            }
+
+            // 5. Threat Logic
+            updateThreatLogic(delta);
+
+            // 6. Interaction Prompts
+            checkInteractionPrompts();
+
+            // 7. Camera Timestamp HUD
+            const timeSpan = document.getElementById('camera-time');
+            const elapsed = Math.floor(clock.getElapsedTime());
+            const hrs = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+            const mins = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+            const secs = String(elapsed % 60).padStart(2, '0');
+            timeSpan.innerText = `${hrs}:${mins}:${secs}`;
+        }
+
+        function render() {
+            renderer.render(scene, camera);
+        }
+
+        function gameLoop() {
+            requestAnimationFrame(gameLoop);
+            update();
+            render();
+        }
+
+        /* =========================================================================
+           13. INITIALIZATION & LISTENERS
+           ========================================================================= */
+        document.getElementById('start-btn').addEventListener('click', () => {
+            document.getElementById('start-menu').classList.add('hidden');
+            GAME_STATE.isStarted = true;
+            GAME_STATE.isPaused = false;
+            container.requestPointerLock();
+            audio.init();
+        });
+
+        document.getElementById('btn-album').addEventListener('click', () => toggleJournal('album'));
+        document.getElementById('btn-clues').addEventListener('click', () => toggleJournal('clues'));
+        document.getElementById('btn-pause').addEventListener('click', togglePauseMenu);
+        document.getElementById('close-journal-btn').addEventListener('click', () => toggleJournal('album'));
+
+        document.getElementById('tab-album-btn').addEventListener('click', () => switchTab('album'));
+        document.getElementById('tab-clues-btn').addEventListener('click', () => switchTab('clues'));
+
+        document.getElementById('restart-btn').addEventListener('click', () => {
+            window.location.reload();
+        });
+
+        // Toggle Clues HUD Panel
+        let isCluesHudOpen = true;
+        document.getElementById('toggle-clues-hud-btn')?.addEventListener('click', () => {
+            const list = document.getElementById('clues-hud-list');
+            const icon = document.getElementById('clues-hud-icon');
+            isCluesHudOpen = !isCluesHudOpen;
+            if (isCluesHudOpen) {
+                list.classList.remove('hidden');
+                icon.className = 'fa-solid fa-chevron-up';
+            } else {
+                list.classList.add('hidden');
+                icon.className = 'fa-solid fa-chevron-down';
+            }
+        });
+
+        // Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start Loop
+        window.onload = function() {
+            gameLoop();
+            updateCluesHUD();
+        };
+    </script>
+</body>
+</html>
