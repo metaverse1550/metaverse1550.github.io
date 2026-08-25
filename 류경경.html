@@ -1,0 +1,1638 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>프로젝트 이스케이프 3D (Project Escape 3D FPS)</title>
+    <!-- Tailwind CSS for UI Layouts -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js 3D Game Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            box-sizing: border-box;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #030712;
+            font-family: 'Noto Sans KR', sans-serif;
+        }
+        .font-tech {
+            font-family: 'Chakra Petch', sans-serif;
+        }
+        #webglContainer {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        /* Tactical Glassmorphism HUD */
+        .hud-panel {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(51, 65, 85, 0.6);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+        }
+        .custom-scroll::-webkit-scrollbar { width: 5px; }
+        .custom-scroll::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+        .custom-scroll::-webkit-scrollbar-thumb { background: rgba(51, 65, 85, 0.8); border-radius: 3px; }
+        
+        /* Reticle crosshair */
+        .crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 12px;
+            height: 12px;
+            pointer-events: none;
+            z-index: 30;
+        }
+        .crosshair::before, .crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(255, 255, 255, 0.85);
+            box-shadow: 0 0 4px rgba(0,0,0,0.8);
+        }
+        .crosshair::before { top: 5px; left: 0; width: 12px; height: 2px; }
+        .crosshair::after { top: 0; left: 5px; width: 2px; height: 12px; }
+
+        /* Hurt / Vignette Overlay */
+        #damageVignette {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 10;
+            box-shadow: inset 0 0 100px rgba(225, 29, 72, 0);
+            transition: box-shadow 0.2s ease-out;
+        }
+
+        /* Animated Tutorial Banner */
+        .tutorial-card {
+            background: rgba(6, 78, 59, 0.85);
+            backdrop-filter: blur(12px);
+            border: 2px solid #10b981;
+            box-shadow: 0 0 25px rgba(16, 185, 129, 0.4);
+            animation: pulseGlow 2s infinite alternate;
+        }
+        @keyframes pulseGlow {
+            0% { box-shadow: 0 0 15px rgba(16, 185, 129, 0.3); }
+            100% { box-shadow: 0 0 30px rgba(16, 185, 129, 0.7); }
+        }
+    </style>
+</head>
+<body class="relative w-screen h-screen overflow-hidden text-slate-100">
+
+    <!-- 3D THREE.JS WEBGL CONTAINER -->
+    <div id="webglContainer"></div>
+
+    <!-- DAMAGE VIGNETTE -->
+    <div id="damageVignette"></div>
+
+    <!-- FPS CROSSHAIR -->
+    <div id="crosshair" class="crosshair hidden"></div>
+
+    <!-- START OVERLAY -->
+    <div id="startOverlay" class="absolute inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex flex-col items-center justify-center p-4 text-center">
+        <div class="max-w-xl bg-slate-900 border border-emerald-500/40 p-8 rounded-2xl shadow-2xl relative overflow-hidden">
+            <div class="absolute -top-12 -left-12 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl"></div>
+            <div class="text-xs font-tech text-emerald-400 font-bold uppercase tracking-widest mb-2">1ST-PERSON REALISTIC SURVIVAL SIMULATOR</div>
+            <h1 class="text-3xl font-extrabold text-white mb-3 font-tech tracking-wide">프로젝트 이스케이프 3D (1인칭)</h1>
+            <p class="text-xs text-slate-300 leading-relaxed mb-6">
+                적대적 무인도에 1인칭으로 고립되었습니다.<br>
+                자원을 채집하고, 총기/근접 무기로 야생동물과 적대 용병에 맞서 생존하십시오.<br>
+                무전 신호기 설치 또는 보트 수리를 통해 섬에서 탈출하는 것이 목표입니다.
+            </p>
+            <div class="bg-slate-950/80 p-4 rounded-xl border border-slate-800 text-left text-xs space-y-1.5 mb-6 text-slate-300">
+                <div><span class="text-emerald-400 font-bold">[WASD / Shift]</span> 이동 및 시야 회전 (마우스 포인터 락)</div>
+                <div><span class="text-emerald-400 font-bold">[마우스 좌클릭]</span> 공격 및 사격 &nbsp;|&nbsp; <span class="text-emerald-400 font-bold">[E]</span> 자원 채집 / 상호작용</div>
+                <div><span class="text-emerald-400 font-bold">[R]</span> 재장전 &nbsp;|&nbsp; <span class="text-emerald-400 font-bold">[F]</span> 손전등 On/Off</div>
+                <div><span class="text-emerald-400 font-bold">[1-4]</span> 장비 전환 &nbsp;|&nbsp; <span class="text-emerald-400 font-bold">[I / B]</span> 인벤토리 & 제작</div>
+            </div>
+            <button id="btnStartGame" class="w-full bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold py-3.5 px-8 rounded-xl font-tech text-sm shadow-lg transition-all border border-emerald-400/50">
+                작전 개시 (게임 시작)
+            </button>
+        </div>
+    </div>
+
+    <!-- HUD OVERLAY -->
+    <div id="hudOverlay" class="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 z-20 hidden">
+        
+        <!-- TOP STATUS & INFO BAR -->
+        <div class="flex justify-between items-start w-full gap-4">
+            <!-- VITAL MONITOR -->
+            <div class="hud-panel p-3.5 rounded-xl pointer-events-auto min-w-[280px]">
+                <div class="flex justify-between items-center mb-2 pb-1 border-b border-slate-700/60 text-xs">
+                    <span class="font-tech text-emerald-400 font-bold" id="uiRank">특수전 대원 (1인칭)</span>
+                    <span class="font-tech text-cyan-400" id="uiZone">구역: 서쪽 해변가</span>
+                </div>
+
+                <!-- HEALTH -->
+                <div class="mb-1.5">
+                    <div class="flex justify-between text-xs mb-0.5 font-bold">
+                        <span class="text-rose-400">체력 (HP) <span class="text-[10px] text-slate-400 font-normal">(붕대/모닥불로 회복)</span></span>
+                        <span id="uiHpVal" class="font-tech text-slate-200">100 / 100</span>
+                    </div>
+                    <div class="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800">
+                        <div id="uiHpBar" class="bg-gradient-to-r from-rose-600 to-red-500 h-full transition-all duration-150" style="width: 100%;"></div>
+                    </div>
+                </div>
+
+                <!-- STAMINA -->
+                <div class="mb-1.5">
+                    <div class="flex justify-between text-[11px] font-semibold text-emerald-400 mb-0.5">
+                        <span>스태미나 <span class="text-[9px] text-slate-400 font-normal">(휴식 시 자동 차오름)</span></span>
+                        <span id="uiStaminaVal" class="font-tech">100%</span>
+                    </div>
+                    <div class="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden border border-slate-800">
+                        <div id="uiStaminaBar" class="bg-emerald-500 h-full transition-all duration-150" style="width: 100%;"></div>
+                    </div>
+                </div>
+
+                <!-- HUNGER & THIRST -->
+                <div class="grid grid-cols-2 gap-2 mb-1">
+                    <div>
+                        <div class="flex justify-between text-[11px] text-amber-400 mb-0.5 font-medium">
+                            <span>허기 <span class="text-[9px] text-slate-400">(열매/고기)</span></span><span id="uiHungerVal" class="font-tech">100%</span>
+                        </div>
+                        <div class="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden border border-slate-800">
+                            <div id="uiHungerBar" class="bg-amber-500 h-full transition-all duration-150" style="width: 100%;"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-[11px] text-cyan-400 mb-0.5 font-medium">
+                            <span>갈증 <span class="text-[9px] text-slate-400">(물/열매)</span></span><span id="uiThirstVal" class="font-tech">100%</span>
+                        </div>
+                        <div class="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden border border-slate-800">
+                            <div id="uiThirstBar" class="bg-cyan-500 h-full transition-all duration-150" style="width: 100%;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- STATUS BADGES -->
+                <div class="flex gap-1 mt-1.5">
+                    <span id="uiBleedBadge" class="hidden bg-rose-950 border border-rose-600 text-rose-300 text-[10px] px-1.5 py-0.5 rounded font-bold animate-pulse">⚠️ 출혈 중 (붕대로 지혈 필요)</span>
+                </div>
+            </div>
+
+            <!-- TIME & ENVIRONMENT PANEL -->
+            <div class="hud-panel px-4 py-2.5 rounded-xl flex items-center gap-4 pointer-events-auto text-xs">
+                <div>
+                    <div class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">시간 / 환경</div>
+                    <div class="font-tech text-base font-bold text-amber-300" id="uiTimeText">08:00 (낮)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TOP RIGHT MISSION TRACKER PANEL -->
+        <div class="absolute top-4 right-4 hud-panel p-3.5 rounded-xl pointer-events-auto max-w-xs w-72 text-xs border-emerald-500/40">
+            <div class="flex justify-between items-center mb-1.5 pb-1 border-b border-slate-700/80">
+                <span class="font-tech text-emerald-400 font-bold uppercase flex items-center gap-1">
+                    🎯 현재 작전 목표
+                </span>
+                <span id="uiMissionStep" class="text-[10px] bg-emerald-950 border border-emerald-500 text-emerald-300 px-1.5 py-0.5 rounded font-tech">단계 1/3</span>
+            </div>
+            <div id="uiMissionTitle" class="font-bold text-slate-100 mb-1">기본 생존 자원 및 무기 확보</div>
+            <p id="uiMissionDesc" class="text-[11px] text-slate-300 mb-2 leading-tight">
+                섬에 생존하기 위한 기초 자원(목재, 돌)을 채집하고 무기를 제작하십시오.
+            </p>
+            <!-- CHECKLIST -->
+            <div id="uiMissionTasks" class="space-y-1 bg-slate-950/60 p-2 rounded-lg border border-slate-800 text-[11px]">
+                <!-- Dynamic tasks generated by JS -->
+            </div>
+        </div>
+
+        <!-- -->
+        <!-- INTERACTIVE TUTORIAL OVERLAY BANNER -->
+        <div id="tutorialBanner" class="absolute top-4 left-1/2 -translate-x-1/2 tutorial-card px-6 py-3 rounded-2xl flex items-center gap-4 text-xs z-30 transition-all pointer-events-auto">
+            <div class="w-10 h-10 rounded-xl bg-emerald-900 border border-emerald-400 flex items-center justify-center text-xl font-extrabold text-emerald-300 shadow-md" id="tutorialIcon">
+                🎮
+            </div>
+            <div class="flex flex-col">
+                <div class="flex items-center gap-2">
+                    <span class="font-tech text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/50 uppercase font-bold" id="tutorialStepBadge">인게임 튜토리얼 1/6</span>
+                    <span class="text-[11px] font-bold text-emerald-200" id="tutorialTitle">이동 및 화면 회전 익히기</span>
+                </div>
+                <div class="text-xs text-white font-semibold mt-0.5" id="tutorialDesc">
+                    [W, A, S, D] 키를 눌러 섬 안에서 움직여보세요!
+                </div>
+                <div class="text-[10px] text-emerald-300 font-tech font-bold mt-1" id="tutorialProgress">
+                    달성도: 0 / 4 방향키 입력됨
+                </div>
+            </div>
+            <button id="btnSkipTutorial" class="ml-4 bg-slate-900/80 hover:bg-slate-800 text-slate-300 px-2.5 py-1 rounded-lg text-[10px] border border-slate-700 transition-colors">
+                튜토리얼 스킵
+            </button>
+        </div>
+
+        <!-- CENTER INTERACTION PROMPT & TARGET DETECTOR -->
+        <div class="self-center flex flex-col items-center gap-1.5 mb-8 pointer-events-none">
+            <!-- TARGET SCANNER INFO BAR -->
+            <div id="uiTargetInfo" class="hidden hud-panel px-3 py-1.5 rounded-lg border text-xs font-bold flex items-center gap-2 shadow-xl">
+                <span id="uiTargetBadge" class="px-1.5 py-0.5 rounded text-[10px] font-tech font-extrabold uppercase">자원</span>
+                <span id="uiTargetName" class="text-slate-100">나무</span>
+                <span id="uiTargetHp" class="text-slate-400 text-[11px]">HP: 4/4</span>
+            </div>
+
+            <div id="uiInteractMsg" class="hidden bg-emerald-950/90 border border-emerald-500 text-emerald-200 px-4 py-2 rounded-lg text-xs font-bold shadow-lg animate-bounce">
+                [E] 키를 눌러 상호작용
+            </div>
+            <div id="uiToastMsg" class="hidden bg-slate-900/90 border border-slate-700 text-slate-200 px-4 py-1.5 rounded-lg text-xs font-medium shadow-md">
+                메시지 출력
+            </div>
+        </div>
+
+        <!-- BOTTOM WEAPON & HOTBAR PANEL -->
+        <div class="flex justify-between items-end w-full">
+            <!-- HOTBAR SLOTS -->
+            <div class="hud-panel p-2 rounded-xl flex gap-1.5 pointer-events-auto" id="uiHotbar">
+                <!-- Dynamic Hotbar Slots inserted by JS -->
+            </div>
+
+            <!-- WEAPON & AMMO DISPLAY -->
+            <div class="hud-panel p-3.5 rounded-xl pointer-events-auto text-right min-w-[160px]">
+                <div class="text-[10px] text-slate-400 font-bold uppercase" id="uiWeaponName">전투 단검 (Melee)</div>
+                <div class="font-tech text-2xl font-bold text-emerald-400" id="uiAmmoText">근접</div>
+                <div class="text-[10px] text-slate-500" id="uiReloadHint">[R] 재장전 / [F] 손전등 / [I] 제작</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- INVENTORY & CRAFTING MODAL -->
+    <div id="inventoryModal" class="absolute inset-0 bg-slate-950/85 backdrop-blur-md z-40 flex items-center justify-center p-6 hidden">
+        <div class="bg-slate-900 border border-slate-700 w-full max-w-4xl h-[520px] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            <!-- MODAL HEADER -->
+            <div class="bg-slate-950 px-6 py-3 border-b border-slate-800 flex justify-between items-center">
+                <div class="flex items-center gap-4">
+                    <h2 class="font-tech text-lg font-bold text-emerald-400">군용 배낭 & 제작 대시보드</h2>
+                    <span class="text-xs text-slate-400">1인칭 전투 및 생존 관리</span>
+                </div>
+                <button id="btnCloseInv" class="text-slate-400 hover:text-white font-tech font-bold text-sm bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded-lg">
+                    닫기 [ESC / I]
+                </button>
+            </div>
+
+            <!-- MODAL CONTENT GRID -->
+            <div class="flex-1 grid grid-cols-12 gap-4 p-5 overflow-hidden">
+                <!-- LEFT: INVENTORY SLOTS & VITAL GUIDE -->
+                <div class="col-span-7 flex flex-col h-full border-r border-slate-800 pr-4">
+                    <h3 class="text-xs font-bold text-slate-400 mb-1 uppercase tracking-wider">소지품 (Inventory)</h3>
+                    
+                    <!-- VITAL RECOVERY QUICK GUIDE -->
+                    <div class="bg-slate-950 border border-slate-800/80 rounded-lg p-2.5 mb-3 grid grid-cols-2 gap-2 text-[11px] text-slate-300">
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-rose-400 font-bold">🩸 체력 회복:</span>
+                            <span>붕대사용(+35) / 모닥불</span>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-amber-400 font-bold">🍖 허기 충전:</span>
+                            <span>열매(+15) / 고기(+40)</span>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-cyan-400 font-bold">🥤 갈증 해소:</span>
+                            <span>깨끗한 물(+50) / 열매(+5)</span>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-rose-500 font-bold">🩹 출혈 지혈:</span>
+                            <span>군용 압박붕대 사용</span>
+                        </div>
+                    </div>
+
+                    <div id="uiInvGrid" class="grid grid-cols-4 gap-2 overflow-y-auto custom-scroll pr-1 flex-1">
+                        <!-- Dynamic Inventory slots -->
+                    </div>
+                </div>
+
+                <!-- RIGHT: CRAFTING RECIPES -->
+                <div class="col-span-5 flex flex-col h-full">
+                    <h3 class="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">제작 & 건설 (Crafting & Build)</h3>
+                    <div id="uiCraftList" class="space-y-2 overflow-y-auto custom-scroll pr-1 flex-1">
+                        <!-- Dynamic Crafting recipes -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- GAME OVER / VICTORY OVERLAY -->
+    <div id="endOverlay" class="absolute inset-0 bg-slate-950/95 backdrop-blur-lg z-50 flex flex-col items-center justify-center p-6 text-center hidden">
+        <div class="max-w-md bg-slate-900 border border-slate-700 p-8 rounded-2xl shadow-2xl">
+            <h1 id="endTitle" class="text-3xl font-extrabold text-rose-500 font-tech mb-2">작전 실패 (사망)</h1>
+            <p id="endDesc" class="text-xs text-slate-300 mb-6 leading-relaxed">
+                섬의 혹독한 환경과 위협에 견디지 못했습니다.
+            </p>
+            <button id="btnRestart" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-xl font-tech text-sm shadow-lg transition-all">
+                작전 재시도 (재시작)
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // GAME CONFIGURATION
+        const CONFIG = {
+            PLAYER_SPEED: 7,
+            RUN_MULTIPLIER: 1.5,
+            ISLAND_RADIUS: 140,
+            DECAY_RATE: { HUNGER: 0.35, THIRST: 0.55 }
+        };
+
+        // MISSION SYSTEM STATE
+        const Missions = {
+            currentStep: 0,
+            list: [
+                {
+                    title: "1단계: 기초 생존 및 자원 채집",
+                    desc: "나무와 바위에 다가가 [E] 키로 채집하고 [I] 키로 제작 창을 열어보세요.",
+                    tasks: [
+                        { id: 'WOOD', name: '목재 채집', target: 5, current: 0 },
+                        { id: 'STONE', name: '돌 채집', target: 3, current: 0 }
+                    ]
+                },
+                {
+                    title: "2단계: 무기 제작 및 기지 구축",
+                    desc: "야생동물과 용병 공격에 대비해 무기를 제작하고 모닥불을 설치하세요.",
+                    tasks: [
+                        { id: 'WEAPON', name: '총기/도구 제작 완료', target: 1, current: 0 },
+                        { id: 'CAMPFIRE', name: '모닥불 설치', target: 1, current: 0 }
+                    ]
+                },
+                {
+                    title: "3단계: 섬 탈출 수단 확보",
+                    desc: "보트 수리 키트를 제작해 해변 보트를 고치거나 무전 신호기를 설치하세요.",
+                    tasks: [
+                        { id: 'ESCAPE', name: '보트 수리 또는 무전신호기 송신', target: 1, current: 0 }
+                    ]
+                }
+            ],
+            updateProgress(type, amount = 1) {
+                const currentMission = this.list[this.currentStep];
+                if (!currentMission) return;
+
+                let completedCount = 0;
+                currentMission.tasks.forEach(t => {
+                    if (t.id === type && t.current < t.target) {
+                        t.current = Math.min(t.target, t.current + amount);
+                    }
+                    if (t.current >= t.target) completedCount++;
+                });
+
+                if (completedCount === currentMission.tasks.length && this.currentStep < this.list.length - 1) {
+                    this.currentStep++;
+                    showToast(`🎉 작전 목표 달성! 다음 미션 개시: ${this.list[this.currentStep].title}`);
+                }
+                this.renderUI();
+            },
+            renderUI() {
+                const m = this.list[this.currentStep];
+                if (!m) return;
+
+                document.getElementById('uiMissionStep').innerText = `단계 ${this.currentStep + 1}/3`;
+                document.getElementById('uiMissionTitle').innerText = m.title;
+                document.getElementById('uiMissionDesc').innerText = m.desc;
+
+                const tasksEl = document.getElementById('uiMissionTasks');
+                tasksEl.innerHTML = '';
+                m.tasks.forEach(t => {
+                    const isDone = t.current >= t.target;
+                    const div = document.createElement('div');
+                    div.className = `flex justify-between items-center ${isDone ? 'text-emerald-400 font-bold line-through' : 'text-slate-300'}`;
+                    div.innerHTML = `
+                        <span>${isDone ? '✓' : '◦'} ${t.name}</span>
+                        <span class="font-tech ${isDone ? 'text-emerald-400' : 'text-amber-400'}">${t.current}/${t.target}</span>
+                    `;
+                    tasksEl.appendChild(div);
+                });
+            }
+        };
+
+        // ITEM DEFINITIONS
+        const ITEMS = {
+            WOOD: { id: 'WOOD', name: '목재', category: 'RES', stack: 99, icon: '🪵', desc: '건설 및 제작 자원' },
+            STONE: { id: 'STONE', name: '돌', category: 'RES', stack: 99, icon: '🪨', desc: '건설 및 모닥불 제작' },
+            METAL: { id: 'METAL', name: '금속 조각', category: 'RES', stack: 50, icon: '⚙️', desc: '총기/도구 제작 자원' },
+            BERRY: { id: 'BERRY', name: '야생 열매', category: 'FOOD', hunger: 15, thirst: 5, stack: 30, icon: '🍒', recoveryText: '허기 +15 | 갈증 +5' },
+            MEAT: { id: 'MEAT', name: '익힌 고기', category: 'FOOD', hunger: 40, hp: 10, stack: 20, icon: '🍖', recoveryText: '허기 +40 | 체력 +10' },
+            WATER: { id: 'WATER', name: '깨끗한 물', category: 'DRINK', thirst: 50, stack: 10, icon: '🥤', recoveryText: '갈증 +50' },
+            BANDAGE: { id: 'BANDAGE', name: '군용 압박붕대', category: 'MED', hp: 35, stopBleed: true, stack: 10, icon: '🩹', recoveryText: '체력 +35 & 출혈 지혈' },
+            AMMO_PISTOL: { id: 'AMMO_PISTOL', name: '9mm 권총 탄약', category: 'AMMO', stack: 120, icon: '🔫', desc: '권총 장전용' },
+            AMMO_RIFLE: { id: 'AMMO_RIFLE', name: '5.56mm 소총 탄약', category: 'AMMO', stack: 120, icon: '📦', desc: '소총 장전용' },
+            KNIFE: { id: 'KNIFE', name: '전투 단검', category: 'WEAPON', weaponType: 'MELEE', damage: 30, rate: 350, icon: '🗡️', desc: '근접 타격 무기' },
+            PISTOL: { id: 'PISTOL', name: 'M9 권총', category: 'WEAPON', weaponType: 'GUN', ammoType: 'AMMO_PISTOL', damage: 35, magCap: 12, rate: 220, reloadTime: 1800, range: 60, icon: '🔫', desc: '9mm 반자동 권총' },
+            RIFLE: { id: 'RIFLE', name: 'M4A1 소총', category: 'WEAPON', weaponType: 'GUN', ammoType: 'AMMO_RIFLE', damage: 50, magCap: 30, rate: 110, reloadTime: 2400, range: 90, icon: '💥', desc: '5.56mm 돌격 소총' },
+            BOAT_KIT: { id: 'BOAT_KIT', name: '보트 수리 키트', category: 'ESCAPE', stack: 1, icon: '🔧', desc: '해변가 탈출용 보트 수리' }
+        };
+
+        // CRAFT RECIPES
+        const RECIPES = [
+            { id: 'CAMPFIRE', name: '모닥불 (건설)', desc: '주변 조명 및 체력 회복', req: { WOOD: 5, STONE: 3 }, type: 'BUILD' },
+            { id: 'BANDAGE', name: '압박붕대 제작', desc: '출혈 치료 및 체력 회복', req: { WOOD: 2, BERRY: 2 }, type: 'ITEM' },
+            { id: 'PISTOL', name: 'M9 권총 제작', desc: '기본 1인칭 화기', req: { WOOD: 5, METAL: 8 }, type: 'ITEM' },
+            { id: 'RIFLE', name: 'M4A1 소총 제작', desc: '고성능 화기', req: { WOOD: 10, METAL: 18 }, type: 'ITEM' },
+            { id: 'AMMO_PISTOL', name: '9mm 탄약 (15발)', desc: '권총 탄약', req: { METAL: 3 }, amount: 15, type: 'ITEM' },
+            { id: 'AMMO_RIFLE', name: '5.56mm 탄약 (30발)', desc: '소총 탄약', req: { METAL: 5 }, amount: 30, type: 'ITEM' },
+            { id: 'BOAT_KIT', name: '보트 수리 키트 [탈출]', desc: '해변가 보트 수리에 사용', req: { WOOD: 20, METAL: 12 }, type: 'ITEM' },
+            { id: 'SIGNAL_BEACON', name: '무전 신호기 (건설) [탈출]', desc: '구조 신호를 송신하여 탈출', req: { METAL: 15, WOOD: 10 }, type: 'BUILD' }
+        ];
+
+        // GLOBAL GAME STATE
+        let gameState = 'START';
+        let scene, camera, renderer;
+        let playerGroup, pitchObject, flashlight, raycaster;
+        let weaponModels = { knife: null, pistol: null, rifle: null };
+        let activeWeaponMesh = null;
+        let lastTime = performance.now();
+        let toastTimer = null;
+        let dayTime = 8;
+        let sunLight, ambientLight;
+        let isInventoryOpen = false;
+
+        // INTERACTIVE IN-GAME TUTORIAL SYSTEM
+        const Tutorial = {
+            active: true,
+            step: 0,
+            beaconMesh: null,
+            keysPressed: { w: false, a: false, s: false, d: false },
+            mouseMoved: false,
+            sprinted: false,
+
+            steps: [
+                {
+                    id: 'MOVE',
+                    icon: '👟',
+                    title: '1단계: 이동 키 익히기',
+                    desc: '키보드의 [W, A, S, D] 키를 각각 누르고 움직여보세요.',
+                    check() {
+                        const count = Object.values(this.keysPressed).filter(Boolean).length;
+                        document.getElementById('tutorialProgress').innerText = `진행상황: ${count} / 4 방향 이동 완료`;
+                        return count >= 4;
+                    }
+                },
+                {
+                    id: 'LOOK',
+                    icon: '👀',
+                    title: '2단계: 시야 회전 익히기',
+                    desc: '마우스를 상하좌우로 움직여서 주위 시야를 둘러보세요.',
+                    check() {
+                        return this.mouseMoved;
+                    }
+                },
+                {
+                    id: 'SPRINT',
+                    icon: '🏃',
+                    title: '3단계: 달리기 (Shift)',
+                    desc: '[Shift] 키를 누른 채 이동하여 빠르게 달려보세요.',
+                    check() {
+                        return this.sprinted;
+                    }
+                },
+                {
+                    id: 'HARVEST',
+                    icon: '🪵',
+                    title: '4단계: 자원 채집하기',
+                    desc: '빛나는 3D 기둥 표지(야자나무/바위)로 이동해 [E] 키를 눌러 채집하세요.',
+                    check() {
+                        return Player.inventory.some(i => i && (i.id === 'WOOD' || i.id === 'STONE'));
+                    }
+                },
+                {
+                    id: 'INVENTORY',
+                    icon: '🎒',
+                    title: '5단계: 배낭 & 제작 대시보드 열기',
+                    desc: '키보드 [I] 키 또는 [B] 키를 눌러 제작 창을 열어보세요.',
+                    check() {
+                        return isInventoryOpen;
+                    }
+                },
+                {
+                    id: 'CRAFT',
+                    icon: '🔨',
+                    title: '6단계: 도구/무기 제작하기',
+                    desc: '제작 창 오른쪽에서 [모닥불] 또는 [M9 권총] 제작 버튼을 클릭하세요.',
+                    check() {
+                        return Player.inventory.some(i => i && (i.id === 'PISTOL' || i.id === 'RIFLE' || i.id === 'BANDAGE')) ||
+                               scene.children.some(c => c.userData && (c.userData.type === 'CAMPFIRE' || c.userData.type === 'BEACON'));
+                    }
+                }
+            ],
+
+            init() {
+                if (!this.active) {
+                    document.getElementById('tutorialBanner').classList.add('hidden');
+                    return;
+                }
+                this.createBeacon();
+                this.render();
+            },
+
+            createBeacon() {
+                const geo = new THREE.CylinderGeometry(0.1, 1.2, 8, 16, 1, true);
+                const mat = new THREE.MeshBasicMaterial({ color: 0x10b981, transparent: true, opacity: 0.6, side: THREE.DoubleSide });
+                this.beaconMesh = new THREE.Mesh(geo, mat);
+                this.beaconMesh.visible = false;
+                scene.add(this.beaconMesh);
+            },
+
+            updateBeaconPosition() {
+                if (!this.active || !this.beaconMesh) return;
+
+                if (this.steps[this.step].id === 'HARVEST') {
+                    let nearest = null;
+                    let minDist = Infinity;
+                    scene.children.forEach(obj => {
+                        if (obj.userData && (obj.userData.type === 'WOOD' || obj.userData.type === 'STONE')) {
+                            const d = playerGroup.position.distanceTo(obj.position);
+                            if (d < minDist) {
+                                minDist = d;
+                                nearest = obj;
+                            }
+                        }
+                    });
+
+                    if (nearest) {
+                        this.beaconMesh.position.copy(nearest.position);
+                        this.beaconMesh.position.y = 4;
+                        this.beaconMesh.rotation.y += 0.02;
+                        this.beaconMesh.visible = true;
+                        return;
+                    }
+                }
+                this.beaconMesh.visible = false;
+            },
+
+            render() {
+                if (!this.active || this.step >= this.steps.length) {
+                    document.getElementById('tutorialBanner').classList.add('hidden');
+                    if (this.beaconMesh) this.beaconMesh.visible = false;
+                    showToast('🎉 인게임 튜토리얼을 모두 완료했습니다! 이제 생존 및 탈출 작전을 진행하세요.');
+                    return;
+                }
+
+                const current = this.steps[this.step];
+                document.getElementById('tutorialIcon').innerText = current.icon;
+                document.getElementById('tutorialStepBadge').innerText = `인게임 튜토리얼 ${this.step + 1}/${this.steps.length}`;
+                document.getElementById('tutorialTitle').innerText = current.title;
+                document.getElementById('tutorialDesc').innerText = current.desc;
+                document.getElementById('tutorialProgress').innerText = '미션 수행 대기 중...';
+            },
+
+            nextStep() {
+                this.step++;
+                if (this.step < this.steps.length) {
+                    showToast(`✅ 튜토리얼 단계 완료! 다음: ${this.steps[this.step].title}`);
+                }
+                this.render();
+            },
+
+            checkProgress() {
+                if (!this.active || this.step >= this.steps.length) return;
+                const current = this.steps[this.step];
+                if (current.check.call(this)) {
+                    this.nextStep();
+                }
+            },
+
+            skip() {
+                this.active = false;
+                document.getElementById('tutorialBanner').classList.add('hidden');
+                if (this.beaconMesh) this.beaconMesh.visible = false;
+                showToast('튜토리얼이 스킵되었습니다. 자유롭게 탐험하세요.');
+            }
+        };
+
+        // UI UTILITIES
+        function showToast(msg) {
+            const toast = document.getElementById('uiToastMsg');
+            if (!toast) return;
+            toast.innerText = msg;
+            toast.classList.remove('hidden');
+            if (toastTimer) clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 2500);
+        }
+
+        function toggleInventory(forceState) {
+            const invModal = document.getElementById('inventoryModal');
+            if (forceState !== undefined) {
+                isInventoryOpen = forceState;
+            } else {
+                isInventoryOpen = !isInventoryOpen;
+            }
+
+            if (isInventoryOpen) {
+                invModal.classList.remove('hidden');
+                if (document.pointerLockElement) document.exitPointerLock();
+                renderInventoryGrid();
+                renderCraftingRecipes();
+            } else {
+                invModal.classList.add('hidden');
+                if (gameState === 'PLAYING' && !Input.isLocked) {
+                    document.body.requestPointerLock();
+                }
+            }
+        }
+
+        function updateUI() {
+            document.getElementById('uiHpVal').innerText = `${Math.ceil(Player.hp)} / ${Player.maxHp}`;
+            document.getElementById('uiHpBar').style.width = `${Math.max(0, (Player.hp / Player.maxHp) * 100)}%`;
+
+            document.getElementById('uiStaminaVal').innerText = `${Math.ceil(Player.stamina)}%`;
+            document.getElementById('uiStaminaBar').style.width = `${Math.max(0, Player.stamina)}%`;
+
+            document.getElementById('uiHungerVal').innerText = `${Math.ceil(Player.hunger)}%`;
+            document.getElementById('uiHungerBar').style.width = `${Math.max(0, Player.hunger)}%`;
+
+            document.getElementById('uiThirstVal').innerText = `${Math.ceil(Player.thirst)}%`;
+            document.getElementById('uiThirstBar').style.width = `${Math.max(0, Player.thirst)}%`;
+
+            const bleedBadge = document.getElementById('uiBleedBadge');
+            if (Player.isBleeding) bleedBadge.classList.remove('hidden');
+            else bleedBadge.classList.add('hidden');
+
+            const hotbarEl = document.getElementById('uiHotbar');
+            hotbarEl.innerHTML = '';
+            for (let i = 0; i < 4; i++) {
+                const item = Player.inventory[i];
+                const slot = document.createElement('div');
+                const isActive = Player.activeSlot === i;
+                slot.className = `w-14 h-14 rounded-xl border flex flex-col items-center justify-center relative cursor-pointer font-tech transition-all ${
+                    isActive ? 'border-emerald-400 bg-emerald-950/60 shadow-lg scale-105' : 'border-slate-700 bg-slate-900/60 hover:border-slate-500'
+                }`;
+                slot.innerHTML = `
+                    <span class="absolute top-0.5 left-1 text-[10px] text-slate-400 font-bold">${i + 1}</span>
+                    ${item ? `<span class="text-xl">${item.icon}</span><span class="text-[9px] text-emerald-300 font-bold leading-none">${item.count > 1 ? 'x'+item.count : ''}</span>` : '<span class="text-xs text-slate-600">-</span>'}
+                `;
+                slot.onclick = () => Player.selectHotbar(i);
+                hotbarEl.appendChild(slot);
+            }
+
+            const activeItem = Player.inventory[Player.activeSlot];
+            const nameEl = document.getElementById('uiWeaponName');
+            const ammoEl = document.getElementById('uiAmmoText');
+            if (activeItem) {
+                nameEl.innerText = activeItem.name;
+                if (activeItem.weaponType === 'GUN') {
+                    const ammoReserve = Player.inventory.filter(i => i && i.id === activeItem.ammoType).reduce((acc, curr) => acc + curr.count, 0);
+                    ammoEl.innerText = `${activeItem.mag || 0} / ${ammoReserve}`;
+                } else if (activeItem.weaponType === 'MELEE') {
+                    ammoEl.innerText = '근접 무기';
+                } else {
+                    ammoEl.innerText = `x${activeItem.count || 1}`;
+                }
+            } else {
+                nameEl.innerText = '맨손';
+                ammoEl.innerText = '-';
+            }
+
+            Missions.renderUI();
+        }
+
+        // INPUT SYSTEM WITH POINTER LOCK
+        const Input = {
+            keys: {},
+            isLocked: false,
+            init() {
+                window.addEventListener('keydown', e => {
+                    this.keys[e.key.toLowerCase()] = true;
+                    if (e.key === 'i' || e.key === 'I' || e.key === 'b' || e.key === 'B') toggleInventory();
+                    if (e.key === 'Escape') toggleInventory(false);
+                    if (e.key === 'r' || e.key === 'R') Player.reloadWeapon();
+                    if (e.key === 'f' || e.key === 'F') Player.toggleFlashlight();
+                    if (['1','2','3','4'].includes(e.key)) Player.selectHotbar(parseInt(e.key) - 1);
+
+                    if (Tutorial.active) {
+                        const k = e.key.toLowerCase();
+                        if (['w','a','s','d'].includes(k)) {
+                            Tutorial.keysPressed[k] = true;
+                        }
+                        if (e.key === 'Shift') {
+                            Tutorial.sprinted = true;
+                        }
+                        Tutorial.checkProgress();
+                    }
+                });
+                window.addEventListener('keyup', e => { this.keys[e.key.toLowerCase()] = false; });
+                
+                window.addEventListener('mousemove', e => {
+                    if (!this.isLocked || gameState !== 'PLAYING') return;
+                    const movementX = e.movementX || 0;
+                    const movementY = e.movementY || 0;
+
+                    if (Math.abs(movementX) > 2 || Math.abs(movementY) > 2) {
+                        Tutorial.mouseMoved = true;
+                        Tutorial.checkProgress();
+                    }
+
+                    playerGroup.rotation.y -= movementX * 0.0022;
+                    pitchObject.rotation.x -= movementY * 0.0022;
+                    pitchObject.rotation.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, pitchObject.rotation.x));
+                });
+
+                window.addEventListener('mousedown', e => {
+                    if (gameState === 'PLAYING') {
+                        if (!this.isLocked && !isInventoryOpen) {
+                            document.body.requestPointerLock();
+                        } else if (e.button === 0 && !isInventoryOpen) {
+                            Player.attack();
+                        }
+                    }
+                });
+
+                document.addEventListener('pointerlockchange', () => {
+                    this.isLocked = (document.pointerLockElement === document.body);
+                });
+            }
+        };
+
+        // COMBAT SYSTEM
+        const Combat = {
+            meleeAttack(damage) {
+                raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+                const intersects = raycaster.intersectObjects(scene.children, true);
+                for (let hit of intersects) {
+                    if (hit.distance > 3.5) break;
+                    let obj = hit.object;
+                    while (obj.parent && !obj.userData.type) obj = obj.parent;
+                    if (obj.userData && (obj.userData.type === 'WOLF' || obj.userData.type === 'MERCENARY')) {
+                        obj.userData.hp -= damage;
+                        showToast(`근접 타격! 남은 체력: ${Math.max(0, obj.userData.hp)}`);
+                        createHitEffect(hit.point);
+                        break;
+                    }
+                }
+            },
+            fire3DBullet(damage, range) {
+                raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+                const intersects = raycaster.intersectObjects(scene.children, true);
+                for (let hit of intersects) {
+                    if (hit.distance > range) break;
+                    let obj = hit.object;
+                    while (obj.parent && !obj.userData.type) obj = obj.parent;
+                    if (obj.userData) {
+                        if (obj.userData.type === 'WOLF' || obj.userData.type === 'MERCENARY') {
+                            obj.userData.hp -= damage;
+                            showToast(`명중! 남은 체력: ${Math.max(0, obj.userData.hp)}`);
+                            createHitEffect(hit.point);
+                            break;
+                        } else if (obj.userData.type === 'WOOD' || obj.userData.type === 'STONE' || obj.userData.type === 'CRATE') {
+                            obj.userData.hp -= 1;
+                            showToast(`자원 타격 (${obj.userData.hp} 회 남음)`);
+                            createHitEffect(hit.point);
+                            break;
+                        }
+                    }
+                }
+            }
+        };
+
+        function createHitEffect(point) {
+            const particleGeo = new THREE.SphereGeometry(0.08, 4, 4);
+            const particleMat = new THREE.MeshBasicMaterial({ color: 0xfde047 });
+            const p = new THREE.Mesh(particleGeo, particleMat);
+            p.position.copy(point);
+            scene.add(p);
+            setTimeout(() => scene.remove(p), 150);
+        }
+
+        // PLAYER ENTITY
+        const Player = {
+            hp: 100,
+            maxHp: 100,
+            stamina: 100,
+            hunger: 100,
+            thirst: 100,
+            isBleeding: false,
+            flashlightOn: true,
+            activeSlot: 0,
+            inventory: Array(16).fill(null),
+            lastShotTime: 0,
+            isReloading: false,
+            recoilTimer: 0,
+
+            init() {
+                this.hp = 100;
+                this.stamina = 100;
+                this.hunger = 100;
+                this.thirst = 100;
+                this.isBleeding = false;
+                
+                this.inventory[0] = { ...ITEMS.KNIFE, count: 1 };
+                this.inventory[1] = { ...ITEMS.PISTOL, count: 1, mag: 12 };
+                this.inventory[2] = { ...ITEMS.AMMO_PISTOL, count: 45 };
+                this.inventory[3] = { ...ITEMS.BERRY, count: 8 };
+
+                playerGroup.position.set(0, 1.6, 30);
+                this.updateWeaponVisibility();
+            },
+
+            update(dt) {
+                this.hunger = Math.max(0, this.hunger - CONFIG.DECAY_RATE.HUNGER * dt);
+                this.thirst = Math.max(0, this.thirst - CONFIG.DECAY_RATE.THIRST * dt);
+                
+                if (this.hunger <= 0 || this.thirst <= 0) {
+                    this.takeDamage(1.2 * dt, '기아/갈증');
+                }
+                if (this.isBleeding) {
+                    this.takeDamage(2.5 * dt, '출혈');
+                }
+
+                const moveVector = new THREE.Vector3();
+                if (Input.keys['w'] || Input.keys['W']) moveVector.z -= 1;
+                if (Input.keys['s'] || Input.keys['S']) moveVector.z += 1;
+                if (Input.keys['a'] || Input.keys['A']) moveVector.x -= 1;
+                if (Input.keys['d'] || Input.keys['D']) moveVector.x += 1;
+
+                if (moveVector.lengthSq() > 0) {
+                    moveVector.normalize();
+                    let speed = CONFIG.PLAYER_SPEED;
+                    if (Input.keys['shift'] && this.stamina > 5) {
+                        speed *= CONFIG.RUN_MULTIPLIER;
+                        this.stamina = Math.max(0, this.stamina - 18 * dt);
+                    } else {
+                        this.stamina = Math.min(100, this.stamina + 12 * dt);
+                    }
+
+                    moveVector.applyQuaternion(playerGroup.quaternion);
+                    playerGroup.position.addScaledVector(moveVector, speed * dt);
+
+                    const distFromCenter = Math.hypot(playerGroup.position.x, playerGroup.position.z);
+                    if (distFromCenter > CONFIG.ISLAND_RADIUS) {
+                        playerGroup.position.x = (playerGroup.position.x / distFromCenter) * CONFIG.ISLAND_RADIUS;
+                        playerGroup.position.z = (playerGroup.position.z / distFromCenter) * CONFIG.ISLAND_RADIUS;
+                    }
+
+                    // Update Zone Title based on player distance
+                    const zoneEl = document.getElementById('uiZone');
+                    if (distFromCenter > 90) zoneEl.innerText = '구역: 남쪽 백사장 해변가';
+                    else if (distFromCenter > 45) zoneEl.innerText = '구역: 울창한 밀림 정글';
+                    else zoneEl.innerText = '구역: 중앙 군사 진지 폐허';
+                } else {
+                    this.stamina = Math.min(100, this.stamina + 15 * dt);
+                }
+
+                if (this.recoilTimer > 0) {
+                    this.recoilTimer -= dt * 8;
+                    if (activeWeaponMesh) {
+                        activeWeaponMesh.position.z = -0.4 + Math.sin(this.recoilTimer) * 0.08;
+                        activeWeaponMesh.rotation.x = Math.sin(this.recoilTimer) * 0.15;
+                    }
+                } else if (activeWeaponMesh) {
+                    activeWeaponMesh.position.set(0.25, -0.22, -0.4);
+                    activeWeaponMesh.rotation.set(0, 0, 0);
+                }
+
+                this.checkRaycastInteraction();
+            },
+
+            checkRaycastInteraction() {
+                raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+                const intersects = raycaster.intersectObjects(scene.children, true);
+
+                let foundMsg = null;
+                let targetInfo = null;
+
+                for (let hit of intersects) {
+                    if (hit.distance > 25) break;
+                    let obj = hit.object;
+                    while (obj.parent && !obj.userData.type) obj = obj.parent;
+
+                    if (obj.userData.type) {
+                        const data = obj.userData;
+                        const dist = hit.distance;
+
+                        if (data.type === 'WOLF') {
+                            targetInfo = { name: '야생 늑대', hp: `${data.hp}/${data.maxHp}`, badge: '⚠️ 위협 동물', color: 'bg-amber-600 text-white border-amber-400' };
+                        } else if (data.type === 'MERCENARY') {
+                            targetInfo = { name: '적대 용병', hp: `${data.hp}/${data.maxHp}`, badge: '🚨 위험 인물', color: 'bg-rose-600 text-white border-rose-400' };
+                        } else if (data.type === 'WOOD') {
+                            targetInfo = { name: '열대 야자나무', hp: `${data.hp}/4`, badge: '목재 자원', color: 'bg-emerald-800 text-emerald-200 border-emerald-500' };
+                        } else if (data.type === 'STONE') {
+                            targetInfo = { name: '해안 바위', hp: `${data.hp}/3`, badge: '돌 자원', color: 'bg-slate-700 text-slate-200 border-slate-500' };
+                        } else if (data.type === 'CRATE') {
+                            targetInfo = { name: '군용 수색 상자', hp: `${data.hp}/2`, badge: '보급품', color: 'bg-amber-800 text-amber-200 border-amber-500' };
+                        } else if (data.type === 'BOAT') {
+                            targetInfo = { name: '해변 탈출 보트', hp: data.repaired ? '수리완료' : '파손됨', badge: '탈출 오브젝트', color: 'bg-cyan-800 text-cyan-200 border-cyan-500' };
+                        } else if (data.type === 'CAMPFIRE') {
+                            targetInfo = { name: '모닥불', hp: '사용 가능', badge: '휴식/체력회복', color: 'bg-orange-800 text-orange-200 border-orange-500' };
+                        } else if (data.type === 'BEACON') {
+                            targetInfo = { name: '무전 구조신호기', hp: '작동 가능', badge: '탈출 송신기', color: 'bg-blue-800 text-blue-200 border-blue-500' };
+                        }
+
+                        if (dist <= 5) {
+                            if (data.type === 'WOOD') foundMsg = '[E] 키를 눌러 목재 채집';
+                            else if (data.type === 'STONE') foundMsg = '[E] 키를 눌러 돌 채집';
+                            else if (data.type === 'CRATE') foundMsg = '[E] 키를 눌러 군용 상자 수색';
+                            else if (data.type === 'BOAT') foundMsg = '[E] 키를 눌러 보트 수리/탈출';
+                            else if (data.type === 'CAMPFIRE') foundMsg = '[E] 키를 눌러 모닥불 휴식 (체력 회복)';
+                            else if (data.type === 'BEACON') foundMsg = '[E] 키를 눌러 무전 구조신호 송신';
+                        }
+                        break;
+                    }
+                }
+
+                const targetBar = document.getElementById('uiTargetInfo');
+                if (targetInfo) {
+                    document.getElementById('uiTargetBadge').innerText = targetInfo.badge;
+                    document.getElementById('uiTargetBadge').className = `px-1.5 py-0.5 rounded text-[10px] font-tech font-extrabold uppercase border ${targetInfo.color}`;
+                    document.getElementById('uiTargetName').innerText = targetInfo.name;
+                    document.getElementById('uiTargetHp').innerText = targetInfo.hp;
+                    targetBar.classList.remove('hidden');
+                } else {
+                    targetBar.classList.add('hidden');
+                }
+
+                const msgEl = document.getElementById('uiInteractMsg');
+                if (foundMsg) {
+                    msgEl.innerText = foundMsg;
+                    msgEl.classList.remove('hidden');
+                } else {
+                    msgEl.classList.add('hidden');
+                }
+            },
+
+            interact() {
+                raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+                const intersects = raycaster.intersectObjects(scene.children, true);
+
+                for (let hit of intersects) {
+                    if (hit.distance > 5) break;
+                    let obj = hit.object;
+                    while (obj.parent && !obj.userData.type) obj = obj.parent;
+
+                    if (obj.userData.type) {
+                        const data = obj.userData;
+                        if (data.type === 'WOOD') {
+                            this.addItem(ITEMS.WOOD, 3);
+                            Missions.updateProgress('WOOD', 3);
+                            showToast('목재 3개 채집 완료');
+                            data.hp--; if (data.hp <= 0) scene.remove(obj);
+                        } else if (data.type === 'STONE') {
+                            this.addItem(ITEMS.STONE, 2);
+                            Missions.updateProgress('STONE', 2);
+                            showToast('돌 2개 채집 완료');
+                            data.hp--; if (data.hp <= 0) scene.remove(obj);
+                        } else if (data.type === 'CRATE') {
+                            this.addItem(ITEMS.METAL, 2);
+                            this.addItem(ITEMS.AMMO_PISTOL, 15);
+                            showToast('군용 물자 획득 (금속, 탄약)');
+                            data.hp--; if (data.hp <= 0) scene.remove(obj);
+                        } else if (data.type === 'BOAT') {
+                            if (data.repaired) {
+                                triggerVictory('수리된 보트를 타고 무인도를 성공적으로 탈출했습니다!');
+                            } else {
+                                const kitIdx = this.inventory.findIndex(i => i && i.id === 'BOAT_KIT');
+                                if (kitIdx !== -1) {
+                                    this.inventory[kitIdx] = null;
+                                    data.repaired = true;
+                                    Missions.updateProgress('ESCAPE', 1);
+                                    showToast('보트 수리 완료! 다시 상호작용하여 탈출하세요.');
+                                } else {
+                                    showToast('보트가 파손되었습니다! [보트 수리 키트]가 필요합니다.');
+                                }
+                            }
+                        } else if (data.type === 'CAMPFIRE') {
+                            this.hp = Math.min(this.maxHp, this.hp + 20);
+                            showToast('모닥불 온기로 체력을 회복했습니다.');
+                        } else if (data.type === 'BEACON') {
+                            Missions.updateProgress('ESCAPE', 1);
+                            triggerVictory('무전 신호기를 통해 헬기 구조대를 호출하여 탈출에 성공했습니다!');
+                        }
+                        
+                        Tutorial.checkProgress();
+                        updateUI();
+                        break;
+                    }
+                }
+            },
+
+            attack() {
+                const weapon = this.inventory[this.activeSlot];
+                if (!weapon) return;
+
+                const now = performance.now();
+                if (weapon.weaponType === 'MELEE') {
+                    if (now - this.lastShotTime >= weapon.rate) {
+                        this.lastShotTime = now;
+                        this.recoilTimer = Math.PI;
+                        Combat.meleeAttack(weapon.damage);
+                    }
+                } else if (weapon.weaponType === 'GUN') {
+                    if (this.isReloading) return;
+                    if ((weapon.mag || 0) <= 0) {
+                        showToast('탄약이 부족합니다! [R] 키로 재장전하세요.');
+                        return;
+                    }
+                    if (now - this.lastShotTime >= weapon.rate) {
+                        this.lastShotTime = now;
+                        weapon.mag--;
+                        this.recoilTimer = Math.PI;
+                        Combat.fire3DBullet(weapon.damage, weapon.range);
+                        updateUI();
+                    }
+                } else {
+                    this.useItem(this.activeSlot);
+                }
+            },
+
+            reloadWeapon() {
+                const weapon = this.inventory[this.activeSlot];
+                if (!weapon || weapon.weaponType !== 'GUN' || this.isReloading) return;
+
+                const ammoItem = this.inventory.find(i => i && i.id === weapon.ammoType);
+                if (!ammoItem || ammoItem.count <= 0) {
+                    showToast('해당 화기의 탄약이 인벤토리에 없습니다!');
+                    return;
+                }
+
+                this.isReloading = true;
+                showToast('재장전 중...');
+                setTimeout(() => {
+                    const needed = weapon.magCap - (weapon.mag || 0);
+                    const loadAmount = Math.min(needed, ammoItem.count);
+                    weapon.mag = (weapon.mag || 0) + loadAmount;
+                    ammoItem.count -= loadAmount;
+                    if (ammoItem.count <= 0) {
+                        const idx = this.inventory.indexOf(ammoItem);
+                        this.inventory[idx] = null;
+                    }
+                    this.isReloading = false;
+                    showToast('재장전 완료!');
+                    updateUI();
+                }, weapon.reloadTime);
+            },
+
+            toggleFlashlight() {
+                this.flashlightOn = !this.flashlightOn;
+                flashlight.visible = this.flashlightOn;
+                showToast(`손전등 ${this.flashlightOn ? '켜짐' : '꺼짐'}`);
+            },
+
+            selectHotbar(index) {
+                this.activeSlot = index;
+                this.updateWeaponVisibility();
+                updateUI();
+            },
+
+            updateWeaponVisibility() {
+                if (weaponModels.knife) weaponModels.knife.visible = false;
+                if (weaponModels.pistol) weaponModels.pistol.visible = false;
+                if (weaponModels.rifle) weaponModels.rifle.visible = false;
+
+                const active = this.inventory[this.activeSlot];
+                if (active) {
+                    if (active.id === 'KNIFE' && weaponModels.knife) {
+                        weaponModels.knife.visible = true; activeWeaponMesh = weaponModels.knife;
+                    } else if (active.id === 'PISTOL' && weaponModels.pistol) {
+                        weaponModels.pistol.visible = true; activeWeaponMesh = weaponModels.pistol;
+                    } else if (active.id === 'RIFLE' && weaponModels.rifle) {
+                        weaponModels.rifle.visible = true; activeWeaponMesh = weaponModels.rifle;
+                    } else { activeWeaponMesh = null; }
+                } else { activeWeaponMesh = null; }
+            },
+
+            useItem(slotIdx) {
+                const item = this.inventory[slotIdx];
+                if (!item) return;
+
+                if (item.hunger) this.hunger = Math.min(100, this.hunger + item.hunger);
+                if (item.thirst) this.thirst = Math.min(100, this.thirst + item.thirst);
+                if (item.hp) this.hp = Math.min(this.maxHp, this.hp + item.hp);
+                if (item.stopBleed) this.isBleeding = false;
+
+                item.count--;
+                if (item.count <= 0) this.inventory[slotIdx] = null;
+                showToast(`${item.name} 사용 완료`);
+                updateUI();
+            },
+
+            takeDamage(amount, source = '공격') {
+                this.hp -= amount;
+                const damageOverlay = document.getElementById('damageVignette');
+                damageOverlay.style.boxShadow = 'inset 0 0 100px rgba(225, 29, 72, 0.8)';
+                setTimeout(() => damageOverlay.style.boxShadow = 'inset 0 0 100px rgba(225, 29, 72, 0)', 300);
+
+                if (this.hp <= 0) {
+                    this.hp = 0;
+                    triggerGameOver(`사망 원인: ${source}`);
+                }
+            },
+
+            addItem(itemObj, count = 1) {
+                let slot = this.inventory.find(i => i && i.id === itemObj.id && i.count < (i.stack || 99));
+                if (slot) {
+                    slot.count += count;
+                    return true;
+                }
+                const emptyIdx = this.inventory.findIndex(i => i === null);
+                if (emptyIdx !== -1) {
+                    this.inventory[emptyIdx] = { ...itemObj, count: count };
+                    return true;
+                }
+                showToast('배낭 공간이 부족합니다!');
+                return false;
+            }
+        };
+
+        function createKnifeMesh() {
+            const group = new THREE.Group();
+            const blade = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.35, 0.08), new THREE.MeshStandardMaterial({ color: 0xd1d5db, metalness: 0.8, roughness: 0.2 }));
+            blade.position.set(0, 0.18, 0);
+            const handle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.18, 0.06), new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.8 }));
+            group.add(blade, handle);
+            group.position.set(0.25, -0.22, -0.4);
+            return group;
+        }
+
+        function createPistolMesh() {
+            const group = new THREE.Group();
+            const slide = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.38), new THREE.MeshStandardMaterial({ color: 0x374151, metalness: 0.7, roughness: 0.3 }));
+            const handle = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.22, 0.1), new THREE.MeshStandardMaterial({ color: 0x1f2937 }));
+            handle.position.set(0, -0.12, 0.08); handle.rotation.x = 0.2;
+            group.add(slide, handle);
+            group.position.set(0.25, -0.22, -0.4);
+            return group;
+        }
+
+        function createRifleMesh() {
+            const group = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.7), new THREE.MeshStandardMaterial({ color: 0x1f2937, metalness: 0.6, roughness: 0.4 }));
+            const mag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.22, 0.1), new THREE.MeshStandardMaterial({ color: 0x111827 }));
+            mag.position.set(0, -0.15, -0.05);
+            group.add(body, mag);
+            group.position.set(0.25, -0.22, -0.4);
+            return group;
+        }
+
+        // 3D WORLD INITIALIZATION WITH RICH MAP DETAILS
+        function init3DWorld() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0f172a);
+            scene.fog = new THREE.FogExp2(0x0f172a, 0.012);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            raycaster = new THREE.Raycaster();
+
+            playerGroup = new THREE.Group();
+            pitchObject = new THREE.Group();
+            pitchObject.add(camera);
+            playerGroup.add(pitchObject);
+            scene.add(playerGroup);
+
+            // Flashlight
+            flashlight = new THREE.SpotLight(0xffffff, 2.5, 45, Math.PI / 4.5, 0.5, 1);
+            flashlight.position.set(0.2, -0.2, 0);
+            flashlight.target.position.set(0, -0.2, -10);
+            pitchObject.add(flashlight, flashlight.target);
+
+            // Attach Weapons
+            weaponModels.knife = createKnifeMesh();
+            weaponModels.pistol = createPistolMesh();
+            weaponModels.rifle = createRifleMesh();
+
+            pitchObject.add(weaponModels.knife, weaponModels.pistol, weaponModels.rifle);
+
+            // Lighting
+            ambientLight = new THREE.AmbientLight(0x334155, 0.8);
+            scene.add(ambientLight);
+
+            sunLight = new THREE.DirectionalLight(0xfef08a, 1.2);
+            sunLight.position.set(60, 100, 60);
+            scene.add(sunLight);
+
+            // MULTI-LAYERED TERRAIN VISUALS
+            // Layer 1: Beach Sand Outer Ring
+            const beachGeo = new THREE.CylinderGeometry(CONFIG.ISLAND_RADIUS, CONFIG.ISLAND_RADIUS + 12, 1.8, 64);
+            const beachMat = new THREE.MeshStandardMaterial({ color: 0xca8a04, roughness: 0.95 });
+            const beach = new THREE.Mesh(beachGeo, beachMat);
+            beach.position.y = -0.9;
+            scene.add(beach);
+
+            // Layer 2: Jungle Grass Middle Zone
+            const jungleGeo = new THREE.CylinderGeometry(CONFIG.ISLAND_RADIUS - 30, CONFIG.ISLAND_RADIUS - 30, 2.2, 64);
+            const jungleMat = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.8 });
+            const jungle = new THREE.Mesh(jungleGeo, jungleMat);
+            jungle.position.y = -0.7;
+            scene.add(jungle);
+
+            // Layer 3: Central Rocky Mountain Core
+            const mountainGeo = new THREE.CylinderGeometry(40, 50, 4, 32);
+            const mountainMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.9 });
+            const mountain = new THREE.Mesh(mountainGeo, mountainMat);
+            mountain.position.y = 0;
+            scene.add(mountain);
+
+            // Surrounding Ocean
+            const waterGeo = new THREE.PlaneGeometry(1000, 1000);
+            const waterMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, transparent: true, opacity: 0.8, roughness: 0.1 });
+            const water = new THREE.Mesh(waterGeo, waterMat);
+            water.rotation.x = -Math.PI / 2;
+            water.position.y = -1.7;
+            scene.add(water);
+
+            spawnWorldObjects();
+        }
+
+        // DECORATIVE & RICH WORLD MAP GENERATION
+        function spawnWorldObjects() {
+            // 1. PALM TREES & PINE TREES
+            for (let i = 0; i < 45; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const r = 15 + Math.random() * (CONFIG.ISLAND_RADIUS - 25);
+                const x = Math.cos(angle) * r;
+                const z = Math.sin(angle) * r;
+
+                const tree = new THREE.Group();
+                if (r > 80) {
+                    // Tropical Palm Tree on beach/edge
+                    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.45, 4.5, 6), new THREE.MeshStandardMaterial({ color: 0xa16207 }));
+                    trunk.position.y = 2.25; trunk.rotation.z = (Math.random() - 0.5) * 0.2;
+                    const top = new THREE.Mesh(new THREE.SphereGeometry(2.2, 6, 6), new THREE.MeshStandardMaterial({ color: 0x15803d }));
+                    top.position.y = 4.8;
+                    tree.add(trunk, top);
+                } else {
+                    // Deep Jungle Tree
+                    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.6, 4, 8), new THREE.MeshStandardMaterial({ color: 0x78350f }));
+                    trunk.position.y = 2;
+                    const leaves = new THREE.Mesh(new THREE.ConeGeometry(2.5, 5, 8), new THREE.MeshStandardMaterial({ color: 0x166534 }));
+                    leaves.position.y = 5;
+                    tree.add(trunk, leaves);
+                }
+                tree.position.set(x, 0, z);
+                tree.userData = { type: 'WOOD', hp: 4 };
+                scene.add(tree);
+            }
+
+            // 2. ROCKS & BOULDERS
+            for (let i = 0; i < 30; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const r = 10 + Math.random() * (CONFIG.ISLAND_RADIUS - 20);
+                const x = Math.cos(angle) * r;
+                const z = Math.sin(angle) * r;
+
+                const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(1.2 + Math.random() * 0.8), new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.9 }));
+                rock.position.set(x, 0.6, z);
+                rock.userData = { type: 'STONE', hp: 3 };
+                scene.add(rock);
+            }
+
+            // 3. MILITARY OUTPOST RUINS (Central Base Ruins)
+            const outpost = new THREE.Group();
+            
+            // Watchtower
+            const tower = new THREE.Mesh(new THREE.BoxGeometry(3, 8, 3), new THREE.MeshStandardMaterial({ color: 0x334155 }));
+            tower.position.set(0, 4, 0);
+            outpost.add(tower);
+
+            // Sandbag Bunkers
+            for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 2) {
+                const sandbag = new THREE.Mesh(new THREE.BoxGeometry(4, 1.2, 0.8), new THREE.MeshStandardMaterial({ color: 0x854d0e }));
+                sandbag.position.set(Math.cos(angle) * 8, 0.6, Math.sin(angle) * 8);
+                sandbag.rotation.y = angle;
+                outpost.add(sandbag);
+            }
+            outpost.position.set(0, 1.5, 0);
+            scene.add(outpost);
+
+            // 4. CRASHED SUPPLY CONTAINERS
+            for (let i = 0; i < 12; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const r = 15 + Math.random() * (CONFIG.ISLAND_RADIUS - 30);
+                const x = Math.cos(angle) * r;
+                const z = Math.sin(angle) * r;
+
+                const crate = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.4, 1.4), new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.6 }));
+                crate.position.set(x, 0.7, z);
+                crate.rotation.y = Math.random() * Math.PI;
+                crate.userData = { type: 'CRATE', hp: 2 };
+                scene.add(crate);
+            }
+
+            // 5. ESCAPE BOAT ON BEACH
+            const boatGroup = new THREE.Group();
+            const hull = new THREE.Mesh(new THREE.BoxGeometry(2.8, 1.2, 5.5), new THREE.MeshStandardMaterial({ color: 0x0284c7 }));
+            hull.position.y = 0.6;
+            boatGroup.add(hull);
+            boatGroup.position.set(0, -0.2, CONFIG.ISLAND_RADIUS - 12);
+            boatGroup.userData = { type: 'BOAT', repaired: false };
+            scene.add(boatGroup);
+        }
+
+        // ENEMY MANAGER
+        const EnemyManager = {
+            enemies: [],
+            spawnTimer: 0,
+
+            spawn(type) {
+                const angle = Math.random() * Math.PI * 2;
+                const dist = 35 + Math.random() * 40;
+                const x = playerGroup.position.x + Math.cos(angle) * dist;
+                const z = playerGroup.position.z + Math.sin(angle) * dist;
+
+                const group = new THREE.Group();
+
+                if (type === 'WOLF') {
+                    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.8 });
+                    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+
+                    const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.6, 1.4), bodyMat);
+                    body.position.y = 0.5;
+                    group.add(body);
+
+                    const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.45, 0.5), bodyMat);
+                    head.position.set(0, 0.8, -0.7);
+                    group.add(head);
+
+                    const eyeLeft = new THREE.Mesh(new THREE.SphereGeometry(0.07), eyeMat);
+                    eyeLeft.position.set(-0.15, 0.88, -0.96);
+                    const eyeRight = new THREE.Mesh(new THREE.SphereGeometry(0.07), eyeMat);
+                    eyeRight.position.set(0.15, 0.88, -0.96);
+                    group.add(eyeLeft, eyeRight);
+
+                    for (let lx of [-0.25, 0.25]) {
+                        for (let lz of [-0.4, 0.4]) {
+                            const leg = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.5, 0.18), bodyMat);
+                            leg.position.set(lx, 0.25, lz);
+                            group.add(leg);
+                        }
+                    }
+                } else {
+                    const camoMat = new THREE.MeshStandardMaterial({ color: 0x1f2937 });
+                    const vestMat = new THREE.MeshStandardMaterial({ color: 0x991b1b });
+                    const visorMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+
+                    const legs = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.8, 0.4), camoMat);
+                    legs.position.y = 0.4;
+                    group.add(legs);
+
+                    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.8, 0.45), vestMat);
+                    torso.position.y = 1.1;
+                    group.add(torso);
+
+                    const helmet = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.4, 0.45), camoMat);
+                    helmet.position.y = 1.7;
+                    group.add(helmet);
+
+                    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.12, 0.1), visorMat);
+                    visor.position.set(0, 1.7, -0.21);
+                    group.add(visor);
+
+                    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.7), new THREE.MeshStandardMaterial({ color: 0x111827 }));
+                    gun.position.set(0.35, 1.1, -0.3);
+                    group.add(gun);
+                }
+
+                group.position.set(x, 0, z);
+
+                const enemyData = {
+                    mesh: group,
+                    type: type,
+                    hp: type === 'WOLF' ? 45 : 80,
+                    maxHp: type === 'WOLF' ? 45 : 80,
+                    speed: type === 'WOLF' ? 6.0 : 4.2,
+                    damage: type === 'WOLF' ? 12 : 18,
+                    lastAttack: 0
+                };
+                group.userData = enemyData;
+                scene.add(group);
+                this.enemies.push(enemyData);
+            },
+
+            update(dt) {
+                for (let i = this.enemies.length - 1; i >= 0; i--) {
+                    const e = this.enemies[i];
+                    const distToPlayer = e.mesh.position.distanceTo(playerGroup.position);
+
+                    if (distToPlayer < 40) {
+                        e.mesh.lookAt(playerGroup.position.x, e.mesh.position.y, playerGroup.position.z);
+                        const dir = new THREE.Vector3().subVectors(playerGroup.position, e.mesh.position).normalize();
+                        dir.y = 0;
+                        e.mesh.position.addScaledVector(dir, e.speed * dt);
+
+                        if (distToPlayer < 2.2) {
+                            const now = performance.now();
+                            if (now - e.lastAttack > 1200) {
+                                e.lastAttack = now;
+                                Player.takeDamage(e.damage, e.type === 'WOLF' ? '야생 늑대 습격' : '적대 용병 사격');
+                                if (Math.random() < 0.35) Player.isBleeding = true;
+                            }
+                        }
+                    }
+
+                    if (e.hp <= 0) {
+                        scene.remove(e.mesh);
+                        if (e.type === 'WOLF') Player.addItem(ITEMS.MEAT, 2);
+                        else { Player.addItem(ITEMS.AMMO_RIFLE, 20); Player.addItem(ITEMS.METAL, 3); }
+                        this.enemies.splice(i, 1);
+                        showToast(`${e.type === 'WOLF' ? '야생 늑대' : '적대 용병'} 처치!`);
+                    }
+                }
+
+                this.spawnTimer += dt;
+                if (this.spawnTimer > 18 && this.enemies.length < 8) {
+                    this.spawnTimer = 0;
+                    this.spawn(Math.random() < 0.6 ? 'WOLF' : 'MERCENARY');
+                }
+            }
+        };
+
+        function renderInventoryGrid() {
+            const grid = document.getElementById('uiInvGrid');
+            grid.innerHTML = '';
+            Player.inventory.forEach((item, idx) => {
+                const slot = document.createElement('div');
+                slot.className = 'bg-slate-950 border border-slate-800 rounded-xl p-1.5 h-22 flex flex-col items-center justify-between relative cursor-pointer hover:border-slate-600 transition-colors';
+                if (item) {
+                    slot.innerHTML = `
+                        <span class="text-2xl mt-0.5">${item.icon}</span>
+                        <div class="text-center w-full">
+                            <div class="text-[10px] text-slate-200 truncate font-semibold">${item.name}</div>
+                            ${item.recoveryText ? `<div class="text-[9px] text-emerald-400 font-bold leading-tight">${item.recoveryText}</div>` : `<div class="text-[9px] text-slate-500 truncate">${item.desc || ''}</div>`}
+                        </div>
+                        <span class="text-[10px] text-emerald-400 font-tech font-bold absolute top-1 right-1 bg-slate-900/80 px-1 rounded">x${item.count || 1}</span>
+                    `;
+                    slot.onclick = () => { Player.useItem(idx); renderInventoryGrid(); };
+                }
+                grid.appendChild(slot);
+            });
+        }
+
+        function renderCraftingRecipes() {
+            const list = document.getElementById('uiCraftList');
+            list.innerHTML = '';
+            RECIPES.forEach(r => {
+                const item = document.createElement('div');
+                item.className = 'bg-slate-950 border border-slate-800 rounded-xl p-3 flex justify-between items-center';
+                
+                let canCraft = true;
+                let reqStr = [];
+                for (let matKey in r.req) {
+                    const needed = r.req[matKey];
+                    const hasItem = Player.inventory.find(i => i && i.id === matKey);
+                    const hasCount = hasItem ? hasItem.count : 0;
+                    if (hasCount < needed) canCraft = false;
+                    reqStr.push(`${ITEMS[matKey].name} ${hasCount}/${needed}`);
+                }
+
+                item.innerHTML = `
+                    <div>
+                        <div class="text-xs font-bold text-slate-200">${r.name}</div>
+                        <div class="text-[10px] text-slate-400 mb-1">${r.desc}</div>
+                        <div class="text-[10px] text-slate-500">${reqStr.join(' | ')}</div>
+                    </div>
+                    <button class="px-3 py-1.5 rounded-lg text-xs font-bold font-tech ${canCraft ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}" ${canCraft ? '' : 'disabled'}>
+                        제작
+                    </button>
+                `;
+
+                item.querySelector('button').onclick = () => craftRecipe(r);
+                list.appendChild(item);
+            });
+        }
+
+        function craftRecipe(recipe) {
+            for (let matKey in recipe.req) {
+                const needed = recipe.req[matKey];
+                let item = Player.inventory.find(i => i && i.id === matKey);
+                item.count -= needed;
+                if (item.count <= 0) {
+                    const idx = Player.inventory.indexOf(item);
+                    Player.inventory[idx] = null;
+                }
+            }
+
+            if (recipe.type === 'BUILD') {
+                const forward = new THREE.Vector3(0, 0, -3).applyQuaternion(playerGroup.quaternion);
+                const buildPos = new THREE.Vector3().addVectors(playerGroup.position, forward);
+
+                if (recipe.id === 'CAMPFIRE') {
+                    const fire = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.6, 0.3), new THREE.MeshStandardMaterial({ color: 0xeab308 }));
+                    fire.position.copy(buildPos);
+                    fire.position.y = 0.15;
+                    fire.userData = { type: 'CAMPFIRE', hp: 99 };
+                    scene.add(fire);
+                    Missions.updateProgress('CAMPFIRE', 1);
+                } else if (recipe.id === 'SIGNAL_BEACON') {
+                    const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.4, 4), new THREE.MeshStandardMaterial({ color: 0x06b6d4 }));
+                    beacon.position.copy(buildPos);
+                    beacon.position.y = 2;
+                    beacon.userData = { type: 'BEACON', hp: 99 };
+                    scene.add(beacon);
+                    Missions.updateProgress('ESCAPE', 1);
+                }
+                showToast(`${recipe.name} 건설 완료!`);
+            } else {
+                Player.addItem(ITEMS[recipe.id], recipe.amount || 1);
+                if (recipe.id === 'PISTOL' || recipe.id === 'RIFLE') Missions.updateProgress('WEAPON', 1);
+                showToast(`${recipe.name} 제작 완료!`);
+            }
+
+            Tutorial.checkProgress();
+            renderInventoryGrid();
+            renderCraftingRecipes();
+            updateUI();
+        }
+
+        function updateEnvironment(dt) {
+            dayTime = (dayTime + dt * 0.05) % 24;
+            const hour = Math.floor(dayTime);
+            const min = Math.floor((dayTime - hour) * 60);
+            const isNight = dayTime < 6 || dayTime > 19;
+            
+            document.getElementById('uiTimeText').innerText = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')} (${isNight ? '밤 🌙' : '낮 ☀️'})`;
+
+            if (isNight) {
+                ambientLight.intensity = 0.2;
+                sunLight.intensity = 0.1;
+            } else {
+                ambientLight.intensity = 0.8;
+                sunLight.intensity = 1.2;
+            }
+        }
+
+        // GAME LOOP
+        function animateLoop(now) {
+            const dt = Math.min((now - lastTime) / 1000, 0.1);
+            lastTime = now;
+
+            if (gameState === 'PLAYING') {
+                if (Input.keys['e'] || Input.keys['E']) {
+                    Input.keys['e'] = false;
+                    Input.keys['E'] = false;
+                    Player.interact();
+                }
+
+                updateEnvironment(dt);
+                Player.update(dt);
+                EnemyManager.update(dt);
+                Tutorial.updateBeaconPosition();
+                updateUI();
+            }
+
+            renderer.render(scene, camera);
+            requestAnimationFrame(animateLoop);
+        }
+
+        function triggerGameOver(reason) {
+            gameState = 'GAMEOVER';
+            if (document.pointerLockElement) document.exitPointerLock();
+            document.getElementById('endTitle').innerText = '작전 실패 (사망)';
+            document.getElementById('endTitle').className = 'text-3xl font-extrabold text-rose-500 font-tech mb-2';
+            document.getElementById('endDesc').innerText = reason;
+            document.getElementById('endOverlay').classList.remove('hidden');
+        }
+
+        function triggerVictory(msg) {
+            gameState = 'VICTORY';
+            if (document.pointerLockElement) document.exitPointerLock();
+            document.getElementById('endTitle').innerText = '섬 탈출 성공 (작전 완료)';
+            document.getElementById('endTitle').className = 'text-3xl font-extrabold text-emerald-400 font-tech mb-2';
+            document.getElementById('endDesc').innerText = msg;
+            document.getElementById('endOverlay').classList.remove('hidden');
+        }
+
+        function startGame() {
+            const container = document.getElementById('webglContainer');
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            Input.init();
+            init3DWorld();
+            Player.init();
+            Tutorial.init();
+            EnemyManager.spawn('WOLF');
+            EnemyManager.spawn('MERCENARY');
+
+            document.getElementById('startOverlay').classList.add('hidden');
+            document.getElementById('hudOverlay').classList.remove('hidden');
+            document.getElementById('crosshair').classList.remove('hidden');
+
+            document.body.requestPointerLock();
+            gameState = 'PLAYING';
+            lastTime = performance.now();
+            requestAnimationFrame(animateLoop);
+        }
+
+        // EVENT BINDINGS
+        window.onload = () => {
+            document.getElementById('btnStartGame').onclick = startGame;
+            document.getElementById('btnCloseInv').onclick = () => { toggleInventory(false); Tutorial.checkProgress(); };
+            document.getElementById('btnSkipTutorial').onclick = () => Tutorial.skip();
+            document.getElementById('btnRestart').onclick = () => location.reload();
+        };
+    </script>
+</body>
+</html>

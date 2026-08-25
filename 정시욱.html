@@ -1,0 +1,1493 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>학교 탈출 - 체력단련실의 비밀</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            user-select: none;
+            background-color: #020617;
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+            touch-action: none;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        /* Crosshair Reticle */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.85);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+        }
+        #crosshair.active {
+            border-color: #f59e0b;
+            background-color: rgba(245, 158, 11, 0.6);
+            transform: translate(-50%, -50%) scale(1.6);
+        }
+
+        /* Screen Vignette & Overlay Effects */
+        .vignette {
+            position: absolute;
+            inset: 0;
+            box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.65);
+            pointer-events: none;
+        }
+
+        #hide-overlay {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle, rgba(0,0,0,0.2) 20%, rgba(0,0,0,0.92) 85%);
+            pointer-events: none;
+            display: none;
+        }
+
+        .scanlines {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.12) 50%);
+            background-size: 100% 4px;
+            pointer-events: none;
+            opacity: 0.3;
+        }
+
+        /* Touch Control Pad Styling for Mobile/Tablet */
+        .touch-btn {
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(245, 158, 11, 0.5);
+            color: #f8fafc;
+            border-radius: 9999px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            user-select: none;
+            touch-action: manipulation;
+            backdrop-filter: blur(6px);
+        }
+        .touch-btn:active {
+            background: rgba(245, 158, 11, 0.6);
+            transform: scale(0.92);
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-white select-none">
+
+    <!-- Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- Atmosphere Filters -->
+    <div id="vignette-effect" class="vignette"></div>
+    <div class="scanlines"></div>
+    
+    <!-- Hiding Screen Overlay -->
+    <div id="hide-overlay">
+        <div class="absolute bottom-20 left-1/2 -translate-x-1/2 bg-black/85 border border-emerald-500/70 text-emerald-300 px-6 py-2.5 rounded-full text-xs font-bold tracking-wide animate-pulse shadow-2xl flex items-center gap-2">
+            <span>👁️</span> 라커 내부에 몸을 숨겼습니다. (선생님이 완전히 멀어질 때까지 대기하세요)
+        </div>
+    </div>
+
+    <!-- HUD Overlay -->
+    <div id="hud" class="absolute inset-0 pointer-events-none p-4 md:p-6 flex flex-col justify-between hidden">
+        <!-- Top Info Bar -->
+        <div class="flex justify-between items-start">
+            <!-- Location & Objective -->
+            <div class="space-y-2 max-w-xs md:max-w-md">
+                <div class="bg-slate-900/90 border border-amber-500/40 px-3 py-1.5 md:px-4 md:py-2 rounded-xl backdrop-blur-md shadow-2xl flex items-center space-x-2">
+                    <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+                    <span id="location-text" class="text-[11px] md:text-xs font-bold text-amber-300 uppercase tracking-widest">위치: 체력단련실 1관 (웨이트존)</span>
+                </div>
+                <div class="bg-slate-900/90 border border-slate-700 p-3 md:p-4 rounded-xl shadow-2xl backdrop-blur-md">
+                    <h2 class="text-[11px] md:text-xs font-bold text-red-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        현재 탈출 목표
+                    </h2>
+                    <p id="objective-text" class="text-[11px] md:text-xs font-medium text-slate-200 leading-snug">학교 곳곳에 숨겨진 7개의 열쇠를 수집해 정문으로 탈출하세요.</p>
+                </div>
+            </div>
+            
+            <!-- Keys Counter -->
+            <div class="bg-slate-900/90 border border-amber-500/50 p-3 md:p-4 rounded-2xl shadow-2xl flex items-center space-x-3 md:space-x-4 backdrop-blur-md">
+                <div class="text-2xl md:text-3xl">🔑</div>
+                <div>
+                    <div class="text-[10px] md:text-xs font-semibold text-slate-400 uppercase tracking-wider">열쇠 수집 진행도</div>
+                    <div id="key-counter" class="text-xl md:text-2xl font-black text-amber-400 tracking-tight">0 / 7</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center Reticle & Interactive Prompt -->
+        <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
+            <div id="crosshair"></div>
+            <div id="interaction-prompt" class="mt-8 px-5 py-2.5 bg-slate-900/95 text-amber-300 text-xs font-bold rounded-full border border-amber-500/80 opacity-0 transition-all duration-150 shadow-2xl backdrop-blur-sm tracking-wide cursor-pointer pointer-events-auto hover:bg-amber-500 hover:text-slate-950 active:scale-95">
+                [E / Space / 클릭] 상호작용
+            </div>
+        </div>
+
+        <!-- Notification Toast -->
+        <div id="notification-toast" class="absolute top-24 md:top-28 left-1/2 transform -translate-x-1/2 bg-slate-900/95 border border-amber-500 text-amber-200 px-6 py-2.5 rounded-xl shadow-2xl text-center transition-all duration-300 opacity-0 -translate-y-4 pointer-events-none backdrop-blur-md">
+            <p id="notification-text" class="font-bold text-xs tracking-wide"></p>
+        </div>
+
+        <!-- Bottom Controls & Stamina Bar -->
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-end gap-3 pointer-events-auto">
+            <!-- Stamina Bar -->
+            <div class="w-60 md:w-72 bg-slate-900/90 p-3 md:p-4 rounded-xl border border-slate-700 backdrop-blur-md shadow-2xl">
+                <div class="flex justify-between text-[11px] md:text-xs font-bold mb-1.5">
+                    <span class="text-slate-300 uppercase tracking-wider">스태미나</span>
+                    <span id="stamina-text" class="text-emerald-400">100%</span>
+                </div>
+                <div class="w-full bg-slate-950 rounded-full h-3 overflow-hidden border border-slate-800 p-0.5">
+                    <div id="stamina-bar" class="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-all duration-75 shadow-sm" style="width: 100%"></div>
+                </div>
+            </div>
+
+            <!-- Keyboard Legend (Desktop) -->
+            <div class="hidden md:block bg-slate-900/90 border border-slate-700 px-4 py-3 rounded-xl text-xs text-slate-200 space-y-1 backdrop-blur-md shadow-2xl">
+                <div><span class="text-amber-400 font-bold">WASD / 방향키</span> : 이동 &nbsp;|&nbsp; <span class="text-amber-400 font-bold">Shift</span> : 달리기</div>
+                <div><span class="text-amber-400 font-bold">마우스 클릭/드래그</span> : 시점 회전 &nbsp;|&nbsp; <span class="text-amber-400 font-bold">E / Space / 클릭</span> : 상호작용/문 열기/열쇠/숨기</div>
+                <div><span class="text-amber-400 font-bold">F</span> : 손전등 On/Off &nbsp;|&nbsp; <span class="text-amber-400 font-bold">ESC</span> : 단서 닫기</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Touch Controls for Mobile/Tablet -->
+    <div id="touch-controls" class="absolute bottom-6 right-6 flex flex-col items-end gap-3 pointer-events-auto md:hidden z-30">
+        <div class="grid grid-cols-3 gap-1 w-36 h-36 mb-2">
+            <div></div>
+            <button id="btn-dpad-up" class="touch-btn text-lg">▲</button>
+            <div></div>
+            <button id="btn-dpad-left" class="touch-btn text-lg">◀</button>
+            <button id="btn-dpad-down" class="touch-btn text-lg">▼</button>
+            <button id="btn-dpad-right" class="touch-btn text-lg">▶</button>
+        </div>
+        <div class="flex gap-2">
+            <button id="btn-touch-interact" class="touch-btn w-12 h-12 text-xs border-amber-400 text-amber-300">E</button>
+            <button id="btn-touch-light" class="touch-btn w-12 h-12 text-xs border-sky-400 text-sky-300">💡</button>
+            <button id="btn-touch-run" class="touch-btn w-12 h-12 text-xs border-emerald-400 text-emerald-300">🏃</button>
+        </div>
+    </div>
+
+    <!-- Start Modal Screen -->
+    <div id="start-screen" class="absolute inset-0 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 flex flex-col items-center justify-center p-6 z-50">
+        <div class="max-w-2xl text-center space-y-6">
+            <div class="inline-block px-4 py-1.5 bg-amber-950/80 border border-amber-500/60 rounded-full text-amber-400 text-xs font-bold tracking-widest uppercase">
+                🏫 3D 1인칭 공포 학교 탈출
+            </div>
+            <h1 class="text-4xl md:text-5xl font-black tracking-tight text-white drop-shadow-[0_10px_20px_rgba(245,158,11,0.2)]">
+                학교 탈출: 체력단련실의 비밀
+            </h1>
+            <p class="text-amber-400 text-xs md:text-sm font-bold tracking-widest -mt-2">학생 '황우진'의 심야 야간 탈출기</p>
+
+            <div class="bg-slate-900/95 border border-slate-700 p-5 md:p-6 rounded-2xl text-left text-xs text-slate-200 space-y-3 backdrop-blur-md shadow-2xl leading-relaxed">
+                <p><span class="text-amber-400 font-bold">시나리오:</span> 주인공 <span class="text-white font-bold">'황우진'</span>은 밤 11시, 학교 체력단련실 1관에서 눈을 떴습니다. 4명의 순찰 선생님들을 피해 학교 전체를 수색하세요.</p>
+                <p><span class="text-amber-400 font-bold">조작 방법:</span> <span class="text-emerald-300 font-bold">WASD / 방향키</span> 이동, <span class="text-emerald-300 font-bold">마우스 클릭/드래그</span> 시점 전환, <span class="text-emerald-300 font-bold">E / Space / 문 클릭</span> 문 열기/상호작용, <span class="text-emerald-300 font-bold">Shift</span> 달리기, <span class="text-emerald-300 font-bold">F</span> 손전등.</p>
+                <hr class="border-slate-800">
+                <ul class="space-y-2 text-xs text-slate-300">
+                    <li class="flex items-center gap-2"><span class="text-amber-400 font-bold">🔑 목표:</span> 교실과 창고, 보건실 등에 숨겨진 <span class="text-amber-400 font-bold">7개의 열쇠</span>를 수집해 <span class="text-emerald-400 font-bold">초록색 정문</span>으로 탈출하세요.</li>
+                    <li class="flex items-center gap-2"><span class="text-red-400 font-bold">🚨 선생님 회피:</span> 선생님을 만나면 달리기로 따돌리거나 근처 라커에 숨으세요. 문을 닫으면 시야를 차단할 수 있습니다!</li>
+                </ul>
+            </div>
+
+            <button id="btn-start" class="w-full py-4 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-black text-lg rounded-xl shadow-2xl transform transition hover:scale-[1.01] active:scale-95 border border-amber-400 tracking-wider cursor-pointer">
+                게임 시작 (클릭)
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Over Modal Screen -->
+    <div id="gameover-screen" class="absolute inset-0 bg-slate-950/95 flex flex-col items-center justify-center p-6 z-50 hidden backdrop-blur-xl">
+        <div class="text-center space-y-6 max-w-md">
+            <div class="text-6xl animate-bounce">🚨</div>
+            <h1 class="text-4xl font-black text-red-500 tracking-wider">선생님께 붙잡혔습니다!</h1>
+            <p class="text-slate-300 text-xs font-medium leading-relaxed">"황우진 학생! 이 밤늦게 학교 체력단련실과 복도에서 뭐 하고 있는 건가!"</p>
+            <div class="bg-red-950/40 border border-red-900/50 p-4 rounded-xl text-xs text-slate-300">
+                선생님을 발견하면 빠르게 뛰어 따돌리거나 근처 라커에 숨으세요! 문을 닫으면 시야를 차단할 수 있습니다.
+            </div>
+            <button id="btn-restart" class="w-full py-3.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white font-bold rounded-xl shadow-2xl transform transition active:scale-95 cursor-pointer">
+                다시 시도하기
+            </button>
+        </div>
+    </div>
+
+    <!-- Victory Modal Screen -->
+    <div id="victory-screen" class="absolute inset-0 bg-gradient-to-b from-slate-950 via-emerald-950/50 to-slate-950 flex flex-col items-center justify-center p-6 z-50 hidden backdrop-blur-xl">
+        <div class="text-center space-y-6 max-w-md">
+            <div class="text-7xl">🏫🏃‍♂️💨</div>
+            <h1 class="text-4xl font-black text-emerald-400 tracking-tight">학교 탈출 성공!</h1>
+            <p class="text-slate-200 text-xs">7개의 열쇠를 모두 수집하여 초록색 정문을 열고 무사히 탈출했습니다!</p>
+            <div class="bg-emerald-950/60 p-5 rounded-2xl border border-emerald-700/60 text-xs text-emerald-200 leading-relaxed shadow-xl">
+                체력단련실과 모든 교실을 누비며 비밀을 완벽히 밝혀냈습니다! 축하합니다, 황우진 학생!
+            </div>
+            <button id="btn-clear-restart" class="w-full py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-2xl transform transition active:scale-95 cursor-pointer">
+                처음부터 다시하기
+            </button>
+        </div>
+    </div>
+
+    <!-- Clue Note Modal Screen -->
+    <div id="clue-modal" class="absolute inset-0 bg-black/80 flex items-center justify-center p-4 z-40 hidden pointer-events-auto backdrop-blur-sm">
+        <div class="bg-amber-50 text-slate-900 p-7 rounded-2xl shadow-2xl max-w-md w-full border-4 border-amber-900 relative transform rotate-1 transition-transform">
+            <div class="text-xs font-bold text-amber-800 tracking-widest uppercase mb-1">🔍 수집한 단서 메모</div>
+            <h3 id="clue-title" class="text-lg font-black border-b-2 border-amber-800/30 pb-2 mb-4 text-amber-950"></h3>
+            <p id="clue-body" class="text-xs font-medium leading-relaxed text-slate-800 mb-6 whitespace-pre-line"></p>
+            <div class="text-right">
+                <button id="btn-close-clue" class="px-5 py-2 bg-amber-900 text-amber-100 font-bold rounded-lg text-xs hover:bg-amber-800 shadow-md cursor-pointer">
+                    닫기 [E / ESC]
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Core Game Configuration Parameters
+        const CONFIG = {
+            WALK_SPEED: 5.5,
+            RUN_SPEED: 9.5,
+            TEACHER_PATROL_SPEED: 2.2,
+            TEACHER_CHASE_SPEED: 4.5,
+            STAMINA_MAX: 100,
+            STAMINA_DRAIN_RATE: 15,
+            STAMINA_RECOVER_RATE: 25,
+            INTERACTION_DIST: 6.5,
+            TEACHER_FOV_ANGLE: Math.PI / 4.5,
+            TEACHER_FOV_DIST: 12.0,
+            TEACHER_HEARING_DIST: 14.0,
+            TOTAL_KEYS: 7
+        };
+
+        // Runtime Global Game State
+        const GAME_STATE = {
+            isPlaying: false,
+            isGameOver: false,
+            isVictory: false,
+            collectedKeys: 0,
+            keysFoundMap: [false, false, false, false, false, false, false],
+            cluesFoundMap: [false, false, false, false],
+            currentLocation: "체력단련실 1관 (웨이트존)",
+            objectiveText: "체력단련실과 주변 구역을 수색해 열쇠와 단서를 찾으세요."
+        };
+
+        let scene, camera, renderer, player;
+        const TEACHERS = [];
+
+        class AudioEngine {
+            constructor() {
+                this.audioCtx = null;
+            }
+
+            init() {
+                if (!this.audioCtx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.audioCtx = new AudioContext();
+                }
+                if (this.audioCtx.state === 'suspended') {
+                    this.audioCtx.resume();
+                }
+            }
+
+            playFootstep() {
+                if (!this.audioCtx) return;
+                const osc = this.audioCtx.createOscillator();
+                const gain = this.audioCtx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(110, this.audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(30, this.audioCtx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.12, this.audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.audioCtx.currentTime + 0.1);
+                osc.connect(gain);
+                gain.connect(this.audioCtx.destination);
+                osc.start();
+                osc.stop(this.audioCtx.currentTime + 0.1);
+            }
+
+            playFlashlightSound() {
+                if (!this.audioCtx) return;
+                const osc = this.audioCtx.createOscillator();
+                const gain = this.audioCtx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(800, this.audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(200, this.audioCtx.currentTime + 0.05);
+                gain.gain.setValueAtTime(0.2, this.audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.audioCtx.currentTime + 0.05);
+                osc.connect(gain);
+                gain.connect(this.audioCtx.destination);
+                osc.start();
+                osc.stop(this.audioCtx.currentTime + 0.05);
+            }
+
+            playDoorSound() {
+                if (!this.audioCtx) return;
+                const osc = this.audioCtx.createOscillator();
+                const gain = this.audioCtx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(220, this.audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(90, this.audioCtx.currentTime + 0.3);
+                gain.gain.setValueAtTime(0.25, this.audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.audioCtx.currentTime + 0.3);
+                osc.connect(gain);
+                gain.connect(this.audioCtx.destination);
+                osc.start();
+                osc.stop(this.audioCtx.currentTime + 0.3);
+            }
+
+            playKeySound() {
+                if (!this.audioCtx) return;
+                const osc = this.audioCtx.createOscillator();
+                const gain = this.audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(587.33, this.audioCtx.currentTime);
+                osc.frequency.setValueAtTime(880, this.audioCtx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.3, this.audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.audioCtx.currentTime + 0.4);
+                osc.connect(gain);
+                gain.connect(this.audioCtx.destination);
+                osc.start();
+                osc.stop(this.audioCtx.currentTime + 0.4);
+            }
+
+            playClueSound() {
+                if (!this.audioCtx) return;
+                const osc = this.audioCtx.createOscillator();
+                const gain = this.audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(440, this.audioCtx.currentTime);
+                osc.frequency.setValueAtTime(659.25, this.audioCtx.currentTime + 0.12);
+                gain.gain.setValueAtTime(0.25, this.audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.audioCtx.currentTime + 0.35);
+                osc.connect(gain);
+                gain.connect(this.audioCtx.destination);
+                osc.start();
+                osc.stop(this.audioCtx.currentTime + 0.35);
+            }
+
+            playAlertSound() {
+                if (!this.audioCtx) return;
+                const osc = this.audioCtx.createOscillator();
+                const gain = this.audioCtx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(320, this.audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(640, this.audioCtx.currentTime + 0.2);
+                gain.gain.setValueAtTime(0.3, this.audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.audioCtx.currentTime + 0.3);
+                osc.connect(gain);
+                gain.connect(this.audioCtx.destination);
+                osc.start();
+                osc.stop(this.audioCtx.currentTime + 0.3);
+            }
+        }
+        const sound = new AudioEngine();
+
+        const INPUT = {
+            keys: {},
+            isMouseDown: false,
+            lastMouseX: 0,
+            lastMouseY: 0,
+
+            init() {
+                window.addEventListener('click', () => {
+                    window.focus();
+                });
+
+                window.addEventListener('keydown', (e) => {
+                    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
+                        e.preventDefault();
+                    }
+
+                    const keyLower = e.key ? e.key.toLowerCase() : '';
+
+                    this.keys[e.code] = true;
+                    this.keys[keyLower] = true;
+
+                    if (e.code === 'KeyW' || e.code === 'ArrowUp' || e.key === 'ㅈ') this.keys['w'] = true;
+                    if (e.code === 'KeyA' || e.code === 'ArrowLeft' || e.key === 'ㅁ') this.keys['a'] = true;
+                    if (e.code === 'KeyS' || e.code === 'ArrowDown' || e.key === 'ㄴ') this.keys['s'] = true;
+                    if (e.code === 'KeyD' || e.code === 'ArrowRight' || e.key === 'ㅇ') this.keys['d'] = true;
+                    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.keys['shift'] = true;
+
+                    if (!e.repeat) {
+                        // 손전등 토글 (F / ㄹ)
+                        if (e.code === 'KeyF' || keyLower === 'f' || e.key === 'ㄹ') {
+                            if (player && GAME_STATE.isPlaying) player.toggleFlashlight();
+                        }
+                        // 상호작용 지원 (E, Space, Enter, ㄷ)
+                        if (e.code === 'KeyE' || e.code === 'Space' || e.code === 'Enter' || keyLower === 'e' || e.key === 'ㄷ') {
+                            const clueModal = document.getElementById('clue-modal');
+                            if (clueModal && !clueModal.classList.contains('hidden')) {
+                                UI.hideClueModal();
+                            } else if (GAME_STATE.isPlaying) {
+                                INTERACTION.checkInteraction(true);
+                            }
+                        }
+                        if (e.code === 'Escape') {
+                            UI.hideClueModal();
+                        }
+                    }
+                });
+
+                window.addEventListener('keyup', (e) => {
+                    const keyLower = e.key ? e.key.toLowerCase() : '';
+                    this.keys[e.code] = false;
+                    this.keys[keyLower] = false;
+
+                    if (e.code === 'KeyW' || e.code === 'ArrowUp' || e.key === 'ㅈ') this.keys['w'] = false;
+                    if (e.code === 'KeyA' || e.code === 'ArrowLeft' || e.key === 'ㅁ') this.keys['a'] = false;
+                    if (e.code === 'KeyS' || e.code === 'ArrowDown' || e.key === 'ㄴ') this.keys['s'] = false;
+                    if (e.code === 'KeyD' || e.code === 'ArrowRight' || e.key === 'ㅇ') this.keys['d'] = false;
+                    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.keys['shift'] = false;
+                });
+
+                const container = document.getElementById('canvas-container');
+                const promptBtn = document.getElementById('interaction-prompt');
+
+                if (promptBtn) {
+                    promptBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        if (GAME_STATE.isPlaying) INTERACTION.checkInteraction(true);
+                    });
+                }
+
+                container?.addEventListener('click', (e) => {
+                    window.focus();
+                    if (GAME_STATE.isPlaying) {
+                        const interacted = INTERACTION.checkInteraction(true);
+                        if (!interacted && container.requestPointerLock) {
+                            container.requestPointerLock();
+                        }
+                    }
+                });
+
+                window.addEventListener('mousemove', (e) => {
+                    if (!GAME_STATE.isPlaying || !player) return;
+
+                    if (document.pointerLockElement === container) {
+                        player.rotateYaw(-e.movementX * 0.0025);
+                        player.rotatePitch(-e.movementY * 0.0025);
+                    } else if (this.isMouseDown) {
+                        const deltaX = e.clientX - this.lastMouseX;
+                        const deltaY = e.clientY - this.lastMouseY;
+                        this.lastMouseX = e.clientX;
+                        this.lastMouseY = e.clientY;
+                        player.rotateYaw(-deltaX * 0.0035);
+                        player.rotatePitch(-deltaY * 0.0035);
+                    }
+                });
+
+                window.addEventListener('mousedown', (e) => {
+                    if (e.button === 0) {
+                        this.isMouseDown = true;
+                        this.lastMouseX = e.clientX;
+                        this.lastMouseY = e.clientY;
+                    }
+                });
+
+                window.addEventListener('mouseup', () => {
+                    this.isMouseDown = false;
+                });
+
+                // Onscreen Touch & D-Pad Bindings
+                const bindTouchHold = (id, keyName) => {
+                    const btn = document.getElementById(id);
+                    if (!btn) return;
+                    const start = (e) => { e.preventDefault(); this.keys[keyName] = true; };
+                    const end = (e) => { e.preventDefault(); this.keys[keyName] = false; };
+                    btn.addEventListener('touchstart', start);
+                    btn.addEventListener('touchend', end);
+                    btn.addEventListener('mousedown', start);
+                    btn.addEventListener('mouseup', end);
+                    btn.addEventListener('mouseleave', end);
+                };
+
+                bindTouchHold('btn-dpad-up', 'w');
+                bindTouchHold('btn-dpad-down', 's');
+                bindTouchHold('btn-dpad-left', 'a');
+                bindTouchHold('btn-dpad-right', 'd');
+                bindTouchHold('btn-touch-run', 'shift');
+
+                document.getElementById('btn-touch-interact')?.addEventListener('click', () => {
+                    if (GAME_STATE.isPlaying) INTERACTION.checkInteraction(true);
+                });
+                document.getElementById('btn-touch-light')?.addEventListener('click', () => {
+                    if (player && GAME_STATE.isPlaying) player.toggleFlashlight();
+                });
+            }
+        };
+
+        class Player {
+            constructor(camera) {
+                this.camera = camera;
+                this.position = new THREE.Vector3(-112, 1.6, -60);
+                this.pitch = 0;
+                this.yaw = Math.PI / 2;
+                this.stamina = CONFIG.STAMINA_MAX;
+                this.isSprinting = false;
+                this.isHiding = false;
+                this.flashlightOn = true;
+                this.currentHidingSpot = null;
+                this.footstepTimer = 0;
+                this.colliderRadius = 0.35;
+
+                // Bright Wide White Flashlight for clear visibility
+                this.flashlight = new THREE.SpotLight(0xffffff, 18.0, 80, Math.PI / 2.6, 0.35, 1);
+                this.flashlightTarget = new THREE.Object3D();
+                scene.add(this.flashlightTarget);
+                this.flashlight.target = this.flashlightTarget;
+                camera.add(this.flashlight);
+                this.flashlight.position.set(0, -0.1, 0);
+            }
+
+            reset(startPos) {
+                this.position.copy(startPos);
+                this.pitch = 0;
+                this.yaw = Math.PI / 2;
+                this.stamina = CONFIG.STAMINA_MAX;
+                this.isHiding = false;
+                this.currentHidingSpot = null;
+                this.flashlightOn = true;
+                this.flashlight.visible = true;
+                this.updateCamera();
+            }
+
+            toggleFlashlight() {
+                this.flashlightOn = !this.flashlightOn;
+                this.flashlight.visible = this.flashlightOn;
+                sound.playFlashlightSound();
+            }
+
+            rotateYaw(amount) {
+                this.yaw += amount;
+            }
+
+            rotatePitch(amount) {
+                this.pitch += amount;
+                this.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, this.pitch));
+            }
+
+            updateCamera() {
+                this.camera.position.copy(this.position);
+                const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+                euler.x = this.pitch;
+                euler.y = this.yaw;
+                this.camera.quaternion.setFromEuler(euler);
+
+                // Update Flashlight Target
+                const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+                this.flashlightTarget.position.copy(this.camera.position).add(dir.multiplyScalar(10));
+            }
+
+            hide(spot) {
+                this.isHiding = true;
+                this.currentHidingSpot = spot;
+                this.position.copy(spot.position);
+                this.position.y = 1.6;
+                this.updateCamera();
+                UI.toggleHideOverlay(true);
+            }
+
+            unhide() {
+                if (!this.currentHidingSpot) return;
+                this.isHiding = false;
+                this.position.copy(this.currentHidingSpot.exitPosition);
+                this.currentHidingSpot = null;
+                this.updateCamera();
+                UI.toggleHideOverlay(false);
+            }
+
+            update(delta) {
+                if (this.isHiding) return;
+
+                // Stamina Drain and Recovery
+                const wantsSprint = INPUT.keys['shift'] || INPUT.keys['run'];
+                if (wantsSprint && this.stamina > 0 && (INPUT.keys['w'] || INPUT.keys['s'] || INPUT.keys['a'] || INPUT.keys['d'] || INPUT.keys['arrowup'] || INPUT.keys['arrowdown'])) {
+                    this.isSprinting = true;
+                    this.stamina = Math.max(0, this.stamina - CONFIG.STAMINA_DRAIN_RATE * delta);
+                } else {
+                    this.isSprinting = false;
+                    this.stamina = Math.min(CONFIG.STAMINA_MAX, this.stamina + CONFIG.STAMINA_RECOVER_RATE * delta);
+                }
+                UI.updateStaminaBar(this.stamina);
+
+                // Calculate Movement Vector
+                const speed = this.isSprinting ? CONFIG.RUN_SPEED : CONFIG.WALK_SPEED;
+                const moveVec = new THREE.Vector3();
+
+                if (INPUT.keys['w'] || INPUT.keys['arrowup']) moveVec.z -= 1;
+                if (INPUT.keys['s'] || INPUT.keys['arrowdown']) moveVec.z += 1;
+                if (INPUT.keys['a'] || INPUT.keys['arrowleft']) moveVec.x -= 1;
+                if (INPUT.keys['d'] || INPUT.keys['arrowright']) moveVec.x += 1;
+
+                if (moveVec.lengthSq() > 0) {
+                    moveVec.normalize();
+                    moveVec.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+
+                    const nextPos = this.position.clone().addScaledVector(moveVec, speed * delta);
+
+                    // Separate X and Z Collision Resolution for Smooth Wall Sliding
+                    const testPosX = new THREE.Vector3(nextPos.x, this.position.y, this.position.z);
+                    if (!MAP.checkCollision(testPosX, this.colliderRadius)) {
+                        this.position.x = nextPos.x;
+                    }
+                    const testPosZ = new THREE.Vector3(this.position.x, this.position.y, nextPos.z);
+                    if (!MAP.checkCollision(testPosZ, this.colliderRadius)) {
+                        this.position.z = nextPos.z;
+                    }
+
+                    // Footstep Audio Trigger
+                    this.footstepTimer += delta * (this.isSprinting ? 2.2 : 1.3);
+                    if (this.footstepTimer > 0.5) {
+                        this.footstepTimer = 0;
+                        sound.playFootstep();
+                    }
+                }
+
+                this.updateCamera();
+            }
+        }
+
+        const MAP = {
+            scene: null,
+            colliders: [],
+            doors: [],
+            hidingSpots: [],
+
+            init(scene) {
+                this.scene = scene;
+                this.colliders = [];
+                this.doors = [];
+                this.hidingSpots = [];
+                this.buildFullExpandedSchool();
+            },
+
+            addBoxCollider(minX, maxX, minZ, maxZ) {
+                this.colliders.push({ minX, maxX, minZ, maxZ });
+            },
+
+            checkCollision(pos, radius) {
+                for (const c of this.colliders) {
+                    if (pos.x + radius > c.minX && pos.x - radius < c.maxX &&
+                        pos.z + radius > c.minZ && pos.z - radius < c.maxZ) {
+                        return true;
+                    }
+                }
+                // Check closed door colliders with refined oriented bounding box
+                for (const d of this.doors) {
+                    if (!d.isOpen) {
+                        const isRotated = Math.abs(d.rotationAngle) > 0.1;
+                        const boxW = isRotated ? 0.4 : 2.2;
+                        const boxD = isRotated ? 2.2 : 0.4;
+                        if (pos.x + radius > d.position.x - boxW/2 && pos.x - radius < d.position.x + boxW/2 &&
+                            pos.z + radius > d.position.z - boxD/2 && pos.z - radius < d.position.z + boxD/2) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            },
+
+            createDoor(x, z, rotation, name) {
+                const group = new THREE.Group();
+                group.position.set(x, 0, z);
+
+                // Frame
+                const frameMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.5 });
+                const fLeft = new THREE.Mesh(new THREE.BoxGeometry(0.15, 3.2, 0.15), frameMat);
+                fLeft.position.set(-1.1, 1.6, 0);
+                const fRight = new THREE.Mesh(new THREE.BoxGeometry(0.15, 3.2, 0.15), frameMat);
+                fRight.position.set(1.1, 1.6, 0);
+                const fTop = new THREE.Mesh(new THREE.BoxGeometry(2.35, 0.15, 0.15), frameMat);
+                fTop.position.set(0, 3.15, 0);
+                group.add(fLeft, fRight, fTop);
+
+                // Door Leaf Pivot
+                const doorPivot = new THREE.Group();
+                doorPivot.position.set(-1.0, 0, 0);
+
+                const doorMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.4 });
+                const doorMesh = new THREE.Mesh(new THREE.BoxGeometry(2.0, 3.0, 0.14), doorMat);
+                doorMesh.position.set(1.0, 1.5, 0);
+                doorPivot.add(doorMesh);
+
+                // Door Glass Window Panel
+                const glassMat = new THREE.MeshStandardMaterial({ color: 0x93c5fd, roughness: 0.1, opacity: 0.6, transparent: true });
+                const windowMesh = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.16), glassMat);
+                windowMesh.position.set(1.0, 2.2, 0);
+                doorPivot.add(windowMesh);
+
+                // Handle
+                const handleMat = new THREE.MeshStandardMaterial({ color: 0xd1d5db, metalness: 0.8, roughness: 0.2 });
+                const handle = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.08, 0.2), handleMat);
+                handle.position.set(1.8, 1.4, 0);
+                doorPivot.add(handle);
+
+                group.add(doorPivot);
+                group.rotation.y = rotation;
+                this.scene.add(group);
+
+                const doorObj = {
+                    name,
+                    position: new THREE.Vector3(x, 1.5, z),
+                    pivot: doorPivot,
+                    isOpen: false,
+                    targetAngle: 0,
+                    currentAngle: 0,
+                    rotationAngle: rotation,
+                    toggle() {
+                        this.isOpen = !this.isOpen;
+                        this.targetAngle = this.isOpen ? Math.PI / 1.75 : 0;
+                        sound.playDoorSound();
+                    },
+                    update(delta) {
+                        if (Math.abs(this.currentAngle - this.targetAngle) > 0.005) {
+                            this.currentAngle += (this.targetAngle - this.currentAngle) * Math.min(delta * 10, 1.0);
+                            this.pivot.rotation.y = this.currentAngle;
+                        } else {
+                            this.pivot.rotation.y = this.targetAngle;
+                            this.currentAngle = this.targetAngle;
+                        }
+                    }
+                };
+                this.doors.push(doorObj);
+
+                const interactTarget = {
+                    position: doorObj.position,
+                    dist: 6.5,
+                    prompt: () => `${doorObj.name} [E / 클릭: ${doorObj.isOpen ? '문 닫기' : '문 열기'}]`,
+                    action: () => doorObj.toggle()
+                };
+
+                // Register all meshes in door group so raycasting at any part works perfectly
+                group.traverse((child) => {
+                    if (child.isMesh) {
+                        child.userData = interactTarget;
+                    }
+                });
+                INTERACTION.register(interactTarget);
+            },
+
+            createHidingSpot(x, z, name) {
+                const lockerGroup = new THREE.Group();
+                lockerGroup.position.set(x, 0, z);
+
+                const lockerMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.4, roughness: 0.5 });
+                const lockerBody = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.8, 1.2), lockerMat);
+                lockerBody.position.set(0, 1.4, 0);
+                lockerGroup.add(lockerBody);
+
+                // Handle detail
+                const handleMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.8, roughness: 0.2 });
+                const handle = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.4, 0.1), handleMat);
+                handle.position.set(0.6, 1.4, 0.65);
+                lockerGroup.add(handle);
+
+                this.scene.add(lockerGroup);
+
+                const spot = {
+                    name,
+                    position: new THREE.Vector3(x, 1.6, z),
+                    exitPosition: new THREE.Vector3(x, 1.6, z + 2.0)
+                };
+                this.hidingSpots.push(spot);
+
+                const interactTarget = {
+                    position: spot.position,
+                    dist: 5.5,
+                    prompt: () => `${name} [E / 클릭: 숨기]`,
+                    action: () => {
+                        if (!player.isHiding) player.hide(spot);
+                    }
+                };
+
+                lockerGroup.traverse((child) => {
+                    if (child.isMesh) child.userData = interactTarget;
+                });
+                INTERACTION.register(interactTarget);
+            },
+
+            createDoorSign(x, y, z, text) {
+                const canvas = document.createElement('canvas');
+                canvas.width = 256; canvas.height = 128;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, 256, 128);
+                ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 8; ctx.strokeRect(4, 4, 248, 120);
+                ctx.fillStyle = '#f8fafc'; ctx.font = 'bold 36px Pretendard, sans-serif';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText(text, 128, 64);
+
+                const tex = new THREE.CanvasTexture(canvas);
+                const mat = new THREE.MeshBasicMaterial({ map: tex });
+                const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.6), mat);
+                mesh.position.set(x, y, z);
+                this.scene.add(mesh);
+            },
+
+            buildFullExpandedSchool() {
+                const floorMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6 });
+                const wallMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.5 });
+                const ceilingMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.8 });
+                const gymFloorMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.4 });
+                const exitMat = new THREE.MeshStandardMaterial({ color: 0x10b981, emissive: 0x059669, emissiveIntensity: 0.9 });
+
+                // Floors & Ceilings
+                const floorGeo = new THREE.PlaneGeometry(260, 200);
+                const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+                floorMesh.rotation.x = -Math.PI / 2;
+                this.scene.add(floorMesh);
+
+                const gymFloor = new THREE.Mesh(new THREE.PlaneGeometry(50, 100), gymFloorMat);
+                gymFloor.rotation.x = -Math.PI / 2;
+                gymFloor.position.set(-105, 0.01, -30);
+                this.scene.add(gymFloor);
+
+                const ceilingMesh = new THREE.Mesh(floorGeo, ceilingMat);
+                ceilingMesh.rotation.x = Math.PI / 2;
+                ceilingMesh.position.set(0, 3.8, 0);
+                this.scene.add(ceilingMesh);
+
+                const createWall = (x, y, z, w, h, d) => {
+                    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+                    mesh.position.set(x, y, z);
+                    this.scene.add(mesh);
+                    this.addBoxCollider(x - w / 2, x + w / 2, z - d / 2, z + d / 2);
+                };
+
+                // Perimeter Walls
+                createWall(0, 1.9, -85, 260, 3.8, 2);
+                createWall(0, 1.9, 75, 260, 3.8, 2);
+                createWall(-125, 1.9, -5, 2, 3.8, 160);
+                createWall(125, 1.9, -5, 2, 3.8, 160);
+
+                // Hallway Walls with Doorway Cuts
+                const doorPositionsC1 = [-115, -95, -80, -55, -30, -5, 20, 45, 70];
+                let startX = -125;
+                doorPositionsC1.sort((a,b)=>a-b).forEach(doorX => {
+                    const wallW = (doorX - 1.2) - startX;
+                    if (wallW > 0.1) {
+                        createWall(startX + wallW / 2, 1.9, -35, wallW, 3.8, 0.6);
+                    }
+                    const lintel = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.8, 0.6), wallMat);
+                    lintel.position.set(doorX, 3.4, -35);
+                    this.scene.add(lintel);
+                    startX = doorX + 1.2;
+                });
+                if (125 - startX > 0.1) {
+                    createWall(startX + (125 - startX) / 2, 1.9, -35, 125 - startX, 3.8, 0.6);
+                }
+
+                // Corridor 2: Z = 25
+                const doorPositionsC2 = [-105, -85, -55, -30, -5, 20, 45, 70];
+                startX = -125;
+                doorPositionsC2.sort((a,b)=>a-b).forEach(doorX => {
+                    const wallW = (doorX - 1.2) - startX;
+                    if (wallW > 0.1) {
+                        createWall(startX + wallW / 2, 1.9, 25, wallW, 3.8, 0.6);
+                    }
+                    const lintel = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.8, 0.6), wallMat);
+                    lintel.position.set(doorX, 3.4, 25);
+                    this.scene.add(lintel);
+                    startX = doorX + 1.2;
+                });
+                if (125 - startX > 0.1) {
+                    createWall(startX + (125 - startX) / 2, 1.9, 25, 125 - startX, 3.8, 0.6);
+                }
+
+                // Room Dividers
+                const roomDividersX = [-60, -35, -10, 15, 40, 65, 90];
+                roomDividersX.forEach(x => {
+                    createWall(x, 1.9, -60, 0.6, 3.8, 50);
+                    createWall(x, 1.9, -5, 0.6, 3.8, 50);
+                    createWall(x, 1.9, 50, 0.6, 3.8, 50);
+                });
+
+                // Spawn Doors and Signboards
+                const doorsData = [
+                    { x: -115, z: -35, rot: 0, name: "체력단련실 1관" },
+                    { x: -95, z: -35, rot: 0, name: "체력단련실 2관" },
+                    { x: -80, z: -35, rot: 0, name: "락카 & 샤워실" },
+                    { x: -105, z: 25, rot: 0, name: "체육 기구창고" },
+                    { x: -85, z: 25, rot: 0, name: "보건실" },
+                    { x: -55, z: -35, rot: 0, name: "1학년 1반" },
+                    { x: -30, z: -35, rot: 0, name: "1학년 2반" },
+                    { x: -5, z: -35, rot: 0, name: "1학년 3반" },
+                    { x: 20, z: -35, rot: 0, name: "1학년 4반" },
+                    { x: 45, z: -35, rot: 0, name: "1학년 5반" },
+                    { x: 70, z: -35, rot: 0, name: "1학년 6반" },
+                    { x: -55, z: 25, rot: 0, name: "2학년 1반" },
+                    { x: -30, z: 25, rot: 0, name: "2학년 2반" },
+                    { x: -5, z: 25, rot: 0, name: "2학년 3반" },
+                    { x: 20, z: 25, rot: 0, name: "2학년 4반" },
+                    { x: 45, z: 25, rot: 0, name: "2학년 5반" },
+                    { x: 70, z: 25, rot: 0, name: "2학년 7반" }
+                ];
+
+                doorsData.forEach(d => {
+                    this.createDoor(d.x, d.z, d.rot, d.name);
+                    this.createDoorSign(d.x, 2.7, d.z + 0.35, d.name);
+                });
+
+                // Furniture & Classroom Interiors
+                this.buildClassroomInteriors();
+
+                // Hiding Spot Lockers
+                this.createHidingSpot(-118, -70, "체력단련실 라커 A");
+                this.createHidingSpot(-88, -70, "체력단련실 라커 B");
+                this.createHidingSpot(-108, -10, "기구창고 캐비닛");
+                this.createHidingSpot(-50, -60, "1-1반 청소도구함");
+                this.createHidingSpot(30, -60, "1-5반 라커");
+                this.createHidingSpot(-20, -10, "2-3반 라커");
+                this.createHidingSpot(80, -10, "2-7반 라커");
+
+                // Green Illuminated Exit Main Gate
+                const exitMesh = new THREE.Mesh(new THREE.BoxGeometry(1.6, 3.2, 0.2), exitMat);
+                exitMesh.position.set(123.5, 1.6, 50);
+                this.scene.add(exitMesh);
+
+                const exitLight = new THREE.PointLight(0x10b981, 6, 25);
+                exitLight.position.set(122, 2.8, 50);
+                this.scene.add(exitLight);
+
+                const exitTarget = {
+                    position: new THREE.Vector3(122, 1.6, 50),
+                    dist: 4.0,
+                    prompt: () => `초록색 비상구 정문 [E / 클릭: 탈출]`,
+                    action: () => {
+                        if (GAME_STATE.collectedKeys >= CONFIG.TOTAL_KEYS) {
+                            UI.triggerVictory();
+                        } else {
+                            UI.showNotification(`정문이 열리지 않습니다! (열쇠 ${GAME_STATE.collectedKeys}/${CONFIG.TOTAL_KEYS}개)`);
+                        }
+                    }
+                };
+                exitMesh.userData = exitTarget;
+                INTERACTION.register(exitTarget);
+            },
+
+            buildClassroomInteriors() {
+                const chalkboardMat = new THREE.MeshStandardMaterial({ color: 0x064e3b, roughness: 0.3 });
+                const deskMat = new THREE.MeshStandardMaterial({ color: 0x854d0e, roughness: 0.5 });
+                const chairMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6 });
+                const bedMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.8 });
+
+                const addDesksToRoom = (roomCenterX, roomCenterZ) => {
+                    const board = new THREE.Mesh(new THREE.BoxGeometry(6, 1.8, 0.1), chalkboardMat);
+                    board.position.set(roomCenterX, 2.0, roomCenterZ - 23.5);
+                    this.scene.add(board);
+
+                    const tDesk = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.0, 1.2), deskMat);
+                    tDesk.position.set(roomCenterX, 0.5, roomCenterZ - 18);
+                    this.scene.add(tDesk);
+
+                    for (let r = 0; r < 3; r++) {
+                        for (let c = 0; c < 3; c++) {
+                            const dx = roomCenterX - 6 + c * 6;
+                            const dz = roomCenterZ - 10 + r * 6;
+
+                            const desk = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.9, 0.9), deskMat);
+                            desk.position.set(dx, 0.45, dz);
+                            this.scene.add(desk);
+
+                            const chair = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.6, 0.7), chairMat);
+                            chair.position.set(dx, 0.3, dz + 0.9);
+                            this.scene.add(chair);
+                        }
+                    }
+                };
+
+                // Classrooms
+                addDesksToRoom(-47.5, -60);
+                addDesksToRoom(-22.5, -60);
+                addDesksToRoom(2.5, -60);
+                addDesksToRoom(27.5, -60);
+                addDesksToRoom(52.5, -60);
+                addDesksToRoom(77.5, -60);
+
+                addDesksToRoom(-47.5, -10);
+                addDesksToRoom(-22.5, -10);
+                addDesksToRoom(2.5, -10);
+                addDesksToRoom(27.5, -10);
+                addDesksToRoom(52.5, -10);
+                addDesksToRoom(77.5, -10);
+
+                // Infirmary Beds
+                const bed1 = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.8, 3.2), bedMat);
+                bed1.position.set(-88, 0.4, -18);
+                const bed2 = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.8, 3.2), bedMat);
+                bed2.position.set(-82, 0.4, -18);
+                this.scene.add(bed1, bed2);
+            }
+        };
+
+        class TeacherAI {
+            constructor(name, startPos, waypoints) {
+                this.name = name;
+                this.waypoints = waypoints;
+                this.currentWaypointIdx = 0;
+                this.state = 'PATROL'; // PATROL, CHASE
+                this.lostTimer = 0;
+
+                const geo = new THREE.CylinderGeometry(0.5, 0.5, 2.2, 16);
+                const mat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.3 });
+                this.mesh = new THREE.Mesh(geo, mat);
+                this.mesh.position.copy(startPos);
+                scene.add(this.mesh);
+
+                // Teacher Head & Flashlight
+                const head = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 16), new THREE.MeshStandardMaterial({ color: 0xfed7aa }));
+                head.position.set(0, 1.2, 0);
+                this.mesh.add(head);
+
+                this.spotLight = new THREE.SpotLight(0xef4444, 12, 18, Math.PI / 4, 0.4);
+                this.spotLight.position.set(0, 1.0, 0);
+                this.spotLightTarget = new THREE.Object3D();
+                scene.add(this.spotLightTarget);
+                this.spotLight.target = this.spotLightTarget;
+                this.mesh.add(this.spotLight);
+            }
+
+            reset(startPos) {
+                this.mesh.position.copy(startPos);
+                this.state = 'PATROL';
+                this.currentWaypointIdx = 0;
+                this.lostTimer = 0;
+            }
+
+            update(delta) {
+                if (!GAME_STATE.isPlaying || player.isHiding) {
+                    this.state = 'PATROL';
+                }
+
+                const pos = this.mesh.position;
+                const playerPos = player.position;
+                const distToPlayer = pos.distanceTo(playerPos);
+
+                // Detection Check
+                if (!player.isHiding && GAME_STATE.isPlaying) {
+                    if (distToPlayer < CONFIG.TEACHER_FOV_DIST) {
+                        const dirToPlayer = playerPos.clone().sub(pos).normalize();
+                        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.mesh.quaternion);
+                        const angle = forward.angleTo(dirToPlayer);
+
+                        if (angle < CONFIG.TEACHER_FOV_ANGLE) {
+                            if (this.state !== 'CHASE') sound.playAlertSound();
+                            this.state = 'CHASE';
+                            this.lostTimer = 0;
+                        }
+                    }
+                    if (player.isSprinting && distToPlayer < CONFIG.TEACHER_HEARING_DIST) {
+                        if (this.state !== 'CHASE') sound.playAlertSound();
+                        this.state = 'CHASE';
+                        this.lostTimer = 0;
+                    }
+                }
+
+                // AI State Machine Execution
+                if (this.state === 'CHASE') {
+                    this.spotLight.color.setHex(0xef4444); // Red Alert Light
+                    const dir = playerPos.clone().sub(pos).normalize();
+                    dir.y = 0;
+                    pos.addScaledVector(dir, CONFIG.TEACHER_CHASE_SPEED * delta);
+                    this.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), dir);
+
+                    // Catch Condition
+                    if (distToPlayer < 1.1) {
+                        UI.triggerGameOver();
+                    }
+
+                    // Lost Sight Condition
+                    if (distToPlayer > CONFIG.TEACHER_FOV_DIST * 1.5 || player.isHiding) {
+                        this.lostTimer += delta;
+                        if (this.lostTimer > 4.0) {
+                            this.state = 'PATROL';
+                            this.lostTimer = 0;
+                        }
+                    }
+                } else {
+                    // PATROL State
+                    this.spotLight.color.setHex(0xf59e0b); // Amber Patrol Light
+                    const targetWp = this.waypoints[this.currentWaypointIdx];
+                    const dir = targetWp.clone().sub(pos);
+                    dir.y = 0;
+
+                    if (dir.length() < 0.8) {
+                        this.currentWaypointIdx = (this.currentWaypointIdx + 1) % this.waypoints.length;
+                    } else {
+                        dir.normalize();
+                        pos.addScaledVector(dir, CONFIG.TEACHER_PATROL_SPEED * delta);
+                        this.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), dir);
+                    }
+                }
+
+                // Update Spotlight Target Forward Position
+                const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.mesh.quaternion);
+                this.spotLightTarget.position.copy(pos).add(fwd.multiplyScalar(8));
+            }
+        }
+
+        const KEYS_AND_CLUES = {
+            keysData: [
+                { id: 0, x: -108, z: -10, name: "체육기구창고 열쇠", clueId: 0 },
+                { id: 1, x: -85, z: -18, name: "보건실 약품함 열쇠", clueId: 1 },
+                { id: 2, x: -5, z: -58, name: "1학년 3반 교탁 열쇠", clueId: null },
+                { id: 3, x: 25, z: -58, name: "1학년 5반 청소도구함 열쇠", clueId: 2 },
+                { id: 4, x: -30, z: -10, name: "2학년 2반 라커 열쇠", clueId: null },
+                { id: 5, x: 45, z: -10, name: "2학년 5반 서랍 열쇠", clueId: 3 },
+                { id: 6, x: 75, z: -10, name: "2학년 7반 비상 열쇠", clueId: null }
+            ],
+
+            cluesData: [
+                { id: 0, title: "기구창고 메모", body: "기구창고 서랍 깊숙한 곳에 열쇠가 하나 떨어져 있었다.\n체력단련실 2관 운동 매트 옆을 확인해보자." },
+                { id: 1, title: "보건실 양호선생님 메모", body: "급히 퇴근하며 보건실 열쇠를 1-5반 청소함 뒤에 넣어두었다." },
+                { id: 2, title: "학생 일기장 조각", body: "2-5반 서랍 속 열쇠는 2학년 복도 끝쪽과 연관이 있는 것 같다." },
+                { id: 3, title: "야간 순찰 지침서", body: "7개의 열쇠를 모두 수집해야 동쪽 정문 비상구 락이 해제된다." }
+            ],
+
+            init() {
+                this.keysData.forEach((k, idx) => {
+                    const keyGroup = new THREE.Group();
+                    keyGroup.position.set(k.x, 0.8, k.z);
+
+                    const mesh = new THREE.Mesh(
+                        new THREE.TorusGeometry(0.22, 0.06, 8, 16),
+                        new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xd97706, emissiveIntensity: 0.9 })
+                    );
+                    keyGroup.add(mesh);
+                    scene.add(keyGroup);
+
+                    const keyTarget = {
+                        position: keyGroup.position,
+                        dist: 3.5,
+                        prompt: () => `🔑 ${k.name} [E / 클릭: 획득]`,
+                        action: () => {
+                            if (!GAME_STATE.keysFoundMap[idx]) {
+                                GAME_STATE.keysFoundMap[idx] = true;
+                                GAME_STATE.collectedKeys++;
+                                scene.remove(keyGroup);
+                                sound.playKeySound();
+                                UI.updateKeyCounter(GAME_STATE.collectedKeys);
+                                UI.showNotification(`🔑 ${k.name}을(를) 획득했습니다! (${GAME_STATE.collectedKeys}/${CONFIG.TOTAL_KEYS})`);
+                            }
+                        }
+                    };
+
+                    mesh.userData = keyTarget;
+                    INTERACTION.register(keyTarget);
+                });
+
+                // Clue Notes Placement
+                this.cluesData.forEach((c) => {
+                    const noteMesh = new THREE.Mesh(
+                        new THREE.PlaneGeometry(0.5, 0.6),
+                        new THREE.MeshBasicMaterial({ color: 0xfef08a, side: THREE.DoubleSide })
+                    );
+                    noteMesh.rotation.x = -Math.PI / 2;
+                    noteMesh.position.set(-112 + c.id * 15, 0.45, -55);
+                    scene.add(noteMesh);
+
+                    const clueTarget = {
+                        position: noteMesh.position,
+                        dist: 3.0,
+                        prompt: () => `📄 단서 메모 [E / 클릭: 읽기]`,
+                        action: () => {
+                            sound.playClueSound();
+                            UI.showClueModal(c.title, c.body);
+                        }
+                    };
+                    noteMesh.userData = clueTarget;
+                    INTERACTION.register(clueTarget);
+                });
+            }
+        };
+
+        const INTERACTION = {
+            targets: [],
+            raycaster: new THREE.Raycaster(),
+
+            register(target) {
+                this.targets.push(target);
+            },
+
+            checkInteraction(isKeyPressed = false) {
+                if (!player || !GAME_STATE.isPlaying) return false;
+
+                if (player.isHiding) {
+                    UI.showPrompt(`[E / 클릭] 라커에서 나가기`);
+                    if (isKeyPressed) {
+                        player.unhide();
+                        return true;
+                    }
+                    return false;
+                }
+
+                let activeTarget = null;
+
+                // 1. Precise Raycast Detection across full Scene graph
+                if (camera) {
+                    this.raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+                    this.raycaster.far = CONFIG.INTERACTION_DIST;
+                    
+                    const intersects = this.raycaster.intersectObjects(scene.children, true);
+
+                    for (let i = 0; i < intersects.length; i++) {
+                        let hitObj = intersects[i].object;
+                        while (hitObj) {
+                            if (hitObj.userData && hitObj.userData.prompt) {
+                                activeTarget = hitObj.userData;
+                                break;
+                            }
+                            hitObj = hitObj.parent;
+                        }
+                        if (activeTarget) break;
+                    }
+                }
+
+                // 2. Distance Proximity Fallback Check
+                if (!activeTarget) {
+                    let minDist = Infinity;
+                    for (const t of this.targets) {
+                        const player2D = new THREE.Vector2(player.position.x, player.position.z);
+                        const target2D = new THREE.Vector2(t.position.x, t.position.z);
+                        const d = player2D.distanceTo(target2D);
+                        const allowedDist = Math.max(t.dist || 0, CONFIG.INTERACTION_DIST);
+
+                        if (d < allowedDist && d < minDist) {
+                            minDist = d;
+                            activeTarget = t;
+                        }
+                    }
+                }
+
+                if (activeTarget) {
+                    UI.showPrompt(activeTarget.prompt());
+                    if (isKeyPressed) {
+                        activeTarget.action();
+                        return true;
+                    }
+                } else {
+                    UI.hidePrompt();
+                }
+                return false;
+            }
+        };
+
+        const UI = {
+            init() {
+                document.getElementById('btn-start').addEventListener('click', () => this.startGame());
+                document.getElementById('btn-restart').addEventListener('click', () => this.restartGame());
+                document.getElementById('btn-clear-restart').addEventListener('click', () => this.restartGame());
+                document.getElementById('btn-close-clue').addEventListener('click', () => this.hideClueModal());
+            },
+
+            startGame() {
+                sound.init();
+                window.focus();
+                document.getElementById('start-screen').classList.add('hidden');
+                document.getElementById('hud').classList.remove('hidden');
+                GAME_STATE.isPlaying = true;
+            },
+
+            restartGame() {
+                window.focus();
+                document.getElementById('gameover-screen').classList.add('hidden');
+                document.getElementById('victory-screen').classList.add('hidden');
+                document.getElementById('hud').classList.remove('hidden');
+
+                GAME_STATE.isPlaying = true;
+                GAME_STATE.isGameOver = false;
+                GAME_STATE.isVictory = false;
+                GAME_STATE.collectedKeys = 0;
+                GAME_STATE.keysFoundMap.fill(false);
+
+                player.reset(new THREE.Vector3(-112, 1.6, -60));
+                TEACHERS.forEach((t, i) => t.reset(t.waypoints[0]));
+
+                this.updateKeyCounter(0);
+                this.toggleHideOverlay(false);
+            },
+
+            updateStaminaBar(val) {
+                const pct = Math.max(0, Math.min(100, val));
+                const bar = document.getElementById('stamina-bar');
+                const txt = document.getElementById('stamina-text');
+                if (bar) bar.style.width = `${pct}%`;
+                if (txt) txt.innerText = `${Math.round(pct)}%`;
+            },
+
+            updateKeyCounter(count) {
+                const el = document.getElementById('key-counter');
+                if (el) el.innerText = `${count} / ${CONFIG.TOTAL_KEYS}`;
+            },
+
+            showPrompt(text) {
+                const prompt = document.getElementById('interaction-prompt');
+                const crosshair = document.getElementById('crosshair');
+                if (prompt) {
+                    prompt.innerText = text;
+                    prompt.style.opacity = '1';
+                }
+                if (crosshair) crosshair.classList.add('active');
+            },
+
+            hidePrompt() {
+                const prompt = document.getElementById('interaction-prompt');
+                const crosshair = document.getElementById('crosshair');
+                if (prompt) prompt.style.opacity = '0';
+                if (crosshair) crosshair.classList.remove('active');
+            },
+
+            showNotification(msg) {
+                const toast = document.getElementById('notification-toast');
+                const txt = document.getElementById('notification-text');
+                if (toast && txt) {
+                    txt.innerText = msg;
+                    toast.classList.remove('opacity-0', '-translate-y-4');
+                    toast.classList.add('opacity-100', 'translate-y-0');
+                    setTimeout(() => {
+                        toast.classList.remove('opacity-100', 'translate-y-0');
+                        toast.classList.add('opacity-0', '-translate-y-4');
+                    }, 3200);
+                }
+            },
+
+            toggleHideOverlay(show) {
+                const overlay = document.getElementById('hide-overlay');
+                if (overlay) overlay.style.display = show ? 'block' : 'none';
+            },
+
+            showClueModal(title, body) {
+                document.getElementById('clue-title').innerText = title;
+                document.getElementById('clue-body').innerText = body;
+                document.getElementById('clue-modal').classList.remove('hidden');
+            },
+
+            hideClueModal() {
+                document.getElementById('clue-modal').classList.add('hidden');
+            },
+
+            triggerGameOver() {
+                GAME_STATE.isPlaying = false;
+                GAME_STATE.isGameOver = true;
+                document.getElementById('hud').classList.add('hidden');
+                document.getElementById('gameover-screen').classList.remove('hidden');
+            },
+
+            triggerVictory() {
+                GAME_STATE.isPlaying = false;
+                GAME_STATE.isVictory = true;
+                document.getElementById('hud').classList.add('hidden');
+                document.getElementById('victory-screen').classList.remove('hidden');
+            }
+        };
+
+        function initEngine() {
+            const container = document.getElementById('canvas-container');
+
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x020617);
+            scene.fog = new THREE.FogExp2(0x020617, 0.012);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = false;
+            container.appendChild(renderer.domElement);
+
+            // Balanced Ambient Lighting
+            const ambientLight = new THREE.AmbientLight(0x475569, 1.2);
+            scene.add(ambientLight);
+
+            // Hallway Sconce Lights
+            const sconces = [-80, -30, 20, 70];
+            sconces.forEach(x => {
+                const pLight = new THREE.PointLight(0xf59e0b, 1.8, 18);
+                pLight.position.set(x, 3.2, -35);
+                scene.add(pLight);
+            });
+
+            // Initialize Modules
+            player = new Player(camera);
+            MAP.init(scene);
+            KEYS_AND_CLUES.init();
+            INPUT.init();
+            UI.init();
+
+            // Instantiate Patrol Teachers
+            TEACHERS.push(new TeacherAI("체육 선생님", new THREE.Vector3(-105, 1.1, -30), [
+                new THREE.Vector3(-105, 1.1, -70),
+                new THREE.Vector3(-80, 1.1, -70),
+                new THREE.Vector3(-80, 1.1, -30),
+                new THREE.Vector3(-105, 1.1, -30)
+            ]));
+
+            TEACHERS.push(new TeacherAI("1학년 주임 선생님", new THREE.Vector3(-50, 1.1, -35), [
+                new THREE.Vector3(-50, 1.1, -35),
+                new THREE.Vector3(70, 1.1, -35),
+                new THREE.Vector3(70, 1.1, -60),
+                new THREE.Vector3(-50, 1.1, -60)
+            ]));
+
+            TEACHERS.push(new TeacherAI("2학년 주임 선생님", new THREE.Vector3(-50, 1.1, 25), [
+                new THREE.Vector3(-50, 1.1, 25),
+                new THREE.Vector3(70, 1.1, 25),
+                new THREE.Vector3(70, 1.1, -10),
+                new THREE.Vector3(-50, 1.1, -10)
+            ]));
+
+            TEACHERS.push(new TeacherAI("당직 선생님", new THREE.Vector3(100, 1.1, 25), [
+                new THREE.Vector3(100, 1.1, 25),
+                new THREE.Vector3(120, 1.1, 50),
+                new THREE.Vector3(100, 1.1, -35)
+            ]));
+
+            // Window Resize Listener
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        let lastTime = performance.now();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const now = performance.now();
+            const delta = Math.min((now - lastTime) / 1000, 0.1);
+            lastTime = now;
+
+            if (GAME_STATE.isPlaying) {
+                player.update(delta);
+                TEACHERS.forEach(t => t.update(delta));
+                MAP.doors.forEach(d => d.update(delta));
+                INTERACTION.checkInteraction(false);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.onload = function () {
+            initEngine();
+            animate();
+        };
+    </script>
+</body>
+</html>

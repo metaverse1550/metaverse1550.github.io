@@ -1,0 +1,1513 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>1인칭 귀여운 빵의 빵집 탈출 (1st Person Bakery Escape)</title>
+    <!-- Tailwind CSS for UI Layout -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js 3D Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Jua&family=Gaegu:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Jua', 'Gaegu', sans-serif;
+            background-color: #2b1d14;
+            color: #fff;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+        }
+
+        .bakery-panel {
+            background: rgba(45, 27, 16, 0.90);
+            border: 3px solid #d38137;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+            border-radius: 20px;
+            backdrop-filter: blur(8px);
+        }
+
+        .btn-bakery {
+            background: linear-gradient(180deg, #f39c12 0%, #d35400 100%);
+            border: 3px solid #f1c40f;
+            box-shadow: 0 5px 0 #8e44ad;
+            transition: all 0.15s ease;
+        }
+
+        .btn-bakery:hover {
+            transform: translateY(-2px);
+            filter: brightness(1.1);
+        }
+
+        .btn-bakery:active {
+            transform: translateY(3px);
+            box-shadow: 0 2px 0 #8e44ad;
+        }
+
+        .btn-bakery-green {
+            background: linear-gradient(180deg, #2ecc71 0%, #27ae60 100%);
+            border: 3px solid #a3e635;
+            box-shadow: 0 5px 0 #1e8449;
+        }
+
+        .btn-bakery-green:active {
+            transform: translateY(3px);
+            box-shadow: 0 2px 0 #1e8449;
+        }
+
+        /* 1st Person Crosshair & HUD Effects */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 12px;
+            height: 12px;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        #crosshair::before, #crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(255, 255, 255, 0.85);
+            border-radius: 2px;
+            box-shadow: 0 0 4px rgba(0,0,0,0.5);
+        }
+
+        #crosshair::before {
+            top: 5px; left: 0; width: 12px; height: 2px;
+        }
+        #crosshair::after {
+            top: 0; left: 5px; width: 2px; height: 12px;
+        }
+
+        #vignette {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            box-shadow: inset 0 0 90px rgba(0,0,0,0.65);
+            transition: box-shadow 0.3s ease;
+        }
+
+        #vignette.danger {
+            box-shadow: inset 0 0 110px rgba(231, 76, 60, 0.85);
+            animation: pulseDanger 0.8s infinite alternate;
+        }
+
+        @keyframes pulseDanger {
+            from { box-shadow: inset 0 0 70px rgba(231, 76, 60, 0.5); }
+            to { box-shadow: inset 0 0 130px rgba(231, 76, 60, 0.95); }
+        }
+
+        /* Viewmodel Hands (Cute Bread Loaf Edges at bottom) */
+        .bread-viewmodel {
+            position: absolute;
+            bottom: -20px;
+            width: 260px;
+            height: 140px;
+            background: linear-gradient(0deg, #d38137 0%, #f39c12 70%, #f1c40f 100%);
+            border: 6px solid #8e44ad;
+            border-radius: 60px 60px 0 0;
+            pointer-events: none;
+            box-shadow: 0 -10px 20px rgba(0,0,0,0.4);
+            transition: transform 0.1s ease-out;
+        }
+    </style>
+</head>
+<body class="w-screen h-screen overflow-hidden bg-stone-900 select-none">
+
+    <!-- 3D Canvas Viewport Container -->
+    <div id="canvas-container" class="relative w-full h-full cursor-pointer">
+        
+        <!-- Vignette Effect Overlay -->
+        <div id="vignette"></div>
+
+        <!-- 1st Person Crosshair -->
+        <div id="crosshair"></div>
+
+        <!-- 1st Person Viewmodel (Cute Loaf Frame Bottom) -->
+        <div class="absolute bottom-0 left-1/2 -translate-x-1/2 flex justify-center pointer-events-none">
+            <div id="bread-hand" class="bread-viewmodel flex items-center justify-center pt-2">
+                <div class="text-3xl filter drop-shadow">🍞✨</div>
+            </div>
+        </div>
+
+        <!-- HUD TOP OVERLAY -->
+        <div id="hud-overlay" class="absolute top-4 left-4 right-4 flex justify-between items-start pointer-events-none hidden z-10">
+            <!-- HP & Key -->
+            <div class="bakery-panel px-4 py-2.5 flex items-center gap-4 text-white">
+                <div class="flex items-center gap-1.5">
+                    <span class="text-amber-300 text-sm">체력:</span>
+                    <div id="hp-container" class="flex text-lg gap-1">❤️❤️❤️</div>
+                </div>
+                <div class="h-4 w-0.5 bg-amber-700/50"></div>
+                <div class="flex items-center gap-2">
+                    <span class="text-amber-300 text-sm">열쇠:</span>
+                    <span id="key-icon" class="text-2xl opacity-30 filter drop-shadow transition-all">🔑</span>
+                </div>
+            </div>
+
+            <!-- Stealth Alert Indicator & Zone Info -->
+            <div class="flex items-center gap-3">
+                <div id="stealth-badge" class="bakery-panel px-4 py-2 flex items-center gap-2 text-sm font-bold text-green-400">
+                    <span id="stealth-icon" class="text-lg">👁️</span>
+                    <span id="stealth-status">안전함</span>
+                </div>
+
+                <div class="bakery-panel px-4 py-2 text-right">
+                    <div id="zone-title" class="text-xs text-amber-400 tracking-wider font-bold">ZONE 1: 주방</div>
+                    <div id="zone-desc" class="text-[10px] text-amber-200/80">기본 감시원 1명 • 난이도: ★☆☆☆☆</div>
+                    <div class="text-lg font-bold text-yellow-300">점수: <span id="score-text">0</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MINIMAP OVERLAY -->
+        <div id="minimap-container" class="absolute top-20 right-4 bakery-panel p-2 hidden pointer-events-none z-10 flex flex-col items-center">
+            <div class="text-[10px] text-amber-300 mb-1 font-bold">🗺️ 빵집 레이더 지도</div>
+            <canvas id="minimap" width="130" height="130" class="rounded-lg bg-stone-950 border border-amber-600/40"></canvas>
+        </div>
+
+        <!-- PointerLock Instruction Overlay -->
+        <div id="pointerlock-hint" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/75 backdrop-blur-md px-6 py-3 rounded-full text-white text-sm border border-amber-400/40 pointer-events-none hidden z-10">
+            🖱️ 화면을 클릭하여 시점 조작을 시작하세요 (ESC: 잠금 해제)
+        </div>
+
+        <!-- Touch Controls for Mobile -->
+        <div id="touch-controls" class="absolute bottom-6 left-6 right-6 flex justify-between items-end pointer-events-none sm:hidden hidden z-20">
+            <div class="relative w-32 h-32 bg-black/40 rounded-full border-2 border-amber-500/40 backdrop-blur-sm pointer-events-auto flex items-center justify-center" id="touch-joystick-base">
+                <div class="w-12 h-12 bg-amber-500 rounded-full shadow-lg opacity-80" id="touch-joystick-stick"></div>
+            </div>
+            <div class="bg-black/60 text-amber-200 text-xs px-3 py-1.5 rounded-full backdrop-blur-sm border border-amber-500/30">
+                👉 오른쪽 화면 터치 드래그로 시점 전환
+            </div>
+        </div>
+
+        <!-- TITLE SCREEN OVERLAY -->
+        <div id="title-screen" class="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-stone-950/80 backdrop-blur-md z-30">
+            <div class="bakery-panel max-w-md p-8 flex flex-col items-center border-2 border-amber-500">
+                <div class="text-6xl mb-3 animate-bounce">🥐🥐✨</div>
+                <h1 class="text-3xl sm:text-4xl font-extrabold text-amber-300 mb-2">1인칭 귀여운 빵의 빵집 탈출</h1>
+                <p class="text-amber-100 text-sm sm:text-base mb-6 leading-relaxed">
+                    갓 구워진 식빵 시점(1인칭)에서 펼쳐지는 탈출 극!<br>
+                    따스하고 향기로운 빵집을 탐험하며 제빵사의 감시와 뜨거운 오븐을 피해 빵집 정문으로 탈출하세요!
+                </p>
+
+                <div class="bg-amber-950/60 p-4 rounded-xl border border-amber-700/50 text-left text-xs sm:text-sm text-amber-200 mb-6 w-full space-y-2">
+                    <p>🎮 <b>이동:</b> WASD 또는 방향키 (모바일: 좌측 조이스틱)</p>
+                    <p>👀 <b>시점 회전:</b> 마우스 이동 (모바일: 우측 화면 드래그)</p>
+                    <p>👁️ <b>스텔스:</b> 제빵사/손님의 노란 3D 탐조등 시야를 피하세요!</p>
+                    <p>🚪 <b>목표:</b> 각 구역의 황금 열쇠를 찾아 탈출문으로 이동!</p>
+                </div>
+
+                <button id="start-btn" class="btn-bakery text-white text-xl font-bold px-8 py-3 rounded-full cursor-pointer w-full">
+                    1인칭 탈출 시작 🚀
+                </button>
+            </div>
+        </div>
+
+        <!-- STAGE CLEAR OVERLAY -->
+        <div id="stage-clear-screen" class="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-amber-950/85 backdrop-blur-md text-white hidden z-30">
+            <div class="bakery-panel max-w-sm p-8 flex flex-col items-center border-2 border-emerald-500">
+                <div class="text-5xl mb-2 animate-bounce">🎉🚪</div>
+                <h3 id="clear-title" class="text-3xl font-bold text-yellow-300 mb-2">구역 통과 성공!</h3>
+                <p id="clear-desc" class="text-amber-200 text-sm mb-6">문을 열고 다음 구역으로 이동합니다.</p>
+                <button id="next-stage-btn" class="btn-bakery-green text-white text-lg font-bold px-8 py-3 rounded-full cursor-pointer w-full">
+                    다음 구역 진입 ➡️
+                </button>
+            </div>
+        </div>
+
+        <!-- GAME OVER OVERLAY -->
+        <div id="game-over-screen" class="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-red-950/90 backdrop-blur-md text-white hidden z-30">
+            <div class="bakery-panel max-w-sm p-8 flex flex-col items-center border-2 border-red-500">
+                <div class="text-6xl mb-3">😵🍞</div>
+                <h3 class="text-3xl font-bold text-red-400 mb-2">제빵사에게 포위되었습니다!</h3>
+                <p class="text-red-200 text-xs sm:text-sm mb-4">맛있는 빵 진열대에 다시 올려질 위기에 처했습니다...</p>
+                <div class="bg-red-900/60 px-4 py-2 rounded-xl mb-6 border border-red-500/40 text-sm">
+                    최종 점수: <span id="game-over-score" class="text-yellow-300 font-bold text-lg">0</span>점
+                </div>
+                <button id="restart-btn" class="btn-bakery text-white text-lg font-bold px-8 py-3 rounded-full cursor-pointer w-full">
+                    현재 구역 다시 도전 🔄
+                </button>
+            </div>
+        </div>
+
+        <!-- GAME CLEAR OVERLAY -->
+        <div id="game-clear-screen" class="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-amber-950/95 backdrop-blur-md text-white hidden z-30">
+            <div class="bakery-panel max-w-md p-8 flex flex-col items-center border-2 border-yellow-400">
+                <div class="text-7xl mb-3 animate-bounce">🏆🥖✨</div>
+                <h3 class="text-3xl sm:text-4xl font-extrabold text-yellow-300 mb-2">자유를 찾은 식빵!</h3>
+                <p class="text-amber-100 text-sm mb-4">
+                    축하합니다! 빵집 정문을 무사히 빠져나와 바깥 세상을 마주했습니다!
+                </p>
+                <div class="bg-amber-900/60 p-4 rounded-2xl border border-amber-500/40 text-center mb-6 w-full">
+                    <div class="text-xs text-amber-200">최종 획득 점수</div>
+                    <div id="final-score" class="text-3xl font-extrabold text-yellow-400">0</div>
+                </div>
+                <button id="victory-restart-btn" class="btn-bakery-green text-white text-xl font-bold px-8 py-3 rounded-full cursor-pointer w-full">
+                    다시 플레이 🔁
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // === GLOBAL VARIABLES DECLARATION ===
+        let scene, camera, renderer, controls;
+        let tileTexture, wallTexture, ceilingTexture, menuTexture;
+        let game = null;
+
+        // === GAME CONFIGURATION ===
+        const CONFIG = {
+            PLAYER_HEIGHT: 0.8,
+            PLAYER_RADIUS: 0.45,
+            PLAYER_SPEED: 0.12,
+            PLAYER_MAX_HP: 3,
+            ENEMY_SPEED_PATROL: 0.05,
+            ENEMY_SPEED_CHASE: 0.095,
+            OVEN_CYCLE_IDLE: 180,
+            OVEN_CYCLE_WARN: 60,
+            OVEN_CYCLE_HOT: 120,
+            SCORE_CRUMB: 10,
+            SCORE_BUTTER: 50,
+            SCORE_KEY: 100,
+            INVULNERABLE_FRAMES: 90
+        };
+
+        // === WEB AUDIO SYNTHESIZER ===
+        class AudioSystem {
+            constructor() {
+                this.ctx = null;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (AudioCtx) this.ctx = new AudioCtx();
+                }
+                if (this.ctx && this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            playTone(freq, type, duration, vol = 0.1) {
+                if (!this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                    gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + duration);
+                } catch(e) {}
+            }
+
+            playStep() { this.playTone(120, 'sine', 0.08, 0.03); }
+            playItem() { this.playTone(587, 'triangle', 0.15, 0.12); }
+            playKey() { this.playTone(880, 'sine', 0.3, 0.15); }
+            playAlert() { this.playTone(300, 'sawtooth', 0.25, 0.15); }
+            playHurt() { this.playTone(90, 'square', 0.3, 0.2); }
+            playStageClear() {
+                this.playTone(523, 'sine', 0.15, 0.15);
+                setTimeout(() => this.playTone(659, 'sine', 0.15, 0.15), 150);
+                setTimeout(() => this.playTone(783, 'sine', 0.3, 0.15), 300);
+            }
+            playVictory() {
+                [523, 659, 783, 1046].forEach((f, i) => {
+                    setTimeout(() => this.playTone(f, 'sine', 0.3, 0.15), i * 150);
+                });
+            }
+        }
+        const audio = new AudioSystem();
+
+        // === PROCEDURAL CANVAS TEXTURE GENERATOR ===
+        function createProceduralTextures() {
+            // Tile Floor Texture
+            const canvasTile = document.createElement('canvas');
+            canvasTile.width = 256; canvasTile.height = 256;
+            const ctxT = canvasTile.getContext('2d');
+            ctxT.fillStyle = '#f3e5ab'; ctxT.fillRect(0,0,256,256);
+            ctxT.strokeStyle = '#d7ccc8'; ctxT.lineWidth = 4;
+            for(let i=0; i<=256; i+=64) {
+                ctxT.beginPath(); ctxT.moveTo(i, 0); ctxT.lineTo(i, 256); ctxT.stroke();
+                ctxT.beginPath(); ctxT.moveTo(0, i); ctxT.lineTo(256, i); ctxT.stroke();
+            }
+            const tileTex = new THREE.CanvasTexture(canvasTile);
+            tileTex.wrapS = THREE.RepeatWrapping; tileTex.wrapT = THREE.RepeatWrapping;
+            tileTex.repeat.set(10, 5);
+
+            // Wall Wallpaper Texture
+            const canvasWall = document.createElement('canvas');
+            canvasWall.width = 256; canvasWall.height = 256;
+            const ctxW = canvasWall.getContext('2d');
+            ctxW.fillStyle = '#fff8e7'; ctxW.fillRect(0,0,256,256);
+            ctxW.fillStyle = '#ffe0b2';
+            for(let i=0; i<256; i+=32) { ctxW.fillRect(i, 0, 16, 256); }
+            const wallTex = new THREE.CanvasTexture(canvasWall);
+            wallTex.wrapS = THREE.RepeatWrapping; wallTex.wrapT = THREE.RepeatWrapping;
+            wallTex.repeat.set(4, 1);
+
+            // Ceiling Texture
+            const canvasCeil = document.createElement('canvas');
+            canvasCeil.width = 256; canvasCeil.height = 256;
+            const ctxC = canvasCeil.getContext('2d');
+            ctxC.fillStyle = '#5d4037'; ctxC.fillRect(0,0,256,256);
+            ctxC.fillStyle = '#8d6e63';
+            for(let i=0; i<256; i+=64) { ctxC.fillRect(i, 0, 8, 256); }
+            const ceilTex = new THREE.CanvasTexture(canvasCeil);
+            ceilTex.wrapS = THREE.RepeatWrapping; ceilTex.wrapT = THREE.RepeatWrapping;
+            ceilTex.repeat.set(8, 4);
+
+            // Menu Chalkboard Texture
+            const canvasMenu = document.createElement('canvas');
+            canvasMenu.width = 256; canvasMenu.height = 128;
+            const ctxM = canvasMenu.getContext('2d');
+            ctxM.fillStyle = '#212121'; ctxM.fillRect(0,0,256,128);
+            ctxM.strokeStyle = '#a1887f'; ctxM.lineWidth = 6; ctxM.strokeRect(3,3,250,122);
+            ctxM.fillStyle = '#ffffff'; ctxM.font = '20px sans-serif';
+            ctxM.fillText('🥐 Bakery Menu', 20, 35);
+            ctxM.font = '14px sans-serif';
+            ctxM.fillText('1. Croissant - 3.0$', 20, 65);
+            ctxM.fillText('2. Fresh Bread - 2.5$', 20, 90);
+            const menuTex = new THREE.CanvasTexture(canvasMenu);
+
+            return { tileTex, wallTex, ceilTex, menuTex };
+        }
+
+        // === 3D MODEL FACTORY ===
+        const ModelFactory = {
+            createBaker() {
+                const group = new THREE.Group();
+                const bodyGeo = new THREE.CylinderGeometry(0.4, 0.45, 1.4, 12);
+                const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+                const body = new THREE.Mesh(bodyGeo, bodyMat);
+                body.position.y = 0.7;
+                group.add(body);
+
+                const headGeo = new THREE.SphereGeometry(0.3, 12, 12);
+                const headMat = new THREE.MeshStandardMaterial({ color: 0xffcc99 });
+                const head = new THREE.Mesh(headGeo, headMat);
+                head.position.y = 1.6;
+                group.add(head);
+
+                const hatGeo = new THREE.CylinderGeometry(0.35, 0.28, 0.4, 12);
+                const hatMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+                const hat = new THREE.Mesh(hatGeo, hatMat);
+                hat.position.y = 1.95;
+                group.add(hat);
+
+                return group;
+            },
+
+            createCustomer() {
+                const group = new THREE.Group();
+                const bodyGeo = new THREE.CylinderGeometry(0.38, 0.42, 1.4, 12);
+                const bodyMat = new THREE.MeshStandardMaterial({ color: 0x6e3f1b });
+                const body = new THREE.Mesh(bodyGeo, bodyMat);
+                body.position.y = 0.7;
+                group.add(body);
+
+                const headGeo = new THREE.SphereGeometry(0.28, 12, 12);
+                const headMat = new THREE.MeshStandardMaterial({ color: 0xffdbac });
+                const head = new THREE.Mesh(headGeo, headMat);
+                head.position.y = 1.55;
+                group.add(head);
+
+                return group;
+            },
+
+            createOven(w, h, d) {
+                const group = new THREE.Group();
+                const bodyGeo = new THREE.BoxGeometry(w, h, d);
+                const bodyMat = new THREE.MeshStandardMaterial({ color: 0x424242, metalness: 0.8, roughness: 0.2 });
+                const body = new THREE.Mesh(bodyGeo, bodyMat);
+                body.position.y = h / 2;
+                group.add(body);
+
+                const winGeo = new THREE.PlaneGeometry(w * 0.7, h * 0.5);
+                const winMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0x000000 });
+                const win = new THREE.Mesh(winGeo, winMat);
+                win.position.set(0, h * 0.5, d / 2 + 0.01);
+                group.add(win);
+
+                group.userData.windowMat = winMat;
+                return group;
+            },
+
+            createRollingPin() {
+                const group = new THREE.Group();
+                const pinGeo = new THREE.CylinderGeometry(0.12, 0.12, 1.6, 12);
+                const pinMat = new THREE.MeshStandardMaterial({ color: 0xd7ccc8 });
+                const pin = new THREE.Mesh(pinGeo, pinMat);
+                pin.rotation.z = Math.PI / 2;
+                pin.position.y = 0.2;
+                group.add(pin);
+                return group;
+            },
+
+            createItem(type) {
+                const group = new THREE.Group();
+                if (type === 'crumb') {
+                    const geo = new THREE.DodecahedronGeometry(0.18);
+                    const mat = new THREE.MeshStandardMaterial({ color: 0xf5b041 });
+                    const mesh = new THREE.Mesh(geo, mat);
+                    mesh.position.y = 0.25;
+                    group.add(mesh);
+                } else if (type === 'butter') {
+                    const geo = new THREE.BoxGeometry(0.35, 0.2, 0.35);
+                    const mat = new THREE.MeshStandardMaterial({ color: 0xf4d03f });
+                    const mesh = new THREE.Mesh(geo, mat);
+                    mesh.position.y = 0.2;
+                    group.add(mesh);
+                } else if (type === 'key') {
+                    const geo = new THREE.TorusGeometry(0.2, 0.05, 8, 16);
+                    const mat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.9, roughness: 0.1 });
+                    const mesh = new THREE.Mesh(geo, mat);
+                    mesh.position.y = 0.5;
+                    group.add(mesh);
+                }
+                return group;
+            },
+
+            createExitDoor() {
+                const group = new THREE.Group();
+
+                // Heavy Wooden Frame & Decorative Molding (Rich Dark Oak)
+                const frameGeo = new THREE.BoxGeometry(0.5, 3.4, 2.8);
+                const frameMat = new THREE.MeshStandardMaterial({ color: 0x3d2314, roughness: 0.6 });
+                const frame = new THREE.Mesh(frameGeo, frameMat);
+                frame.position.y = 1.7;
+                group.add(frame);
+
+                const topTrimGeo = new THREE.BoxGeometry(0.65, 0.25, 3.1);
+                const topTrim = new THREE.Mesh(topTrimGeo, frameMat);
+                topTrim.position.set(0, 3.45, 0);
+                group.add(topTrim);
+
+                // Door Wood Framing & Solid Bottom Panel
+                const doorWoodMat = new THREE.MeshStandardMaterial({ color: 0x5c3a21, roughness: 0.5 });
+                const bottomPanelGeo = new THREE.BoxGeometry(0.2, 0.8, 2.3);
+                const bottomPanel = new THREE.Mesh(bottomPanelGeo, doorWoodMat);
+                bottomPanel.position.set(0, 0.4, 0);
+                group.add(bottomPanel);
+
+                // Polished Brass Kickplate at Bottom
+                const kickPlateGeo = new THREE.BoxGeometry(0.22, 0.25, 2.1);
+                const kickPlateMat = new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 0.85, roughness: 0.2 });
+                const kickPlate = new THREE.Mesh(kickPlateGeo, kickPlateMat);
+                kickPlate.position.set(-0.01, 0.2, 0);
+                group.add(kickPlate);
+
+                // Glass Sash Framing & Center Mullion Dividers
+                const leftStile = new THREE.Mesh(new THREE.BoxGeometry(0.2, 2.2, 0.25), doorWoodMat);
+                leftStile.position.set(0, 1.9, -1.025);
+                const rightStile = new THREE.Mesh(new THREE.BoxGeometry(0.2, 2.2, 0.25), doorWoodMat);
+                rightStile.position.set(0, 1.9, 1.025);
+                const topRail = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.3, 2.3), doorWoodMat);
+                topRail.position.set(0, 2.9, 0);
+                const centerMullion = new THREE.Mesh(new THREE.BoxGeometry(0.21, 2.1, 0.08), doorWoodMat);
+                centerMullion.position.set(0, 1.85, 0);
+                const sashBar = new THREE.Mesh(new THREE.BoxGeometry(0.21, 0.08, 2.1), doorWoodMat);
+                sashBar.position.set(0, 1.85, 0);
+                group.add(leftStile, rightStile, topRail, centerMullion, sashBar);
+
+                // Transparent Storefront Glass Windows
+                const glassGeo = new THREE.BoxGeometry(0.05, 2.0, 2.0);
+                const glassMat = new THREE.MeshPhysicalMaterial({ 
+                    color: 0xe0f7fa, transparent: true, opacity: 0.45, roughness: 0.1, metalness: 0.1, transmission: 0.6 
+                });
+                const glass = new THREE.Mesh(glassGeo, glassMat);
+                glass.position.set(0, 1.85, 0);
+                group.add(glass);
+
+                // Red & Cream Striped Bakery Canopy Awning Overhead
+                const canvasAwning = document.createElement('canvas');
+                canvasAwning.width = 128; canvasAwning.height = 128;
+                const ctxA = canvasAwning.getContext('2d');
+                ctxA.fillStyle = '#c0392b'; ctxA.fillRect(0,0,128,128);
+                ctxA.fillStyle = '#fef5e7';
+                for(let i=0; i<128; i+=32) { ctxA.fillRect(i, 0, 16, 128); }
+                const awningTex = new THREE.CanvasTexture(canvasAwning);
+                awningTex.wrapS = THREE.RepeatWrapping; awningTex.wrapT = THREE.RepeatWrapping;
+                awningTex.repeat.set(4, 1);
+
+                const awningGeo = new THREE.BoxGeometry(0.9, 0.4, 3.2);
+                const awningMat = new THREE.MeshStandardMaterial({ map: awningTex, roughness: 0.8 });
+                const awning = new THREE.Mesh(awningGeo, awningMat);
+                awning.position.set(-0.4, 3.55, 0);
+                awning.rotation.z = -0.15;
+                group.add(awning);
+
+                const fringeGeo = new THREE.BoxGeometry(0.08, 0.15, 3.2);
+                const fringeMat = new THREE.MeshStandardMaterial({ color: 0xc0392b });
+                const fringe = new THREE.Mesh(fringeGeo, fringeMat);
+                fringe.position.set(-0.82, 3.32, 0);
+                group.add(fringe);
+
+                // Bakery Signboard with Croissant Graphic and Text
+                const canvasSign = document.createElement('canvas');
+                canvasSign.width = 256; canvasSign.height = 128;
+                const ctxS = canvasSign.getContext('2d');
+                ctxS.fillStyle = '#2c3e50'; ctxS.fillRect(0, 0, 256, 128);
+                ctxS.strokeStyle = '#f39c12'; ctxS.lineWidth = 8; ctxS.strokeRect(4, 4, 248, 120);
+                ctxS.fillStyle = '#f1c40f'; ctxS.font = 'bold 22px sans-serif'; ctxS.textAlign = 'center';
+                ctxS.fillText('🥐 FRESH BAKERY 🍞', 128, 45);
+                ctxS.fillStyle = '#ffffff'; ctxS.font = 'bold 18px sans-serif';
+                ctxS.fillText('-[ ESCAPE / 탈출구 ]-', 128, 80);
+                ctxS.fillStyle = '#2ecc71'; ctxS.font = '14px sans-serif';
+                ctxS.fillText('OPEN • WALK OUT', 128, 106);
+
+                const signTex = new THREE.CanvasTexture(canvasSign);
+                const signGeo = new THREE.PlaneGeometry(1.6, 0.7);
+                const signMat = new THREE.MeshStandardMaterial({ map: signTex, roughness: 0.3, emissive: 0x111111 });
+                const signInner = new THREE.Mesh(signGeo, signMat);
+                signInner.rotation.y = -Math.PI / 2;
+                signInner.position.set(-0.12, 2.5, 0);
+                group.add(signInner);
+
+                const signPlaqueGeo = new THREE.BoxGeometry(0.1, 0.8, 1.7);
+                const signPlaque = new THREE.Mesh(signPlaqueGeo, frameMat);
+                signPlaque.position.set(-0.08, 2.5, 0);
+                group.add(signPlaque);
+
+                // Brass Push Bars and Handle Mounts
+                const handleBarGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.9, 12);
+                const handleBar = new THREE.Mesh(handleBarGeo, kickPlateMat);
+                handleBar.rotation.x = Math.PI / 2;
+                handleBar.position.set(-0.15, 1.25, -0.6);
+                group.add(handleBar);
+
+                const handleMount1 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 0.06), kickPlateMat);
+                handleMount1.position.set(-0.1, 1.25, -0.2);
+                const handleMount2 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 0.06), kickPlateMat);
+                handleMount2.position.set(-0.1, 1.25, -1.0);
+                group.add(handleMount1, handleMount2);
+
+                const pushPlateGeo = new THREE.BoxGeometry(0.02, 0.4, 0.15);
+                const pushPlate = new THREE.Mesh(pushPlateGeo, kickPlateMat);
+                pushPlate.position.set(-0.12, 1.3, 0.6);
+                group.add(pushPlate);
+
+                // Lock Indicator Vintage Lantern Sconce
+                const lanternGroup = new THREE.Group();
+                lanternGroup.position.set(-0.12, 1.4, 1.05);
+                const mountArm = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.2, 8), kickPlateMat);
+                mountArm.rotation.z = Math.PI / 2;
+                lanternGroup.add(mountArm);
+
+                const lockLightGeo = new THREE.SphereGeometry(0.12, 12, 12);
+                const lockLightMat = new THREE.MeshStandardMaterial({ color: 0xe74c3c, emissive: 0xe74c3c, emissiveIntensity: 0.8, roughness: 0.2 });
+                const lockLight = new THREE.Mesh(lockLightGeo, lockLightMat);
+                lockLight.position.set(-0.1, 0, 0);
+                lanternGroup.add(lockLight);
+
+                const cageGeo = new THREE.CylinderGeometry(0.14, 0.14, 0.28, 6, 1, true);
+                const cageMat = new THREE.MeshStandardMaterial({ color: 0x222222, wireframe: true });
+                const cage = new THREE.Mesh(cageGeo, cageMat);
+                cage.position.set(-0.1, 0, 0);
+                lanternGroup.add(cage);
+                group.add(lanternGroup);
+
+                // Welcome Mat on Floor in front of Door
+                const matGeo = new THREE.PlaneGeometry(1.2, 2.2);
+                const matCanvas = document.createElement('canvas');
+                matCanvas.width = 128; matCanvas.height = 128;
+                const ctxM = matCanvas.getContext('2d');
+                ctxM.fillStyle = '#6e473b'; ctxM.fillRect(0,0,128,128);
+                ctxM.strokeStyle = '#f39c12'; ctxM.lineWidth = 6; ctxM.strokeRect(6,6,116,116);
+                ctxM.fillStyle = '#ffffff'; ctxM.font = 'bold 20px sans-serif'; ctxM.textAlign = 'center';
+                ctxM.fillText('WELCOME', 64, 70);
+                const matTex = new THREE.CanvasTexture(matCanvas);
+                const welcomeMat = new THREE.Mesh(matGeo, new THREE.MeshStandardMaterial({ map: matTex, roughness: 0.9 }));
+                welcomeMat.rotation.x = -Math.PI / 2;
+                welcomeMat.rotation.z = Math.PI / 2;
+                welcomeMat.position.set(-0.7, 0.01, 0);
+                group.add(welcomeMat);
+
+                group.userData.lockLightMat = lockLightMat;
+                group.userData.signMat = signMat;
+                return group;
+            },
+
+            createFlourSack() {
+                const geo = new THREE.CylinderGeometry(0.4, 0.45, 0.8, 8);
+                const mat = new THREE.MeshStandardMaterial({ color: 0xefebe9 });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.y = 0.4;
+                return mesh;
+            },
+
+            createHangingLamp() {
+                const group = new THREE.Group();
+                const shadeGeo = new THREE.ConeGeometry(0.5, 0.3, 12);
+                const shadeMat = new THREE.MeshStandardMaterial({ color: 0xd35400 });
+                const shade = new THREE.Mesh(shadeGeo, shadeMat);
+                shade.position.y = 3.2;
+                group.add(shade);
+
+                const light = new THREE.PointLight(0xffaa44, 0.8, 6);
+                light.position.y = 3.0;
+                group.add(light);
+                return group;
+            },
+
+            createBreadShelf() {
+                const group = new THREE.Group();
+                const shelfGeo = new THREE.BoxGeometry(2.0, 1.8, 0.8);
+                const shelfMat = new THREE.MeshStandardMaterial({ color: 0x6d4c41 });
+                const shelf = new THREE.Mesh(shelfGeo, shelfMat);
+                shelf.position.y = 0.9;
+                group.add(shelf);
+                return group;
+            },
+
+            createPastryCounter() {
+                const group = new THREE.Group();
+                const counterGeo = new THREE.BoxGeometry(2.2, 1.1, 1.0);
+                const counterMat = new THREE.MeshStandardMaterial({ color: 0xd7ccc8, roughness: 0.2 });
+                const counter = new THREE.Mesh(counterGeo, counterMat);
+                counter.position.y = 0.55;
+                group.add(counter);
+                return group;
+            }
+        };
+
+        // === CONTROLS MANAGER ===
+        class ControlsManager {
+            constructor() {
+                this.keys = {};
+                this.yaw = 0;
+                this.pitch = 0;
+                this.touchMove = { x: 0, y: 0 };
+                this.touchLook = { id: null, x: 0, y: 0 };
+
+                this.setupKeyboard();
+                this.setupPointerLock();
+                this.setupTouchControls();
+            }
+
+            setupKeyboard() {
+                window.addEventListener('keydown', (e) => this.keys[e.code] = true);
+                window.addEventListener('keyup', (e) => this.keys[e.code] = false);
+            }
+
+            setupPointerLock() {
+                const container = document.getElementById('canvas-container');
+                container.addEventListener('click', () => {
+                    if (game && game.state === 'PLAYING' && !document.pointerLockElement) {
+                        try {
+                            const req = container.requestPointerLock();
+                            if (req && req.catch) req.catch(() => {});
+                        } catch (e) {}
+                    }
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    if (document.pointerLockElement) {
+                        this.yaw -= e.movementX * 0.0025;
+                        this.pitch -= e.movementY * 0.0025;
+                        this.pitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.pitch));
+                    }
+                });
+            }
+
+            setupTouchControls() {
+                const stick = document.getElementById('touch-joystick-stick');
+                const base = document.getElementById('touch-joystick-base');
+
+                base.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    const touch = e.touches[0];
+                    this.updateJoystick(touch, base, stick);
+                }, { passive: false });
+
+                base.addEventListener('touchmove', (e) => {
+                    e.preventDefault();
+                    const touch = e.touches[0];
+                    this.updateJoystick(touch, base, stick);
+                }, { passive: false });
+
+                const resetStick = () => {
+                    this.touchMove = { x: 0, y: 0 };
+                    stick.style.transform = `translate(0px, 0px)`;
+                };
+                base.addEventListener('touchend', resetStick);
+                base.addEventListener('touchcancel', resetStick);
+
+                window.addEventListener('touchmove', (e) => {
+                    for (let i = 0; i < e.touches.length; i++) {
+                        const t = e.touches[i];
+                        if (t.clientX > window.innerWidth / 2) {
+                            if (this.touchLook.id === t.identifier) {
+                                const dx = t.clientX - this.touchLook.x;
+                                const dy = t.clientY - this.touchLook.y;
+                                this.yaw -= dx * 0.005;
+                                this.pitch -= dy * 0.005;
+                                this.pitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.pitch));
+                            }
+                            this.touchLook.id = t.identifier;
+                            this.touchLook.x = t.clientX;
+                            this.touchLook.y = t.clientY;
+                        }
+                    }
+                });
+            }
+
+            updateJoystick(touch, base, stick) {
+                const rect = base.getBoundingClientRect();
+                const centerX = rect.left + rect.width / 2;
+                const centerY = rect.top + rect.height / 2;
+                let dx = touch.clientX - centerX;
+                let dy = touch.clientY - centerY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const maxDist = 40;
+                if (dist > maxDist) {
+                    dx = (dx / dist) * maxDist;
+                    dy = (dy / dist) * maxDist;
+                }
+                stick.style.transform = `translate(${dx}px, ${dy}px)`;
+                this.touchMove = { x: dx / maxDist, y: dy / maxDist };
+            }
+
+            getMovementVector() {
+                let forward = 0;
+                let side = 0;
+
+                if (this.keys['KeyW'] || this.keys['ArrowUp']) forward += 1;
+                if (this.keys['KeyS'] || this.keys['ArrowDown']) forward -= 1;
+                if (this.keys['KeyA'] || this.keys['ArrowLeft']) side -= 1;
+                if (this.keys['KeyD'] || this.keys['ArrowRight']) side += 1;
+
+                forward -= this.touchMove.y;
+                side += this.touchMove.x;
+
+                const moveVec = new THREE.Vector3();
+                if (forward !== 0 || side !== 0) {
+                    const dirForward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
+                    const dirSide = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).normalize();
+                    moveVec.addScaledVector(dirForward, forward);
+                    moveVec.addScaledVector(dirSide, side);
+                    if (moveVec.lengthSq() > 1) moveVec.normalize();
+                }
+                return moveVec;
+            }
+
+            updateCamera() {
+                camera.rotation.order = "YXZ";
+                camera.rotation.y = this.yaw;
+                camera.rotation.x = this.pitch;
+            }
+        }
+
+        // === GLOBAL TOP-LEVEL 3D INITIALIZATION FUNCTION ===
+        function init3D() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+
+            const container = document.getElementById('canvas-container');
+            container.appendChild(renderer.domElement);
+
+            const textures = createProceduralTextures();
+            tileTexture = textures.tileTex;
+            wallTexture = textures.wallTex;
+            ceilingTexture = textures.ceilTex;
+            menuTexture = textures.menuTex;
+
+            controls = new ControlsManager();
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        // === LEVEL DATA & STAGES ===
+        const Stages = [
+            {
+                name: "ZONE 1: 따스한 주방 (Cozy Kitchen)",
+                desc: "기본 감시원 1명 • 난이도: ★☆☆☆☆",
+                theme: {
+                    bg: 0x322015, fog: 0x322015, fogDensity: 0.035,
+                    ambientColor: 0xfff5e6, ambientIntensity: 0.8,
+                    dirColor: 0xffebd2, wallColor: 0xffffff, floorColor: 0xffffff,
+                    ovenCycleMult: 1.0, enemySpeedMult: 1.0,
+                    visionDist: 7.5, visionAngle: Math.PI / 4.5
+                },
+                playerStart: { x: -16, z: 0 },
+                exitDoor: { x: 20.2, z: 0 },
+                walls: [
+                    { x: -8, z: -4, w: 6, h: 2, d: 6 },
+                    { x: -8, z: 4, w: 6, h: 2, d: 6 },
+                    { x: 6, z: 0, w: 6, h: 2, d: 10 }
+                ],
+                enemies: [{ type: 'baker', waypoints: [{ x: 0, z: -7 }, { x: 0, z: 7 }] }],
+                ovens: [],
+                hazards: [{ x1: 14, z1: -6, x2: 14, z2: 6, speed: 0.06 }],
+                items: [
+                    { x: -12, z: -6, type: 'crumb' },
+                    { x: -12, z: 6, type: 'crumb' },
+                    { x: 0, z: 0, type: 'butter' },
+                    { x: 14, z: 0, type: 'key' }
+                ],
+                decors: [
+                    { type: 'flour', x: -18, z: -8 },
+                    { type: 'lamp', x: 0, z: 0 },
+                    { type: 'lamp', x: 14, z: 0 }
+                ]
+            },
+            {
+                name: "ZONE 2: 불꽃 오븐실 (Infernal Ovens)",
+                desc: "고속 오븐 & 밀대 트랩 • 난이도: ★★★☆☆",
+                theme: {
+                    bg: 0x322015, fog: 0x322015, fogDensity: 0.035,
+                    ambientColor: 0xfff5e6, ambientIntensity: 0.8,
+                    dirColor: 0xffebd2, wallColor: 0xffffff, floorColor: 0xffffff,
+                    ovenCycleMult: 0.6, enemySpeedMult: 1.25,
+                    visionDist: 8.0, visionAngle: Math.PI / 4.2
+                },
+                playerStart: { x: -16, z: -7 },
+                exitDoor: { x: 20.2, z: 8 },
+                walls: [
+                    { x: -8, z: -2, w: 1, h: 4, d: 15 },
+                    { x: 2, z: 2, w: 1, h: 4, d: 15 },
+                    { x: 12, z: -2, w: 1, h: 4, d: 15 }
+                ],
+                enemies: [
+                    { type: 'baker', waypoints: [{ x: -3, z: 6 }, { x: -3, z: -6 }] },
+                    { type: 'baker', waypoints: [{ x: 7, z: -6 }, { x: 7, z: 6 }] }
+                ],
+                ovens: [
+                    { x: -5, z: -4, w: 4, h: 2.5, d: 2 },
+                    { x: -5, z: 3, w: 4, h: 2.5, d: 2 },
+                    { x: 5, z: -3, w: 4, h: 2.5, d: 2 },
+                    { x: 5, z: 4, w: 4, h: 2.5, d: 2 }
+                ],
+                hazards: [
+                    { x1: -13, z1: -3, x2: -13, z2: 5, speed: 0.12 },
+                    { x1: 9, z1: -6, x2: 9, z2: 6, speed: 0.15 }
+                ],
+                items: [
+                    { x: -14, z: 0, type: 'crumb' },
+                    { x: -3, z: 0, type: 'butter' },
+                    { x: 7, z: 0, type: 'butter' },
+                    { x: 16, z: -7, type: 'key' }
+                ],
+                decors: [{ type: 'lamp', x: -5, z: 0 }, { type: 'lamp', x: 5, z: 0 }]
+            },
+            {
+                name: "ZONE 3: 디저트 라운지 (Dessert Lounge)",
+                desc: "손님들의 광역 시야 경계 • 난이도: ★★★★☆",
+                theme: {
+                    bg: 0x322015, fog: 0x322015, fogDensity: 0.035,
+                    ambientColor: 0xfff5e6, ambientIntensity: 0.8,
+                    dirColor: 0xffebd2, wallColor: 0xffffff, floorColor: 0xffffff,
+                    ovenCycleMult: 1.0, enemySpeedMult: 1.35,
+                    visionDist: 9.0, visionAngle: Math.PI / 3.8
+                },
+                playerStart: { x: -16, z: 0 },
+                exitDoor: { x: 20.2, z: -8 },
+                walls: [
+                    { x: -8, z: -4, w: 6, h: 2, d: 4 },
+                    { x: -8, z: 4, w: 6, h: 2, d: 4 },
+                    { x: 4, z: -4, w: 6, h: 2, d: 4 },
+                    { x: 4, z: 4, w: 6, h: 2, d: 4 }
+                ],
+                enemies: [
+                    { type: 'customer', waypoints: [{ x: -2, z: -7 }, { x: -2, z: 7 }] },
+                    { type: 'customer', waypoints: [{ x: -14, z: -7 }, { x: 12, z: -7 }, { x: 12, z: 7 }, { x: -14, z: 7 }] },
+                    { type: 'baker', waypoints: [{ x: 11, z: 7 }, { x: 11, z: -7 }] }
+                ],
+                ovens: [],
+                hazards: [{ x1: -2, z1: 0, x2: 10, z2: 0, speed: 0.11 }],
+                items: [
+                    { x: -8, z: 0, type: 'crumb' },
+                    { x: 4, z: 0, type: 'butter' },
+                    { x: 15, z: 7, type: 'key' }
+                ],
+                decors: [
+                    { type: 'shelf', x: -8, z: -4 }, { type: 'shelf', x: -8, z: 4 },
+                    { type: 'pastry', x: 4, z: -4 }, { type: 'pastry', x: 4, z: 4 }
+                ]
+            },
+            {
+                name: "ZONE 4: 심야 정문 탈출구 (Midnight Exit)",
+                desc: "4인 경비 삼엄함 • 난이도: ★★★★★",
+                theme: {
+                    bg: 0x322015, fog: 0x322015, fogDensity: 0.035,
+                    ambientColor: 0xfff5e6, ambientIntensity: 0.8,
+                    dirColor: 0xffebd2, wallColor: 0xffffff, floorColor: 0xffffff,
+                    ovenCycleMult: 0.5, enemySpeedMult: 1.5,
+                    visionDist: 9.5, visionAngle: Math.PI / 3.5
+                },
+                playerStart: { x: -16, z: 0 },
+                exitDoor: { x: 20.2, z: 0 },
+                walls: [
+                    { x: -6, z: 0, w: 4, h: 2, d: 8 },
+                    { x: 6, z: -5, w: 6, h: 2, d: 4 },
+                    { x: 6, z: 5, w: 6, h: 2, d: 4 }
+                ],
+                enemies: [
+                    { type: 'baker', waypoints: [{ x: 0, z: -7 }, { x: 0, z: 7 }] },
+                    { type: 'baker', waypoints: [{ x: 13, z: 7 }, { x: 13, z: -7 }] },
+                    { type: 'customer', waypoints: [{ x: -12, z: -7 }, { x: -12, z: 7 }] },
+                    { type: 'customer', waypoints: [{ x: 6, z: -1.5 }, { x: 6, z: 1.5 }] }
+                ],
+                ovens: [{ x: 0, z: 0, w: 3, h: 2, d: 3 }],
+                hazards: [
+                    { x1: 13, z1: -4, x2: 17, z2: -4, speed: 0.14 },
+                    { x1: 13, z1: 4, x2: 17, z2: 4, speed: 0.14 }
+                ],
+                items: [
+                    { x: 0, z: -4, type: 'butter' },
+                    { x: -12, z: -3, type: 'crumb' },
+                    { x: 13, z: -5, type: 'key' }
+                ],
+                decors: [{ type: 'lamp', x: 0, z: 0 }, { type: 'lamp', x: 15, z: 0 }]
+            }
+        ];
+
+        // === MAIN GAME ENGINE CLASS ===
+        class Game {
+            constructor() {
+                this.state = 'TITLE';
+                this.stageIdx = 0;
+                this.score = 0;
+                this.hp = CONFIG.PLAYER_MAX_HP;
+                this.hasKey = false;
+                this.invulnerableTimer = 0;
+
+                this.playerPosition = new THREE.Vector3();
+                this.currentStageData = null;
+
+                this.wallsMeshes = [];
+                this.enemiesList = [];
+                this.ovensList = [];
+                this.hazardsList = [];
+                this.itemsList = [];
+                this.exitDoorGroup = null;
+
+                this.setupUI();
+                init3D();
+            }
+
+            setupUI() {
+                document.getElementById('start-btn').onclick = () => { audio.init(); this.startGame(); };
+                document.getElementById('restart-btn').onclick = () => { audio.init(); this.restartStage(); };
+                document.getElementById('victory-restart-btn').onclick = () => { audio.init(); this.startGame(); };
+                document.getElementById('next-stage-btn').onclick = () => { audio.init(); this.nextStage(); };
+            }
+
+            startGame() {
+                this.score = 0;
+                this.hp = CONFIG.PLAYER_MAX_HP;
+                this.stageIdx = 0;
+                this.loadStage(this.stageIdx);
+                this.setState('PLAYING');
+            }
+
+            restartStage() {
+                this.hp = CONFIG.PLAYER_MAX_HP;
+                this.loadStage(this.stageIdx);
+                this.setState('PLAYING');
+            }
+
+            loadStage(idx) {
+                while(scene.children.length > 0){ 
+                    scene.remove(scene.children[0]); 
+                }
+
+                const data = Stages[idx];
+                this.currentStageData = data;
+                this.hasKey = false;
+
+                const theme = data.theme;
+                scene.background = new THREE.Color(theme.bg);
+                scene.fog = new THREE.FogExp2(theme.fog, theme.fogDensity);
+
+                const ambientLight = new THREE.AmbientLight(theme.ambientColor, theme.ambientIntensity);
+                scene.add(ambientLight);
+
+                const dirLight = new THREE.DirectionalLight(theme.dirColor, 0.7);
+                dirLight.position.set(20, 40, 20);
+                scene.add(dirLight);
+
+                const floorGeo = new THREE.PlaneGeometry(42, 22);
+                const floorMat = new THREE.MeshStandardMaterial({ map: tileTexture, color: theme.floorColor, roughness: 0.4 });
+                const floor = new THREE.Mesh(floorGeo, floorMat);
+                floor.rotation.x = -Math.PI / 2;
+                scene.add(floor);
+
+                const ceilingGeo = new THREE.PlaneGeometry(42, 22);
+                const ceilingMat = new THREE.MeshStandardMaterial({ map: ceilingTexture, roughness: 0.6 });
+                const ceiling = new THREE.Mesh(ceilingGeo, ceilingMat);
+                ceiling.position.y = 4.0;
+                ceiling.rotation.x = Math.PI / 2;
+                scene.add(ceiling);
+
+                this.wallsMeshes = [];
+
+                const outerWalls = [
+                    { x: 0, z: -10.5, w: 42, h: 4, d: 1 },
+                    { x: 0, z: 10.5, w: 42, h: 4, d: 1 },
+                    { x: -20.5, z: 0, w: 1, h: 4, d: 22 }
+                ];
+
+                const doorZ = data.exitDoor.z;
+                const upperEastLen = Math.max(0.1, (doorZ - 1.4) - (-10.5));
+                const upperEastZ = -10.5 + upperEastLen / 2;
+                outerWalls.push({ x: 20.5, z: upperEastZ, w: 1, h: 4, d: upperEastLen });
+
+                const lowerEastLen = Math.max(0.1, 10.5 - (doorZ + 1.4));
+                const lowerEastZ = (doorZ + 1.4) + lowerEastLen / 2;
+                outerWalls.push({ x: 20.5, z: lowerEastZ, w: 1, h: 4, d: lowerEastLen });
+
+                const allWallDefs = [...outerWalls, ...data.walls];
+
+                allWallDefs.forEach(w => {
+                    const geo = new THREE.BoxGeometry(w.w, w.h, w.d);
+                    const mat = new THREE.MeshStandardMaterial({ map: wallTexture, color: theme.wallColor, roughness: 0.7 });
+                    const mesh = new THREE.Mesh(geo, mat);
+                    mesh.position.set(w.x, w.h / 2, w.z);
+                    scene.add(mesh);
+                    mesh.userData = { bbox: new THREE.Box3().setFromObject(mesh) };
+                    this.wallsMeshes.push(mesh);
+                });
+
+                const exit = data.exitDoor;
+                this.exitDoorGroup = ModelFactory.createExitDoor();
+                this.exitDoorGroup.position.set(exit.x, 0, exit.z);
+                scene.add(this.exitDoorGroup);
+
+                if (data.decors) {
+                    data.decors.forEach(dec => {
+                        let prop = null;
+                        if (dec.type === 'flour') prop = ModelFactory.createFlourSack();
+                        else if (dec.type === 'lamp') prop = ModelFactory.createHangingLamp();
+                        else if (dec.type === 'shelf') prop = ModelFactory.createBreadShelf();
+                        else if (dec.type === 'pastry') prop = ModelFactory.createPastryCounter();
+
+                        if (prop) {
+                            prop.position.set(dec.x, prop.position.y || 0, dec.z);
+                            scene.add(prop);
+                            if (dec.type === 'shelf' || dec.type === 'pastry') {
+                                const propBox = new THREE.Box3().setFromObject(prop);
+                                const dummyMesh = { position: prop.position.clone(), userData: { bbox: propBox } };
+                                this.wallsMeshes.push(dummyMesh);
+                            }
+                        }
+                    });
+                }
+
+                this.playerPosition.set(data.playerStart.x, CONFIG.PLAYER_HEIGHT, data.playerStart.z);
+                camera.position.copy(this.playerPosition);
+
+                this.enemiesList = [];
+                data.enemies.forEach(eData => {
+                    const mesh = (eData.type === 'baker') ? ModelFactory.createBaker() : ModelFactory.createCustomer();
+                    mesh.position.set(eData.waypoints[0].x, 0, eData.waypoints[0].z);
+                    scene.add(mesh);
+
+                    const coneGeo = new THREE.ConeGeometry(
+                        theme.visionDist * Math.tan(theme.visionAngle / 2),
+                        theme.visionDist, 16, 1, true
+                    );
+                    const coneMat = new THREE.MeshBasicMaterial({ color: 0xffeb3b, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
+                    const cone = new THREE.Mesh(coneGeo, coneMat);
+                    cone.rotation.x = -Math.PI / 2;
+                    cone.position.set(0, 1.1, -theme.visionDist / 2);
+                    mesh.add(cone);
+                    mesh.userData.visionConeMat = coneMat;
+
+                    this.enemiesList.push({ mesh, waypoints: eData.waypoints, wpIdx: 0, state: 'PATROL', chaseTimer: 0 });
+                });
+
+                this.ovensList = [];
+                data.ovens.forEach(oData => {
+                    const mesh = ModelFactory.createOven(oData.w, oData.h, oData.d);
+                    mesh.position.set(oData.x, 0, oData.z);
+                    scene.add(mesh);
+                    this.ovensList.push({ mesh, timer: Math.floor(Math.random() * 60), bbox: new THREE.Box3().setFromObject(mesh) });
+                });
+
+                this.hazardsList = [];
+                data.hazards.forEach(hData => {
+                    const mesh = ModelFactory.createRollingPin();
+                    mesh.position.set(hData.x1, 0, hData.z1);
+                    scene.add(mesh);
+                    this.hazardsList.push({ mesh, x1: hData.x1, z1: hData.z1, x2: hData.x2, z2: hData.z2, speed: hData.speed, progress: 0, dir: 1 });
+                });
+
+                this.itemsList = [];
+                data.items.forEach(iData => {
+                    const mesh = ModelFactory.createItem(iData.type);
+                    mesh.position.set(iData.x, 0, iData.z);
+                    scene.add(mesh);
+                    this.itemsList.push({ mesh, type: iData.type, collected: false });
+                });
+
+                document.getElementById('zone-title').innerText = data.name;
+                document.getElementById('zone-desc').innerText = data.desc;
+            }
+
+            nextStage() {
+                this.stageIdx++;
+                if (this.stageIdx >= Stages.length) {
+                    this.setState('GAME_CLEAR');
+                } else {
+                    this.loadStage(this.stageIdx);
+                    this.setState('PLAYING');
+                }
+            }
+
+            setState(newState) {
+                this.state = newState;
+                if (newState !== 'PLAYING' && document.pointerLockElement) {
+                    try { document.exitPointerLock(); } catch (e) {}
+                }
+
+                document.getElementById('title-screen').classList.add('hidden');
+                document.getElementById('hud-overlay').classList.add('hidden');
+                document.getElementById('minimap-container').classList.add('hidden');
+                document.getElementById('touch-controls').classList.add('hidden');
+                document.getElementById('stage-clear-screen').classList.add('hidden');
+                document.getElementById('game-over-screen').classList.add('hidden');
+                document.getElementById('game-clear-screen').classList.add('hidden');
+
+                if (newState === 'TITLE') {
+                    document.getElementById('title-screen').classList.remove('hidden');
+                } else if (newState === 'PLAYING') {
+                    document.getElementById('hud-overlay').classList.remove('hidden');
+                    document.getElementById('minimap-container').classList.remove('hidden');
+                    document.getElementById('touch-controls').classList.remove('hidden');
+                    audio.playStep();
+                } else if (newState === 'STAGE_CLEAR') {
+                    document.getElementById('stage-clear-screen').classList.remove('hidden');
+                    audio.playStageClear();
+                } else if (newState === 'GAME_OVER') {
+                    document.getElementById('game-over-screen').classList.remove('hidden');
+                    document.getElementById('game-over-score').innerText = this.score;
+                } else if (newState === 'GAME_CLEAR') {
+                    document.getElementById('game-clear-screen').classList.remove('hidden');
+                    document.getElementById('final-score').innerText = this.score;
+                    audio.playVictory();
+                }
+            }
+
+            takeDamage() {
+                if (this.invulnerableTimer > 0) return;
+                this.hp--;
+                this.invulnerableTimer = CONFIG.INVULNERABLE_FRAMES;
+                audio.playHurt();
+
+                const vignette = document.getElementById('vignette');
+                vignette.classList.add('danger');
+                setTimeout(() => vignette.classList.remove('danger'), 800);
+
+                if (this.hp <= 0) {
+                    this.setState('GAME_OVER');
+                }
+            }
+
+            update() {
+                if (this.state !== 'PLAYING') return;
+
+                if (this.invulnerableTimer > 0) this.invulnerableTimer--;
+
+                const theme = this.currentStageData.theme;
+
+                const moveVec = controls.getMovementVector();
+                if (moveVec.lengthSq() > 0) {
+                    this.playerPosition.x += moveVec.x * CONFIG.PLAYER_SPEED;
+                    this.playerPosition.z += moveVec.z * CONFIG.PLAYER_SPEED;
+
+                    const breadHand = document.getElementById('bread-hand');
+                    breadHand.style.transform = `translateY(${Math.sin(Date.now() * 0.01) * 8}px)`;
+                }
+
+                const solidBoxes = [];
+                this.wallsMeshes.forEach(w => solidBoxes.push(w.userData.bbox));
+                this.ovensList.forEach(o => solidBoxes.push(o.bbox));
+
+                const pRadius = CONFIG.PLAYER_RADIUS;
+                for (let pass = 0; pass < 3; pass++) {
+                    for (let i = 0; i < solidBoxes.length; i++) {
+                        const bbox = solidBoxes[i];
+                        if (!bbox) continue;
+                        const closestX = Math.max(bbox.min.x, Math.min(this.playerPosition.x, bbox.max.x));
+                        const closestZ = Math.max(bbox.min.z, Math.min(this.playerPosition.z, bbox.max.z));
+
+                        const dx = this.playerPosition.x - closestX;
+                        const dz = this.playerPosition.z - closestZ;
+                        const distSq = dx * dx + dz * dz;
+
+                        if (distSq < pRadius * pRadius) {
+                            const dist = Math.sqrt(distSq);
+                            if (dist > 0.0001) {
+                                const overlap = pRadius - dist;
+                                this.playerPosition.x += (dx / dist) * overlap;
+                                this.playerPosition.z += (dz / dist) * overlap;
+                            } else {
+                                const distMinX = Math.abs(this.playerPosition.x - bbox.min.x);
+                                const distMaxX = Math.abs(this.playerPosition.x - bbox.max.x);
+                                const distMinZ = Math.abs(this.playerPosition.z - bbox.min.z);
+                                const distMaxZ = Math.abs(this.playerPosition.z - bbox.max.z);
+                                const minDist = Math.min(distMinX, distMaxX, distMinZ, distMaxZ);
+
+                                if (minDist === distMinX) this.playerPosition.x = bbox.min.x - pRadius;
+                                else if (minDist === distMaxX) this.playerPosition.x = bbox.max.x + pRadius;
+                                else if (minDist === distMinZ) this.playerPosition.z = bbox.min.z - pRadius;
+                                else if (minDist === distMaxZ) this.playerPosition.z = bbox.max.z + pRadius;
+                            }
+                        }
+                    }
+                }
+
+                this.playerPosition.x = Math.max(-19.5 + pRadius, Math.min(19.5 - pRadius, this.playerPosition.x));
+                this.playerPosition.z = Math.max(-9.5 + pRadius, Math.min(9.5 - pRadius, this.playerPosition.z));
+
+                camera.position.copy(this.playerPosition);
+                controls.updateCamera();
+
+                this.itemsList.forEach(item => {
+                    if (item.collected) return;
+                    item.mesh.rotation.y += 0.03;
+
+                    const dist = this.playerPosition.distanceTo(item.mesh.position);
+                    if (dist < 1.0) {
+                        item.collected = true;
+                        scene.remove(item.mesh);
+
+                        if (item.type === 'crumb') {
+                            this.score += CONFIG.SCORE_CRUMB;
+                            audio.playItem();
+                        } else if (item.type === 'butter') {
+                            this.score += CONFIG.SCORE_BUTTER;
+                            audio.playItem();
+                        } else if (item.type === 'key') {
+                            this.score += CONFIG.SCORE_KEY;
+                            this.hasKey = true;
+                            audio.playKey();
+                        }
+                    }
+                });
+
+                const ovenCycleIdle = CONFIG.OVEN_CYCLE_IDLE * theme.ovenCycleMult;
+                const ovenCycleWarn = CONFIG.OVEN_CYCLE_WARN * theme.ovenCycleMult;
+                const ovenCycleHot = CONFIG.OVEN_CYCLE_HOT * theme.ovenCycleMult;
+                const totalCycle = ovenCycleIdle + ovenCycleWarn + ovenCycleHot;
+
+                this.ovensList.forEach(oven => {
+                    oven.timer++;
+                    const cyclePos = oven.timer % totalCycle;
+                    const winMat = oven.mesh.userData.windowMat;
+
+                    if (cyclePos < ovenCycleIdle) {
+                        winMat.emissive.setHex(0x000000);
+                    } else if (cyclePos < ovenCycleIdle + ovenCycleWarn) {
+                        winMat.emissive.setHex(0xf39c12);
+                    } else {
+                        winMat.emissive.setHex(0xe74c3c);
+                        if (oven.bbox.containsPoint(this.playerPosition)) {
+                            this.takeDamage();
+                        }
+                    }
+                });
+
+                this.hazardsList.forEach(h => {
+                    h.progress += h.speed * 0.015 * h.dir;
+                    if (h.progress >= 1 || h.progress <= 0) {
+                        h.dir *= -1;
+                        h.progress = Math.max(0, Math.min(1, h.progress));
+                    }
+                    h.mesh.position.x = THREE.MathUtils.lerp(h.x1, h.x2, h.progress);
+                    h.mesh.position.z = THREE.MathUtils.lerp(h.z1, h.z2, h.progress);
+                    h.mesh.rotation.y += 0.08;
+
+                    if (this.playerPosition.distanceTo(h.mesh.position) < 1.2) {
+                        this.takeDamage();
+                    }
+                });
+
+                let isAnyChasing = false;
+
+                this.enemiesList.forEach(enemy => {
+                    const eMesh = enemy.mesh;
+                    let targetWp = enemy.waypoints[enemy.wpIdx];
+
+                    if (enemy.state === 'CHASE') {
+                        isAnyChasing = true;
+                        targetWp = { x: this.playerPosition.x, z: this.playerPosition.z };
+                        enemy.chaseTimer++;
+                        if (enemy.chaseTimer > 200) {
+                            enemy.state = 'PATROL';
+                            enemy.chaseTimer = 0;
+                        }
+                    }
+
+                    const dir = new THREE.Vector3(targetWp.x - eMesh.position.x, 0, targetWp.z - eMesh.position.z);
+                    const dist = dir.length();
+                    const spd = ((enemy.state === 'CHASE') ? CONFIG.ENEMY_SPEED_CHASE : CONFIG.ENEMY_SPEED_PATROL) * theme.enemySpeedMult;
+
+                    if (dist > 0.2) {
+                        dir.normalize();
+                        eMesh.position.addScaledVector(dir, spd);
+                        const targetAngle = Math.atan2(dir.x, dir.z);
+                        eMesh.rotation.y = targetAngle + Math.PI;
+                    } else if (enemy.state === 'PATROL') {
+                        enemy.wpIdx = (enemy.wpIdx + 1) % enemy.waypoints.length;
+                    }
+
+                    const toPlayer = new THREE.Vector3().subVectors(this.playerPosition, eMesh.position);
+                    const pDist = toPlayer.length();
+
+                    if (pDist < theme.visionDist) {
+                        const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), eMesh.rotation.y + Math.PI);
+                        const angle = forward.angleTo(toPlayer);
+
+                        if (angle < theme.visionAngle / 2) {
+                            if (enemy.state !== 'CHASE') {
+                                enemy.state = 'CHASE';
+                                audio.playAlert();
+                            }
+                        }
+                    }
+
+                    const coneMat = eMesh.userData.visionConeMat;
+                    if (coneMat) {
+                        coneMat.color.setHex((enemy.state === 'CHASE') ? 0xe74c3c : 0xffeb3b);
+                    }
+
+                    if (pDist < 0.9) {
+                        this.takeDamage();
+                    }
+                });
+
+                const badge = document.getElementById('stealth-badge');
+                const badgeStatus = document.getElementById('stealth-status');
+                if (isAnyChasing) {
+                    badge.className = "bakery-panel px-4 py-2 flex items-center gap-2 text-sm font-bold text-red-400 border-red-500 animate-pulse";
+                    badgeStatus.innerText = "추적당하는 중!";
+                } else {
+                    badge.className = "bakery-panel px-4 py-2 flex items-center gap-2 text-sm font-bold text-green-400";
+                    badgeStatus.innerText = "안전함";
+                }
+
+                const exitDoor = this.currentStageData.exitDoor;
+                if (Math.abs(this.playerPosition.x - exitDoor.x) < 1.8 && Math.abs(this.playerPosition.z - exitDoor.z) < 2.2) {
+                    if (this.hasKey) {
+                        this.setState('STAGE_CLEAR');
+                    }
+                }
+
+                if (this.exitDoorGroup) {
+                    const lockLightMat = this.exitDoorGroup.userData.lockLightMat;
+                    const signMat = this.exitDoorGroup.userData.signMat;
+                    if (this.hasKey) {
+                        if (lockLightMat) lockLightMat.color.setHex(0x2ecc71);
+                        if (lockLightMat) lockLightMat.emissive.setHex(0x2ecc71);
+                        if (signMat) signMat.emissiveIntensity = 0.9;
+                    } else {
+                        if (lockLightMat) lockLightMat.color.setHex(0xe74c3c);
+                        if (lockLightMat) lockLightMat.emissive.setHex(0xe74c3c);
+                    }
+                }
+
+                document.getElementById('score-text').innerText = this.score;
+                document.getElementById('hp-container').innerText = '❤️'.repeat(this.hp);
+                document.getElementById('key-icon').style.opacity = this.hasKey ? '1' : '0.2';
+
+                this.drawMinimap();
+            }
+
+            drawMinimap() {
+                const canvas = document.getElementById('minimap');
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, 130, 130);
+
+                const mapX = (x) => ((x + 20) / 40) * 130;
+                const mapZ = (z) => ((z + 10) / 20) * 130;
+
+                ctx.fillStyle = '#8b5a2b';
+                this.wallsMeshes.forEach(w => {
+                    const pos = w.position || (w.userData && w.userData.bbox ? w.userData.bbox.getCenter(new THREE.Vector3()) : null);
+                    if (!pos) return;
+                    ctx.fillRect(mapX(pos.x - 1), mapZ(pos.z - 1), 7, 7);
+                });
+
+                ctx.fillStyle = this.hasKey ? '#2ecc71' : '#e74c3c';
+                const exit = this.currentStageData.exitDoor;
+                ctx.fillRect(mapX(exit.x) - 4, mapZ(exit.z) - 4, 8, 8);
+
+                this.itemsList.forEach(i => {
+                    if (!i.collected) {
+                        ctx.fillStyle = (i.type === 'key') ? '#ffd700' : '#f39c12';
+                        ctx.beginPath();
+                        ctx.arc(mapX(i.mesh.position.x), mapZ(i.mesh.position.z), 3, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                });
+
+                ctx.fillStyle = '#e74c3c';
+                this.enemiesList.forEach(e => {
+                    ctx.beginPath();
+                    ctx.arc(mapX(e.mesh.position.x), mapZ(e.mesh.position.z), 4, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                ctx.fillStyle = '#3498db';
+                ctx.beginPath();
+                ctx.arc(mapX(this.playerPosition.x), mapZ(this.playerPosition.z), 5, 0, Math.PI * 2);
+                ctx.fill();
+
+                const forwardX = Math.sin(controls.yaw);
+                const forwardZ = Math.cos(controls.yaw);
+                ctx.strokeStyle = '#3498db';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(mapX(this.playerPosition.x), mapZ(this.playerPosition.z));
+                ctx.lineTo(mapX(this.playerPosition.x - forwardX * 3), mapZ(this.playerPosition.z - forwardZ * 3));
+                ctx.stroke();
+            }
+
+            render() {
+                renderer.render(scene, camera);
+            }
+        }
+
+        window.addEventListener('unhandledrejection', (event) => {
+            if (event.reason && (event.reason.name === 'SecurityError' || (event.reason.message && event.reason.message.includes('Pointer lock')))) {
+                event.preventDefault();
+            }
+        });
+
+        window.onload = () => {
+            game = new Game();
+
+            function animate() {
+                requestAnimationFrame(animate);
+                if (game) {
+                    game.update();
+                    game.render();
+                }
+            }
+            animate();
+        };
+    </script>
+</body>
+</html>
