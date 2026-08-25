@@ -178,8 +178,8 @@
                 <span class="fantasy-font flex items-center gap-1.5"><i class="fa-solid fa-compass"></i> 진행 중인 퀘스트</span>
                 <span class="text-[10px] text-slate-400">Q키로 상세보기</span>
             </div>
-            <div id="tracker-quest-title" class="font-semibold text-amber-200">추방된 슬라임</div>
-            <div id="tracker-quest-objective" class="text-slate-300">초원의 슬라임 처치 (0 / 5)</div>
+            <div id="tracker-quest-title" class="font-semibold text-amber-200">모험의 시작</div>
+            <div id="tracker-quest-objective" class="text-slate-300">상인 엘레나와 대화하여 잡화 모험 준비를 하세요.</div>
         </div>
 
         <!-- Bottom Controls & EXP Bar -->
@@ -515,7 +515,7 @@
             <h2 class="text-3xl font-bold text-red-400 fantasy-font">쓰러졌습니다...</h2>
             <p class="text-slate-300 text-sm">체력이 모두 소진되어 사망했습니다. 마을로 다시 복귀합니다.</p>
             <button onclick="respawnInTown()" class="w-full py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold transition shadow-lg">
-                마월에서 다시 시작
+                마을에서 다시 시작
             </button>
         </div>
     </div>
@@ -554,7 +554,7 @@
         CLASSES: {
             NOVICE: { id: 'NOVICE', name: '모험가', title: '견습생', hp: 100, mp: 50, atk: 20, def: 5, crit: 0.05, color: '#f59e0b' },
             KNIGHT: { id: 'KNIGHT', name: '기사', title: '수호기사', hp: 220, mp: 80, atk: 35, def: 18, crit: 0.10, color: '#3b82f6' },
-            MAGE:   { id: 'MAGE',   name: '마법사', title: '대마법사', hp: 120, mp: 200, atk: 55, def: 6, crit: 0.20, color: '#a855f7' },
+            MAGE:   { id: 'MAGE',   name: '마법사', title: '원소술사', hp: 120, mp: 200, atk: 55, def: 6, crit: 0.20, color: '#a855f7' },
             ROGUE:  { id: 'ROGUE',  name: '도적', title: '그림자', hp: 150, mp: 100, atk: 45, def: 10, crit: 0.35, color: '#10b981' },
             // 2차 전직 클래스
             DRAGON_KNIGHT: { id: 'DRAGON_KNIGHT', name: '용기사', title: '용의 수호자', hp: 420, mp: 150, atk: 60, def: 32, crit: 0.15, color: '#f97316', advanced: true, baseClass: 'KNIGHT' },
@@ -618,8 +618,12 @@
             this.mouse = { x: 0, y: 0, worldX: 0, worldY: 0, isDown: false };
             
             window.addEventListener('keydown', e => {
-                this.keys[e.key.toLowerCase()] = true;
-                this.handleHotkey(e.key.toLowerCase());
+                const key = e.key.toLowerCase();
+                this.keys[key] = true;
+                if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(key)) {
+                    e.preventDefault();
+                }
+                if (!e.repeat) this.handleHotkey(key, e);
             });
             window.addEventListener('keyup', e => {
                 this.keys[e.key.toLowerCase()] = false;
@@ -635,7 +639,7 @@
                 if (e.button === 0) {
                     this.mouse.isDown = true;
                     audio.init();
-                    handlePrimaryAttack();
+                    if (!tryInteractNpc()) handlePrimaryAttack();
                 }
             });
             canvas.addEventListener('mouseup', e => {
@@ -643,7 +647,13 @@
             });
         }
 
-        handleHotkey(key) {
+        handleHotkey(key, e) {
+            if (key === 'escape') {
+                closeTopModal();
+                return;
+            }
+            if (isBlockingUiOpen() && !['i', 'q', 'c'].includes(key)) return;
+
             if (key === '1') useSkill(1);
             if (key === '2') useSkill(2);
             if (key === '3') useSkill(3);
@@ -651,8 +661,9 @@
             if (key === '5') useSkill(5);
             if (key === 'r') useUltimate();
             if (key === 'h') usePotion();
-            if (key === 'i') toggleModal('inventory-modal');
-            if (key === 'q') toggleModal('quest-modal');
+            if (key === 'e') tryInteractNpc();
+            if (key === 'i') { e && e.preventDefault(); toggleModal('inventory-modal'); }
+            if (key === 'q') { e && e.preventDefault(); toggleModal('quest-modal'); }
             if (key === 'c') toggleModal('stat-modal');
         }
 
@@ -908,19 +919,27 @@
 
         gainExp(amount) {
             this.exp += amount;
-            const req = CONFIG.EXP_TABLE[this.level] || 999999;
+            let req = CONFIG.EXP_TABLE[this.level] || 999999;
             addFloatingText(`+${amount} EXP`, this.x, this.y - 15, '#fbbf24', 13);
             
-            if (this.exp >= req && this.level < CONFIG.EXP_TABLE.length - 1) {
+            let leveled = false;
+            while (this.exp >= req && this.level < CONFIG.EXP_TABLE.length - 1) {
                 this.exp -= req;
                 this.level++;
                 this.statPoints += 3;
+                leveled = true;
+                const stats = this.getStats();
+                this.maxHp = stats.maxHp;
+                this.maxMp = stats.maxMp;
                 this.hp = this.maxHp;
                 this.mp = this.maxMp;
+                req = CONFIG.EXP_TABLE[this.level] || 999999;
+                checkQuestProgress('level', this.level);
+            }
+            if (leveled) {
                 audio.playLevelUp();
                 spawnParticles(this.x, this.y, 30, '#f59e0b', 120);
                 addFloatingText('LEVEL UP! (스텟 포인트 +3)', this.x, this.y - 30, '#38bdf8', 20);
-                checkQuestProgress('level', this.level);
             }
             updateHUD();
         }
@@ -1042,11 +1061,30 @@
         return false;
     }
 
+    function isoDist(x1, y1, x2, y2) {
+        const a = worldToIso(x1, y1);
+        const b = worldToIso(x2, y2);
+        return Math.hypot(a.x - b.x, a.y - b.y);
+    }
+
+    function isEnemyAlive(e) {
+        return !!(e && !e.dead && e.hp > 0);
+    }
+
+    function damageEnemy(e, amount, isCrit = false) {
+        if (!isEnemyAlive(e)) return;
+        Enemy.prototype.takeDamage.call(e, amount, isCrit);
+    }
+
+    let portalLock = 0;
+
     function switchMap(targetMapKey, targetX, targetY) {
         if (!MAPS[targetMapKey]) return;
         currentMapKey = targetMapKey;
         player.x = targetX;
         player.y = targetY;
+        portalLock = 0.85;
+        projectiles.length = 0;
         spawnMapEnemies();
         updateHUD();
         addFloatingText(`지역 이동: ${MAPS[targetMapKey].name}`, player.x, player.y - 20, '#f59e0b', 16);
@@ -1065,6 +1103,7 @@
             this.attackTimer = 0;
             this.isHit = false;
             this.hitTimer = 0;
+            this.dead = false;
         }
 
         setupStats() {
@@ -1105,6 +1144,8 @@
         }
 
         update(dt) {
+            if (this.dead || this.hp <= 0) return;
+            if (currentMapKey === 'TOWN') return;
             if (this.hitTimer > 0) this.hitTimer -= dt;
             if (this.attackTimer > 0) this.attackTimer -= dt;
 
@@ -1122,14 +1163,16 @@
                 }
             }
 
-            // Attack player
-            if (dist <= this.size + 18 && this.attackTimer <= 0) {
+            // 화면에 그려진 스프라이트가 실제로 겹칠 때만 타격 (원거리 출혈 방지)
+            const touchRange = 13 + this.size + 6;
+            if (isoDist(player.x, player.y, this.x, this.y) <= touchRange && this.attackTimer <= 0) {
                 player.takeDamage(this.atk);
                 this.attackTimer = 1.2;
             }
         }
 
         takeDamage(amount, isCrit = false) {
+            if (this.dead || this.hp <= 0) return;
             const actualDmg = Math.max(1, Math.floor(amount * (100 / (100 + this.def))));
             this.hp -= actualDmg;
             this.hitTimer = 0.2;
@@ -1140,11 +1183,15 @@
             addFloatingText(txt, this.x, this.y - 15, txtColor, isCrit ? 18 : 14);
 
             if (this.hp <= 0) {
+                this.hp = 0;
                 this.onDeath();
             }
         }
 
         onDeath() {
+            if (this.dead) return;
+            this.dead = true;
+            this.hp = 0;
             player.gainExp(this.exp);
             player.gold += this.gold;
             audio.playGold();
@@ -1224,17 +1271,23 @@
             this.color = color;
             this.size = size;
             this.life = life;
+            this.hit = false;
         }
 
         update(dt) {
+            if (this.hit) {
+                this.life = 0;
+                return;
+            }
             this.x += this.vx * dt;
             this.y += this.vy * dt;
             this.life -= dt;
 
-            // Check collision with enemies
             for (let e of enemies) {
-                if (e.hp > 0 && Math.hypot(e.x - this.x, e.y - this.y) < e.size + this.size) {
-                    e.takeDamage(this.damage, this.isCrit);
+                if (!isEnemyAlive(e)) continue;
+                if (isoDist(this.x, this.y, e.x, e.y) < e.size + this.size) {
+                    damageEnemy(e, this.damage, this.isCrit);
+                    this.hit = true;
                     this.life = 0;
                     break;
                 }
@@ -1258,7 +1311,19 @@
 
     const projectiles = [];
 
+    function fireProjectile(angle, speed, damage, isCrit, color, size, life) {
+        const ox = player.x + Math.cos(angle) * 22;
+        const oy = player.y + Math.sin(angle) * 22;
+        projectiles.push(new Projectile(
+            ox, oy,
+            Math.cos(angle) * speed,
+            Math.sin(angle) * speed,
+            damage, isCrit, color, size, life
+        ));
+    }
+
     function handlePrimaryAttack() {
+        if (!isGameRunning || isBlockingUiOpen()) return;
         if (player.attackTimer > 0) return;
         const stats = player.getStats();
         player.attackTimer = 0.35;
@@ -1269,10 +1334,7 @@
 
         if (player.job.id === 'MAGE' || player.job.id === 'ARCHMAGE') {
             // Mage Primary Attack: Magic Missile Projectile
-            const spd = 320;
-            const vx = Math.cos(player.facingAngle) * spd;
-            const vy = Math.sin(player.facingAngle) * spd;
-            projectiles.push(new Projectile(player.x, player.y, vx, vy, baseDmg, isCrit, '#a855f7', 8, 1.2));
+            fireProjectile(player.facingAngle, 320, baseDmg, isCrit, '#a855f7', 8, 1.2);
         } else {
             // Melee Arc Slash for Novice / Knight / Rogue / 2nd job melee classes
             const isKnightLike = player.job.id === 'KNIGHT' || player.job.id === 'DRAGON_KNIGHT';
@@ -1281,7 +1343,7 @@
             const arcAngle = isRogueLike ? Math.PI / 2 : Math.PI / 3;
 
             enemies.forEach(e => {
-                if (e.hp <= 0) return;
+                if (!isEnemyAlive(e)) return;
                 const dist = Math.hypot(e.x - player.x, e.y - player.y);
                 if (dist <= arcRange + e.size) {
                     const angleToEnemy = Math.atan2(e.y - player.y, e.x - player.x);
@@ -1289,7 +1351,7 @@
                     if (diff > Math.PI) diff = Math.PI * 2 - diff;
 
                     if (diff <= arcAngle) {
-                        e.takeDamage(baseDmg, isCrit);
+                        damageEnemy(e, baseDmg, isCrit);
                     }
                 }
             });
@@ -1302,6 +1364,7 @@
     }
 
     function useSkill(slotKey) {
+        if (!isGameRunning || isBlockingUiOpen()) return;
         if (player.skillCooldowns[slotKey] > 0) return;
         const stats = player.getStats();
 
@@ -1313,7 +1376,7 @@
                 audio.playHit();
                 const dmg = stats.atk * 2.2;
                 enemies.forEach(e => {
-                    if (Math.hypot(e.x - player.x, e.y - player.y) < 70) e.takeDamage(dmg, true);
+                    if (Math.hypot(e.x - player.x, e.y - player.y) < 70) damageEnemy(e, dmg, true);
                 });
                 spawnParticles(player.x, player.y, 25, '#f59e0b', 160);
             }
@@ -1324,7 +1387,7 @@
                 player.skillCooldowns[1] = 3.0;
                 audio.playHit();
                 enemies.forEach(e => {
-                    if (Math.hypot(e.x - player.x, e.y - player.y) < 80) e.takeDamage(stats.atk * 2.0, false);
+                    if (Math.hypot(e.x - player.x, e.y - player.y) < 80) damageEnemy(e, stats.atk * 2.0, false);
                 });
                 spawnParticles(player.x, player.y, 30, '#3b82f6', 180);
             } else if (slotKey === 2) { // Whirlwind
@@ -1333,7 +1396,7 @@
                 player.skillCooldowns[2] = 5.0;
                 audio.playSwing();
                 enemies.forEach(e => {
-                    if (Math.hypot(e.x - player.x, e.y - player.y) < 110) e.takeDamage(stats.atk * 3.0, true);
+                    if (Math.hypot(e.x - player.x, e.y - player.y) < 110) damageEnemy(e, stats.atk * 3.0, true);
                 });
                 spawnParticles(player.x, player.y, 50, '#60a5fa', 220);
             } else if (slotKey === 3) { // Iron Wall Buff
@@ -1350,16 +1413,14 @@
                 player.mp -= 25;
                 player.skillCooldowns[1] = 2.5;
                 audio.playMagic();
-                const vx = Math.cos(player.facingAngle) * 350;
-                const vy = Math.sin(player.facingAngle) * 350;
-                projectiles.push(new Projectile(player.x, player.y, vx, vy, stats.atk * 2.8, true, '#ef4444', 14, 1.5));
+                fireProjectile(player.facingAngle, 350, stats.atk * 2.8, true, '#ef4444', 14, 1.5);
             } else if (slotKey === 2) { // Frost Nova
                 if (player.mp < 40) return;
                 player.mp -= 40;
                 player.skillCooldowns[2] = 6.0;
                 audio.playMagic();
                 enemies.forEach(e => {
-                    if (Math.hypot(e.x - player.x, e.y - player.y) < 130) e.takeDamage(stats.atk * 2.5, false);
+                    if (Math.hypot(e.x - player.x, e.y - player.y) < 130) damageEnemy(e, stats.atk * 2.5, false);
                 });
                 spawnParticles(player.x, player.y, 60, '#38bdf8', 200);
             } else if (slotKey === 3) { // Blink / Teleport
@@ -1389,7 +1450,7 @@
                     player.x = newX; player.y = newY;
                 }
                 enemies.forEach(e => {
-                    if (Math.hypot(e.x - player.x, e.y - player.y) < 80) e.takeDamage(stats.atk * 2.4, true);
+                    if (Math.hypot(e.x - player.x, e.y - player.y) < 80) damageEnemy(e, stats.atk * 2.4, true);
                 });
                 spawnParticles(player.x, player.y, 35, '#10b981', 180);
             } else if (slotKey === 2) { // Fan of Knives
@@ -1399,9 +1460,7 @@
                 audio.playSwing();
                 for (let i = 0; i < 8; i++) {
                     const ang = (Math.PI * 2 / 8) * i;
-                    const vx = Math.cos(ang) * 300;
-                    const vy = Math.sin(ang) * 300;
-                    projectiles.push(new Projectile(player.x, player.y, vx, vy, stats.atk * 1.6, false, '#34d399', 6, 0.8));
+                    fireProjectile(ang, 300, stats.atk * 1.6, false, '#34d399', 6, 0.8);
                 }
             } else if (slotKey === 3) { // Deadly Focus
                 if (player.mp < 35) return;
@@ -1415,12 +1474,12 @@
             if (slotKey === 1) { // Shield Bash (강화)
                 if (player.mp < 20) return;
                 player.mp -= 20; player.skillCooldowns[1] = 2.6; audio.playHit();
-                enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) < 90) e.takeDamage(stats.atk * 2.4, false); });
+                enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) < 90) damageEnemy(e, stats.atk * 2.4, false); });
                 spawnParticles(player.x, player.y, 30, '#f97316', 190);
             } else if (slotKey === 2) { // Whirlwind (강화)
                 if (player.mp < 35) return;
                 player.mp -= 35; player.skillCooldowns[2] = 4.5; audio.playSwing();
-                enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) < 120) e.takeDamage(stats.atk * 3.4, true); });
+                enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) < 120) damageEnemy(e, stats.atk * 3.4, true); });
                 spawnParticles(player.x, player.y, 55, '#fb923c', 230);
             } else if (slotKey === 3) { // Iron Wall
                 if (player.mp < 40) return;
@@ -1435,7 +1494,7 @@
                     const angleToEnemy = Math.atan2(e.y - player.y, e.x - player.x);
                     let diff = Math.abs(angleToEnemy - player.facingAngle);
                     if (diff > Math.PI) diff = Math.PI * 2 - diff;
-                    if (diff <= Math.PI / 3) e.takeDamage(stats.atk * 2.6, false);
+                    if (diff <= Math.PI / 3) damageEnemy(e, stats.atk * 2.6, false);
                 });
                 spawnParticles(player.x + Math.cos(player.facingAngle) * 40, player.y + Math.sin(player.facingAngle) * 40, 30, '#ea580c', 150);
                 addFloatingText('용의 숨결!', player.x, player.y - 25, '#ea580c', 16);
@@ -1445,7 +1504,7 @@
                 enemies.forEach(e => {
                     const dist = Math.hypot(e.x - player.x, e.y - player.y);
                     if (dist < 140) {
-                        e.takeDamage(stats.atk * 2.9, true);
+                        damageEnemy(e, stats.atk * 2.9, true);
                         const ang = Math.atan2(e.y - player.y, e.x - player.x);
                         e.x += Math.cos(ang) * 30; e.y += Math.sin(ang) * 30;
                     }
@@ -1457,12 +1516,11 @@
             if (slotKey === 1) { // Fireball (강화)
                 if (player.mp < 25) return;
                 player.mp -= 25; player.skillCooldowns[1] = 2.2; audio.playMagic();
-                const vx = Math.cos(player.facingAngle) * 380, vy = Math.sin(player.facingAngle) * 380;
-                projectiles.push(new Projectile(player.x, player.y, vx, vy, stats.atk * 3.2, true, '#ef4444', 15, 1.5));
+                fireProjectile(player.facingAngle, 380, stats.atk * 3.2, true, '#ef4444', 15, 1.5);
             } else if (slotKey === 2) { // Frost Nova (강화)
                 if (player.mp < 40) return;
                 player.mp -= 40; player.skillCooldowns[2] = 5.5; audio.playMagic();
-                enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) < 150) e.takeDamage(stats.atk * 2.9, false); });
+                enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) < 150) damageEnemy(e, stats.atk * 2.9, false); });
                 spawnParticles(player.x, player.y, 65, '#38bdf8', 210);
             } else if (slotKey === 3) { // Blink
                 if (player.mp < 30) return;
@@ -1476,15 +1534,14 @@
                 player.mp -= 35; player.skillCooldowns[4] = 5.0; audio.playMagic();
                 for (let i = -2; i <= 2; i++) {
                     const ang = player.facingAngle + i * 0.15;
-                    const vx = Math.cos(ang) * 360, vy = Math.sin(ang) * 360;
-                    projectiles.push(new Projectile(player.x, player.y, vx, vy, stats.atk * 1.4, false, '#a855f7', 8, 1.2));
+                    fireProjectile(ang, 360, stats.atk * 1.4, false, '#a855f7', 8, 1.2);
                 }
                 addFloatingText('비전 연사!', player.x, player.y - 25, '#a855f7', 16);
             } else if (slotKey === 5) { // Meteor - 전방 지점 강력한 폭발
                 if (player.mp < 55) return;
                 player.mp -= 55; player.skillCooldowns[5] = 9.0; audio.playHit();
                 const tx = player.x + Math.cos(player.facingAngle) * 90, ty = player.y + Math.sin(player.facingAngle) * 90;
-                enemies.forEach(e => { if (Math.hypot(e.x - tx, e.y - ty) < 110) e.takeDamage(stats.atk * 4.0, true); });
+                enemies.forEach(e => { if (Math.hypot(e.x - tx, e.y - ty) < 110) damageEnemy(e, stats.atk * 4.0, true); });
                 spawnParticles(tx, ty, 70, '#f97316', 260);
                 addFloatingText('메테오!', tx, ty - 25, '#f97316', 18);
             }
@@ -1495,15 +1552,14 @@
                 const dashDist = 110;
                 const newX = player.x + Math.cos(player.facingAngle) * dashDist, newY = player.y + Math.sin(player.facingAngle) * dashDist;
                 if (!checkCollision(newX, newY)) { player.x = newX; player.y = newY; }
-                enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) < 85) e.takeDamage(stats.atk * 2.7, true); });
+                enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) < 85) damageEnemy(e, stats.atk * 2.7, true); });
                 spawnParticles(player.x, player.y, 35, '#10b981', 180);
             } else if (slotKey === 2) { // Fan of Knives (강화)
                 if (player.mp < 30) return;
                 player.mp -= 30; player.skillCooldowns[2] = 4.0; audio.playSwing();
                 for (let i = 0; i < 10; i++) {
                     const ang = (Math.PI * 2 / 10) * i;
-                    const vx = Math.cos(ang) * 320, vy = Math.sin(ang) * 320;
-                    projectiles.push(new Projectile(player.x, player.y, vx, vy, stats.atk * 1.8, false, '#34d399', 6, 0.8));
+                    fireProjectile(ang, 320, stats.atk * 1.8, false, '#34d399', 6, 0.8);
                 }
             } else if (slotKey === 3) { // Deadly Focus
                 if (player.mp < 35) return;
@@ -1513,7 +1569,7 @@
             } else if (slotKey === 4) { // Poison Blade - 근접 맹독 강타
                 if (player.mp < 25) return;
                 player.mp -= 25; player.skillCooldowns[4] = 3.5; audio.playHit();
-                enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) < 70) e.takeDamage(stats.atk * 2.2, true); });
+                enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) < 70) damageEnemy(e, stats.atk * 2.2, true); });
                 spawnParticles(player.x, player.y, 25, '#22c55e', 150);
                 addFloatingText('맹독의 칼날!', player.x, player.y - 25, '#22c55e', 16);
             } else if (slotKey === 5) { // Vanish - 은신(무적) + 가속 + 다음 공격 확정 크리티컬
@@ -1530,6 +1586,7 @@
     }
 
     function useUltimate() {
+        if (!isGameRunning || isBlockingUiOpen()) return;
         if (player.skillCooldowns.ult > 0 || !player.job.advanced) return;
         const stats = player.getStats();
 
@@ -1537,20 +1594,20 @@
             if (player.mp < 60) return;
             player.mp -= 60; player.skillCooldowns.ult = 45.0; audio.playMagic();
             player.atkBuffTimer = 8.0; player.atkBuffMult = 1.8;
-            enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) < 170) e.takeDamage(stats.atk * 4.5, true); });
+            enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) < 170) damageEnemy(e, stats.atk * 4.5, true); });
             spawnParticles(player.x, player.y, 90, '#f97316', 280);
             addFloatingText('용의 분노!', player.x, player.y - 40, '#f97316', 22);
         } else if (player.job.id === 'ARCHMAGE') { // 천공의 심판
             if (player.mp < 80) return;
             player.mp -= 80; player.skillCooldowns.ult = 50.0; audio.playMagic();
-            enemies.forEach(e => { if (e.hp > 0) e.takeDamage(stats.atk * 3.2, true); });
+            enemies.forEach(e => { if (e.hp > 0) damageEnemy(e, stats.atk * 3.2, true); });
             spawnParticles(player.x, player.y, 110, '#a855f7', 320);
             addFloatingText('천공의 심판!', player.x, player.y - 40, '#c084fc', 22);
         } else if (player.job.id === 'ASSASSIN') { // 처형
             if (player.mp < 50) return;
             player.mp -= 50; player.skillCooldowns.ult = 40.0; audio.playHit();
             player.critBuffTimer = Math.max(player.critBuffTimer, 5.0);
-            enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) < 110) e.takeDamage(stats.atk * 3.8, true); });
+            enemies.forEach(e => { if (Math.hypot(e.x - player.x, e.y - player.y) < 110) damageEnemy(e, stats.atk * 3.8, true); });
             spawnParticles(player.x, player.y, 65, '#059669', 230);
             addFloatingText('처형!', player.x, player.y - 40, '#34d399', 22);
         }
@@ -1558,15 +1615,22 @@
     }
 
     function usePotion() {
-        if (player.potions > 0 && player.hp < player.maxHp) {
-            player.potions--;
-            const healAmount = Math.floor(player.maxHp * 0.5);
-            player.hp = Math.min(player.maxHp, player.hp + healAmount);
-            audio.playMagic();
-            spawnParticles(player.x, player.y, 20, '#ef4444', 100);
-            addFloatingText(`+${healAmount} HP`, player.x, player.y - 25, '#4ade80', 16);
-            updateHUD();
+        if (!isGameRunning || isBlockingUiOpen()) return;
+        if (player.potions <= 0) {
+            addFloatingText('물약이 없습니다!', player.x, player.y - 20, '#ef4444', 13);
+            return;
         }
+        if (player.hp >= player.maxHp) {
+            addFloatingText('이미 체력이 가득합니다.', player.x, player.y - 20, '#94a3b8', 13);
+            return;
+        }
+        player.potions--;
+        const healAmount = Math.floor(player.maxHp * 0.5);
+        player.hp = Math.min(player.maxHp, player.hp + healAmount);
+        audio.playMagic();
+        spawnParticles(player.x, player.y, 20, '#ef4444', 100);
+        addFloatingText(`+${healAmount} HP`, player.x, player.y - 25, '#4ade80', 16);
+        updateHUD();
     }
 
     /* ==========================================================================
@@ -1611,6 +1675,7 @@
     }
 
     function completeQuest(q) {
+        if (!q || q.done) return;
         q.done = true;
         audio.playLevelUp();
         player.gainExp(150);
@@ -1761,7 +1826,12 @@
             row.querySelector('button').onclick = () => {
                 if (player.gold >= s.price) {
                     player.gold -= s.price;
-                    if (s.item) player.inventory.push(s.item);
+                    if (s.item) {
+                        player.inventory.push(new Item(
+                            'shop_' + Date.now() + '_' + Math.random().toString(16).slice(2),
+                            s.item.name, s.item.type, s.item.statType, s.item.baseVal, s.item.rarity
+                        ));
+                    }
                     if (s.action) s.action();
                     audio.playGold();
                     renderInventoryUI();
@@ -1955,10 +2025,6 @@
             ctx.textAlign = 'center';
             ctx.fillText(p.label, drawX, drawY - 15);
 
-            // Distance check to trigger portal transition
-            if (Math.hypot(player.x - p.x, player.y - p.y) < 25) {
-                switchMap(p.targetMap, p.targetX, p.targetY);
-            }
         });
 
         // 3. Render NPCs
@@ -1985,14 +2051,9 @@
             ctx.textAlign = 'center';
             ctx.fillText(npc.name, drawX, drawY - 28);
 
-            // NPC interaction check
             if (Math.hypot(player.x - npc.x, player.y - npc.y) < 35) {
                 ctx.fillStyle = '#38bdf8';
-                ctx.fillText('[대화 클릭]', drawX, drawY - 40);
-                if (input.mouse.isDown) {
-                    input.mouse.isDown = false;
-                    interactNPC(npc);
-                }
+                ctx.fillText('[E 또는 클릭]', drawX, drawY - 40);
             }
         });
 
@@ -2285,6 +2346,46 @@
         });
     }
 
+    const BLOCKING_UI_IDS = ['dialogue-modal', 'inventory-modal', 'shop-modal', 'quest-modal', 'stat-modal', 'gameover-screen', 'gameclear-screen', 'title-screen'];
+
+    function isBlockingUiOpen() {
+        return BLOCKING_UI_IDS.some(id => {
+            const el = document.getElementById(id);
+            return el && !el.classList.contains('hidden');
+        });
+    }
+
+    function closeTopModal() {
+        const closeOrder = ['dialogue-modal', 'shop-modal', 'inventory-modal', 'quest-modal', 'stat-modal'];
+        for (const id of closeOrder) {
+            const el = document.getElementById(id);
+            if (el && !el.classList.contains('hidden')) {
+                el.classList.add('hidden');
+                return;
+            }
+        }
+    }
+
+    function tryInteractNpc() {
+        if (!isGameRunning || isBlockingUiOpen()) return false;
+        const map = MAPS[currentMapKey];
+        const npc = map.npcs.find(n => Math.hypot(player.x - n.x, player.y - n.y) < 35);
+        if (!npc) return false;
+        interactNPC(npc);
+        return true;
+    }
+
+    function checkNearbyPortals() {
+        if (portalLock > 0) return;
+        const map = MAPS[currentMapKey];
+        for (const p of map.portals) {
+            if (Math.hypot(player.x - p.x, player.y - p.y) < 25) {
+                switchMap(p.targetMap, p.targetX, p.targetY);
+                return;
+            }
+        }
+    }
+
     function toggleModal(modalId) {
         const modal = document.getElementById(modalId);
         if (modal.classList.contains('hidden')) {
@@ -2308,31 +2409,28 @@
         lastTime = now;
 
         if (isGameRunning) {
-            // Update Player
-            player.update(dt);
+            if (!isBlockingUiOpen()) {
+                portalLock = Math.max(0, portalLock - dt);
+                player.update(dt);
+                checkNearbyPortals();
+                enemies.forEach(e => e.update(dt));
+                enemies = enemies.filter(e => isEnemyAlive(e));
 
-            // Update Enemies
-            enemies.forEach(e => e.update(dt));
-
-            // Update Projectiles
-            for (let i = projectiles.length - 1; i >= 0; i--) {
-                projectiles[i].update(dt);
-                if (projectiles[i].life <= 0) projectiles.splice(i, 1);
+                for (let i = projectiles.length - 1; i >= 0; i--) {
+                    projectiles[i].update(dt);
+                    if (projectiles[i].life <= 0) projectiles.splice(i, 1);
+                }
             }
 
-            // Update Particles
             for (let i = particles.length - 1; i >= 0; i--) {
                 particles[i].update(dt);
                 if (particles[i].life <= 0) particles.splice(i, 1);
             }
-
-            // Update Floating Texts
             for (let i = floatingTexts.length - 1; i >= 0; i--) {
                 floatingTexts[i].update(dt);
                 if (floatingTexts[i].life <= 0) floatingTexts.splice(i, 1);
             }
 
-            // Render Screen
             renderGame();
             updateHUD();
         }
