@@ -119,6 +119,9 @@
         .classroom-seat-btn.occupied { background: rgba(30, 41, 59, 0.9); border: 2px solid rgba(51, 65, 85, 0.8); color: #64748b; cursor: not-allowed; }
         .classroom-seat-btn.mine { background: linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(5, 150, 105, 0.35)); border: 2px solid rgba(52, 211, 153, 0.6); color: #6ee7b7; }
         .classroom-seat-btn.admin-occupied { background: rgba(49, 46, 129, 0.4); border: 2px solid rgba(99, 102, 241, 0.5); color: #c7d2fe; }
+        .classroom-guest-row { margin-top: 0.25rem; padding-top: 0.75rem; border-top: 1px dashed rgba(100, 116, 139, 0.45); }
+        .classroom-guest-entry { width: 100%; min-height: 3.75rem; border-radius: 1rem; font-weight: 900; font-size: 0.95rem; transition: all 0.2s; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.2rem; background: linear-gradient(135deg, rgba(51, 65, 85, 0.5), rgba(30, 41, 59, 0.85)); border: 2px dashed rgba(148, 163, 184, 0.55); color: #cbd5e1; cursor: pointer; }
+        .classroom-guest-entry:hover { transform: scale(1.02); border-color: #94a3b8; color: #f1f5f9; background: linear-gradient(135deg, rgba(71, 85, 105, 0.55), rgba(51, 65, 85, 0.9)); }
         .chat-bubble-row { display: flex; width: 100%; margin-bottom: 0.65rem; }
         .chat-bubble-row.mine { justify-content: flex-end; }
         .chat-bubble-row.theirs { justify-content: flex-start; }
@@ -1117,7 +1120,7 @@
         <div class="bg-slate-900 border-2 border-indigo-500/50 rounded-3xl p-7 md:p-8 max-w-lg w-full text-center space-y-5 shadow-2xl">
             <div class="space-y-1.5">
                 <h3 class="text-2xl font-black text-white">🪑 내 자리를 선택해주세요</h3>
-                <p class="text-sm text-slate-400">교실 배치도에서 본인 자리 번호를 클릭하세요. 선생님은 <strong class="text-sky-400">쌤 PC</strong>를 눌러 관리자 모드로 입장할 수 있어요.</p>
+                <p class="text-sm text-slate-400">교실 배치도에서 본인 자리 번호를 클릭하세요. 자리가 없으면 하단 <strong class="text-slate-300">게스트로 입장</strong>을 눌러 둘러볼 수 있어요. 선생님은 <strong class="text-sky-400">쌤 PC</strong>를 눌러 관리자 모드로 입장할 수 있어요.</p>
             </div>
             <div id="seat-picker-grid" class="classroom-layout"></div>
             <p id="seat-picker-error" class="text-xs text-rose-400 hidden"></p>
@@ -1239,9 +1242,23 @@
             return COMMENT_POOL[Math.floor(Math.random() * COMMENT_POOL.length)];
         }
 
+        function isGuestMode() {
+            return localStorage.getItem("meta_guest_mode") === "true";
+        }
+
+        function getGuestClientId() {
+            let id = localStorage.getItem("meta_guest_id");
+            if (!id) {
+                id = `게스트-${Math.floor(Math.random() * 900 + 100)}`;
+                localStorage.setItem("meta_guest_id", id);
+            }
+            return id;
+        }
+
         function getStudentClientId() {
             const seat = localStorage.getItem("meta_assigned_seat");
             if (seat) return `${seat}번 자리`;
+            if (isGuestMode()) return getGuestClientId();
             let id = localStorage.getItem("meta_student_pc_id");
             if (!id) {
                 const prefixLetters = ["A", "B", "C", "D", "E"];
@@ -1514,6 +1531,18 @@
                 rowEl.appendChild(aisle);
                 rowEl.appendChild(createSeatButton(right, mode, onSeatClick));
                 containerEl.appendChild(rowEl);
+            }
+
+            if (mode === "picker") {
+                const guestRow = document.createElement("div");
+                guestRow.className = "classroom-guest-row";
+                const guestBtn = document.createElement("button");
+                guestBtn.type = "button";
+                guestBtn.className = "classroom-guest-entry";
+                guestBtn.innerHTML = `<span>👤 게스트로 입장</span><span class="text-[10px] font-semibold opacity-80">자리 없이 둘러보기 · 채팅·호출 불가</span>`;
+                guestBtn.onclick = () => window.enterAsGuest();
+                guestRow.appendChild(guestBtn);
+                containerEl.appendChild(guestRow);
             }
         }
         window.renderClassroomLayout = renderClassroomLayout;
@@ -1839,6 +1868,8 @@
                     });
                 });
                 localStorage.setItem("meta_assigned_seat", String(seatNum));
+                localStorage.removeItem("meta_guest_mode");
+                localStorage.removeItem("meta_guest_id");
                 hideSeatPicker();
                 updateSeatAssignedUI();
                 window.logUserAction("SEAT_CLAIM", `${seatNum}번 자리를 선택했습니다.`);
@@ -1862,8 +1893,22 @@
             }
         };
 
+        window.enterAsGuest = function() {
+            localStorage.setItem("meta_guest_mode", "true");
+            localStorage.removeItem("meta_assigned_seat");
+            getGuestClientId();
+            const errEl = document.getElementById("seat-picker-error");
+            if (errEl) {
+                errEl.classList.add("hidden");
+                errEl.textContent = "";
+            }
+            hideSeatPicker();
+            window.logUserAction("GUEST_ENTER", "게스트로 입장했습니다.");
+        };
+
         window.checkSeatAssignmentOnLoad = async function() {
             if (sessionStorage.getItem("isAdminLoggedIn") === "true") return;
+            if (isGuestMode()) return;
             const seat = getAssignedSeat();
             const clientId = getSeatClientId();
             if (seat) {
@@ -2269,21 +2314,19 @@
             }
             if (!confirm(
                 "🔔 새 수업을 시작할까요?\n\n" +
-                "✅ 리셋: 자리·채팅·호출·퀘스트·펫·좋아요 누름 표시\n" +
-                "❌ 유지: 게임 좋아요 숫자·댓글 내용\n\n" +
-                "모든 학생 화면이 곧 초기화됩니다."
+                "✅ 리셋: 채팅·호출·퀘스트·펫·좋아요 누름 표시\n" +
+                "❌ 유지: 자리 점유·게임 좋아요 숫자·댓글 내용\n\n" +
+                "학생들의 채팅·퀘스트 등이 곧 초기화됩니다. (자리는 그대로)"
             )) return;
 
             const resetAt = new Date().toISOString();
             try {
                 await Promise.all([
-                    deleteAllSeatsFromDb(),
                     deleteAllChatMessagesFromDb(),
                     deleteAllTeacherCallsFromDb(),
                     setDoc(doc(db, "system", "class_session"), { resetAt, resetBy: "관리자" }, { merge: true })
                 ]);
 
-                window.seatsCache = {};
                 window.unresolvedCallsCount = 0;
                 window.adminUnreadBySeat = {};
                 prevAdminUnreadTotal = 0;
@@ -2298,8 +2341,8 @@
                     localStorage.setItem("meta_class_reset_ack", resetAt);
                 }
 
-                window.logUserAction("CLASS_RESET", "새 수업 세션을 시작했습니다. (자리·채팅·퀘스트 리셋 / 게임 좋아요·댓글 유지)");
-                window.showAdminAlert("수업 리셋 완료! 학생들은 자리를 다시 선택하게 됩니다.", "success");
+                window.logUserAction("CLASS_RESET", "새 수업 세션을 시작했습니다. (채팅·퀘스트 리셋 / 자리·게임 좋아요·댓글 유지)");
+                window.showAdminAlert("수업 리셋 완료! 자리는 유지되고 채팅·퀘스트만 초기화됩니다.", "success");
                 window.updateAdminSummaryCard();
                 if (typeof window.refreshSeatUIs === "function") window.refreshSeatUIs();
             } catch (e) {
@@ -3234,22 +3277,18 @@
         window.applyLocalClassSessionReset = function(resetAtIso) {
             const fresh = resetQuestProgressOnly();
             persistQuestState(fresh);
-            localStorage.removeItem("meta_assigned_seat");
             localStorage.setItem("meta_class_reset_ack", resetAtIso || new Date().toISOString());
             sessionStorage.removeItem("meta_gacha_nudge_dismissed");
             sessionStorage.removeItem("meta_gacha_auto_opened");
             window.lastStudentUnreadCount = 0;
             updateQuestUI(fresh);
             if (!window.isAdminAuthenticated) {
-                const stack = document.getElementById("student-right-stack");
-                if (stack) stack.classList.add("hidden");
                 const chatPanel = document.getElementById("student-chat-panel");
                 if (chatPanel) {
                     chatPanel.classList.add("hidden");
                     chatPanel.classList.remove("flex");
                 }
                 updateStudentUnreadBadge(0);
-                if (typeof showSeatPicker === "function") showSeatPicker();
             }
             if (typeof window.renderPortal === "function") window.renderPortal();
         };
