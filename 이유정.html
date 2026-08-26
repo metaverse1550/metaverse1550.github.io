@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>아에테리아 마법학교 : 음영과 마법진 (Aetheria Academy)</title>
+    <!-- Tailwind CSS for UI Overlay -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800;900&family=Noto+Serif+KR:wght@500;700&display=swap');
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #05050d;
+            font-family: 'Noto Serif KR', 'Cinzel', serif;
+            user-select: none;
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        .hud-glass {
+            background: rgba(15, 18, 30, 0.85);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(160, 130, 255, 0.3);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.7);
+        }
+
+        .font-cinzel {
+            font-family: 'Cinzel', serif;
+        }
+
+        .spell-slot {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .spell-slot.active {
+            border-color: #a855f7;
+            box-shadow: 0 0 18px rgba(168, 85, 247, 0.8);
+            transform: translateY(-4px) scale(1.05);
+        }
+
+        @keyframes pulseGlow {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 0.9; }
+        }
+        .pulse-glow {
+            animation: pulseGlow 2s infinite ease-in-out;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 3D Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- UI Overlay Engine -->
+    <div id="ui-layer" class="relative z-10 w-full h-full pointer-events-none flex flex-col justify-between p-6">
+        
+        <!-- Top Header: Status & Exam Info -->
+        <div class="flex justify-between items-start w-full">
+            <!-- Player Health & Mana -->
+            <div class="hud-glass p-4 rounded-xl flex flex-col gap-3 w-80 pointer-events-auto">
+                <div class="flex justify-between items-center text-xs text-purple-300 font-cinzel tracking-widest">
+                    <span>AETHERIA APPRENTICE</span>
+                    <span id="player-grade" class="text-amber-400 font-bold text-sm">GRADE: C</span>
+                </div>
+                <!-- HP Bar -->
+                <div>
+                    <div class="flex justify-between text-xs text-rose-300 mb-1">
+                        <span>체력 (Health)</span>
+                        <span id="hp-text">100 / 100</span>
+                    </div>
+                    <div class="w-full bg-slate-900 h-3 rounded-full overflow-hidden border border-rose-900/50">
+                        <div id="hp-bar" class="bg-gradient-to-r from-rose-700 to-red-500 h-full w-full transition-all duration-300"></div>
+                    </div>
+                </div>
+                <!-- Mana Bar -->
+                <div>
+                    <div class="flex justify-between text-xs text-cyan-300 mb-1">
+                        <span>마력 (Mana)</span>
+                        <span id="mp-text">100 / 100</span>
+                    </div>
+                    <div class="w-full bg-slate-900 h-2.5 rounded-full overflow-hidden border border-cyan-900/50">
+                        <div id="mp-bar" class="bg-gradient-to-r from-cyan-600 to-blue-400 h-full w-full transition-all duration-200"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Exam Progression Status -->
+            <div class="hud-glass p-4 rounded-xl w-96 flex flex-col gap-2">
+                <div class="text-sm font-bold text-amber-300 font-cinzel border-b border-amber-500/20 pb-1 flex justify-between">
+                    <span>ACADEMIC EVALUATION</span>
+                    <span id="total-score" class="text-purple-300">SCORE: 0</span>
+                </div>
+                <div class="text-xs text-slate-300 space-y-1.5 mt-1" id="exam-list">
+                    <div class="flex justify-between items-center" id="exam-1-status">
+                        <span class="flex items-center gap-1.5">📜 1차: 도서관 고대 마법진 해독
+                            <button onclick="Game.showHint('puzzle')" class="text-[10px] bg-purple-900/80 hover:bg-purple-700 px-1.5 py-0.5 rounded text-amber-300 border border-purple-500/40 pointer-events-auto">💡 힌트</button>
+                        </span>
+                        <span class="text-slate-500">미완료</span>
+                    </div>
+                    <div class="flex justify-between items-center" id="exam-2-status">
+                        <span class="flex items-center gap-1.5">⚔️ 2차: 연무장 어둠 마법사 소탕
+                            <button onclick="Game.showHint('combat')" class="text-[10px] bg-purple-900/80 hover:bg-purple-700 px-1.5 py-0.5 rounded text-amber-300 border border-purple-500/40 pointer-events-auto">💡 힌트</button>
+                        </span>
+                        <span class="text-slate-500">미완료</span>
+                    </div>
+                    <div class="flex justify-between items-center" id="exam-3-status">
+                        <span class="flex items-center gap-1.5">🏛️ 최종: 비밀 대경전의 결계 정화
+                            <button onclick="Game.showHint('final')" class="text-[10px] bg-purple-900/80 hover:bg-purple-700 px-1.5 py-0.5 rounded text-amber-300 border border-purple-500/40 pointer-events-auto">💡 힌트</button>
+                        </span>
+                        <span class="text-slate-500">잠김</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center Prompt: Context interaction -->
+        <div id="interaction-prompt" class="self-center mb-12 hidden transition-all duration-200">
+            <div class="hud-glass px-6 py-3 rounded-full flex items-center gap-3 border-amber-400/50 shadow-lg shadow-amber-500/10">
+                <span class="bg-amber-500 text-slate-950 font-black px-2.5 py-0.5 rounded text-sm shadow">E</span>
+                <span id="prompt-text" class="text-amber-200 font-medium text-sm">상호작용</span>
+            </div>
+        </div>
+
+        <!-- Bottom Header: Spells Hotbar -->
+        <div class="flex justify-center items-end w-full pointer-events-auto">
+            <div class="hud-glass p-3 rounded-2xl flex gap-4 border-purple-500/30">
+                <!-- Spell 1: Arcane Bolt -->
+                <div id="spell-1" class="spell-slot active w-16 h-16 bg-slate-900/90 border-2 border-purple-500 rounded-xl flex flex-col items-center justify-center relative cursor-pointer" onclick="Game.setSpell(0)">
+                    <span class="absolute top-1 left-1.5 text-[10px] text-slate-400 font-mono">1</span>
+                    <span class="text-2xl">🪄</span>
+                    <span class="text-[10px] text-purple-300 font-bold mt-0.5">비전 화살</span>
+                </div>
+                <!-- Spell 2: Flame Burst -->
+                <div id="spell-2" class="spell-slot w-16 h-16 bg-slate-900/90 border-2 border-slate-700 rounded-xl flex flex-col items-center justify-center relative cursor-pointer opacity-50" onclick="Game.setSpell(1)">
+                    <span class="absolute top-1 left-1.5 text-[10px] text-slate-400 font-mono">2</span>
+                    <span class="text-2xl">🔥</span>
+                    <span class="text-[10px] text-orange-300 font-bold mt-0.5">화염 폭발</span>
+                    <div id="lock-spell-2" class="absolute inset-0 bg-black/70 rounded-xl flex items-center justify-center text-xs">🔒</div>
+                </div>
+                <!-- Spell 3: Frost Beam -->
+                <div id="spell-3" class="spell-slot w-16 h-16 bg-slate-900/90 border-2 border-slate-700 rounded-xl flex flex-col items-center justify-center relative cursor-pointer opacity-50" onclick="Game.setSpell(2)">
+                    <span class="absolute top-1 left-1.5 text-[10px] text-slate-400 font-mono">3</span>
+                    <span class="text-2xl">❄️</span>
+                    <span class="text-[10px] text-cyan-300 font-bold mt-0.5">빙결 광선</span>
+                    <div id="lock-spell-3" class="absolute inset-0 bg-black/70 rounded-xl flex items-center justify-center text-xs">🔒</div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Modals: Start / Game Over / Clear / Hint -->
+    <div id="modal-screen" class="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-6">
+        
+        <!-- Start Screen Modal -->
+        <div id="modal-start" class="max-w-xl w-full hud-glass p-8 rounded-2xl text-center border-purple-500/40 shadow-2xl">
+            <div class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-amber-300 to-indigo-400 font-cinzel mb-2">
+                AETHERIA ACADEMY
+            </div>
+            <div class="text-xs text-purple-300 tracking-widest font-cinzel mb-6">SHADOW & SIGIL • 마법 학교 자격 시험</div>
+            <p class="text-slate-300 text-sm leading-relaxed mb-6">
+                당신은 아에테리아 마법학교의 수습 마법사입니다.<br>
+                학교 구역을 자유롭게 탐험하며, 서쪽 서고의 <b>마법진 퍼즐</b>과 동쪽 연무장의 <b>어둠 마법사 전투</b>를 완수하세요.<br>
+                시험 점수를 받아 새로운 마법을 해금하고, 차단된 결계를 풀어 궁극의 비밀을 밝혀내세요!
+            </p>
+            <div class="bg-purple-950/40 border border-purple-800/40 rounded-xl p-4 text-left text-xs text-purple-200 mb-6 space-y-1.5">
+                <div>🎮 <b>이동:</b> <span class="text-amber-300 font-bold">W, A, S, D</span></div>
+                <div>🪄 <b>조준 & 공격:</b> 마우스 이동 & <span class="text-amber-300 font-bold">좌클릭</span></div>
+                <div>✨ <b>마법 교체:</b> 단축키 <span class="text-amber-300 font-bold">1, 2, 3</span></div>
+                <div>🔍 <b>상호작용 / 시험 시작:</b> <span class="text-amber-300 font-bold">E</span> 키</div>
+            </div>
+            <button onclick="Game.start()" class="w-full py-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-purple-600/30 transition-all font-cinzel tracking-wider text-base">
+                마법 시험 시작 (BEGIN EXAM)
+            </button>
+        </div>
+
+        <!-- Game Over Modal -->
+        <div id="modal-gameover" class="max-w-md w-full hud-glass p-8 rounded-2xl text-center border-rose-500/40 hidden">
+            <div class="text-3xl font-extrabold text-rose-500 font-cinzel mb-2">EXAM FAILED</div>
+            <p class="text-slate-300 text-sm mb-6">어둠의 마법에 제압되었습니다. 마력을 수습하고 다시 도전하세요.</p>
+            <button onclick="Game.restart()" class="w-full py-3 bg-rose-700 hover:bg-rose-600 text-white font-bold rounded-xl transition-all">
+                재도전 (Retry)
+            </button>
+        </div>
+
+        <!-- Game Clear Modal -->
+        <div id="modal-victory" class="max-w-lg w-full hud-glass p-8 rounded-2xl text-center border-amber-400/50 hidden">
+            <div class="text-3xl font-extrabold text-amber-300 font-cinzel mb-2">GRAND MAGUS CLEARED!</div>
+            <div class="text-sm text-purple-200 mb-4">모든 마법 자격 시험 통과 & 숨겨진 대경전 해금 완료</div>
+            <div class="bg-slate-900/80 p-4 rounded-xl border border-amber-500/30 my-4 text-left space-y-2">
+                <div class="flex justify-between text-sm">
+                    <span class="text-slate-400">최종 획득 등급:</span>
+                    <span id="final-grade" class="text-amber-300 font-bold font-cinzel text-lg">S GRADE</span>
+                </div>
+                <div class="flex justify-between text-sm">
+                    <span class="text-slate-400">총 평가 점수:</span>
+                    <span id="final-score" class="text-purple-300 font-bold font-cinzel text-lg">2,800 PTS</span>
+                </div>
+            </div>
+            <button onclick="location.reload()" class="w-full py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl font-cinzel">
+                새로운 아카데미 학기 시작
+            </button>
+        </div>
+
+        <!-- In-game Hint Modal -->
+        <div id="modal-hint" class="max-w-md w-full hud-glass p-6 rounded-2xl border-cyan-400/40 shadow-2xl hidden">
+            <div class="flex justify-between items-center mb-3 border-b border-purple-500/30 pb-2">
+                <h3 class="text-amber-300 font-bold font-cinzel text-base flex items-center gap-2">
+                    <span>📜</span> <span id="hint-modal-title">마법 시험 힌트</span>
+                </h3>
+                <button onclick="Game.closeHintModal()" class="text-slate-400 hover:text-white font-bold text-lg px-2">✕</button>
+            </div>
+            <div id="hint-modal-content" class="text-xs text-slate-200 space-y-2.5 leading-relaxed py-2"></div>
+            <button onclick="Game.closeHintModal()" class="w-full mt-4 py-2.5 bg-purple-900/80 hover:bg-purple-800 text-amber-200 font-bold rounded-xl border border-purple-500/40 text-xs">
+                확인 (CLOSE)
+            </button>
+        </div>
+
+    </div>
+
+    <!-- MAIN GAME LOGIC -->
+    <script>
+    const CONFIG = {
+        CAMERA_OFFSET: { x: 18, y: 22, z: 18 },
+        PLAYER_SPEED: 0.22,
+        PLAYER_MAX_HP: 100,
+        PLAYER_MAX_MP: 100,
+        MP_REGEN: 0.25,
+
+        SPELLS: [
+            { id: 'bolt', name: '비전 화살', cost: 8, cd: 250, dmg: 22, color: 0xa855f7, speed: 0.65, type: 'ranged' },
+            { id: 'flame', name: '화염 폭발', cost: 25, cd: 900, dmg: 55, color: 0xf97316, radius: 6.5, type: 'melee' },
+            { id: 'frost', name: '빙결 광선', cost: 18, cd: 500, dmg: 35, color: 0x06b6d4, speed: 0.8, type: 'ranged', slow: true }
+        ],
+
+        ENEMY_TYPES: {
+            STUDENT: { hp: 60, speed: 0.09, dmg: 10, range: 12, color: 0xec4899, score: 300 },
+            MAGE: { hp: 120, speed: 0.07, dmg: 20, range: 16, color: 0x8b5cf6, score: 600 }
+        }
+    };
+
+    const Input = {
+        keys: {},
+        mouseWorld: new THREE.Vector3(),
+        isMouseDown: false,
+        
+        init(domElement, camera) {
+            window.addEventListener('keydown', e => this.keys[e.code] = true);
+            window.addEventListener('keyup', e => this.keys[e.code] = false);
+
+            domElement.addEventListener('mousedown', e => {
+                if (e.button === 0) this.isMouseDown = true;
+            });
+            domElement.addEventListener('mouseup', e => {
+                if (e.button === 0) this.isMouseDown = false;
+            });
+
+            // Raycasting mouse onto 3D ground plane
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+            const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+            domElement.addEventListener('mousemove', e => {
+                mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+                raycaster.setFromCamera(mouse, camera);
+                raycaster.ray.intersectPlane(plane, this.mouseWorld);
+            });
+        }
+    };
+
+    class WorldScene {
+        constructor() {
+            this.container = document.getElementById('canvas-container');
+            this.scene = new THREE.Scene();
+            this.scene.background = new THREE.Color(0x060710);
+            this.scene.fog = new THREE.FogExp2(0x060710, 0.015);
+
+            // 2.5D Quarter-view Orthographic perspective
+            const aspect = window.innerWidth / window.innerHeight;
+            const d = 26;
+            this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 1, 1000);
+            this.camera.position.set(CONFIG.CAMERA_OFFSET.x, CONFIG.CAMERA_OFFSET.y, CONFIG.CAMERA_OFFSET.z);
+            this.camera.lookAt(0, 0, 0);
+
+            this.renderer = new THREE.WebGLRenderer({ antialias: true });
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+            this.renderer.shadowMap.enabled = true;
+            this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            this.container.appendChild(this.renderer.domElement);
+
+            this.setupLighting();
+
+            window.addEventListener('resize', () => this.onResize());
+        }
+
+        setupLighting() {
+            // Ambient Moonlight
+            const ambient = new THREE.AmbientLight(0x2d3258, 0.75);
+            this.scene.add(ambient);
+
+            // Key Directional Light
+            const dirLight = new THREE.DirectionalLight(0x93c5fd, 1.2);
+            dirLight.position.set(30, 45, 20);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.near = 0.5;
+            dirLight.shadow.camera.far = 150;
+            const d = 40;
+            dirLight.shadow.camera.left = -d;
+            dirLight.shadow.camera.right = d;
+            dirLight.shadow.camera.top = d;
+            dirLight.shadow.camera.bottom = -d;
+            this.scene.add(dirLight);
+
+            // Atmospheric point light
+            const centerLight = new THREE.PointLight(0xa855f7, 1.5, 30);
+            centerLight.position.set(0, 6, 0);
+            this.scene.add(centerLight);
+        }
+
+        onResize() {
+            const aspect = window.innerWidth / window.innerHeight;
+            const d = 26;
+            this.camera.left = -d * aspect;
+            this.camera.right = d * aspect;
+            this.camera.top = d;
+            this.camera.bottom = -d;
+            this.camera.updateProjectionMatrix();
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+    }
+
+    class EffectSystem {
+        constructor(scene) {
+            this.scene = scene;
+            this.particles = [];
+        }
+
+        spawnMagicBurst(pos, color, count = 16) {
+            const geo = new THREE.SphereGeometry(0.15, 6, 6);
+            const mat = new THREE.MeshBasicMaterial({ color: color });
+
+            for (let i = 0; i < count; i++) {
+                const p = new THREE.Mesh(geo, mat);
+                p.position.copy(pos);
+                
+                const vel = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.4,
+                    Math.random() * 0.3 + 0.1,
+                    (Math.random() - 0.5) * 0.4
+                );
+
+                this.scene.add(p);
+                this.particles.push({ mesh: p, vel: vel, life: 1.0 });
+            }
+        }
+
+        spawnFlameAOE(pos) {
+            const ringGeo = new THREE.RingGeometry(0.1, 6.5, 32);
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0xf97316, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
+            const ring = new THREE.Mesh(ringGeo, ringMat);
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.copy(pos);
+            ring.position.y = 0.1;
+            this.scene.add(ring);
+
+            let scale = 0.1;
+            const expand = setInterval(() => {
+                scale += 0.2;
+                ring.scale.set(scale, scale, 1);
+                ringMat.opacity -= 0.05;
+                if (ringMat.opacity <= 0) {
+                    clearInterval(expand);
+                    this.scene.remove(ring);
+                }
+            }, 16);
+        }
+
+        update() {
+            for (let i = this.particles.length - 1; i >= 0; i--) {
+                const p = this.particles[i];
+                p.mesh.position.add(p.vel);
+                p.life -= 0.04;
+                p.mesh.scale.multiplyScalar(0.92);
+
+                if (p.life <= 0) {
+                    this.scene.remove(p.mesh);
+                    this.particles.splice(i, 1);
+                }
+            }
+        }
+    }
+
+    class Player {
+        constructor(scene) {
+            this.scene = scene;
+            this.hp = CONFIG.PLAYER_MAX_HP;
+            this.mp = CONFIG.PLAYER_MAX_MP;
+
+            this.group = new THREE.Group();
+            
+            // Robe Body
+            const bodyGeo = new THREE.CylinderGeometry(0.4, 0.8, 1.8, 8);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2e1065, roughness: 0.4 });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 0.9;
+            body.castShadow = true;
+            this.group.add(body);
+
+            // Head / Hood
+            const headGeo = new THREE.SphereGeometry(0.4, 12, 12);
+            const headMat = new THREE.MeshStandardMaterial({ color: 0x581c87 });
+            const head = new THREE.Mesh(headGeo, headMat);
+            head.position.y = 2.0;
+            this.group.add(head);
+
+            // Wizard Hat
+            const hatGeo = new THREE.ConeGeometry(0.6, 1.2, 8);
+            const hatMat = new THREE.MeshStandardMaterial({ color: 0x3b0764 });
+            const hat = new THREE.Mesh(hatGeo, hatMat);
+            hat.position.y = 2.7;
+            hat.rotation.z = -0.1;
+            this.group.add(hat);
+
+            // Magic Staff
+            const staffGeo = new THREE.CylinderGeometry(0.05, 0.05, 2.2);
+            const staffMat = new THREE.MeshStandardMaterial({ color: 0x78350f });
+            this.staff = new THREE.Mesh(staffGeo, staffMat);
+            this.staff.position.set(0.6, 1.1, 0.3);
+            
+            // Staff Crystal Orb
+            const orbGeo = new THREE.SphereGeometry(0.2, 8, 8);
+            this.orbMat = new THREE.MeshBasicMaterial({ color: 0xa855f7 });
+            const orb = new THREE.Mesh(orbGeo, this.orbMat);
+            orb.position.y = 1.1;
+            this.staff.add(orb);
+            this.group.add(this.staff);
+
+            this.scene.add(this.group);
+            this.group.position.set(0, 0, 0);
+
+            this.selectedSpell = 0;
+            this.lastCastTime = 0;
+            this.unlockedSpells = [true, false, false];
+        }
+
+        update(mousePos) {
+            // Regeneration
+            this.mp = Math.min(CONFIG.PLAYER_MAX_MP, this.mp + CONFIG.MP_REGEN);
+
+            // WASD Movement
+            const moveDir = new THREE.Vector3(0, 0, 0);
+            if (Input.keys['KeyW'] || Input.keys['ArrowUp']) moveDir.z -= 1;
+            if (Input.keys['KeyS'] || Input.keys['ArrowDown']) moveDir.z += 1;
+            if (Input.keys['KeyA'] || Input.keys['ArrowLeft']) moveDir.x -= 1;
+            if (Input.keys['KeyD'] || Input.keys['ArrowRight']) moveDir.x += 1;
+
+            if (moveDir.lengthSq() > 0) {
+                moveDir.normalize();
+                this.group.position.addScaledVector(moveDir, CONFIG.PLAYER_SPEED);
+            }
+
+            // Map Bounding Collisions
+            this.group.position.x = Math.max(-42, Math.min(42, this.group.position.x));
+            this.group.position.z = Math.max(-42, Math.min(42, this.group.position.z));
+
+            // Face aiming direction
+            const aimTarget = new THREE.Vector3(mousePos.x, this.group.position.y, mousePos.z);
+            this.group.lookAt(aimTarget);
+
+            // Update Staff Orb Color based on current spell
+            const spell = CONFIG.SPELLS[this.selectedSpell];
+            if (spell) this.orbMat.color.setHex(spell.color);
+        }
+
+        takeDamage(amount) {
+            this.hp = Math.max(0, this.hp - amount);
+            return this.hp <= 0;
+        }
+    }
+
+    class Projectile {
+        constructor(scene, pos, dir, spell) {
+            this.scene = scene;
+            this.spell = spell;
+            this.dir = dir.clone().normalize();
+            this.speed = spell.speed;
+            this.alive = true;
+
+            const geo = new THREE.SphereGeometry(0.35, 8, 8);
+            const mat = new THREE.MeshBasicMaterial({ color: spell.color });
+            this.mesh = new THREE.Mesh(geo, mat);
+            this.mesh.position.copy(pos);
+            this.mesh.position.y = 1.2;
+
+            this.light = new THREE.PointLight(spell.color, 1.2, 6);
+            this.mesh.add(this.light);
+
+            this.scene.add(this.mesh);
+        }
+
+        update() {
+            this.mesh.position.addScaledVector(this.dir, this.speed);
+            if (this.mesh.position.lengthSq() > 3000) {
+                this.destroy();
+            }
+        }
+
+        destroy() {
+            this.alive = false;
+            this.scene.remove(this.mesh);
+        }
+    }
+
+    class Enemy {
+        constructor(scene, typeKey, pos) {
+            this.scene = scene;
+            this.stats = CONFIG.ENEMY_TYPES[typeKey];
+            this.hp = this.stats.hp;
+            this.maxHp = this.stats.hp;
+            this.alive = true;
+
+            this.group = new THREE.Group();
+            const geo = new THREE.CylinderGeometry(0.4, 0.6, 1.7, 8);
+            const mat = new THREE.MeshStandardMaterial({ color: this.stats.color, roughness: 0.5 });
+            const body = new THREE.Mesh(geo, mat);
+            body.position.y = 0.85;
+            this.group.add(body);
+
+            const headGeo = new THREE.SphereGeometry(0.35, 8, 8);
+            const headMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+            const head = new THREE.Mesh(headGeo, headMat);
+            head.position.y = 1.8;
+            this.group.add(head);
+
+            this.scene.add(this.group);
+            this.group.position.copy(pos);
+
+            this.lastAttackTime = 0;
+        }
+
+        update(playerPos, onAttackPlayer) {
+            if (!this.alive) return;
+
+            const dist = this.group.position.distanceTo(playerPos);
+
+            if (dist < this.stats.range) {
+                this.group.lookAt(playerPos.x, this.group.position.y, playerPos.z);
+
+                if (dist > 1.8) {
+                    const dir = new THREE.Vector3().subVectors(playerPos, this.group.position).normalize();
+                    this.group.position.addScaledVector(dir, this.stats.speed);
+                } else {
+                    const now = Date.now();
+                    if (now - this.lastAttackTime > 1200) {
+                        onAttackPlayer(this.stats.dmg);
+                        this.lastAttackTime = now;
+                    }
+                }
+            }
+        }
+
+        takeDamage(amount) {
+            this.hp -= amount;
+            if (this.hp <= 0) {
+                this.alive = false;
+                this.scene.remove(this.group);
+            }
+        }
+    }
+
+    class MapBuilder {
+        constructor(scene) {
+            this.scene = scene;
+            this.doors = [];
+            this.buildSchool();
+        }
+
+        buildSchool() {
+            // Main Floor Platform
+            const floorGeo = new THREE.BoxGeometry(90, 1, 90);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a1c2e, roughness: 0.8 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.position.y = -0.5;
+            floor.receiveShadow = true;
+            this.scene.add(floor);
+
+            // Floor Decorative Grid Tiles
+            const grid = new THREE.GridHelper(90, 30, 0x6366f1, 0x1e1b4b);
+            grid.position.y = 0.01;
+            this.scene.add(grid);
+
+            // Room Walls
+            this.buildWall(0, 0, -20, 90, 6, 2); // North Wall
+            this.buildWall(-20, 0, 10, 2, 6, 60); // West Wall
+            this.buildWall(20, 0, 10, 2, 6, 60);  // East Wall
+
+            // Decorative Pillars
+            for (let x of [-35, -10, 10, 35]) {
+                for (let z of [-35, -10, 10, 35]) {
+                    this.buildPillar(x, z);
+                }
+            }
+
+            // Barriers
+            this.doorLibrary = this.buildBarrier(-20, 0, -10, 0x38bdf8, "도서관 퍼즐 시험장");
+            this.doorArena = this.buildBarrier(20, 0, -10, 0xf43f5e, "연무장 전투 시험장");
+            this.doorSecret = this.buildBarrier(0, 0, -20, 0xf59e0b, "최종 비밀 대경전");
+        }
+
+        buildWall(x, y, z, w, h, d) {
+            const wallGeo = new THREE.BoxGeometry(w, h, d);
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.6 });
+            const wall = new THREE.Mesh(wallGeo, wallMat);
+            wall.position.set(x, y + h / 2, z);
+            wall.castShadow = true;
+            wall.receiveShadow = true;
+            this.scene.add(wall);
+        }
+
+        buildPillar(x, z) {
+            const pilGeo = new THREE.CylinderGeometry(0.8, 1.0, 7, 8);
+            const pilMat = new THREE.MeshStandardMaterial({ color: 0x334155 });
+            const pillar = new THREE.Mesh(pilGeo, pilMat);
+            pillar.position.set(x, 3.5, z);
+            pillar.castShadow = true;
+            this.scene.add(pillar);
+
+            const candleLight = new THREE.PointLight(0xf59e0b, 0.8, 12);
+            candleLight.position.set(x, 7.2, z);
+            this.scene.add(candleLight);
+        }
+
+        buildBarrier(x, y, z, color, name) {
+            const geo = new THREE.BoxGeometry(8, 5, 0.5);
+            const mat = new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.45 });
+            const barrier = new THREE.Mesh(geo, mat);
+            barrier.position.set(x, 2.5, z);
+            this.scene.add(barrier);
+
+            return { mesh: barrier, unlocked: false, name: name, pos: new THREE.Vector3(x, 0, z) };
+        }
+    }
+
+    class PuzzleSystem {
+        constructor(scene) {
+            this.scene = scene;
+            this.circles = [];
+            this.currentStep = 0;
+            this.correctSequence = [0, 1, 2, 3];
+            this.completed = false;
+
+            this.setupMagicCircles();
+        }
+
+        setupMagicCircles() {
+            const coords = [
+                { x: -32, z: 5, symbol: 'α' },
+                { x: -25, z: 12, symbol: 'β' },
+                { x: -32, z: -5, symbol: 'γ' },
+                { x: -25, z: -12, symbol: 'δ' }
+            ];
+
+            coords.forEach((c, idx) => {
+                const group = new THREE.Group();
+                
+                const ringGeo = new THREE.RingGeometry(1.2, 1.5, 24);
+                const ringMat = new THREE.MeshBasicMaterial({ color: 0x6366f1, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
+                const ring = new THREE.Mesh(ringGeo, ringMat);
+                ring.rotation.x = -Math.PI / 2;
+                group.add(ring);
+
+                const runeSprite = this.createRuneLabel(c.symbol, '#c084fc');
+                group.add(runeSprite);
+
+                const light = new THREE.PointLight(0x6366f1, 0, 5);
+                light.position.y = 0.5;
+                group.add(light);
+
+                group.position.set(c.x, 0.05, c.z);
+                this.scene.add(group);
+
+                this.circles.push({
+                    id: idx,
+                    symbol: c.symbol,
+                    group: group,
+                    ringMat: ringMat,
+                    light: light,
+                    activated: false,
+                    pos: new THREE.Vector3(c.x, 0, c.z)
+                });
+            });
+        }
+
+        createRuneLabel(text, color) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.font = 'Bold 80px "Cinzel", "Noto Serif KR", serif';
+            ctx.fillStyle = color;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 15;
+            ctx.fillText(text, 64, 64);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true });
+            const sprite = new THREE.Sprite(spriteMat);
+            sprite.scale.set(2.5, 2.5, 1);
+            sprite.position.y = 2.0;
+            return sprite;
+        }
+
+        interact(playerPos) {
+            if (this.completed) return 'ALREADY_COMPLETED';
+
+            let closest = null;
+            let minDist = 2.5;
+
+            this.circles.forEach(c => {
+                const dist = playerPos.distanceTo(c.pos);
+                if (dist < minDist) {
+                    minDist = dist;
+                    closest = c;
+                }
+            });
+
+            if (!closest) return 'NO_CIRCLE';
+            if (closest.activated) return 'ALREADY_ACTIVATED';
+
+            if (closest.id === this.correctSequence[this.currentStep]) {
+                closest.activated = true;
+                closest.ringMat.color.setHex(0x22c55e);
+                closest.light.intensity = 2;
+                this.currentStep++;
+
+                if (this.currentStep === this.correctSequence.length) {
+                    this.completed = true;
+                    return 'PUZZLE_SOLVED';
+                }
+                return 'STEP_CORRECT';
+            } else {
+                this.currentStep = 0;
+                this.circles.forEach(c => {
+                    c.activated = false;
+                    c.ringMat.color.setHex(0x6366f1);
+                    c.light.intensity = 0;
+                });
+                return 'PUZZLE_RESET';
+            }
+        }
+    }
+
+    const Progression = {
+        score: 0,
+        grade: 'C',
+        exams: {
+            puzzle: false,
+            combat: false,
+            final: false
+        },
+
+        addScore(pts) {
+            this.score += pts;
+            if (this.score >= 3000) this.grade = 'S';
+            else if (this.score >= 2000) this.grade = 'A';
+            else if (this.score >= 1000) this.grade = 'B';
+            else this.grade = 'C';
+
+            document.getElementById('player-grade').innerText = `GRADE: ${this.grade}`;
+            document.getElementById('total-score').innerText = `SCORE: ${this.score}`;
+        }
+    };
+
+    const Game = {
+        world: null,
+        effects: null,
+        player: null,
+        map: null,
+        puzzle: null,
+        projectiles: [],
+        enemies: [],
+        progression: Progression,
+        isStarted: false,
+        isGameOver: false,
+
+        init() {
+            this.world = new WorldScene();
+            this.effects = new EffectSystem(this.world.scene);
+            this.player = new Player(this.world.scene);
+            this.map = new MapBuilder(this.world.scene);
+            this.puzzle = new PuzzleSystem(this.world.scene);
+
+            Input.init(this.world.renderer.domElement, this.world.camera);
+
+            this.spawnEnemies();
+            this.loop();
+        },
+
+        spawnEnemies() {
+            this.enemies = [
+                new Enemy(this.world.scene, 'STUDENT', new THREE.Vector3(25, 0, -5)),
+                new Enemy(this.world.scene, 'STUDENT', new THREE.Vector3(32, 0, 5)),
+                new Enemy(this.world.scene, 'MAGE', new THREE.Vector3(35, 0, 0))
+            ];
+        },
+
+        start() {
+            this.isStarted = true;
+            document.getElementById('modal-screen').classList.add('hidden');
+            document.getElementById('modal-start').classList.add('hidden');
+        },
+
+        restart() {
+            this.player.hp = CONFIG.PLAYER_MAX_HP;
+            this.player.mp = CONFIG.PLAYER_MAX_MP;
+            this.player.group.position.set(0, 0, 0);
+
+            this.projectiles.forEach(p => p.destroy());
+            this.projectiles = [];
+
+            if (!this.progression.exams.combat) {
+                this.enemies.forEach(e => { if (e.alive) this.world.scene.remove(e.group); });
+                this.spawnEnemies();
+            }
+
+            this.isGameOver = false;
+            document.getElementById('modal-screen').classList.add('hidden');
+            document.getElementById('modal-gameover').classList.add('hidden');
+        },
+
+        setSpell(idx) {
+            if (!this.player || !this.player.unlockedSpells[idx]) return;
+            this.player.selectedSpell = idx;
+            for (let i = 1; i <= 3; i++) {
+                const slot = document.getElementById(`spell-${i}`);
+                if (slot) {
+                    if (i === idx + 1) slot.classList.add('active');
+                    else slot.classList.remove('active');
+                }
+            }
+        },
+
+        unlockSpell(idx) {
+            this.player.unlockedSpells[idx] = true;
+            const slot = document.getElementById(`spell-${idx + 1}`);
+            if (slot) slot.classList.remove('opacity-50');
+            const lock = document.getElementById(`lock-spell-${idx + 1}`);
+            if (lock) lock.remove();
+        },
+
+        showHint(type) {
+            const modal = document.getElementById('modal-hint');
+            const title = document.getElementById('hint-modal-title');
+            const content = document.getElementById('hint-modal-content');
+
+            if (type === 'puzzle') {
+                title.innerText = "1차 시험 : 도서관 고대 마법진 힌트";
+                content.innerHTML = `
+                    <p><b>🔍 위치:</b> 서쪽 서고(좌측 구역)에 배치된 4개의 마법진</p>
+                    <p><b>📜 해결법:</b> 그리스 문자의 기본 순서대로 마법진을 순서대로 밟으세요!</p>
+                    <div class="bg-purple-950/60 p-3 rounded-lg border border-purple-500/30 text-amber-300 font-mono text-center text-sm font-bold my-1">
+                        α (Alpha) ➔ β (Beta) ➔ γ (Gamma) ➔ δ (Delta)
+                    </div>
+                    <p class="text-[11px] text-slate-400">* 순서가 틀리면 리셋되므로 알파(α)부터 다시 시작하세요. 성공 시 <b>[화염 폭발 🔥]</b> 마법이 해금됩니다.</p>
+                `;
+            } else if (type === 'combat') {
+                title.innerText = "2차 시험 : 연무장 소탕 힌트";
+                content.innerHTML = `
+                    <p><b>⚔️ 위치:</b> 동쪽 연무장(우측 구역)에 상주하는 어둠의 학도들</p>
+                    <p><b>🪄 전투 팁:</b></p>
+                    <ul class="list-disc list-inside space-y-1 text-slate-300 pl-1">
+                        <li>1차 시험으로 해금한 <b>[2번 화염 폭발 🔥]</b> 마법은 범위 피해를 주므로 적 무리를 일괄 타격하기 좋습니다.</li>
+                        <li><b>[1번 비전 화살 🪄]</b>로 적과의 거리를 유지하며 원거리 사격하세요.</li>
+                        <li>모든 어둠 마법사를 물리치면 <b>[빙결 광선 ❄️]</b> 마법과 함께 최종 대경전 문이 열립니다.</li>
+                    </ul>
+                `;
+            } else if (type === 'final') {
+                title.innerText = "최종 시험 : 비밀 대경전 결계 정화";
+                content.innerHTML = `
+                    <p><b>🏛️ 위치:</b> 중앙 북쪽 복도 끝의 황금빛 결계문</p>
+                    <p><b>📜 조건:</b> 1차(도서관 퍼즐)와 2차(연무장 전투) 시험을 모두 완료해야 결계가 약화됩니다.</p>
+                    <p><b>✨ 완료:</b> 문 앞으로 이동하여 <span class="text-amber-300 font-bold">[E] 키</span>를 눌러 결계를 정화하면 아카데미 수석 마법사 자격(S GRADE)을 획득하며 승리합니다!</p>
+                `;
+            }
+
+            modal.classList.remove('hidden');
+        },
+
+        closeHintModal() {
+            document.getElementById('modal-hint').classList.add('hidden');
+        },
+
+        loop() {
+            if (this.isStarted && !this.isGameOver) {
+                this.update();
+            }
+            this.world.renderer.render(this.world.scene, this.world.camera);
+            requestAnimationFrame(() => this.loop());
+        },
+
+        update() {
+            this.player.update(Input.mouseWorld);
+
+            const targetCamPos = new THREE.Vector3().addVectors(this.player.group.position, CONFIG.CAMERA_OFFSET);
+            this.world.camera.position.lerp(targetCamPos, 0.08);
+
+            if (Input.isMouseDown) {
+                this.castSpell();
+            }
+
+            // Projectiles
+            for (let i = this.projectiles.length - 1; i >= 0; i--) {
+                const proj = this.projectiles[i];
+                proj.update();
+
+                for (let enemy of this.enemies) {
+                    if (enemy.alive && proj.mesh.position.distanceTo(enemy.group.position) < 1.2) {
+                        enemy.takeDamage(proj.spell.dmg);
+                        this.effects.spawnMagicBurst(proj.mesh.position, proj.spell.color);
+                        proj.destroy();
+
+                        if (!enemy.alive) {
+                            this.progression.addScore(enemy.stats.score);
+                            this.checkArenaCompletion();
+                        }
+                        break;
+                    }
+                }
+
+                if (!proj.alive) {
+                    this.projectiles.splice(i, 1);
+                }
+            }
+
+            // Enemies
+            this.enemies.forEach(enemy => {
+                enemy.update(this.player.group.position, (dmg) => {
+                    const dead = this.player.takeDamage(dmg);
+                    if (dead) this.triggerGameOver();
+                });
+            });
+
+            this.effects.update();
+            this.checkInteractions();
+            this.updateHUD();
+        },
+
+        castSpell() {
+            const now = Date.now();
+            const spell = CONFIG.SPELLS[this.player.selectedSpell];
+
+            if (now - this.player.lastCastTime < spell.cd) return;
+            if (this.player.mp < spell.cost) return;
+
+            this.player.mp -= spell.cost;
+            this.player.lastCastTime = now;
+
+            const playerPos = this.player.group.position.clone();
+            const aimDir = new THREE.Vector3().subVectors(Input.mouseWorld, playerPos);
+            aimDir.y = 0;
+
+            if (spell.type === 'ranged') {
+                this.projectiles.push(new Projectile(this.world.scene, playerPos, aimDir, spell));
+            } else if (spell.type === 'melee') {
+                this.effects.spawnFlameAOE(playerPos);
+                this.enemies.forEach(enemy => {
+                    if (enemy.alive && enemy.group.position.distanceTo(playerPos) < spell.radius) {
+                        enemy.takeDamage(spell.dmg);
+                        if (!enemy.alive) this.progression.addScore(enemy.stats.score);
+                    }
+                });
+            }
+        },
+
+        checkInteractions() {
+            const pPos = this.player.group.position;
+            const prompt = document.getElementById('interaction-prompt');
+            const promptText = document.getElementById('prompt-text');
+            let canInteract = false;
+
+            // Library Magic Circle Puzzle
+            if (pPos.x < -18 && !this.progression.exams.puzzle) {
+                canInteract = true;
+                promptText.innerText = "도서관 마법진 활성화 [E]";
+
+                if (Input.keys['KeyE']) {
+                    Input.keys['KeyE'] = false;
+                    const result = this.puzzle.interact(pPos);
+                    if (result === 'PUZZLE_SOLVED') {
+                        this.progression.exams.puzzle = true;
+                        this.progression.addScore(1000);
+                        this.unlockSpell(1);
+                        this.map.doorLibrary.mesh.material.opacity = 0.1;
+                        document.getElementById('exam-1-status').innerHTML = '<span>📜 1차: 도서관 고대 마법진 해독</span><span class="text-emerald-400 font-bold">완료 (A+)</span>';
+                    }
+                }
+            }
+
+            // Secret Vault Door Final
+            if (pPos.z < -18 && this.progression.exams.puzzle && this.progression.exams.combat && !this.progression.exams.final) {
+                canInteract = true;
+                promptText.innerText = "최종 비밀 대경전 결계 정화 [E]";
+
+                if (Input.keys['KeyE']) {
+                    Input.keys['KeyE'] = false;
+                    this.progression.exams.final = true;
+                    this.progression.addScore(1500);
+                    this.triggerVictory();
+                }
+            }
+
+            if (canInteract) prompt.classList.remove('hidden');
+            else prompt.classList.add('hidden');
+        },
+
+        checkArenaCompletion() {
+            const remaining = this.enemies.filter(e => e.alive).length;
+            if (remaining === 0 && !this.progression.exams.combat) {
+                this.progression.exams.combat = true;
+                this.progression.addScore(1000);
+                this.unlockSpell(2);
+                this.map.doorArena.mesh.material.opacity = 0.1;
+                document.getElementById('exam-2-status').innerHTML = '<span>⚔️ 2차: 연무장 어둠 마법사 소탕</span><span class="text-emerald-400 font-bold">완료 (S)</span>';
+                document.getElementById('exam-3-status').innerHTML = '<span>🏛️ 최종: 비밀 대경전의 결계 정화</span><span class="text-amber-300 font-bold">해금됨</span>';
+            }
+        },
+
+        updateHUD() {
+            const hpPct = (this.player.hp / CONFIG.PLAYER_MAX_HP) * 100;
+            const mpPct = (this.player.mp / CONFIG.PLAYER_MAX_MP) * 100;
+
+            document.getElementById('hp-bar').style.width = `${hpPct}%`;
+            document.getElementById('mp-bar').style.width = `${mpPct}%`;
+            document.getElementById('hp-text').innerText = `${Math.ceil(this.player.hp)} / ${CONFIG.PLAYER_MAX_HP}`;
+            document.getElementById('mp-text').innerText = `${Math.ceil(this.player.mp)} / ${CONFIG.PLAYER_MAX_MP}`;
+        },
+
+        triggerGameOver() {
+            this.isGameOver = true;
+            document.getElementById('modal-screen').classList.remove('hidden');
+            document.getElementById('modal-gameover').classList.remove('hidden');
+        },
+
+        triggerVictory() {
+            this.isGameOver = true;
+            document.getElementById('modal-screen').classList.remove('hidden');
+            document.getElementById('modal-victory').classList.remove('hidden');
+            document.getElementById('final-grade').innerText = `${this.progression.grade} GRADE`;
+            document.getElementById('final-score').innerText = `${this.progression.score} PTS`;
+        }
+    };
+
+    // Explicitly bind Game to global window
+    window.Game = Game;
+
+    // Launch Game on Load
+    window.onload = () => {
+        Game.init();
+    };
+    </script>
+</body>
+</html>

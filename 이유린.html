@@ -1,0 +1,1605 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>고백의 온도 - 여성향 연애 시뮬레이션</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Gowun+Dodum&family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
+        
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #0d0614;
+            font-family: 'Gowun Dodum', 'Noto Sans KR', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            max-width: 1280px;
+            max-height: 720px;
+            aspect-ratio: 16 / 9;
+            box-shadow: 0 25px 60px rgba(0,0,0,0.9), 0 0 40px rgba(255, 105, 180, 0.25);
+            overflow: hidden;
+            border-radius: 16px;
+            background: #0d0614;
+            border: 1px solid rgba(255, 182, 193, 0.3);
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+</div>
+
+<script>
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+        if (typeof r === 'number') r = [r, r, r, r];
+        const [tl, tr, br, bl] = r;
+        this.beginPath();
+        this.moveTo(x + tl, y);
+        this.lineTo(x + w - tr, y);
+        this.quadraticCurveTo(x + w, y, x + w, y + tr);
+        this.lineTo(x + w, y + h - br);
+        this.quadraticCurveTo(x + w, y + h, x + w - br, y + h);
+        this.lineTo(x + bl, y + h);
+        this.quadraticCurveTo(x, y + h, x, y + h - bl);
+        this.lineTo(x, y + tl);
+        this.quadraticCurveTo(x, y, x + tl, y);
+        this.closePath();
+        return this;
+    };
+}
+
+const CONFIG = {
+    CANVAS_WIDTH: 1280,
+    CANVAS_HEIGHT: 720,
+    TOTAL_DAYS: 3,
+    MAX_AFFECTION: 100,
+    PASSING_AFFECTION: 65
+};
+
+const GAME_STATE = {
+    screen: 'TITLE', // TITLE, CHARACTER_SELECT, STORY, DATE_SELECT, CONFESSION_SELECT, ENDING, STATUS_MODAL, GALLERY_MODAL
+    day: 1,
+    timeOfDay: 'MORNING', // MORNING, SCHOOL, AFTER_SCHOOL, DATE, EVENING
+    favoritePicks: [],
+    secretAdmirer: 0,
+    selectedCharacter: null,
+    affections: [30, 30, 30, 30, 30],
+    cgUnlocked: [false, false, false, false, false],
+    currentSpeaker: '',
+    currentExpression: 'normal',
+    typedText: '',
+    isTyping: false,
+    dialogueIndex: 0,
+    currentDialogueSequence: [],
+    choices: null,
+    onDialogueComplete: null,
+    currentBG: 'title',
+    endingSuccess: false,
+    particles: [],
+    notification: '',
+    notificationTimer: 0
+};
+
+const CHARACTERS = [
+    {
+        id: 0,
+        name: '강민우',
+        type: '농구부 츤데레 동갑내기',
+        motto: '"어이, 칠칠치 못하게 뭘 또 떨어뜨리냐..."',
+        themeColor: '#e74c3c',
+        dateLocation: '노을 지는 학교 운동장',
+        bgLocation: 'gym'
+    },
+    {
+        id: 1,
+        name: '윤서준',
+        type: '다정한 학생회장',
+        motto: '"오늘도 많이 힘들었지? 따뜻한 차 한잔할래?"',
+        themeColor: '#2980b9',
+        dateLocation: '아늑한 감성 카페',
+        bgLocation: 'student_council'
+    },
+    {
+        id: 2,
+        name: '한시우',
+        type: '능글맞은 밴드부 선배',
+        motto: '"너 보려고 연습 일찍 끝냈지. 나 잘했어?"',
+        themeColor: '#8e44ad',
+        dateLocation: '해질녘 학교 옥상',
+        bgLocation: 'rooftop'
+    },
+    {
+        id: 3,
+        name: '이도현',
+        type: '귀여운 도서부 연하남',
+        motto: '"선배님! 오늘 같이 야자하고 하교하면 안 돼요?"',
+        themeColor: '#27ae60',
+        dateLocation: '조용한 도서관 구석',
+        bgLocation: 'library'
+    },
+    {
+        id: 4,
+        name: '차현우',
+        type: '시크한 전교 1등 라이벌',
+        motto: '"이번 시험 모의고사 1등은 나야. 비결이 궁금해?"',
+        themeColor: '#16a085',
+        dateLocation: '학원가 자습실 계단',
+        bgLocation: 'study_room'
+    }
+];
+
+const SCHOOL_EVENTS = [
+    {
+        characterId: 0,
+        location: 'gym',
+        dialogues: [
+            { speaker: '강민우', expression: 'surprised', text: '어, 너 뭐야? 체육관엔 무슨 일인데?' },
+            { speaker: '강민우', expression: 'blush', text: '아... 아니, 땀 흘리는 거 보여주기 좀 쑥스러워서 그래.' },
+            { speaker: '강민우', expression: 'normal', text: '마침 목말랐는데, 음료수 하나 사 왔냐?' }
+        ],
+        choices: [
+            { text: '♥ 차가운 이온음료를 내밀며 "수고했어!"', affection: 15 },
+            { text: '♥ "운동하는 모습 멋있어서 구경 중이었어."', affection: 20 },
+            { text: '♥ "너 보러 온 거 아닌데? 착각 마!"', affection: -5 }
+        ]
+    },
+    {
+        characterId: 1,
+        location: 'student_council',
+        dialogues: [
+            { speaker: '윤서준', expression: 'smile', text: '어서 와. 방과 후 학생회실은 조용해서 서류 정리하기 딱 좋아.' },
+            { speaker: '윤서준', expression: 'blush', text: '실은... 네가 지나갈 때까지 창밖만 바라보고 있었어.' },
+            { speaker: '윤서준', expression: 'normal', text: '잠시 나랑 같이 따뜻한 홍차 한잔 들지 않을래?' }
+        ],
+        choices: [
+            { text: '♥ "회장님이 주시는 차라면 당연히 마셔야죠!"', affection: 20 },
+            { text: '♥ "학생회 일 많이 바쁘죠? 도와드릴게요."', affection: 15 },
+            { text: '♥ "공부해야 해서 다음에 마실게요."', affection: 0 }
+        ]
+    },
+    {
+        characterId: 2,
+        location: 'rooftop',
+        dialogues: [
+            { speaker: '한시우', expression: 'smile', text: '지나가던 귀여운 후배님, 옥상엔 웬일이야?' },
+            { speaker: '한시우', expression: 'blush', text: '방금 새로 만든 자작곡 연습 중이었는데... 들어볼래?' },
+            { speaker: '한시우', expression: 'normal', text: '오직 너만을 위해 만든 가사거든.' }
+        ],
+        choices: [
+            { text: '♥ "선배 기타 연주 소리 너무 좋아요, 들려주세요!"', affection: 20 },
+            { text: '♥ "너만을 위한 가사라니... 장난치지 마세요!"', affection: 10 },
+            { text: '♥ "선배님 바람둥이라는 소문 다 들었어요."', affection: -10 }
+        ]
+    },
+    {
+        characterId: 3,
+        location: 'library',
+        dialogues: [
+            { speaker: '이도현', expression: 'surprised', text: '선배님! 진짜 도서관에 오셨네요?' },
+            { speaker: '이도현', expression: 'blush', text: '선배님이 추천해주신 소설책, 어제 밤새워서 다 읽었어요!' },
+            { speaker: '이도현', expression: 'smile', text: '다음엔 어떤 책 읽을까요? 선배 옆자리에 앉아도 되죠?' }
+        ],
+        choices: [
+            { text: '♥ 도현이 머리를 쓰다듬으며 "잘했어, 착하다!"', affection: 20 },
+            { text: '♥ "여기 내 옆자리에 앉아서 같이 공부하자."', affection: 15 },
+            { text: '♥ "도서관에서는 정숙해야지 도현아."', affection: 5 }
+        ]
+    },
+    {
+        characterId: 4,
+        location: 'study_room',
+        dialogues: [
+            { speaker: '차현우', expression: 'normal', text: '이번 수학 모의고사 21번 문제, 풀었어?' },
+            { speaker: '차현우', expression: 'blush', text: '네가 멍하니 문제집만 보길래... 오답 노트 내 거 복사해 줄까 해서.' },
+            { speaker: '차현우', expression: 'surprised', text: '내가 왜 이러냐고? 그냥... 네 성적이 떨어지면 재미없으니까.' }
+        ],
+        choices: [
+            { text: '♥ "고마워 현우야! 내 츤데레 선생님이네."', affection: 20 },
+            { text: '♥ "역시 전교 1등은 친절하구나?"', affection: 10 },
+            { text: '♥ "나 혼자서도 풀 수 있거든?"', affection: -5 }
+        ]
+    }
+];
+
+const DATE_EVENTS = [
+    {
+        characterId: 0,
+        location: 'gym',
+        dialogues: [
+            { speaker: '강민우', expression: 'blush', text: '방과 후에 나랑 농구장 뒤편 골목길 걸어줘서 고맙다.' },
+            { speaker: '강민우', expression: 'smile', text: '실은 너랑 같이 떡볶이 먹으러 가고 싶었거든...' },
+            { speaker: '강민우', expression: 'blush', text: '손... 손잡고 가도 되냐?' }
+        ],
+        choices: [
+            { text: '♥ 수줍게 손을 꼭 잡아준다', affection: 20 },
+            { text: '♥ "민우 손 되게 크고 따뜻하다!"', affection: 15 },
+            { text: '♥ "길 한복판에서 민망하게 왜 그래!"', affection: -5 }
+        ]
+    },
+    {
+        characterId: 1,
+        location: 'cafe',
+        dialogues: [
+            { speaker: '윤서준', expression: 'smile', text: '카페 분위기 마음에 들어? 조용한 구석 자리로 예약했어.' },
+            { speaker: '윤서준', expression: 'blush', text: '네가 케이크 맛있게 먹는 모습 보니까 나까지 기분이 좋아진다.' },
+            { speaker: '윤서준', expression: 'smile', text: '앞으로 매주 주말마다 나랑 데이트해 줄래?' }
+        ],
+        choices: [
+            { text: '♥ "서준 선배랑 함께라면 매일도 좋아요!"', affection: 20 },
+            { text: '♥ 케이크를 아~ 하고 한 입 먹여준다', affection: 25 },
+            { text: '♥ "주말엔 집에서 쉬고 싶은데요."', affection: -10 }
+        ]
+    },
+    {
+        characterId: 2,
+        location: 'rooftop',
+        dialogues: [
+            { speaker: '한시우', expression: 'smile', text: '노을빛 아래에서 보는 너, 평소보다 훨씬 더 예쁘다.' },
+            { speaker: '한시우', expression: 'blush', text: '나 여러 사람 앞에서는 짓궂게 굴지만... 너 앞에서는 진심이야.' },
+            { speaker: '한시우', expression: 'surprised', text: '내 심장 소리 들려? 이렇게 가슴이 뛰는 건 처음이야.' }
+        ],
+        choices: [
+            { text: '♥ 시우의 가슴에 손을 대어 심장소리를 느낀다', affection: 25 },
+            { text: '♥ "선배 진지한 모습 보니까 새로워요."', affection: 15 },
+            { text: '♥ "다른 여학생한테도 이런 말 하셨죠?"', affection: -5 }
+        ]
+    },
+    {
+        characterId: 3,
+        location: 'park',
+        dialogues: [
+            { speaker: '이도현', expression: 'smile', text: '공원 벤치에 벚꽃잎이 많이 떨어졌어요, 선배님!' },
+            { speaker: '이도현', expression: 'blush', text: '선배님 머리에 벚꽃잎 붙었어요. 제가 떼어드릴게요.' },
+            { speaker: '이도현', expression: 'blush', text: '저... 어리다고만 생각하지 마시고 남자로 봐주시면 안 돼요?' }
+        ],
+        choices: [
+            { text: '♥ "도현이는 이미 내게 멋진 남자야."', affection: 25 },
+            { text: '♥ 도현이 볼을 살짝 꼬집어준다', affection: 15 },
+            { text: '♥ "아직은 귀여운 동생으로 보여."', affection: -10 }
+        ]
+    },
+    {
+        characterId: 4,
+        location: 'study_room',
+        dialogues: [
+            { speaker: '차현우', expression: 'blush', text: '학원 끝나고 걸어가는 밤길, 혼자 보내기 걱정돼서 나왔어.' },
+            { speaker: '차현우', expression: 'normal', text: '내가 너한테 왜 이렇게 신경 쓰는지 진짜 몰라서 묻는 거야?' },
+            { speaker: '차현우', expression: 'blush', text: '너 말고 다른 애들한테는 1분도 시간 안 써.' }
+        ],
+        choices: [
+            { text: '♥ 현우의 옷소매를 살며시 잡는다', affection: 25 },
+            { text: '♥ "나 걱정해 준 거야? 고마워 현우야."', affection: 15 },
+            { text: '♥ "나 혼자서도 밤길 잘 가거든?"', affection: -5 }
+        ]
+    }
+];
+
+let canvas, ctx;
+
+const audio = {
+    ctx: null,
+    init() {
+        if (!this.ctx) {
+            this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+    },
+    playClick() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(880, this.ctx.currentTime + 0.08);
+        gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.08);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.08);
+    },
+    playHeartSound() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(60, this.ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.2);
+    },
+    playChime() {
+        if (!this.ctx) return;
+        [523.25, 659.25, 783.99, 1046.50].forEach((freq, idx) => {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, this.ctx.currentTime + idx * 0.08);
+            gain.gain.setValueAtTime(0.12, this.ctx.currentTime + idx * 0.08);
+            gain.gain.linearRampToValueAtTime(0.001, this.ctx.currentTime + idx * 0.08 + 0.3);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(this.ctx.currentTime + idx * 0.08);
+            osc.stop(this.ctx.currentTime + idx * 0.08 + 0.3);
+        });
+    }
+};
+
+const characterSpriteCache = {};
+
+function createCharacterSVGData(id, expression = 'normal') {
+    let hairColor, hairLight, extraAccessory = '', hairBack = '', hairFront = '', shirtDetails = '';
+    const isBlush = expression === 'blush';
+    const isSmile = expression === 'smile';
+    const isSurprised = expression === 'surprised';
+
+    switch (id) {
+        case 0:
+            hairColor = '#221e20'; hairLight = '#4a3b3d';
+            hairBack = `<path d="M 75,120 Q 60,60 150,35 Q 240,60 225,120 Q 220,160 215,175 L 85,175 Q 80,160 75,120 Z" fill="${hairColor}"/>`;
+            hairFront = `<path d="M 72,110 Q 110,55 150,75 Q 190,55 228,110 L 210,135 L 180,105 L 150,130 L 120,105 L 90,135 Z" fill="${hairColor}"/>
+            <path d="M 95,80 Q 120,60 145,72" stroke="${hairLight}" stroke-width="3" fill="none"/>`;
+            shirtDetails = `<path d="M 80,270 L 220,270 L 190,400 L 110,400 Z" fill="#2c3e50"/>
+            <path d="M 150,250 L 150,400" stroke="#e74c3c" stroke-width="7"/>`;
+            break;
+        case 1:
+            hairColor = '#7a5223'; hairLight = '#b3824b';
+            hairBack = `<path d="M 75,120 Q 60,50 150,32 Q 240,50 225,120 Q 220,165 215,180 L 85,180 Q 80,165 75,120 Z" fill="${hairColor}"/>`;
+            hairFront = `<path d="M 74,108 Q 115,58 142,88 Q 165,58 226,108 Q 185,130 150,112 Q 115,130 74,108 Z" fill="${hairColor}"/>
+            <path d="M 95,72 Q 125,58 150,70" stroke="${hairLight}" stroke-width="3" fill="none"/>`;
+            shirtDetails = `<rect x="135" y="250" width="30" height="150" fill="#2980b9"/>
+            <rect x="58" y="280" width="35" height="18" rx="4" fill="#f1c40f"/>
+            <text x="63" y="293" font-size="10" font-weight="bold" fill="#000">학생회장</text>`;
+            break;
+        case 2:
+            hairColor = '#2d1b36'; hairLight = '#5d386e';
+            hairBack = `<path d="M 72,120 Q 58,48 150,30 Q 242,48 228,120 Q 222,168 216,182 L 84,182 Q 78,168 72,120 Z" fill="${hairColor}"/>`;
+            hairFront = `<path d="M 72,110 Q 110,50 150,72 Q 190,50 228,110 L 205,140 L 175,110 L 150,135 L 122,110 L 88,140 Z" fill="${hairColor}"/>
+            <path d="M 85,75 Q 120,52 155,68" stroke="${hairLight}" stroke-width="3" fill="none"/>`;
+            extraAccessory = `<circle cx="218" cy="180" r="4.5" fill="#e74c3c"/>`;
+            break;
+        case 3:
+            hairColor = '#5c2b14'; hairLight = '#914e2c';
+            hairBack = `<path d="M 75,120 Q 60,52 150,35 Q 240,52 225,120 Q 220,160 215,175 L 85,175 Q 80,160 75,120 Z" fill="${hairColor}"/>`;
+            hairFront = `<path d="M 74,108 Q 110,60 150,82 Q 190,60 226,108 Q 185,130 150,118 Q 115,130 74,108 Z" fill="${hairColor}"/>
+            <path d="M 90,78 Q 120,60 150,72" stroke="${hairLight}" stroke-width="3" fill="none"/>`;
+            shirtDetails = `<path d="M 65,270 L 235,270 L 210,400 L 90,400 Z" fill="#f1c40f"/>`;
+            break;
+        case 4:
+            hairColor = '#121f28'; hairLight = '#2a4354';
+            hairBack = `<path d="M 74,120 Q 58,48 150,30 Q 242,48 226,120 Q 220,165 214,178 L 86,178 Q 80,165 74,120 Z" fill="${hairColor}"/>`;
+            hairFront = `<path d="M 74,105 Q 112,48 150,68 Q 188,48 226,105 L 202,138 L 175,108 L 150,128 L 120,108 L 92,138 Z" fill="${hairColor}"/>
+            <path d="M 85,72 Q 120,52 150,66" stroke="${hairLight}" stroke-width="3" fill="none"/>`;
+            extraAccessory = `
+            <circle cx="118" cy="168" r="17" stroke="#d5dbdb" stroke-width="2.5" fill="none"/>
+            <circle cx="182" cy="168" r="17" stroke="#d5dbdb" stroke-width="2.5" fill="none"/>
+            <line x1="135" y1="168" x2="165" y2="168" stroke="#d5dbdb" stroke-width="2.5"/>`;
+            break;
+    }
+
+    let mouthPath = "M 138,212 L 162,212";
+    if (isSmile) mouthPath = "M 135,208 Q 150,228 165,208";
+    else if (isBlush) mouthPath = "M 136,212 Q 150,222 164,212";
+    else if (isSurprised) mouthPath = "M 142,206 A 8,9 0 0,1 158,206 A 8,9 0 0,1 142,206 Z";
+
+    let eyebrowLeft = "M 102,140 Q 120,134 138,140";
+    let eyebrowRight = "M 162,140 Q 180,134 198,140";
+    if (isSurprised) {
+        eyebrowLeft = "M 102,130 Q 120,122 138,132";
+        eyebrowRight = "M 162,132 Q 180,122 198,130";
+    } else if (isBlush) {
+        eyebrowLeft = "M 102,138 Q 120,144 138,138";
+        eyebrowRight = "M 162,138 Q 180,144 198,138";
+    }
+
+    const blushOpacity = isBlush ? "0.75" : (isSmile ? "0.35" : "0.0");
+
+    const svgString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400" width="300" height="400">
+        ${hairBack}
+        <path d="M 30,400 L 70,245 Q 150,230 230,245 L 270,400 Z" fill="#1c2833"/>
+        <path d="M 115,245 L 150,320 L 185,245 Z" fill="#ffffff"/>
+        ${shirtDetails}
+        <path d="M 142,255 L 158,255 L 154,330 L 150,340 L 146,330 Z" fill="#c0392b"/>
+        <rect x="124" y="150" width="52" height="110" fill="#fdebd0"/>
+        <rect x="124" y="215" width="52" height="30" fill="#f5cba7" opacity="0.45"/>
+        <path d="M 85,110 Q 80,198 150,228 Q 220,198 215,110 Q 150,75 85,110 Z" fill="#fdebd0"/>
+        <ellipse cx="82" cy="165" rx="8" ry="13" fill="#fdebd0"/>
+        <ellipse cx="218" cy="165" rx="8" ry="13" fill="#fdebd0"/>
+        <ellipse cx="120" cy="165" rx="14" ry="11" fill="#ffffff"/>
+        <ellipse cx="180" cy="165" rx="14" ry="11" fill="#ffffff"/>
+        <ellipse cx="120" cy="165" rx="9" ry="10" fill="#2c3e50"/>
+        <ellipse cx="180" cy="165" rx="9" ry="10" fill="#2c3e50"/>
+        <circle cx="117" cy="162" r="3.5" fill="#ffffff"/>
+        <circle cx="177" cy="162" r="3.5" fill="#ffffff"/>
+        <path d="${eyebrowLeft}" stroke="${hairColor}" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path d="${eyebrowRight}" stroke="${hairColor}" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path d="M 104,155 Q 120,150 136,155" stroke="#2c3e50" stroke-width="3" fill="none"/>
+        <path d="M 164,155 Q 180,150 196,155" stroke="#2c3e50" stroke-width="3" fill="none"/>
+        <path d="M 150,185 L 147,193 L 153,193" stroke="#d98880" stroke-width="2" fill="none"/>
+        <path d="${mouthPath}" stroke="#a93226" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+        <ellipse cx="110" cy="182" rx="18" ry="9" fill="#ff6b81" opacity="${blushOpacity}"/>
+        <ellipse cx="190" cy="182" rx="18" ry="9" fill="#ff6b81" opacity="${blushOpacity}"/>
+        ${extraAccessory}
+        ${hairFront}
+    </svg>`;
+
+    const img = new Image();
+    img.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svgString);
+    return img;
+}
+
+function loadAllCharacterSprites() {
+    ['normal', 'smile', 'blush', 'surprised'].forEach(exp => {
+        characterSpriteCache[exp] = [];
+        for (let i = 0; i < 5; i++) {
+            characterSpriteCache[exp][i] = createCharacterSVGData(i, exp);
+        }
+    });
+}
+
+function drawBackground(bgType) {
+    const W = CONFIG.CANVAS_WIDTH;
+    const H = CONFIG.CANVAS_HEIGHT;
+
+    ctx.save();
+    switch (bgType) {
+        case 'title': {
+            const grad = ctx.createLinearGradient(0, 0, W, H);
+            grad.addColorStop(0, '#2c001e');
+            grad.addColorStop(0.5, '#581845');
+            grad.addColorStop(1, '#0f0015');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, W, H);
+            break;
+        }
+        case 'gym': {
+            ctx.fillStyle = '#1e272c';
+            ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = '#d35400';
+            ctx.fillRect(0, H - 180, W, 180);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.arc(W / 2, H - 90, 80, 0, Math.PI * 2);
+            ctx.stroke();
+            break;
+        }
+        case 'student_council': {
+            ctx.fillStyle = '#2c3e50';
+            ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = '#bdc3c7';
+            ctx.fillRect(100, 100, W - 200, H - 200);
+            ctx.fillStyle = '#7f8c8d';
+            ctx.fillRect(120, 120, W - 240, H - 240);
+            break;
+        }
+        case 'rooftop': {
+            const grad = ctx.createLinearGradient(0, 0, 0, H);
+            grad.addColorStop(0, '#ff7e5f');
+            grad.addColorStop(1, '#feb47b');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = '#7f8c8d';
+            ctx.fillRect(0, H - 120, W, 120);
+            ctx.strokeStyle = '#2c3e50';
+            ctx.lineWidth = 6;
+            for (let x = 0; x < W; x += 40) {
+                ctx.beginPath(); ctx.moveTo(x, H - 120); ctx.lineTo(x, H - 220); ctx.stroke();
+            }
+            break;
+        }
+        case 'library': {
+            ctx.fillStyle = '#3e2723';
+            ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = '#5d4037';
+            for (let i = 0; i < 6; i++) {
+                ctx.fillRect(50 + i * 200, 80, 150, H - 160);
+            }
+            break;
+        }
+        case 'study_room': {
+            ctx.fillStyle = '#1a252f';
+            ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = '#34495e';
+            ctx.fillRect(0, H - 160, W, 160);
+            break;
+        }
+        case 'cafe': {
+            ctx.fillStyle = '#4a235a';
+            ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = '#f5eef8';
+            ctx.fillRect(0, H - 150, W, 150);
+            break;
+        }
+        case 'park': {
+            const grad = ctx.createLinearGradient(0, 0, 0, H);
+            grad.addColorStop(0, '#a1c4fd');
+            grad.addColorStop(1, '#c2e9fb');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = '#27ae60';
+            ctx.fillRect(0, H - 140, W, 140);
+            break;
+        }
+        default: {
+            const grad = ctx.createLinearGradient(0, 0, 0, H);
+            grad.addColorStop(0, '#1a1c20');
+            grad.addColorStop(1, '#0f1012');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, W, H);
+            break;
+        }
+    }
+    ctx.restore();
+}
+
+function drawCharacterSprite(charIdx, expression, x, y, scale = 1.0) {
+    const img = characterSpriteCache[expression]?.[charIdx] || characterSpriteCache['normal'][charIdx];
+    if (img && img.complete) {
+        const w = 300 * scale;
+        const h = 400 * scale;
+        ctx.drawImage(img, x - w / 2, y - h, w, h);
+    }
+}
+
+function initCanvas() {
+    canvas = document.getElementById('gameCanvas');
+    ctx = canvas.getContext('2d');
+    canvas.width = CONFIG.CANVAS_WIDTH;
+    canvas.height = CONFIG.CANVAS_HEIGHT;
+
+    for (let i = 0; i < 35; i++) {
+        GAME_STATE.particles.push({
+            x: Math.random() * CONFIG.CANVAS_WIDTH,
+            y: Math.random() * CONFIG.CANVAS_HEIGHT,
+            radius: Math.random() * 4 + 2,
+            vy: Math.random() * 1.2 + 0.5,
+            vx: Math.random() * 0.8 - 0.4,
+            alpha: Math.random() * 0.6 + 0.3
+        });
+    }
+}
+
+function updateParticles() {
+    GAME_STATE.particles.forEach(p => {
+        p.y += p.vy;
+        p.x += p.vx;
+        if (p.y > CONFIG.CANVAS_HEIGHT) {
+            p.y = -10;
+            p.x = Math.random() * CONFIG.CANVAS_WIDTH;
+        }
+    });
+}
+
+function drawParticles() {
+    ctx.save();
+    GAME_STATE.particles.forEach(p => {
+        ctx.fillStyle = `rgba(255, 182, 193, ${p.alpha})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.restore();
+}
+
+function renderUI() {
+    ctx.clearRect(0, 0, CONFIG.CANVAS_WIDTH, CONFIG.CANVAS_HEIGHT);
+    drawBackground(GAME_STATE.currentBG);
+    updateParticles();
+    drawParticles();
+
+    switch (GAME_STATE.screen) {
+        case 'TITLE':
+            drawTitleScreen();
+            break;
+        case 'CHARACTER_SELECT':
+            drawCharacterSelectScreen();
+            break;
+        case 'STORY':
+            drawStoryScreen();
+            drawHUD();
+            break;
+        case 'DATE_SELECT':
+            drawDateSelectScreen();
+            drawHUD();
+            break;
+        case 'CONFESSION_SELECT':
+            drawConfessionSelectScreen();
+            break;
+        case 'ENDING':
+            drawEndingScreen();
+            break;
+        case 'STATUS_MODAL':
+            drawStoryScreen();
+            drawStatusModal();
+            break;
+        case 'GALLERY_MODAL':
+            drawStoryScreen();
+            drawGalleryModal();
+            break;
+    }
+
+    if (GAME_STATE.notificationTimer > 0) {
+        GAME_STATE.notificationTimer--;
+        ctx.save();
+        ctx.fillStyle = 'rgba(255, 51, 102, 0.92)';
+        ctx.beginPath();
+        ctx.roundRect(CONFIG.CANVAS_WIDTH / 2 - 200, 20, 400, 45, 22);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 18px "Gowun Dodum", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(GAME_STATE.notification, CONFIG.CANVAS_WIDTH / 2, 48);
+        ctx.restore();
+    }
+}
+
+function drawTitleScreen() {
+    const W = CONFIG.CANVAS_WIDTH;
+    const H = CONFIG.CANVAS_HEIGHT;
+
+    ctx.save();
+    ctx.textAlign = 'center';
+
+    ctx.fillStyle = 'rgba(255, 182, 193, 0.25)';
+    ctx.beginPath();
+    ctx.roundRect(W / 2 - 250, H / 2 - 170, 500, 40, 20);
+    ctx.fill();
+    ctx.strokeStyle = '#ff9ebb';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffccd5';
+    ctx.font = 'bold 18px "Gowun Dodum", sans-serif';
+    ctx.fillText('♥ 여성향 학원 로맨스 연애 시뮬레이션 ♥', W / 2, H / 2 - 144);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = '#ff3366';
+    ctx.shadowBlur = 35;
+    ctx.font = 'bold 84px "Gowun Batang", serif';
+    ctx.fillText('고백의 온도', W / 2, H / 2 - 35);
+
+    ctx.fillStyle = '#ffe6ea';
+    ctx.shadowBlur = 0;
+    ctx.font = '22px "Gowun Dodum", sans-serif';
+    ctx.fillText('~ 나를 운명처럼 몰래 짝사랑하고 있는 남학생은 누구일까? ~', W / 2, H / 2 + 35);
+
+    const btnX = W / 2 - 180;
+    const btnY = H / 2 + 100;
+    const btnW = 360;
+    const btnH = 75;
+
+    const btnGrad = ctx.createLinearGradient(btnX, btnY, btnX + btnW, btnY + btnH);
+    btnGrad.addColorStop(0, '#ff3366');
+    btnGrad.addColorStop(1, '#ff6b81');
+
+    ctx.fillStyle = btnGrad;
+    ctx.shadowColor = 'rgba(255, 51, 102, 0.8)';
+    ctx.shadowBlur = 25;
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnW, btnH, 38);
+    ctx.fill();
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 28px "Gowun Batang", serif';
+    ctx.fillText('♥ 설레는 시작하기 ♥', W / 2, btnY + 47);
+
+    ctx.restore();
+}
+
+function drawStoryScreen() {
+    const W = CONFIG.CANVAS_WIDTH;
+    const H = CONFIG.CANVAS_HEIGHT;
+
+    if (GAME_STATE.selectedCharacter !== null && GAME_STATE.selectedCharacter !== undefined) {
+        drawCharacterSprite(
+            GAME_STATE.selectedCharacter,
+            GAME_STATE.currentExpression || 'normal',
+            W / 2,
+            H - 120,
+            1.25
+        );
+    }
+
+    const boxX = 60;
+    const boxY = H - 200;
+    const boxW = W - 120;
+    const boxH = 170;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(15, 10, 25, 0.92)';
+    ctx.beginPath();
+    ctx.roundRect(boxX, boxY, boxW, boxH, 16);
+    ctx.fill();
+
+    ctx.strokeStyle = '#ff69b4';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    if (GAME_STATE.currentSpeaker) {
+        const charObj = CHARACTERS.find(c => c.name === GAME_STATE.currentSpeaker);
+        const tagColor = charObj ? charObj.themeColor : '#ff3366';
+
+        ctx.fillStyle = tagColor;
+        ctx.beginPath();
+        ctx.roundRect(boxX + 25, boxY - 20, 160, 40, 10);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 18px "Gowun Dodum", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(GAME_STATE.currentSpeaker, boxX + 105, boxY + 6);
+    }
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '20px "Gowun Dodum", sans-serif';
+    ctx.textAlign = 'left';
+
+    const text = GAME_STATE.typedText || '';
+    const maxTextWidth = boxW - 60;
+    let line = '';
+    let startY = boxY + 50;
+
+    for (let n = 0; n < text.length; n++) {
+        const testLine = line + text[n];
+        const metrics = ctx.measureText(testLine);
+        if (metrics.width > maxTextWidth && n > 0) {
+            ctx.fillText(line, boxX + 30, startY);
+            line = text[n];
+            startY += 32;
+        } else {
+            line = testLine;
+        }
+    }
+    ctx.fillText(line, boxX + 30, startY);
+
+    if (!GAME_STATE.isTyping && (!GAME_STATE.choices || GAME_STATE.choices.length === 0)) {
+        ctx.fillStyle = '#ff69b4';
+        ctx.font = 'bold 20px sans-serif';
+        const floatY = boxY + boxH - 25 + Math.sin(Date.now() / 150) * 4;
+        ctx.fillText('▼', boxX + boxW - 40, floatY);
+    }
+
+    if (GAME_STATE.choices && GAME_STATE.choices.length > 0 && !GAME_STATE.isTyping) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+        ctx.fillRect(0, 0, W, H);
+
+        GAME_STATE.choices.forEach((choice, idx) => {
+            const cW = 640;
+            const cH = 54;
+            const cX = W / 2 - cW / 2;
+            const cY = 180 + idx * 70;
+
+            const grad = ctx.createLinearGradient(cX, cY, cX + cW, cY + cH);
+            grad.addColorStop(0, '#ffffff');
+            grad.addColorStop(1, '#fff0f5');
+
+            ctx.fillStyle = grad;
+            ctx.shadowColor = 'rgba(255, 51, 102, 0.4)';
+            ctx.shadowBlur = 12;
+            ctx.beginPath();
+            ctx.roundRect(cX, cY, cW, cH, 27);
+            ctx.fill();
+
+            ctx.strokeStyle = '#ff3366';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = '#ff1493';
+            ctx.font = 'bold 18px "Gowun Dodum", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(choice.text, W / 2, cY + 34);
+        });
+    }
+
+    ctx.restore();
+}
+
+function drawCharacterSelectScreen() {
+    const W = CONFIG.CANVAS_WIDTH;
+    const H = CONFIG.CANVAS_HEIGHT;
+
+    ctx.save();
+    ctx.textAlign = 'center';
+
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = 'rgba(255, 105, 180, 0.8)';
+    ctx.shadowBlur = 18;
+    ctx.font = 'bold 34px "Gowun Batang", serif';
+    ctx.fillText('호감이 가는 남학생 2명을 선택하세요!', W / 2, 45);
+
+    ctx.shadowBlur = 0;
+    const statusText = `현재 선택: ${GAME_STATE.favoritePicks.length} / 2 명 (2명을 모두 선택해 주세요)`;
+    ctx.fillStyle = 'rgba(255, 51, 102, 0.95)';
+    ctx.beginPath();
+    ctx.roundRect(W / 2 - 270, 60, 540, 38, 19);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 17px "Gowun Dodum", sans-serif';
+    ctx.fillText(statusText, W / 2, 85);
+
+    const cardW = 215;
+    const cardH = 470;
+    const startX = 55;
+    const spacing = 238;
+
+    CHARACTERS.forEach((char, idx) => {
+        const x = startX + idx * spacing;
+        const y = 115;
+        const isSelected = GAME_STATE.favoritePicks.includes(idx);
+
+        ctx.fillStyle = isSelected ? 'rgba(255, 240, 245, 0.97)' : 'rgba(255, 255, 255, 0.93)';
+        ctx.beginPath();
+        ctx.roundRect(x, y, cardW, cardH, 18);
+        ctx.fill();
+
+        if (isSelected) {
+            ctx.strokeStyle = '#ff3366';
+            ctx.lineWidth = 5;
+            ctx.stroke();
+        } else {
+            ctx.strokeStyle = '#dddddd';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = char.themeColor;
+        ctx.font = 'bold 22px "Gowun Batang", serif';
+        ctx.fillText(char.name, x + cardW / 2, y + 35);
+
+        ctx.fillStyle = '#555';
+        ctx.font = '12px "Gowun Dodum", sans-serif';
+        ctx.fillText(char.type, x + cardW / 2, y + 56);
+
+        drawCharacterSprite(idx, 'normal', x + cardW / 2, y + 390, 0.78);
+
+        const btnY = y + 410;
+        ctx.fillStyle = isSelected ? '#ff3366' : '#666666';
+        ctx.beginPath();
+        ctx.roundRect(x + 20, btnY, cardW - 40, 42, 21);
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 15px "Gowun Dodum", sans-serif';
+        ctx.fillText(isSelected ? '♥ 선택됨' : '선택하기', x + cardW / 2, btnY + 26);
+    });
+
+    if (GAME_STATE.favoritePicks.length === 2) {
+        const confirmBtnX = W / 2 - 160;
+        const confirmBtnY = 625;
+        ctx.fillStyle = '#ff3366';
+        ctx.shadowColor = 'rgba(255, 51, 102, 0.8)';
+        ctx.shadowBlur = 20;
+        ctx.beginPath();
+        ctx.roundRect(confirmBtnX, confirmBtnY, 320, 55, 28);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 22px "Gowun Batang", serif';
+        ctx.fillText('학교 생활 시작하기 →', W / 2, confirmBtnY + 36);
+    }
+
+    ctx.restore();
+}
+
+function drawDateSelectScreen() {
+    const W = CONFIG.CANVAS_WIDTH;
+    const H = CONFIG.CANVAS_HEIGHT;
+
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 32px "Gowun Batang", serif';
+    ctx.fillText('방과 후, 누구와 함께 데이트를 하시겠습니까?', W / 2, 55);
+
+    ctx.font = '16px "Gowun Dodum", sans-serif';
+    ctx.fillStyle = '#ffe6ea';
+    ctx.fillText('원하는 남학생을 선택해 둘만의 특별한 시간을 보내세요.', W / 2, 88);
+
+    const cardW = 215;
+    const cardH = 450;
+    const startX = 55;
+    const spacing = 238;
+
+    CHARACTERS.forEach((char, idx) => {
+        const x = startX + idx * spacing;
+        const y = 115;
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.93)';
+        ctx.beginPath();
+        ctx.roundRect(x, y, cardW, cardH, 18);
+        ctx.fill();
+
+        ctx.fillStyle = char.themeColor;
+        ctx.font = 'bold 22px "Gowun Batang", serif';
+        ctx.fillText(char.name, x + cardW / 2, y + 35);
+
+        ctx.fillStyle = '#555';
+        ctx.font = '12px "Gowun Dodum", sans-serif';
+        ctx.fillText(`장소: ${char.dateLocation}`, x + cardW / 2, y + 56);
+
+        drawCharacterSprite(idx, 'smile', x + cardW / 2, y + 375, 0.78);
+
+        const btnX = x + 18;
+        const btnY = y + 390;
+        ctx.fillStyle = char.themeColor;
+        ctx.beginPath();
+        ctx.roundRect(btnX, btnY, cardW - 36, 42, 21);
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 15px "Gowun Batang", serif';
+        ctx.fillText('데이트 신청', x + cardW / 2, btnY + 26);
+    });
+
+    ctx.restore();
+}
+
+function drawConfessionSelectScreen() {
+    const W = CONFIG.CANVAS_WIDTH;
+    const H = CONFIG.CANVAS_HEIGHT;
+
+    ctx.save();
+    ctx.textAlign = 'center';
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 36px "Gowun Batang", serif';
+    ctx.fillText('♥ 마침내 다가온 고백의 날 ♥', W / 2, 60);
+
+    ctx.font = '18px "Gowun Dodum", sans-serif';
+    ctx.fillStyle = '#ffccd5';
+    ctx.fillText('진심을 고백하고 싶은 남학생을 선택해 주세요.', W / 2, 96);
+
+    const cardW = 215;
+    const cardH = 430;
+    const startX = 55;
+    const spacing = 238;
+
+    CHARACTERS.forEach((char, idx) => {
+        const x = startX + idx * spacing;
+        const y = 130;
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.94)';
+        ctx.beginPath();
+        ctx.roundRect(x, y, cardW, cardH, 18);
+        ctx.fill();
+
+        drawCharacterSprite(idx, 'blush', x + cardW / 2, y + 270, 0.9);
+
+        ctx.fillStyle = char.themeColor;
+        ctx.font = 'bold 22px "Gowun Batang", serif';
+        ctx.fillText(char.name, x + cardW / 2, y + 305);
+
+        const btnX = x + 15;
+        const btnY = y + 345;
+        ctx.fillStyle = '#ff3366';
+        ctx.beginPath();
+        ctx.roundRect(btnX, btnY, cardW - 30, 52, 26);
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 18px "Gowun Batang", serif';
+        ctx.fillText('고백하기 ♥', x + cardW / 2, btnY + 32);
+    });
+
+    ctx.restore();
+}
+
+function drawEndingScreen() {
+    const W = CONFIG.CANVAS_WIDTH;
+    const H = CONFIG.CANVAS_HEIGHT;
+    const char = CHARACTERS[GAME_STATE.selectedCharacter];
+    const isSuccess = GAME_STATE.endingSuccess;
+
+    ctx.save();
+    ctx.textAlign = 'center';
+
+    if (isSuccess) {
+        GAME_STATE.cgUnlocked[GAME_STATE.selectedCharacter] = true;
+        drawCharacterSprite(GAME_STATE.selectedCharacter, 'blush', W / 2, H - 70, 1.5);
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+        ctx.fillRect(W / 2 - 380, H - 230, 760, 160);
+        ctx.strokeStyle = '#ff3366';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(W / 2 - 380, H - 230, 760, 160);
+
+        ctx.fillStyle = '#ff3366';
+        ctx.font = 'bold 30px "Gowun Batang", serif';
+        ctx.fillText(`♥ HAPPY ENDING: ${char.name}와 연애 성공! ♥`, W / 2, H - 180);
+
+        ctx.fillStyle = '#222222';
+        ctx.font = '18px "Gowun Dodum", sans-serif';
+        ctx.fillText(`"${char.name}도 사실 당신을 오랫동안 진심으로 좋아하고 있었습니다!"`, W / 2, H - 142);
+        ctx.fillText('서로의 진심을 확인한 두 사람은 달콤한 연인이 되었습니다.', W / 2, H - 110);
+    } else {
+        drawCharacterSprite(GAME_STATE.selectedCharacter, 'normal', W / 2, H - 70, 1.4);
+
+        ctx.fillStyle = 'rgba(15, 10, 25, 0.94)';
+        ctx.fillRect(W / 2 - 380, H - 230, 760, 160);
+        ctx.strokeStyle = '#aaa';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(W / 2 - 380, H - 230, 760, 160);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 28px "Gowun Batang", serif';
+        ctx.fillText(`NORMAL ENDING: 아쉬운 마음`, W / 2, H - 180);
+
+        ctx.fillStyle = '#ffccd5';
+        ctx.font = '16px "Gowun Dodum", sans-serif';
+        ctx.fillText(`${char.name}와의 호감도가 연인이 되기엔 조금 아쉬웠습니다.`, W / 2, H - 142);
+
+        const secretChar = CHARACTERS[GAME_STATE.secretAdmirer];
+        ctx.fillStyle = '#ffe66d';
+        ctx.fillText(`★ 참고: 당신을 비밀리에 짝사랑하던 남학생은 [${secretChar.name}] 이었습니다!`, W / 2, H - 105);
+    }
+
+    const reBtnX = W / 2 - 130;
+    const reBtnY = H - 55;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.roundRect(reBtnX, reBtnY, 260, 48, 24);
+    ctx.fill();
+    ctx.strokeStyle = '#ff3366';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    ctx.fillStyle = '#ff3366';
+    ctx.font = 'bold 18px "Gowun Batang", serif';
+    ctx.fillText('처음부터 다시 시작 ↺', W / 2, reBtnY + 31);
+
+    ctx.restore();
+}
+
+function drawHUD() {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
+    ctx.beginPath();
+    ctx.roundRect(20, 20, 240, 48, 14);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 16px "Gowun Dodum", sans-serif';
+    ctx.textAlign = 'left';
+    const dayStr = GAME_STATE.day <= CONFIG.TOTAL_DAYS ? `DAY ${GAME_STATE.day} / ${CONFIG.TOTAL_DAYS}` : '고백의 날';
+    ctx.fillText(`📅 ${dayStr} [${getKoreanTimeOfDay(GAME_STATE.timeOfDay)}]`, 35, 50);
+
+    const statusBtnX = CONFIG.CANVAS_WIDTH - 210;
+    ctx.fillStyle = '#ff3366';
+    ctx.beginPath();
+    ctx.roundRect(statusBtnX, 20, 90, 44, 12);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 14px "Gowun Dodum", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('♥ 호감도', statusBtnX + 45, 47);
+
+    const galleryBtnX = CONFIG.CANVAS_WIDTH - 110;
+    ctx.fillStyle = '#9b59b6';
+    ctx.beginPath();
+    ctx.roundRect(galleryBtnX, 20, 90, 44, 12);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 14px "Gowun Dodum", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🖼 갤러리', galleryBtnX + 45, 47);
+
+    ctx.restore();
+}
+
+function getKoreanTimeOfDay(time) {
+    switch (time) {
+        case 'MORNING': return '아침';
+        case 'SCHOOL': return '학교생활';
+        case 'AFTER_SCHOOL': return '방과 후';
+        case 'DATE': return '데이트';
+        case 'EVENING': return '귀가';
+        default: return '진행 중';
+    }
+}
+
+function drawStatusModal() {
+    const W = CONFIG.CANVAS_WIDTH;
+    const H = CONFIG.CANVAS_HEIGHT;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    const mX = W / 2 - 300;
+    const mY = H / 2 - 220;
+    const mW = 600;
+    const mH = 440;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.roundRect(mX, mY, mW, mH, 20);
+    ctx.fill();
+
+    ctx.fillStyle = '#ff3366';
+    ctx.font = 'bold 24px "Gowun Batang", serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('♥ 캐릭터별 호감도 현황 ♥', W / 2, mY + 45);
+
+    CHARACTERS.forEach((char, idx) => {
+        const rowY = mY + 90 + idx * 60;
+        const aff = GAME_STATE.affections[idx];
+        const isPick = GAME_STATE.favoritePicks.includes(idx);
+
+        ctx.textAlign = 'left';
+        ctx.fillStyle = char.themeColor;
+        ctx.font = 'bold 18px "Gowun Dodum", sans-serif';
+        ctx.fillText(`${char.name} ${isPick ? '★내픽' : ''}`, mX + 40, rowY + 20);
+
+        ctx.fillStyle = '#eee';
+        ctx.fillRect(mX + 240, rowY + 5, 240, 22);
+
+        ctx.fillStyle = char.themeColor;
+        ctx.fillRect(mX + 240, rowY + 5, (aff / CONFIG.MAX_AFFECTION) * 240, 22);
+
+        ctx.fillStyle = '#333';
+        ctx.font = '14px "Gowun Dodum", sans-serif';
+        ctx.fillText(`${aff} pt`, mX + 490, rowY + 21);
+    });
+
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.roundRect(W / 2 - 60, mY + mH - 50, 120, 38, 10);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 15px "Gowun Dodum", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('닫기', W / 2, mY + mH - 26);
+
+    ctx.restore();
+}
+
+function drawGalleryModal() {
+    const W = CONFIG.CANVAS_WIDTH;
+    const H = CONFIG.CANVAS_HEIGHT;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.88)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 28px "Gowun Batang", serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🖼 추억의 특별 CG 갤러리', W / 2, 60);
+
+    const cardW = 190;
+    const cardH = 260;
+    const startX = 80;
+    const spacing = 230;
+
+    CHARACTERS.forEach((char, idx) => {
+        const x = startX + idx * spacing;
+        const y = 130;
+        const isUnlocked = GAME_STATE.cgUnlocked[idx];
+
+        ctx.fillStyle = isUnlocked ? '#fff' : '#333';
+        ctx.beginPath();
+        ctx.roundRect(x, y, cardW, cardH, 14);
+        ctx.fill();
+
+        if (isUnlocked) {
+            drawCharacterSprite(idx, 'blush', x + cardW / 2, y + cardH - 10, 0.85);
+            ctx.fillStyle = char.themeColor;
+            ctx.font = 'bold 16px "Gowun Batang", serif';
+            ctx.fillText(char.name, x + cardW / 2, y + 30);
+        } else {
+            ctx.fillStyle = '#888';
+            ctx.font = '16px "Gowun Dodum", sans-serif';
+            ctx.fillText('🔒 미해금', x + cardW / 2, y + cardH / 2);
+            ctx.font = '12px "Gowun Dodum", sans-serif';
+            ctx.fillText('고백 성공 시 해금', x + cardW / 2, y + cardH / 2 + 25);
+        }
+    });
+
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.roundRect(W / 2 - 60, H - 70, 120, 40, 10);
+    ctx.fill();
+    ctx.fillStyle = '#111';
+    ctx.font = 'bold 16px "Gowun Dodum", sans-serif';
+    ctx.fillText('닫기', W / 2, H - 44);
+
+    ctx.restore();
+}
+
+let typingInterval = null;
+
+function startDialogue(dialogueList, onCompleteCallback = null) {
+    GAME_STATE.currentDialogueSequence = dialogueList;
+    GAME_STATE.dialogueIndex = 0;
+    GAME_STATE.onDialogueComplete = onCompleteCallback;
+    showNextDialogue();
+}
+
+function showNextDialogue() {
+    if (GAME_STATE.dialogueIndex >= GAME_STATE.currentDialogueSequence.length) {
+        if (GAME_STATE.onDialogueComplete) {
+            GAME_STATE.onDialogueComplete();
+        }
+        return;
+    }
+
+    const item = GAME_STATE.currentDialogueSequence[GAME_STATE.dialogueIndex];
+    GAME_STATE.currentSpeaker = item.speaker;
+    GAME_STATE.currentExpression = item.expression || 'normal';
+    GAME_STATE.choices = item.choices || null;
+
+    const targetText = item.text;
+    GAME_STATE.typedText = '';
+    GAME_STATE.isTyping = true;
+    let charIdx = 0;
+
+    if (typingInterval) clearInterval(typingInterval);
+
+    typingInterval = setInterval(() => {
+        if (charIdx < targetText.length) {
+            GAME_STATE.typedText += targetText[charIdx];
+            charIdx++;
+        } else {
+            GAME_STATE.isTyping = false;
+            clearInterval(typingInterval);
+        }
+    }, 28);
+}
+
+function advanceDialogue() {
+    if (GAME_STATE.isTyping) {
+        const item = GAME_STATE.currentDialogueSequence[GAME_STATE.dialogueIndex];
+        GAME_STATE.typedText = item.text;
+        GAME_STATE.isTyping = false;
+        if (typingInterval) clearInterval(typingInterval);
+        return;
+    }
+
+    if (GAME_STATE.choices && GAME_STATE.choices.length > 0) return;
+
+    audio.playClick();
+    GAME_STATE.dialogueIndex++;
+    showNextDialogue();
+}
+
+function triggerNotification(msg) {
+    GAME_STATE.notification = msg;
+    GAME_STATE.notificationTimer = 120;
+}
+
+function startNewGame() {
+    GAME_STATE.day = 1;
+    GAME_STATE.timeOfDay = 'MORNING';
+    GAME_STATE.favoritePicks = [];
+    GAME_STATE.secretAdmirer = Math.floor(Math.random() * 5);
+    GAME_STATE.affections = [30, 30, 30, 30, 30];
+    GAME_STATE.affections[GAME_STATE.secretAdmirer] += 15;
+
+    GAME_STATE.screen = 'CHARACTER_SELECT';
+    audio.playChime();
+}
+
+function advanceDayCycle() {
+    if (GAME_STATE.day >= CONFIG.TOTAL_DAYS) {
+        GAME_STATE.screen = 'CONFESSION_SELECT';
+        GAME_STATE.currentBG = 'rooftop';
+        audio.playChime();
+        return;
+    }
+
+    GAME_STATE.day++;
+    GAME_STATE.timeOfDay = 'MORNING';
+    triggerNotification(`☀️ DAY ${GAME_STATE.day} 아침이 밝았습니다!`);
+    runMorningSchoolRoutine();
+}
+
+function runMorningSchoolRoutine() {
+    GAME_STATE.screen = 'STORY';
+    GAME_STATE.timeOfDay = 'SCHOOL';
+
+    const targetCharIdx = Math.random() > 0.4 && GAME_STATE.favoritePicks.length > 0
+        ? GAME_STATE.favoritePicks[Math.floor(Math.random() * GAME_STATE.favoritePicks.length)]
+        : Math.floor(Math.random() * 5);
+
+    GAME_STATE.selectedCharacter = targetCharIdx;
+    const eventData = SCHOOL_EVENTS[targetCharIdx];
+    GAME_STATE.currentBG = eventData.location;
+
+    const eventDialogues = JSON.parse(JSON.stringify(eventData.dialogues));
+    const lastDiag = eventDialogues[eventDialogues.length - 1];
+    lastDiag.choices = eventData.choices;
+
+    startDialogue(eventDialogues, () => {
+        GAME_STATE.screen = 'DATE_SELECT';
+        GAME_STATE.timeOfDay = 'AFTER_SCHOOL';
+        GAME_STATE.currentBG = 'hallway';
+    });
+}
+
+function handleChoiceSelect(choiceIdx) {
+    audio.playHeartSound();
+    const item = GAME_STATE.currentDialogueSequence[GAME_STATE.dialogueIndex];
+    const chosen = item.choices[choiceIdx];
+
+    const randomMod = Math.floor(Math.random() * 6) - 2;
+    const delta = chosen.affection + randomMod;
+    
+    GAME_STATE.affections[GAME_STATE.selectedCharacter] = Math.max(0, Math.min(CONFIG.MAX_AFFECTION, GAME_STATE.affections[GAME_STATE.selectedCharacter] + delta));
+
+    if (delta > 0) {
+        triggerNotification(`♥ ${CHARACTERS[GAME_STATE.selectedCharacter].name}의 호감도 상승!`);
+    } else {
+        triggerNotification(`💔 호감도에 변화가 생겼습니다.`);
+    }
+
+    GAME_STATE.choices = null;
+    advanceDialogue();
+}
+
+function startAfterSchoolDate(charIdx) {
+    audio.playClick();
+    GAME_STATE.screen = 'STORY';
+    GAME_STATE.timeOfDay = 'DATE';
+    GAME_STATE.selectedCharacter = charIdx;
+
+    const dateData = DATE_EVENTS[charIdx];
+    GAME_STATE.currentBG = dateData.location;
+
+    const dateDialogues = JSON.parse(JSON.stringify(dateData.dialogues));
+    const lastDiag = dateDialogues[dateDialogues.length - 1];
+    lastDiag.choices = dateData.choices;
+
+    startDialogue(dateDialogues, () => {
+        advanceDayCycle();
+    });
+}
+
+function handleConfession(targetCharIdx) {
+    audio.playChime();
+    GAME_STATE.selectedCharacter = targetCharIdx;
+    
+    const isSecretAdmirer = (targetCharIdx === GAME_STATE.secretAdmirer);
+    const aff = GAME_STATE.affections[targetCharIdx];
+
+    if (isSecretAdmirer || aff >= CONFIG.PASSING_AFFECTION) {
+        GAME_STATE.endingSuccess = true;
+    } else {
+        GAME_STATE.endingSuccess = false;
+    }
+
+    GAME_STATE.screen = 'ENDING';
+}
+
+function setupInputListeners() {
+    function handlePointer(x, y) {
+        audio.init();
+
+        if (['STORY', 'DATE_SELECT', 'CONFESSION_SELECT'].includes(GAME_STATE.screen)) {
+            const statusBtnX = CONFIG.CANVAS_WIDTH - 210;
+            if (x >= statusBtnX && x <= statusBtnX + 90 && y >= 20 && y <= 64) {
+                GAME_STATE.screen = 'STATUS_MODAL';
+                audio.playClick();
+                return;
+            }
+            const galleryBtnX = CONFIG.CANVAS_WIDTH - 110;
+            if (x >= galleryBtnX && x <= galleryBtnX + 90 && y >= 20 && y <= 64) {
+                GAME_STATE.screen = 'GALLERY_MODAL';
+                audio.playClick();
+                return;
+            }
+        }
+
+        if (GAME_STATE.screen === 'STATUS_MODAL' || GAME_STATE.screen === 'GALLERY_MODAL') {
+            GAME_STATE.screen = 'STORY';
+            audio.playClick();
+            return;
+        }
+
+        if (GAME_STATE.screen === 'TITLE') {
+            const btnX = CONFIG.CANVAS_WIDTH / 2 - 180;
+            const btnY = CONFIG.CANVAS_HEIGHT / 2 + 100;
+            if (x >= btnX && x <= btnX + 360 && y >= btnY && y <= btnY + 75) {
+                startNewGame();
+            }
+            return;
+        }
+
+        if (GAME_STATE.screen === 'CHARACTER_SELECT') {
+            const cardW = 215;
+            const cardH = 460;
+            const startX = 55;
+            const spacing = 238;
+
+            CHARACTERS.forEach((char, idx) => {
+                const cx = startX + idx * spacing;
+                const cy = 125;
+                if (x >= cx && x <= cx + cardW && y >= cy && y <= cy + cardH) {
+                    audio.playClick();
+                    if (GAME_STATE.favoritePicks.includes(idx)) {
+                        GAME_STATE.favoritePicks = GAME_STATE.favoritePicks.filter(i => i !== idx);
+                    } else if (GAME_STATE.favoritePicks.length < 2) {
+                        GAME_STATE.favoritePicks.push(idx);
+                    }
+                }
+            });
+
+            if (GAME_STATE.favoritePicks.length === 2) {
+                const confirmBtnX = CONFIG.CANVAS_WIDTH / 2 - 160;
+                const confirmBtnY = 625;
+                if (x >= confirmBtnX && x <= confirmBtnX + 320 && y >= confirmBtnY && y <= confirmBtnY + 55) {
+                    audio.playChime();
+                    runMorningSchoolRoutine();
+                }
+            }
+            return;
+        }
+
+        if (GAME_STATE.screen === 'STORY') {
+            if (GAME_STATE.choices && GAME_STATE.choices.length > 0 && !GAME_STATE.isTyping) {
+                GAME_STATE.choices.forEach((c, idx) => {
+                    const cW = 640;
+                    const cH = 54;
+                    const cX = CONFIG.CANVAS_WIDTH / 2 - cW / 2;
+                    const cY = 180 + idx * 70;
+                    if (x >= cX && x <= cX + cW && y >= cY && y <= cY + cH) {
+                        handleChoiceSelect(idx);
+                    }
+                });
+            } else {
+                advanceDialogue();
+            }
+            return;
+        }
+
+        if (GAME_STATE.screen === 'DATE_SELECT') {
+            const cardW = 215;
+            const startX = 55;
+            const spacing = 238;
+
+            CHARACTERS.forEach((char, idx) => {
+                const cx = startX + idx * spacing;
+                const btnY = 115 + 390;
+                if (x >= cx + 18 && x <= cx + cardW - 18 && y >= btnY && y <= btnY + 42) {
+                    startAfterSchoolDate(idx);
+                }
+            });
+            return;
+        }
+
+        if (GAME_STATE.screen === 'CONFESSION_SELECT') {
+            const cardW = 215;
+            const startX = 55;
+            const spacing = 238;
+
+            CHARACTERS.forEach((char, idx) => {
+                const cx = startX + idx * spacing;
+                const btnY = 130 + 345;
+                if (x >= cx + 15 && x <= cx + cardW - 15 && y >= btnY && y <= btnY + 52) {
+                    handleConfession(idx);
+                }
+            });
+            return;
+        }
+
+        if (GAME_STATE.screen === 'ENDING') {
+            const reBtnX = CONFIG.CANVAS_WIDTH / 2 - 130;
+            const reBtnY = CONFIG.CANVAS_HEIGHT - 55;
+            if (x >= reBtnX && x <= reBtnX + 260 && y >= reBtnY && y <= reBtnY + 48) {
+                GAME_STATE.screen = 'TITLE';
+                audio.playClick();
+            }
+            return;
+        }
+    }
+
+    function getCanvasPos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const scaleX = CONFIG.CANVAS_WIDTH / rect.width;
+        const scaleY = CONFIG.CANVAS_HEIGHT / rect.height;
+        return {
+            x: (clientX - rect.left) * scaleX,
+            y: (clientY - rect.top) * scaleY
+        };
+    }
+
+    canvas.addEventListener('click', (e) => {
+        const pos = getCanvasPos(e);
+        handlePointer(pos.x, pos.y);
+    });
+
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const pos = getCanvasPos(e);
+        handlePointer(pos.x, pos.y);
+    }, { passive: false });
+
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' || e.code === 'Enter') {
+            e.preventDefault();
+            audio.init();
+
+            if (GAME_STATE.screen === 'STORY') {
+                if (GAME_STATE.choices && GAME_STATE.choices.length > 0 && !GAME_STATE.isTyping) {
+                    handleChoiceSelect(0);
+                } else {
+                    advanceDialogue();
+                }
+            } else if (GAME_STATE.screen === 'TITLE') {
+                startNewGame();
+            } else if (GAME_STATE.screen === 'CHARACTER_SELECT' && GAME_STATE.favoritePicks.length === 2) {
+                audio.playChime();
+                runMorningSchoolRoutine();
+            } else if (GAME_STATE.screen === 'ENDING') {
+                GAME_STATE.screen = 'TITLE';
+                audio.playClick();
+            }
+        }
+    });
+}
+
+function gameLoop() {
+    renderUI();
+    requestAnimationFrame(gameLoop);
+}
+
+window.onload = function () {
+    loadAllCharacterSprites();
+    initCanvas();
+    setupInputListeners();
+    GAME_STATE.screen = 'TITLE';
+    GAME_STATE.currentBG = 'title';
+    gameLoop();
+};
+</script>
+</body>
+</html>
