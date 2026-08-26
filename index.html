@@ -1291,15 +1291,22 @@
             return COMMENT_POOL[Math.floor(Math.random() * COMMENT_POOL.length)];
         }
 
+        function clearGuestMode() {
+            sessionStorage.removeItem("meta_guest_mode");
+            sessionStorage.removeItem("meta_guest_id");
+            localStorage.removeItem("meta_guest_mode");
+            localStorage.removeItem("meta_guest_id");
+        }
+
         function isGuestMode() {
-            return localStorage.getItem("meta_guest_mode") === "true";
+            return sessionStorage.getItem("meta_guest_mode") === "true";
         }
 
         function getGuestClientId() {
-            let id = localStorage.getItem("meta_guest_id");
+            let id = sessionStorage.getItem("meta_guest_id");
             if (!id) {
                 id = `게스트-${Math.floor(Math.random() * 900 + 100)}`;
-                localStorage.setItem("meta_guest_id", id);
+                sessionStorage.setItem("meta_guest_id", id);
             }
             return id;
         }
@@ -1383,9 +1390,9 @@
 
         function clearLocalSeatState() {
             localStorage.removeItem("meta_assigned_seat");
-            localStorage.removeItem("meta_guest_mode");
-            localStorage.removeItem("meta_guest_id");
+            clearGuestMode();
         }
+        window.clearLocalSeatState = clearLocalSeatState;
 
         async function releaseAllSeatsForCurrentClient() {
             const clientId = getSeatClientId();
@@ -1400,6 +1407,7 @@
             }
             await Promise.all(ops);
         }
+        window.releaseAllSeatsForCurrentClient = releaseAllSeatsForCurrentClient;
 
         /** 미리 배정된 localStorage 자리 → Firestore에 항상 동기화 (재접속 시에도 유지) */
         async function syncPreassignedSeat(seatNum) {
@@ -2000,8 +2008,7 @@
                     });
                 });
                 localStorage.setItem("meta_assigned_seat", String(seatNum));
-                localStorage.removeItem("meta_guest_mode");
-                localStorage.removeItem("meta_guest_id");
+                clearGuestMode();
                 hideSeatPicker();
                 updateSeatAssignedUI();
                 window.logUserAction("SEAT_CLAIM", `${seatNum}번 자리를 선택했습니다.`);
@@ -2035,7 +2042,7 @@
                 console.error("게스트 전환 시 자리 해제 실패", e);
             }
             clearLocalSeatState();
-            localStorage.setItem("meta_guest_mode", "true");
+            sessionStorage.setItem("meta_guest_mode", "true");
             getGuestClientId();
             const errEl = document.getElementById("seat-picker-error");
             if (errEl) {
@@ -2051,8 +2058,7 @@
 
             const seat = getAssignedSeat();
             if (seat >= 1 && seat <= TOTAL_SEATS) {
-                localStorage.removeItem("meta_guest_mode");
-                localStorage.removeItem("meta_guest_id");
+                clearGuestMode();
                 const clientId = getSeatClientId();
                 try {
                     await reconcileDuplicateSeats(clientId);
@@ -2066,7 +2072,7 @@
                 return;
             }
 
-            if (isGuestMode()) return;
+            clearGuestMode();
             showSeatPicker();
         };
 
@@ -3087,6 +3093,10 @@
         };
 
         window.bulkUncheckSession = async function() {
+            if (!window.isAdminAuthenticated) {
+                window.showAdminAlert("관리자만 일괄 해제할 수 있습니다.", "error");
+                return;
+            }
             const activeSessionGames = window.gamesList.filter(g => g.isCurrentSession === true);
             if (activeSessionGames.length === 0) {
                 window.showAdminAlert("현재 활성화 상태인 게임이 없습니다.", "error");
@@ -4212,10 +4222,16 @@
             const lockEl = document.getElementById('admin-lock-status');
             const bulkBtn = document.getElementById('btn-bulk-uncheck');
             if (status) {
-                if (!opts.restored) persistAdminSession();
-                else sessionStorage.setItem("isAdminLoggedIn", "true");
-                clearLocalSeatState();
-                releaseAllSeatsForCurrentClient().catch(e => console.error("관리자 전환 시 자리 해제 실패", e));
+                try {
+                    if (!opts.restored) persistAdminSession();
+                    else sessionStorage.setItem("isAdminLoggedIn", "true");
+                    if (typeof window.clearLocalSeatState === "function") window.clearLocalSeatState();
+                    if (typeof window.releaseAllSeatsForCurrentClient === "function") {
+                        window.releaseAllSeatsForCurrentClient().catch(e => console.error("관리자 전환 시 자리 해제 실패", e));
+                    }
+                } catch (e) {
+                    console.error("관리자 전환 시 자리 정리 실패", e);
+                }
                 const modal = document.getElementById('seat-picker-modal');
                 if (modal) {
                     modal.classList.add('hidden');
