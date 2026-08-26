@@ -1374,6 +1374,72 @@
             return s ? parseInt(s, 10) : null;
         }
 
+        function getSessionRole() {
+            if (window.isAdminAuthenticated || sessionStorage.getItem("isAdminLoggedIn") === "true") return "admin";
+            if (isGuestMode()) return "guest";
+            if (getAssignedSeat()) return "seat";
+            return null;
+        }
+
+        function clearLocalSeatState() {
+            localStorage.removeItem("meta_assigned_seat");
+            localStorage.removeItem("meta_guest_mode");
+            localStorage.removeItem("meta_guest_id");
+        }
+
+        async function releaseAllSeatsForCurrentClient() {
+            const clientId = getSeatClientId();
+            const ops = [];
+            for (let i = 1; i <= TOTAL_SEATS; i++) {
+                const ref = doc(db, "seats", String(i));
+                ops.push(getDoc(ref).then(snap => {
+                    if (snap.exists() && snap.data().clientId === clientId) {
+                        return deleteDoc(ref);
+                    }
+                }));
+            }
+            await Promise.all(ops);
+        }
+
+        /** 미리 배정된 localStorage 자리 → Firestore에 항상 동기화 (재접속 시에도 유지) */
+        async function syncPreassignedSeat(seatNum) {
+            const clientId = getSeatClientId();
+            await runTransaction(db, async (transaction) => {
+                const refs = [];
+                for (let i = 1; i <= TOTAL_SEATS; i++) refs.push(doc(db, "seats", String(i)));
+                const snaps = await Promise.all(refs.map(r => transaction.get(r)));
+
+                snaps.forEach((snap, idx) => {
+                    const num = idx + 1;
+                    if (num === seatNum) return;
+                    if (snap.exists() && snap.data().clientId === clientId) {
+                        transaction.delete(refs[idx]);
+                    }
+                });
+
+                transaction.set(refs[seatNum - 1], {
+                    seatNum,
+                    clientId,
+                    claimedAt: new Date().toISOString()
+                });
+            });
+        }
+
+        /** 같은 clientId가 여러 자리에 잡혀 있으면 localStorage 기준 하나만 남기고 정리 */
+        async function reconcileDuplicateSeats(clientId) {
+            const preferred = getAssignedSeat();
+            const owned = [];
+            for (let i = 1; i <= TOTAL_SEATS; i++) {
+                const snap = await getDoc(doc(db, "seats", String(i)));
+                if (snap.exists() && snap.data().clientId === clientId) owned.push(i);
+            }
+            if (owned.length <= 1) return preferred || owned[0] || null;
+
+            const keep = (preferred >= 1 && preferred <= TOTAL_SEATS) ? preferred : owned[0];
+            await Promise.all(owned.filter(n => n !== keep).map(n => deleteDoc(doc(db, "seats", String(n)))));
+            return keep;
+        }
+
         function escapeChatText(text) {
             const d = document.createElement("div");
             d.textContent = text;
@@ -1512,14 +1578,13 @@
             const btn = document.createElement("button");
             btn.type = "button";
             const seatData = window.seatsCache[String(num)];
-            const mySeat = getAssignedSeat();
             const myClient = getSeatClientId();
             let cls = "classroom-seat-btn ";
             let sub = "선택 가능";
             let disabled = false;
 
             if (seatData && seatData.clientId) {
-                if (seatData.clientId === myClient || num === mySeat) {
+                if (seatData.clientId === myClient) {
                     cls += "mine";
                     sub = "내 자리";
                 } else if (mode === "admin") {
@@ -1896,21 +1961,39 @@
             container.scrollTop = container.scrollHeight;
         }
 
+        let seatClaimInProgress = false;
+
         window.claimSeat = async function(seatNum) {
+            if (seatClaimInProgress) return;
+            if (window.isAdminAuthenticated || sessionStorage.getItem("isAdminLoggedIn") === "true") return;
+
             const errEl = document.getElementById("seat-picker-error");
             if (errEl) {
                 errEl.classList.add("hidden");
                 errEl.textContent = "";
             }
             const clientId = getSeatClientId();
-            const seatRef = doc(db, "seats", String(seatNum));
+            seatClaimInProgress = true;
             try {
                 await runTransaction(db, async (transaction) => {
-                    const snap = await transaction.get(seatRef);
-                    if (snap.exists() && snap.data().clientId && snap.data().clientId !== clientId) {
+                    const refs = [];
+                    for (let i = 1; i <= TOTAL_SEATS; i++) refs.push(doc(db, "seats", String(i)));
+                    const snaps = await Promise.all(refs.map(r => transaction.get(r)));
+
+                    const targetIdx = seatNum - 1;
+                    const targetSnap = snaps[targetIdx];
+                    if (targetSnap.exists() && targetSnap.data().clientId && targetSnap.data().clientId !== clientId) {
                         throw new Error("occupied");
                     }
-                    transaction.set(seatRef, {
+
+                    snaps.forEach((snap, idx) => {
+                        const num = idx + 1;
+                        if (snap.exists() && snap.data().clientId === clientId && num !== seatNum) {
+                            transaction.delete(refs[idx]);
+                        }
+                    });
+
+                    transaction.set(refs[targetIdx], {
                         seatNum,
                         clientId,
                         claimedAt: new Date().toISOString()
@@ -1928,6 +2011,8 @@
                     errEl.textContent = e.message === "occupied" ? "이미 다른 학생이 선택한 자리입니다." : "자리 선택에 실패했습니다. 다시 시도해주세요.";
                     errEl.classList.remove("hidden");
                 }
+            } finally {
+                seatClaimInProgress = false;
             }
         };
 
@@ -1942,9 +2027,15 @@
             }
         };
 
-        window.enterAsGuest = function() {
+        window.enterAsGuest = async function() {
+            if (window.isAdminAuthenticated || sessionStorage.getItem("isAdminLoggedIn") === "true") return;
+            try {
+                await releaseAllSeatsForCurrentClient();
+            } catch (e) {
+                console.error("게스트 전환 시 자리 해제 실패", e);
+            }
+            clearLocalSeatState();
             localStorage.setItem("meta_guest_mode", "true");
-            localStorage.removeItem("meta_assigned_seat");
             getGuestClientId();
             const errEl = document.getElementById("seat-picker-error");
             if (errEl) {
@@ -1957,22 +2048,25 @@
 
         window.checkSeatAssignmentOnLoad = async function() {
             if (sessionStorage.getItem("isAdminLoggedIn") === "true") return;
-            if (isGuestMode()) return;
+
             const seat = getAssignedSeat();
-            const clientId = getSeatClientId();
-            if (seat) {
+            if (seat >= 1 && seat <= TOTAL_SEATS) {
+                localStorage.removeItem("meta_guest_mode");
+                localStorage.removeItem("meta_guest_id");
+                const clientId = getSeatClientId();
                 try {
-                    const seatSnap = await getDoc(doc(db, "seats", String(seat)));
-                    if (seatSnap.exists() && seatSnap.data().clientId === clientId) {
-                        updateSeatAssignedUI();
-                        window.subscribeStudentChat();
-                        return;
-                    }
-                    localStorage.removeItem("meta_assigned_seat");
+                    await reconcileDuplicateSeats(clientId);
+                    await syncPreassignedSeat(seat);
                 } catch (e) {
-                    console.error("좌석 확인 실패", e);
+                    console.error("미리 배정 자리 동기화 실패", e);
                 }
+                hideSeatPicker();
+                updateSeatAssignedUI();
+                window.subscribeStudentChat();
+                return;
             }
+
+            if (isGuestMode()) return;
             showSeatPicker();
         };
 
@@ -4120,6 +4214,8 @@
             if (status) {
                 if (!opts.restored) persistAdminSession();
                 else sessionStorage.setItem("isAdminLoggedIn", "true");
+                clearLocalSeatState();
+                releaseAllSeatsForCurrentClient().catch(e => console.error("관리자 전환 시 자리 해제 실패", e));
                 const modal = document.getElementById('seat-picker-modal');
                 if (modal) {
                     modal.classList.add('hidden');
