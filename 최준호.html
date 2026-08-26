@@ -1,0 +1,1305 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>신들의 황혼: 창조주의 길</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Google Fonts: Cinzel & Noto Sans KR -->
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            user-select: none;
+            background-color: #050508;
+            font-family: 'Noto Sans KR', sans-serif;
+            color: #e2e8f0;
+        }
+        .font-cinzel { font-family: 'Cinzel', serif; }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        /* 피격 / 타격 플래시 효과 */
+        #damage-flash {
+            pointer-events: none;
+            transition: opacity 0.15s ease-out;
+        }
+        /* 조준점 */
+        .crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+        /* 커스텀 스크롤바 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 3px; }
+    </style>
+</head>
+<body class="relative bg-black text-white">
+
+    <!-- 3D 렌더링용 Canvas 컨테이너 -->
+    <div id="canvas-container"></div>
+
+    <!-- 피격 / 상태 시각 효과 오버레이 -->
+    <div id="damage-flash" class="absolute inset-0 bg-red-600/0 z-10"></div>
+    <div id="vignette" class="absolute inset-0 pointer-events-none z-10 shadow-[inset_0_0_100px_rgba(0,0,0,0.8)]"></div>
+
+    <!-- Crosshair (조준점) -->
+    <div class="crosshair z-20 flex items-center justify-center">
+        <div class="w-1.5 h-1.5 bg-amber-400 rounded-full opacity-80 border border-black"></div>
+    </div>
+
+    <!-- 메인 HUD UI -->
+    <div id="hud-ui" class="absolute inset-0 pointer-events-none z-20 flex flex-col justify-between p-6">
+        
+        <!-- 상단: 보스 체력바 & 스테이지 정보 -->
+        <div class="flex flex-col items-center w-full max-w-2xl mx-auto space-y-2">
+            <!-- 스테이지 타이틀 -->
+            <div id="stage-info" class="text-center">
+                <span id="stage-realm" class="text-amber-500 font-cinzel text-xs tracking-widest uppercase block">CHAPTER I</span>
+                <h2 id="stage-title" class="text-2xl font-bold tracking-wider text-slate-100 shadow-sm">버려진 신들의 지하 유적</h2>
+            </div>
+
+            <!-- 보스 체력바 (보스전 시 활성화) -->
+            <div id="boss-hp-container" class="w-full bg-black/70 border border-red-900/60 rounded-lg p-2 backdrop-blur-md hidden transition-all duration-300">
+                <div class="flex justify-between items-center mb-1 px-1">
+                    <span id="boss-name" class="text-sm font-bold text-red-400 font-cinzel tracking-widest">MINOTAUR LORD</span>
+                    <span id="boss-hp-text" class="text-xs text-slate-300 font-mono">1000 / 1000</span>
+                </div>
+                <div class="w-full bg-slate-900 h-3.5 rounded-md overflow-hidden border border-slate-700">
+                    <div id="boss-hp-bar" class="bg-gradient-to-r from-red-800 to-red-500 h-full w-full transition-all duration-200"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 하단: 플레이어 상태 및 권능/장비 슬롯 -->
+        <div class="flex justify-between items-end w-full">
+            
+            <!-- 플레이어 체력 및 방어력 -->
+            <div class="bg-black/60 border border-slate-800 backdrop-blur-md p-4 rounded-xl max-w-xs w-full shadow-2xl">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs text-amber-400/90 font-bold tracking-wider">신에게 버림받은 자</span>
+                    <span id="player-hp-text" class="text-sm font-bold font-mono text-emerald-400">100 / 100</span>
+                </div>
+                <!-- 체력바 -->
+                <div class="w-full bg-slate-950 h-3 rounded-full overflow-hidden border border-slate-800 mb-2">
+                    <div id="player-hp-bar" class="bg-gradient-to-r from-emerald-600 to-emerald-400 h-full w-full transition-all duration-150"></div>
+                </div>
+                <!-- 무적/회피 쿨다운 표시 -->
+                <div class="flex justify-between text-[11px] text-slate-400 font-mono">
+                    <span>방어력: <strong id="player-def" class="text-slate-200">0</strong></span>
+                    <span>공격력: <strong id="player-atk" class="text-amber-300">15</strong></span>
+                </div>
+            </div>
+
+            <!-- 중앙: 권능 선택기 및 안내 -->
+            <div class="flex flex-col items-center space-y-2">
+                <!-- 조작 힌트 -->
+                <div class="text-[11px] text-slate-400/80 bg-black/40 px-3 py-1 rounded-full border border-white/5 backdrop-blur-sm">
+                    [좌클릭] 검 공격 | [우클릭] 방패 방어 | [Shift] 회피 | [Q/E 또는 1-4] 권능 전환
+                </div>
+
+                <!-- 권능 스롯 -->
+                <div class="flex space-x-2 bg-black/60 border border-slate-800/80 backdrop-blur-md p-2 rounded-xl" id="power-slots">
+                    <div class="power-slot w-12 h-12 rounded-lg bg-slate-900 border-2 border-amber-500/80 flex flex-col items-center justify-center relative cursor-pointer" data-index="0">
+                        <span class="text-[9px] text-slate-400 absolute top-0.5 left-1 font-mono">1</span>
+                        <span class="power-icon text-lg">⚔️</span>
+                        <span class="power-name text-[9px] text-amber-300 font-bold">인간의 검</span>
+                    </div>
+                    <div class="power-slot w-12 h-12 rounded-lg bg-slate-900/60 border border-slate-800 flex flex-col items-center justify-center relative opacity-40" data-index="1">
+                        <span class="text-[9px] text-slate-400 absolute top-0.5 left-1 font-mono">2</span>
+                        <span class="power-icon text-lg">🔥</span>
+                        <span class="power-name text-[9px] text-slate-400 font-bold">미획득</span>
+                    </div>
+                    <div class="power-slot w-12 h-12 rounded-lg bg-slate-900/60 border border-slate-800 flex flex-col items-center justify-center relative opacity-40" data-index="2">
+                        <span class="text-[9px] text-slate-400 absolute top-0.5 left-1 font-mono">3</span>
+                        <span class="power-icon text-lg">✨</span>
+                        <span class="power-name text-[9px] text-slate-400 font-bold">미획득</span>
+                    </div>
+                    <div class="power-slot w-12 h-12 rounded-lg bg-slate-900/60 border border-slate-800 flex flex-col items-center justify-center relative opacity-40" data-index="3">
+                        <span class="text-[9px] text-slate-400 absolute top-0.5 left-1 font-mono">4</span>
+                        <span class="power-icon text-lg">⚡</span>
+                        <span class="power-name text-[9px] text-slate-400 font-bold">미획득</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 우측: 장비 및 현재 미션 -->
+            <div class="bg-black/60 border border-slate-800 backdrop-blur-md p-4 rounded-xl w-60 shadow-2xl text-right">
+                <div class="text-xs text-slate-400 mb-1">장착 중인 무기</div>
+                <div id="weapon-name" class="text-sm font-bold text-amber-400 mb-2">녹슨 숏소드</div>
+                <div class="text-xs text-slate-400 mb-1">장착 중인 갑옷</div>
+                <div id="armor-name" class="text-sm font-bold text-slate-300">누더기 가죽갑옷</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 스타트 / 일시정지 / 게임오버 / 승리 모달 오버레이 -->
+    <div id="modal-overlay" class="absolute inset-0 bg-black/80 z-30 flex items-center justify-center backdrop-blur-md">
+        
+        <!-- 1. 시작 화면 -->
+        <div id="start-screen" class="text-center max-w-lg p-8 bg-slate-950/90 border border-amber-900/50 rounded-2xl shadow-2xl">
+            <h1 class="text-4xl font-bold font-cinzel text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-amber-500 to-amber-700 mb-2">TWILIGHT OF GODS</h1>
+            <p class="text-slate-400 text-sm mb-6">신들에게 버림받은 인간의 복수극, 그리고 새로운 창조</p>
+            <div class="text-left text-xs text-slate-300 bg-slate-900/80 p-4 rounded-lg border border-slate-800 mb-6 space-y-2 leading-relaxed">
+                <p>• 올림포스의 신들은 인간을 저주하고 세상을 도륙했습니다.</p>
+                <p>• 당신은 검과 방패만을 들고 신들의 하수인과 괴물을 베어 넘겨야 합니다.</p>
+                <p>• 신을 처치하고 그들의 권능(화염, 신성, 번개)을 흡수하여 검에 결합하십시오.</p>
+            </div>
+            <button id="btn-start" class="w-full py-4 bg-gradient-to-r from-amber-700 to-amber-600 hover:from-amber-600 hover:to-amber-500 text-white font-bold rounded-xl shadow-lg transition-all transform hover:scale-[1.02]">
+                전투 시작 (Pointer Lock)
+            </button>
+        </div>
+
+        <!-- 2. 패배 / 재시작 화면 -->
+        <div id="defeat-screen" class="text-center max-w-md p-8 bg-slate-950/90 border border-red-900/50 rounded-2xl shadow-2xl hidden">
+            <h2 class="text-3xl font-bold text-red-500 mb-2 font-cinzel">YOU DIED</h2>
+            <p class="text-slate-400 text-xs mb-6">신들의 칼날 앞에 엎드러졌으나, 획득한 장비와 권능은 영혼에 각인됩니다.</p>
+            <button id="btn-restart" class="w-full py-3 bg-red-900 hover:bg-red-800 text-white font-bold rounded-xl shadow-lg transition-all">
+                현재 지역에서 부활
+            </button>
+        </div>
+
+        <!-- 3. 최종 승리 & 창조주 엔딩 화면 -->
+        <div id="victory-screen" class="text-center max-w-xl p-8 bg-slate-950/95 border border-amber-500/50 rounded-2xl shadow-2xl hidden">
+            <div class="text-5xl mb-4">✨</div>
+            <h2 class="text-3xl font-bold font-cinzel text-amber-300 mb-2">NEW CREATOR OF THE WORLD</h2>
+            <p class="text-slate-300 text-sm mb-6 leading-relaxed">
+                올림포스의 모든 신들이 쓰러졌습니다.<br>
+                당신은 그들의 모든 권능을 흡수하고 기존의 멸망한 세계를 소멸시켰습니다.<br>
+                이제 당신이 새로운 신세계의 존엄한 창조주입니다.
+            </p>
+            <div class="bg-amber-950/30 border border-amber-800/40 p-4 rounded-xl mb-6 text-xs text-amber-200/80">
+                획득한 권능: [인간의 의지], [헤파이스토스의 화염], [아테나의 신성], [제우스의 뇌전]
+            </div>
+            <button id="btn-recreation" class="w-full py-4 bg-gradient-to-r from-amber-500 to-yellow-600 text-black font-bold rounded-xl shadow-lg hover:brightness-110 transition-all">
+                새로운 신세계 시작하기
+            </button>
+        </div>
+    </div>
+
+    <!-- 게임 시스템 및 로직 스크립트 -->
+    <script>
+        // ====================================================================
+        // 1. GLOBAL CONFIGURATION (REQUIRED BEFORE ANY OTHER LOGIC)
+        // ====================================================================
+        const CONFIG = {
+            camera: {
+                fov: 75,
+                height: 1.6
+            },
+            player: {
+                hpMax: 100,
+                speed: 8.0,
+                blockMoveSpeed: 4.0,
+                dashSpeed: 18.0,
+                dashCooldown: 1.2,
+                invincibleDuration: 0.4,
+                baseAtk: 15
+            }
+        };
+
+        // ====================================================================
+        // 2. DATA DEFINITIONS (DIVINE POWERS, MAPS, EQUIPMENT)
+        // ====================================================================
+        const DIVINE_POWERS = [
+            { id: 'none', name: '인간의 검', color: 0xcccccc, extraAtk: 0, icon: '⚔️', desc: '순수한 인간의 근력으로 휘두르는 단단한 철검.' },
+            { id: 'fire', name: '화염의 권능', color: 0xff4500, extraAtk: 20, icon: '🔥', desc: '헤파이스토스의 불꽃. 타격 시 폭발적인 화염 피해.' },
+            { id: 'holy', name: '아테나의 신성', color: 0xffd700, extraAtk: 30, icon: '✨', desc: '전쟁과 지혜의 여신 아테나의 황금빛 섬광. 방어 파쇄 및 강력한 신성 피해.' },
+            { id: 'lightning', name: '뇌전의 권능', color: 0x00ffff, extraAtk: 45, icon: '⚡', desc: '제우스의 벼락. 빠른 전격 사슬로 적을 무력화.' }
+        ];
+
+        const EQUIPMENT_DATABASE = {
+            weapons: [
+                { name: '녹슨 숏소드', atkBonus: 0 },
+                { name: '영웅의 롱소드', atkBonus: 15 },
+                { name: '아테나의 신성 브로드소드', atkBonus: 30 },
+                { name: '신살자 대검', atkBonus: 50 }
+            ],
+            armors: [
+                { name: '누더기 가죽갑옷', defBonus: 0, hpBonus: 0 },
+                { name: '청동 판금갑옷', defBonus: 10, hpBonus: 30 },
+                { name: '이지스의 신성 흉갑', defBonus: 22, hpBonus: 60 },
+                { name: '신성한 아테나의 흉갑', defBonus: 35, hpBonus: 100 }
+            ]
+        };
+
+        const STAGE_DATA = [
+            {
+                realm: 'CHAPTER I',
+                title: '버려진 신들의 지하 유적',
+                wallColor: 0x22252a,
+                floorColor: 0x111317,
+                fogColor: 0x08090b,
+                enemiesCount: 4,
+                boss: {
+                    name: '지하 유적 수호신 (미노타우로스)',
+                    color: 0x8b0000,
+                    hp: 400,
+                    atk: 18,
+                    scale: 2.2,
+                    powerRewardIndex: 1
+                }
+            },
+            {
+                realm: 'CHAPTER II',
+                title: '아테네 폐허 (무너진 아테나 신전)',
+                wallColor: 0x4a4336,
+                floorColor: 0x26221c,
+                fogColor: 0x14110d,
+                enemiesCount: 5,
+                enemyType: 'bronze',
+                boss: {
+                    name: '전쟁과 지혜의 여신 (아테나)',
+                    type: 'athena',
+                    color: 0xffd700,
+                    hp: 750,
+                    atk: 25,
+                    scale: 2.5,
+                    powerRewardIndex: 2
+                }
+            },
+            {
+                realm: 'CHAPTER III',
+                title: '올림포스 파괴된 성전',
+                wallColor: 0x3a2e1d,
+                floorColor: 0x241c10,
+                fogColor: 0x120d07,
+                enemiesCount: 6,
+                enemyType: 'standard',
+                boss: {
+                    name: '올림포스의 주신 (제우스)',
+                    color: 0x00ffff,
+                    hp: 1100,
+                    atk: 35,
+                    scale: 2.8,
+                    powerRewardIndex: 3
+                }
+            }
+        ];
+
+        // ====================================================================
+        // 3. AUDIO & EFFECTS SUBSYSTEMS
+        // ====================================================================
+        const AudioSys = {
+            ctx: null,
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            },
+            playSwing() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(160, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.12);
+                gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.12);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.12);
+            },
+            playHit() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(280, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(70, this.ctx.currentTime + 0.18);
+                gain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.18);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.18);
+            },
+            playBlock() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(450, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(150, this.ctx.currentTime + 0.15);
+                gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.15);
+            },
+            playPower() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(220, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(650, this.ctx.currentTime + 0.25);
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.25);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.25);
+            }
+        };
+
+        const Effects = {
+            particles: [],
+            shakeTime: 0,
+            shakeIntensity: 0,
+
+            triggerScreenShake(duration, intensity) {
+                this.shakeTime = duration;
+                this.shakeIntensity = intensity;
+            },
+
+            spawnParticle(pos, color) {
+                const geo = new THREE.SphereGeometry(0.06 + Math.random() * 0.04, 4, 4);
+                const mat = new THREE.MeshBasicMaterial({ color: color });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.copy(pos);
+                scene.add(mesh);
+
+                const vel = new THREE.Vector3(
+                    (Math.random() - 0.5) * 3,
+                    Math.random() * 2 + 1,
+                    (Math.random() - 0.5) * 3
+                );
+
+                this.particles.push({ mesh, vel, life: 0.35 });
+            },
+
+            spawnHitParticles(pos, color) {
+                for (let i = 0; i < 10; i++) {
+                    this.spawnParticle(pos, color);
+                }
+            },
+
+            update(dt) {
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    const p = this.particles[i];
+                    p.life -= dt;
+                    p.mesh.position.addScaledVector(p.vel, dt);
+                    if (p.life <= 0) {
+                        scene.remove(p.mesh);
+                        p.mesh.geometry.dispose();
+                        p.mesh.material.dispose();
+                        this.particles.splice(i, 1);
+                    }
+                }
+
+                if (this.shakeTime > 0) {
+                    this.shakeTime -= dt;
+                    camera.position.x = (Math.random() - 0.5) * this.shakeIntensity;
+                    camera.position.y = CONFIG.camera.height + (Math.random() - 0.5) * this.shakeIntensity;
+                } else {
+                    camera.position.x = 0;
+                    camera.position.y = CONFIG.camera.height;
+                }
+            }
+        };
+
+        // ====================================================================
+        // 4. COMBAT SUBSYSTEM
+        // ====================================================================
+        const Combat = {
+            checkPlayerAttack() {
+                const atkPower = Player.getAttackPower();
+                const power = DIVINE_POWERS[GameState.selectedPowerIndex];
+
+                enemies.forEach(enemy => {
+                    if (enemy.hp <= 0) return;
+                    const dist = Player.position.distanceTo(enemy.mesh.position);
+                    const pDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+                    pDir.y = 0;
+                    pDir.normalize();
+
+                    const eDir = new THREE.Vector3().subVectors(enemy.mesh.position, Player.position);
+                    eDir.y = 0;
+                    eDir.normalize();
+
+                    const angle = pDir.angleTo(eDir);
+
+                    if (dist <= 3.8 && angle < Math.PI / 2.8) {
+                        enemy.takeDamage(atkPower, power.color);
+                        Effects.triggerScreenShake(0.12, 0.15);
+                    }
+                });
+            },
+
+            handleEnemyAttack(attackerPos, rawDamage) {
+                if (Player.invincibleTimer > 0) return;
+
+                const armor = EQUIPMENT_DATABASE.armors[Player.armorIdx];
+                const playerForward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), Player.yaw);
+                const dirToAttacker = new THREE.Vector3().subVectors(attackerPos, Player.position);
+                dirToAttacker.y = 0;
+                dirToAttacker.normalize();
+
+                const angle = playerForward.angleTo(dirToAttacker);
+
+                // 정면 120도 방어 성공 시
+                if (Player.isBlocking && angle < Math.PI / 3) {
+                    AudioSys.playBlock();
+                    const sparkPos = Player.position.clone().add(playerForward.clone().multiplyScalar(0.7));
+                    Effects.spawnHitParticles(sparkPos, 0xffd700);
+                    Effects.triggerScreenShake(0.08, 0.1);
+                    return; // 데미지 완전 무효화
+                }
+
+                // 방어 실패 또는 측후면 피격
+                const dmg = Math.max(1, rawDamage - armor.defBonus);
+                Player.hp -= dmg;
+                if (Player.hp < 0) Player.hp = 0;
+
+                AudioSys.playHit();
+                Effects.triggerScreenShake(0.2, 0.25);
+
+                const flash = document.getElementById('damage-flash');
+                if (flash) {
+                    flash.classList.remove('bg-red-600/0');
+                    flash.classList.add('bg-red-600/40');
+                    setTimeout(() => {
+                        flash.classList.remove('bg-red-600/40');
+                        flash.classList.add('bg-red-600/0');
+                    }, 150);
+                }
+
+                UI.updatePlayerStatus();
+
+                if (Player.hp <= 0) {
+                    GameState.triggerDefeat();
+                }
+            }
+        };
+
+        // ====================================================================
+        // 5. THREE.JS INITIALIZATION
+        // ====================================================================
+        let scene, camera, renderer;
+        let clock = new THREE.Clock();
+
+        function initThree() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x050508);
+            scene.fog = new THREE.FogExp2(0x050508, 0.035);
+
+            camera = new THREE.PerspectiveCamera(CONFIG.camera.fov, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, CONFIG.camera.height, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.25);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffd8a8, 0.8);
+            dirLight.position.set(20, 40, 20);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 1024;
+            dirLight.shadow.mapSize.height = 1024;
+            scene.add(dirLight);
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // ====================================================================
+        // 6. INPUT MANAGEMENT
+        // ====================================================================
+        const Input = {
+            keys: {},
+            mouseDelta: { x: 0, y: 0 },
+            isLocked: false,
+            attackPressed: false,
+            blockPressed: false,
+            dashRequested: false,
+
+            init() {
+                window.addEventListener('keydown', (e) => {
+                    this.keys[e.code] = true;
+                    if (e.code === 'KeyQ') GameState.switchPower(-1);
+                    if (e.code === 'KeyE') GameState.switchPower(1);
+                    if (e.code === 'Digit1') GameState.selectPower(0);
+                    if (e.code === 'Digit2') GameState.selectPower(1);
+                    if (e.code === 'Digit3') GameState.selectPower(2);
+                    if (e.code === 'Digit4') GameState.selectPower(3);
+                    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.dashRequested = true;
+                });
+                window.addEventListener('keyup', (e) => {
+                    this.keys[e.code] = false;
+                });
+
+                window.addEventListener('mousedown', (e) => {
+                    if (!this.isLocked) return;
+                    if (e.button === 0) this.attackPressed = true;
+                    if (e.button === 2) this.blockPressed = true;
+                });
+
+                window.addEventListener('mouseup', (e) => {
+                    if (e.button === 2) this.blockPressed = false;
+                });
+
+                window.addEventListener('mousemove', (e) => {
+                    if (this.isLocked) {
+                        this.mouseDelta.x += e.movementX;
+                        this.mouseDelta.y += e.movementY;
+                    }
+                });
+
+                window.addEventListener('contextmenu', e => e.preventDefault());
+
+                const btnStart = document.getElementById('btn-start');
+                btnStart.addEventListener('click', () => {
+                    AudioSys.init();
+                    document.body.requestPointerLock();
+                });
+
+                document.addEventListener('pointerlockchange', () => {
+                    this.isLocked = (document.pointerLockElement === document.body);
+                    const modal = document.getElementById('modal-overlay');
+                    const startScreen = document.getElementById('start-screen');
+                    
+                    if (this.isLocked) {
+                        modal.classList.add('hidden');
+                        startScreen.classList.add('hidden');
+                    } else {
+                        this.blockPressed = false;
+                        if (GameState.current !== 'VICTORY' && GameState.current !== 'DEFEAT') {
+                            modal.classList.remove('hidden');
+                            startScreen.classList.remove('hidden');
+                        }
+                    }
+                });
+            },
+
+            consumeMouseDelta() {
+                const delta = { ...this.mouseDelta };
+                this.mouseDelta.x = 0;
+                this.mouseDelta.y = 0;
+                return delta;
+            }
+        };
+
+        // ====================================================================
+        // 7. PLAYER & WEAPON MESH
+        // ====================================================================
+        const Player = {
+            position: new THREE.Vector3(0, CONFIG.camera.height, 0),
+            yaw: 0,
+            pitch: 0,
+            hp: CONFIG.player.hpMax,
+            maxHp: CONFIG.player.hpMax,
+            weaponIdx: 0,
+            armorIdx: 0,
+            dashCooldownTimer: 0,
+            invincibleTimer: 0,
+            isBlocking: false,
+
+            swingProgress: -1,
+            blockBlend: 0,
+            
+            cameraGroup: null,
+            weaponMesh: null,
+            shieldMesh: null,
+            weaponLight: null,
+
+            init() {
+                this.cameraGroup = new THREE.Group();
+                scene.add(this.cameraGroup);
+                this.cameraGroup.add(camera);
+
+                this.buildFirstPersonModels();
+            },
+
+            buildFirstPersonModels() {
+                const swordGroup = new THREE.Group();
+                
+                const bladeGeo = new THREE.BoxGeometry(0.04, 0.9, 0.08);
+                const bladeMat = new THREE.MeshStandardMaterial({ 
+                    color: 0xdddddd, 
+                    metalness: 0.9, 
+                    roughness: 0.2 
+                });
+                const blade = new THREE.Mesh(bladeGeo, bladeMat);
+                blade.position.y = 0.45;
+                blade.castShadow = true;
+                swordGroup.add(blade);
+
+                const hiltGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.2);
+                const hiltMat = new THREE.MeshStandardMaterial({ color: 0x3d2314 });
+                const hilt = new THREE.Mesh(hiltGeo, hiltMat);
+                hilt.position.y = -0.1;
+                swordGroup.add(hilt);
+
+                const guardGeo = new THREE.BoxGeometry(0.25, 0.04, 0.06);
+                const guardMat = new THREE.MeshStandardMaterial({ color: 0xc5a059, metalness: 0.8 });
+                const guard = new THREE.Mesh(guardGeo, guardMat);
+                guard.position.y = 0.02;
+                swordGroup.add(guard);
+
+                this.weaponLight = new THREE.PointLight(0xffffff, 0, 3);
+                this.weaponLight.position.set(0, 0.5, 0);
+                swordGroup.add(this.weaponLight);
+
+                swordGroup.position.set(0.4, -0.35, -0.6);
+                swordGroup.rotation.set(0.1, -0.2, -0.1);
+                camera.add(swordGroup);
+                this.weaponMesh = swordGroup;
+
+                const shieldGroup = new THREE.Group();
+                const shieldGeo = new THREE.CylinderGeometry(0.35, 0.3, 0.05, 8);
+                const shieldMat = new THREE.MeshStandardMaterial({ 
+                    color: 0x2a3439, 
+                    metalness: 0.7, 
+                    roughness: 0.4 
+                });
+                const shield = new THREE.Mesh(shieldGeo, shieldMat);
+                shield.rotation.x = Math.PI / 2;
+                shieldGroup.add(shield);
+
+                const rimGeo = new THREE.TorusGeometry(0.34, 0.03, 8, 16);
+                const rimMat = new THREE.MeshStandardMaterial({ color: 0xc5a059, metalness: 0.9 });
+                const rim = new THREE.Mesh(rimGeo, rimMat);
+                shieldGroup.add(rim);
+
+                shieldGroup.position.set(-0.45, -0.4, -0.5);
+                shieldGroup.rotation.set(0.2, 0.4, -0.2);
+                camera.add(shieldGroup);
+                this.shieldMesh = shieldGroup;
+            },
+
+            update(dt) {
+                const mouse = Input.consumeMouseDelta();
+                const sensitivity = 0.002;
+                this.yaw -= mouse.x * sensitivity;
+                this.pitch -= mouse.y * sensitivity;
+                this.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, this.pitch));
+
+                this.cameraGroup.rotation.y = this.yaw;
+                camera.rotation.x = this.pitch;
+
+                const moveVector = new THREE.Vector3();
+                if (Input.keys['KeyW']) moveVector.z -= 1;
+                if (Input.keys['KeyS']) moveVector.z += 1;
+                if (Input.keys['KeyA']) moveVector.x -= 1;
+                if (Input.keys['KeyD']) moveVector.x += 1;
+                moveVector.normalize();
+
+                moveVector.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+
+                this.isBlocking = Input.blockPressed;
+
+                let speed = CONFIG.player.speed;
+                if (this.isBlocking) {
+                    speed = CONFIG.player.blockMoveSpeed;
+                }
+
+                if (Input.dashRequested && this.dashCooldownTimer <= 0 && moveVector.lengthSq() > 0) {
+                    this.dashCooldownTimer = CONFIG.player.dashCooldown;
+                    this.invincibleTimer = CONFIG.player.invincibleDuration;
+                    speed = CONFIG.player.dashSpeed;
+                    Effects.triggerScreenShake(0.15, 0.2);
+                    AudioSys.playSwing();
+                }
+                Input.dashRequested = false;
+
+                if (this.dashCooldownTimer > 0) this.dashCooldownTimer -= dt;
+                if (this.invincibleTimer > 0) this.invincibleTimer -= dt;
+
+                this.position.addScaledVector(moveVector, speed * dt);
+                this.position.x = Math.max(-28, Math.min(28, this.position.x));
+                this.position.z = Math.max(-28, Math.min(28, this.position.z));
+                this.cameraGroup.position.copy(this.position);
+
+                const targetBlockBlend = this.isBlocking ? 1 : 0;
+                this.blockBlend += (targetBlockBlend - this.blockBlend) * 15 * dt;
+
+                this.shieldMesh.position.x = THREE.MathUtils.lerp(-0.45, 0.0, this.blockBlend);
+                this.shieldMesh.position.y = THREE.MathUtils.lerp(-0.4, -0.15, this.blockBlend);
+                this.shieldMesh.position.z = THREE.MathUtils.lerp(-0.5, -0.35, this.blockBlend);
+                this.shieldMesh.rotation.y = THREE.MathUtils.lerp(0.4, 0.0, this.blockBlend);
+
+                if (Input.attackPressed) {
+                    if (this.swingProgress < 0 && !this.isBlocking) {
+                        this.swingProgress = 0;
+                        AudioSys.playSwing();
+                    }
+                    Input.attackPressed = false;
+                }
+
+                if (this.swingProgress >= 0) {
+                    this.swingProgress += dt * 5;
+                    if (this.swingProgress >= 1) {
+                        this.swingProgress = -1;
+                    } else {
+                        const p = this.swingProgress;
+                        const swingAngle = Math.sin(p * Math.PI);
+                        this.weaponMesh.rotation.z = -0.1 - swingAngle * 1.5;
+                        this.weaponMesh.rotation.y = -0.2 + swingAngle * 1.2;
+                        this.weaponMesh.position.z = -0.6 + swingAngle * 0.2;
+
+                        if (p >= 0.4 && p <= 0.6) {
+                            Combat.checkPlayerAttack();
+                        }
+                    }
+                } else {
+                    const idleSway = Math.sin(clock.getElapsedTime() * 3) * 0.02;
+                    this.weaponMesh.position.y = -0.35 + idleSway;
+                    this.weaponMesh.rotation.z = -0.1;
+                    this.weaponMesh.rotation.y = -0.2;
+                    this.weaponMesh.position.z = -0.6;
+                }
+
+                const power = DIVINE_POWERS[GameState.selectedPowerIndex];
+                if (power.id !== 'none') {
+                    this.weaponLight.color.setHex(power.color);
+                    this.weaponLight.intensity = 1.5 + Math.sin(clock.getElapsedTime() * 8) * 0.5;
+                    
+                    if (Math.random() < 0.4) {
+                        const wPos = new THREE.Vector3();
+                        this.weaponMesh.getWorldPosition(wPos);
+                        Effects.spawnParticle(wPos, power.color);
+                    }
+                } else {
+                    this.weaponLight.intensity = 0;
+                }
+            },
+
+            getAttackPower() {
+                const weapon = EQUIPMENT_DATABASE.weapons[this.weaponIdx];
+                const power = DIVINE_POWERS[GameState.selectedPowerIndex];
+                return CONFIG.player.baseAtk + weapon.atkBonus + power.extraAtk;
+            }
+        };
+
+        // ====================================================================
+        // 8. ENEMIES & BOSS AI
+        // ====================================================================
+        let enemies = [];
+        let currentBoss = null;
+
+        class Enemy {
+            constructor(x, z, isBoss = false, bossData = null, enemyType = 'standard') {
+                this.isBoss = isBoss;
+                this.enemyType = isBoss ? (bossData.type || 'standard') : enemyType;
+                this.hp = isBoss ? bossData.hp : (enemyType === 'bronze' ? 140 : 80);
+                this.maxHp = this.hp;
+                this.atk = isBoss ? bossData.atk : (enemyType === 'bronze' ? 16 : 12);
+                this.speed = isBoss ? 4.8 : (enemyType === 'bronze' ? 4.2 : 5.5);
+                this.attackRange = isBoss ? 3.8 : 2.2;
+                this.attackCooldown = 0;
+                this.bossData = bossData;
+                this.phase = 1;
+                this.isAttacking = false;
+                this.shockwaveCooldown = 0;
+
+                const color = isBoss ? bossData.color : (enemyType === 'bronze' ? 0xb8860b : 0x3a4f3d);
+                const scale = isBoss ? bossData.scale : (enemyType === 'bronze' ? 1.4 : 1.2);
+
+                this.mesh = new THREE.Group();
+
+                if (this.enemyType === 'bronze' || this.enemyType === 'athena') {
+                    const bodyGeo = new THREE.CylinderGeometry(0.5 * scale, 0.4 * scale, 1.8 * scale, 8);
+                    const bodyMat = new THREE.MeshStandardMaterial({ 
+                        color: color, 
+                        metalness: 0.85, 
+                        roughness: 0.25 
+                    });
+                    this.bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+                    this.bodyMesh.position.y = 0.9 * scale;
+                    this.bodyMesh.castShadow = true;
+                    this.mesh.add(this.bodyMesh);
+
+                    const shieldGeo = new THREE.BoxGeometry(0.9 * scale, 1.2 * scale, 0.15 * scale);
+                    const shieldMat = new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 0.9, roughness: 0.2 });
+                    this.shieldMesh = new THREE.Mesh(shieldGeo, shieldMat);
+                    this.shieldMesh.position.set(-0.5 * scale, 0.9 * scale, 0.5 * scale);
+                    this.mesh.add(this.shieldMesh);
+
+                    const headGeo = new THREE.SphereGeometry(0.35 * scale, 8, 8);
+                    const headMat = new THREE.MeshStandardMaterial({ color: 0xffe4b5, metalness: 0.5 });
+                    const head = new THREE.Mesh(headGeo, headMat);
+                    head.position.y = 2.0 * scale;
+                    this.mesh.add(head);
+
+                    this.auraLight = new THREE.PointLight(0xffd700, this.enemyType === 'athena' ? 1.5 : 0.4, 4);
+                    this.auraLight.position.y = 1.5 * scale;
+                    this.mesh.add(this.auraLight);
+                } else {
+                    const bodyGeo = new THREE.OctahedronGeometry(1 * scale, 1);
+                    const bodyMat = new THREE.MeshStandardMaterial({ 
+                        color: color, 
+                        roughness: 0.5,
+                        metalness: 0.3
+                    });
+                    this.bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+                    this.bodyMesh.position.y = 1.2 * scale;
+                    this.bodyMesh.castShadow = true;
+                    this.mesh.add(this.bodyMesh);
+
+                    const eyeGeo = new THREE.SphereGeometry(0.15 * scale, 8, 8);
+                    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+                    const eye1 = new THREE.Mesh(eyeGeo, eyeMat);
+                    eye1.position.set(-0.3 * scale, 1.4 * scale, 0.7 * scale);
+                    const eye2 = eye1.clone();
+                    eye2.position.x = 0.3 * scale;
+                    this.mesh.add(eye1);
+                    this.mesh.add(eye2);
+                }
+
+                this.mesh.position.set(x, 0, z);
+                scene.add(this.mesh);
+            }
+
+            update(dt) {
+                if (this.hp <= 0) return;
+
+                const distToPlayer = this.mesh.position.distanceTo(Player.position);
+
+                if (this.enemyType === 'athena' && this.phase === 1 && this.hp <= this.maxHp * 0.5) {
+                    this.phase = 2;
+                    this.speed = 6.2;
+                    this.atk = 38;
+                    this.auraLight.intensity = 4.0;
+                    this.auraLight.color.setHex(0xffaa00);
+                    this.bodyMesh.material.color.setHex(0xff8c00);
+                    Effects.spawnHitParticles(this.mesh.position, 0xffd700);
+                    Effects.triggerScreenShake(0.4, 0.5);
+                    AudioSys.playPower();
+                }
+
+                this.mesh.lookAt(Player.position.x, this.mesh.position.y, Player.position.z);
+
+                if (this.enemyType === 'athena' && this.phase === 2) {
+                    this.shockwaveCooldown -= dt;
+                    if (this.shockwaveCooldown <= 0 && distToPlayer < 12) {
+                        this.shockwaveCooldown = 5.0;
+                        this.performHolyShockwave();
+                    }
+                }
+
+                if (distToPlayer > this.attackRange && !this.isAttacking) {
+                    const dir = new THREE.Vector3().subVectors(Player.position, this.mesh.position).normalize();
+                    this.mesh.position.x += dir.x * this.speed * dt;
+                    this.mesh.position.z += dir.z * this.speed * dt;
+
+                    const bounceFactor = this.isBoss ? 2.0 : 1.0;
+                    this.bodyMesh.position.y = bounceFactor + Math.sin(clock.getElapsedTime() * 7) * 0.12;
+                } else {
+                    if (this.attackCooldown <= 0 && !this.isAttacking) {
+                        this.attackCooldown = this.isBoss ? (this.phase === 2 ? 1.2 : 1.8) : 1.6;
+                        this.performAttack();
+                    }
+                }
+
+                if (this.attackCooldown > 0) {
+                    this.attackCooldown -= dt;
+                }
+            }
+
+            performAttack() {
+                this.isAttacking = true;
+                const origScale = this.mesh.scale.x;
+                this.mesh.scale.set(origScale * 1.15, origScale * 1.15, origScale * 1.15);
+
+                if (this.auraLight) this.auraLight.intensity *= 2;
+
+                setTimeout(() => {
+                    this.mesh.scale.set(origScale, origScale, origScale);
+                    if (this.auraLight) this.auraLight.intensity /= 2;
+
+                    if (this.mesh.position.distanceTo(Player.position) <= this.attackRange + 1.0) {
+                        Combat.handleEnemyAttack(this.mesh.position, this.atk);
+                    }
+                    this.isAttacking = false;
+                }, 300);
+            }
+
+            performHolyShockwave() {
+                Effects.triggerScreenShake(0.35, 0.4);
+                AudioSys.playPower();
+                
+                for (let i = 0; i < 24; i++) {
+                    const angle = (i / 24) * Math.PI * 2;
+                    const dir = new THREE.Vector3(Math.cos(angle), 0.1, Math.sin(angle));
+                    const pPos = this.mesh.position.clone().add(dir.clone().multiplyScalar(1.5));
+                    Effects.spawnHitParticles(pPos, 0xffd700);
+                }
+
+                if (this.mesh.position.distanceTo(Player.position) < 8.0) {
+                    Combat.handleEnemyAttack(this.mesh.position, 22);
+                }
+            }
+
+            takeDamage(amount, powerColor) {
+                let actualDamage = amount;
+
+                if (this.shieldMesh) {
+                    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.mesh.quaternion);
+                    const dirToPlayer = new THREE.Vector3().subVectors(Player.position, this.mesh.position).normalize();
+                    const angle = forward.angleTo(dirToPlayer);
+
+                    if (angle < Math.PI / 2.5) {
+                        const power = DIVINE_POWERS[GameState.selectedPowerIndex];
+                        if (power.id === 'holy') {
+                            actualDamage = amount * 0.9;
+                            Effects.spawnHitParticles(this.mesh.position, 0xffff00);
+                        } else {
+                            actualDamage = amount * 0.45;
+                            AudioSys.playBlock();
+                        }
+                    }
+                }
+
+                this.hp -= actualDamage;
+                
+                const oldColor = this.bodyMesh.material.color.getHex();
+                this.bodyMesh.material.color.setHex(0xffffff);
+                setTimeout(() => this.bodyMesh.material.color.setHex(oldColor), 80);
+
+                Effects.spawnHitParticles(this.mesh.position, powerColor || 0xffaa00);
+                AudioSys.playHit();
+
+                if (this.isBoss) {
+                    UI.updateBossHp(this.hp, this.maxHp);
+                }
+
+                if (this.hp <= 0) {
+                    this.die();
+                }
+            }
+
+            die() {
+                scene.remove(this.mesh);
+                if (this.isBoss) {
+                    GameState.onBossDefeated(this.bossData);
+                }
+            }
+        }
+
+        // ====================================================================
+        // 9. MAP GENERATOR
+        // ====================================================================
+        const MapBuilder = {
+            mapObjects: [],
+
+            buildStage(stageIdx) {
+                this.mapObjects.forEach(obj => scene.remove(obj));
+                this.mapObjects = [];
+
+                const data = STAGE_DATA[stageIdx];
+                scene.fog.color.setHex(data.fogColor);
+                renderer.setClearColor(data.fogColor);
+
+                const floorGeo = new THREE.PlaneGeometry(60, 60);
+                const floorMat = new THREE.MeshStandardMaterial({ 
+                    color: data.floorColor, 
+                    roughness: 0.9,
+                    metalness: 0.1
+                });
+                const floor = new THREE.Mesh(floorGeo, floorMat);
+                floor.rotation.x = -Math.PI / 2;
+                floor.receiveShadow = true;
+                scene.add(floor);
+                this.mapObjects.push(floor);
+
+                if (stageIdx === 1) { // 아테네 폐허
+                    const pillarGeo = new THREE.CylinderGeometry(0.9, 1.1, 12, 16);
+                    const pillarMat = new THREE.MeshStandardMaterial({ color: data.wallColor, roughness: 0.7, metalness: 0.2 });
+
+                    for (let x = -25; x <= 25; x += 10) {
+                        for (let z = -25; z <= 25; z += 10) {
+                            if (Math.abs(x) === 25 || Math.abs(z) === 25) {
+                                const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+                                const isBroken = Math.random() < 0.35;
+                                if (isBroken) {
+                                    pillar.rotation.z = (Math.random() - 0.5) * 0.6;
+                                    pillar.rotation.x = (Math.random() - 0.5) * 0.6;
+                                    pillar.position.set(x, 3.5, z);
+                                } else {
+                                    pillar.position.set(x, 6, z);
+                                }
+                                pillar.castShadow = true;
+                                pillar.receiveShadow = true;
+                                scene.add(pillar);
+                                this.mapObjects.push(pillar);
+                            }
+                        }
+                    }
+
+                    const holyLight1 = new THREE.PointLight(0xffd700, 2.5, 25);
+                    holyLight1.position.set(-10, 8, -10);
+                    scene.add(holyLight1);
+                    this.mapObjects.push(holyLight1);
+
+                    const holyLight2 = new THREE.PointLight(0xffd700, 2.5, 25);
+                    holyLight2.position.set(10, 8, 10);
+                    scene.add(holyLight2);
+                    this.mapObjects.push(holyLight2);
+
+                    const statueBaseGeo = new THREE.BoxGeometry(6, 1.2, 6);
+                    const statueBaseMat = new THREE.MeshStandardMaterial({ color: 0x5a5243, roughness: 0.6 });
+                    const statueBase = new THREE.Mesh(statueBaseGeo, statueBaseMat);
+                    statueBase.position.set(0, 0.6, -14);
+                    scene.add(statueBase);
+                    this.mapObjects.push(statueBase);
+
+                } else {
+                    const pillarGeo = new THREE.CylinderGeometry(0.8, 1.0, 10, 12);
+                    const pillarMat = new THREE.MeshStandardMaterial({ color: data.wallColor, roughness: 0.8 });
+
+                    for (let x = -25; x <= 25; x += 10) {
+                        for (let z = -25; z <= 25; z += 10) {
+                            if (Math.abs(x) === 25 || Math.abs(z) === 25) {
+                                const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+                                pillar.position.set(x, 5, z);
+                                pillar.castShadow = true;
+                                pillar.receiveShadow = true;
+                                scene.add(pillar);
+                                this.mapObjects.push(pillar);
+                            }
+                        }
+                    }
+
+                    const altarGeo = new THREE.BoxGeometry(4, 0.6, 4);
+                    const altarMat = new THREE.MeshStandardMaterial({ color: 0x4a4a5a, metalness: 0.5 });
+                    const altar = new THREE.Mesh(altarGeo, altarMat);
+                    altar.position.set(0, 0.3, -12);
+                    scene.add(altar);
+                    this.mapObjects.push(altar);
+                }
+            }
+        };
+
+        // ====================================================================
+        // 10. GAME STATE MANAGEMENT & FLOW
+        // ====================================================================
+        const GameState = {
+            current: 'START',
+            currentStageIdx: 0,
+            unlockedPowers: [true, false, false, false],
+            selectedPowerIndex: 0,
+
+            init() {
+                Input.init();
+                Player.init();
+                this.loadStage(0);
+            },
+
+            loadStage(idx) {
+                this.currentStageIdx = idx;
+                const stage = STAGE_DATA[idx];
+
+                MapBuilder.buildStage(idx);
+
+                Player.position.set(0, CONFIG.camera.height, 18);
+                Player.hp = Player.maxHp;
+
+                enemies.forEach(e => scene.remove(e.mesh));
+                enemies = [];
+
+                const enemyType = stage.enemyType || 'standard';
+                for (let i = 0; i < stage.enemiesCount; i++) {
+                    const x = (Math.random() - 0.5) * 30;
+                    const z = (Math.random() - 0.5) * 20 - 5;
+                    enemies.push(new Enemy(x, z, false, null, enemyType));
+                }
+
+                currentBoss = new Enemy(0, -12, true, stage.boss);
+                enemies.push(currentBoss);
+
+                UI.updateStageText(stage.realm, stage.title);
+                UI.updateBossHp(stage.boss.hp, stage.boss.hp);
+                UI.updatePlayerStatus();
+                UI.updatePowerSlots();
+            },
+
+            selectPower(idx) {
+                if (this.unlockedPowers[idx]) {
+                    this.selectedPowerIndex = idx;
+                    UI.updatePowerSlots();
+                    AudioSys.playPower();
+                }
+            },
+
+            switchPower(dir) {
+                let newIdx = this.selectedPowerIndex;
+                for (let i = 0; i < DIVINE_POWERS.length; i++) {
+                    newIdx = (newIdx + dir + DIVINE_POWERS.length) % DIVINE_POWERS.length;
+                    if (this.unlockedPowers[newIdx]) {
+                        this.selectPower(newIdx);
+                        break;
+                    }
+                }
+            },
+
+            onBossDefeated(bossData) {
+                const powerReward = bossData.powerRewardIndex;
+                if (powerReward && !this.unlockedPowers[powerReward]) {
+                    this.unlockedPowers[powerReward] = true;
+                    this.selectedPowerIndex = powerReward;
+                }
+
+                if (Player.weaponIdx < EQUIPMENT_DATABASE.weapons.length - 1) Player.weaponIdx++;
+                if (Player.armorIdx < EQUIPMENT_DATABASE.armors.length - 1) Player.armorIdx++;
+                
+                const armor = EQUIPMENT_DATABASE.armors[Player.armorIdx];
+                Player.maxHp = CONFIG.player.hpMax + armor.hpBonus;
+                Player.hp = Player.maxHp;
+
+                UI.updatePowerSlots();
+                UI.updatePlayerStatus();
+
+                if (this.currentStageIdx + 1 < STAGE_DATA.length) {
+                    setTimeout(() => {
+                        this.loadStage(this.currentStageIdx + 1);
+                    }, 2000);
+                } else {
+                    this.triggerVictory();
+                }
+            },
+
+            triggerDefeat() {
+                this.current = 'DEFEAT';
+                document.exitPointerLock();
+                document.getElementById('modal-overlay').classList.remove('hidden');
+                document.getElementById('defeat-screen').classList.remove('hidden');
+            },
+
+            triggerVictory() {
+                this.current = 'VICTORY';
+                document.exitPointerLock();
+                document.getElementById('modal-overlay').classList.remove('hidden');
+                document.getElementById('victory-screen').classList.remove('hidden');
+            },
+
+            restartCurrentStage() {
+                document.getElementById('modal-overlay').classList.add('hidden');
+                document.getElementById('defeat-screen').classList.add('hidden');
+                this.current = 'PLAYING';
+                this.loadStage(this.currentStageIdx);
+                document.body.requestPointerLock();
+            }
+        };
+
+        // ====================================================================
+        // 11. UI UPDATER
+        // ====================================================================
+        const UI = {
+            updateStageText(realm, title) {
+                document.getElementById('stage-realm').innerText = realm;
+                document.getElementById('stage-title').innerText = title;
+            },
+
+            updateBossHp(hp, maxHp) {
+                const container = document.getElementById('boss-hp-container');
+                container.classList.remove('hidden');
+                const bar = document.getElementById('boss-hp-bar');
+                const text = document.getElementById('boss-hp-text');
+                const pct = Math.max(0, (hp / maxHp) * 100);
+                bar.style.width = `${pct}%`;
+                text.innerText = `${Math.ceil(hp)} / ${maxHp}`;
+
+                if (hp <= 0) {
+                    container.classList.add('hidden');
+                }
+            },
+
+            updatePlayerStatus() {
+                const weapon = EQUIPMENT_DATABASE.weapons[Player.weaponIdx];
+                const armor = EQUIPMENT_DATABASE.armors[Player.armorIdx];
+
+                document.getElementById('player-hp-bar').style.width = `${(Player.hp / Player.maxHp) * 100}%`;
+                document.getElementById('player-hp-text').innerText = `${Math.ceil(Player.hp)} / ${Player.maxHp}`;
+                document.getElementById('player-atk').innerText = Player.getAttackPower();
+                document.getElementById('player-def').innerText = armor.defBonus;
+
+                document.getElementById('weapon-name').innerText = weapon.name;
+                document.getElementById('armor-name').innerText = armor.name;
+            },
+
+            updatePowerSlots() {
+                const slots = document.querySelectorAll('.power-slot');
+                slots.forEach((slot, idx) => {
+                    const power = DIVINE_POWERS[idx];
+                    const isUnlocked = GameState.unlockedPowers[idx];
+                    const isSelected = (GameState.selectedPowerIndex === idx);
+
+                    if (isUnlocked) {
+                        slot.classList.remove('opacity-40');
+                        slot.querySelector('.power-icon').innerText = power.icon;
+                        slot.querySelector('.power-name').innerText = power.name;
+                        
+                        if (isSelected) {
+                            slot.classList.add('border-amber-400', 'bg-slate-800');
+                            slot.classList.remove('border-slate-800');
+                        } else {
+                            slot.classList.remove('border-amber-400', 'bg-slate-800');
+                            slot.classList.add('border-slate-800');
+                        }
+                    } else {
+                        slot.classList.add('opacity-40');
+                        slot.querySelector('.power-name').innerText = '미획득';
+                    }
+                });
+            }
+        };
+
+        document.getElementById('btn-restart').addEventListener('click', () => {
+            GameState.restartCurrentStage();
+        });
+
+        document.getElementById('btn-recreation').addEventListener('click', () => {
+            location.reload();
+        });
+
+        // ====================================================================
+        // 12. MAIN GAME LOOP
+        // ====================================================================
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const dt = Math.min(clock.getDelta(), 0.1);
+
+            if (Input.isLocked && GameState.current !== 'DEFEAT' && GameState.current !== 'VICTORY') {
+                Player.update(dt);
+                enemies.forEach(enemy => enemy.update(dt));
+                Effects.update(dt);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.onload = function() {
+            initThree();
+            GameState.init();
+            animate();
+        };
+    </script>
+</body>
+</html>
