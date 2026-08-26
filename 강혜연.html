@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>감옥 탈출 게임 - Clue & Navigation Fixed</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;800&display=swap');
+        
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            box-sizing: border-box;
+            font-family: 'Pretendard', sans-serif;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #12100e;
+            color: #f1f5f9;
+        }
+
+        /* Pulse animation for clue glowing halos */
+        @keyframes cluePulse {
+            0% { transform: scale(1); opacity: 0.8; box-shadow: 0 0 10px #f59e0b; }
+            50% { transform: scale(1.15); opacity: 1; box-shadow: 0 0 25px #fbbf24; }
+            100% { transform: scale(1); opacity: 0.8; box-shadow: 0 0 10px #f59e0b; }
+        }
+
+        .clue-badge-glow {
+            animation: cluePulse 1.8s infinite ease-in-out;
+        }
+
+        /* Custom scrollbar for clue panels */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1e1b18;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #d97706;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen w-screen bg-stone-950 text-stone-100 select-none">
+    <!-- Top Header / HUD -->
+    <header class="h-14 bg-stone-900/90 border-b border-amber-900/40 px-4 flex items-center justify-between z-10 shrink-0">
+        <div class="flex items-center gap-3">
+            <span class="text-amber-500 text-xl font-black tracking-wider flex items-center gap-2">
+                <i class="fa-solid fa-dungeon"></i> 감옥 탈출
+            </span>
+            <span id="locationBadge" class="bg-amber-950/80 text-amber-300 border border-amber-700/50 text-xs px-2.5 py-1 rounded-md font-semibold">
+                시작 감방
+            </span>
+        </div>
+
+        <!-- Current Objective Tracker -->
+        <div class="hidden md:flex items-center bg-stone-950/80 border border-amber-600/30 px-3 py-1.5 rounded-lg max-w-md">
+            <i class="fa-solid fa-compass text-amber-400 mr-2 text-sm animate-spin-slow"></i>
+            <span class="text-xs text-stone-400 mr-2 shrink-0">현재 목표:</span>
+            <span id="currentObjectiveText" class="text-xs text-amber-200 font-medium truncate">
+                감방 내부와 주변의 단서를 찾아보세요.
+            </span>
+        </div>
+
+        <!-- HUD Action Buttons -->
+        <div class="flex items-center gap-2">
+            <button id="btnToggleClues" onclick="toggleCluePanel()" class="bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition">
+                <i class="fa-solid fa-scroll text-amber-400"></i>
+                <span>단서 기록</span>
+                <span id="clueCountBadge" class="bg-amber-500 text-stone-950 font-bold px-1.5 py-0.2 rounded-full text-[10px]">0/8</span>
+            </button>
+            
+            <button id="btnCompanionChat" onclick="openCompanionModal()" class="bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition">
+                <i class="fa-solid fa-user-ninja text-amber-400"></i>
+                <span class="hidden sm:inline">동료 대화</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Game Canvas Container -->
+    <main class="flex-1 relative bg-stone-950 flex items-center justify-center overflow-hidden">
+        <canvas id="gameCanvas" class="block bg-stone-900 shadow-2xl rounded-sm"></canvas>
+
+        <!-- Interaction Prompt Overlay (E key prompt) -->
+        <div id="interactionPrompt" class="hidden absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-16 bg-amber-500 text-stone-950 px-4 py-2 rounded-xl font-bold text-sm shadow-xl border-2 border-amber-200 pointer-events-none flex items-center gap-2 clue-badge-glow">
+            <span class="bg-stone-900 text-amber-300 px-2 py-0.5 rounded text-xs">E</span>
+            <span id="interactionPromptText">조사하기</span>
+        </div>
+
+        <!-- Guard Caught Alert Overlay (Non-resetting checkpoint toast) -->
+        <div id="caughtOverlay" class="hidden absolute inset-0 bg-red-950/80 backdrop-blur-sm z-30 flex flex-col items-center justify-center text-center p-6 transition-all duration-300">
+            <div class="bg-stone-900 border-2 border-red-600 p-6 rounded-2xl max-w-sm w-full shadow-2xl flex flex-col items-center gap-4">
+                <div class="w-16 h-16 bg-red-900/50 rounded-full flex items-center justify-center border border-red-500 text-red-400 text-3xl">
+                    <i class="fa-solid fa-triangle-exclamation animate-bounce"></i>
+                </div>
+                <h2 class="text-2xl font-black text-red-500">발각되었습니다!</h2>
+                <p class="text-stone-300 text-xs leading-relaxed">
+                    경비원에게 포착되어 시작 감방으로 송환되었습니다.<br>
+                    <span class="text-amber-400 font-semibold">획득한 단서와 아이템은 그대로 유지됩니다.</span>
+                </p>
+                <button onclick="dismissCaughtOverlay()" class="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2.5 rounded-xl transition text-sm">
+                    감방에서 다시 시작
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- Mobile Controls / Bottom Toolbar -->
+    <div class="bg-stone-900/90 border-t border-amber-900/40 p-3 flex items-center justify-between z-10 shrink-0 md:hidden">
+        <!-- Touch Virtual D-Pad -->
+        <div class="grid grid-cols-3 gap-1 w-32 h-28">
+            <div></div>
+            <button ontouchstart="handleTouchStart('Up')" ontouchend="handleTouchEnd('Up')" class="bg-stone-800 border border-stone-700 rounded-lg active:bg-amber-600 text-stone-200 flex items-center justify-center text-lg"><i class="fa-solid fa-arrow-up"></i></button>
+            <div></div>
+            <button ontouchstart="handleTouchStart('Left')" ontouchend="handleTouchEnd('Left')" class="bg-stone-800 border border-stone-700 rounded-lg active:bg-amber-600 text-stone-200 flex items-center justify-center text-lg"><i class="fa-solid fa-arrow-left"></i></button>
+            <button ontouchstart="handleTouchStart('Down')" ontouchend="handleTouchEnd('Down')" class="bg-stone-800 border border-stone-700 rounded-lg active:bg-amber-600 text-stone-200 flex items-center justify-center text-lg"><i class="fa-solid fa-arrow-down"></i></button>
+            <button ontouchstart="handleTouchStart('Right')" ontouchend="handleTouchEnd('Right')" class="bg-stone-800 border border-stone-700 rounded-lg active:bg-amber-600 text-stone-200 flex items-center justify-center text-lg"><i class="fa-solid fa-arrow-right"></i></button>
+        </div>
+
+        <!-- Touch Action Buttons -->
+        <div class="flex items-center gap-3">
+            <button onclick="triggerInteract()" class="w-16 h-16 bg-amber-600 active:bg-amber-500 text-stone-950 font-black rounded-2xl shadow-lg border-2 border-amber-300 flex flex-col items-center justify-center text-xs">
+                <i class="fa-solid fa-hand-pointer text-lg mb-1"></i>
+                <span>조사 [E]</span>
+            </button>
+            <button onclick="openCompanionModal()" class="w-14 h-14 bg-stone-800 active:bg-stone-700 text-amber-400 font-bold rounded-2xl border border-amber-500/40 flex flex-col items-center justify-center text-xs">
+                <i class="fa-solid fa-comment-dots text-base mb-1"></i>
+                <span>동료</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Clue View Modal -->
+    <div id="clueModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-40 flex items-center justify-center p-4">
+        <div class="bg-stone-900 border-2 border-amber-600/80 rounded-2xl max-w-md w-full p-6 shadow-2xl flex flex-col gap-4">
+            <div class="flex items-center justify-between border-b border-amber-800/40 pb-3">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-magnifying-glass text-amber-400 text-lg"></i>
+                    <h3 id="clueModalTitle" class="text-amber-300 font-bold text-lg">단서 발견</h3>
+                </div>
+                <button onclick="closeClueModal()" class="text-stone-400 hover:text-white"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            <div id="clueModalBody" class="text-stone-200 text-sm leading-relaxed bg-stone-950 p-4 rounded-xl border border-stone-800 min-h-[100px]">
+                단서 내용이 표시됩니다.
+            </div>
+            <div id="clueItemReward" class="hidden bg-amber-950/60 border border-amber-600/50 p-2.5 rounded-lg flex items-center gap-2 text-xs text-amber-200">
+                <i class="fa-solid fa-key text-amber-400 text-sm"></i>
+                <span id="clueItemRewardText">새로운 아이템을 획득했습니다!</span>
+            </div>
+            <button onclick="closeClueModal()" class="w-full bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold py-2.5 rounded-xl transition text-sm">
+                확인 및 기록
+            </button>
+        </div>
+    </div>
+
+    <!-- Clue Log Panel Modal -->
+    <div id="clueLogModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-40 flex items-center justify-center p-4">
+        <div class="bg-stone-900 border border-amber-600/60 rounded-2xl max-w-lg w-full p-6 shadow-2xl flex flex-col h-[80vh]">
+            <div class="flex items-center justify-between border-b border-amber-800/40 pb-3 mb-4">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-scroll text-amber-400 text-xl"></i>
+                    <h3 class="text-amber-300 font-bold text-lg">수집한 단서 목록</h3>
+                </div>
+                <button onclick="toggleCluePanel()" class="text-stone-400 hover:text-white"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            <div id="clueListContainer" class="flex-1 overflow-y-auto space-y-3 pr-1">
+                <!-- Dynamic clue cards injected here -->
+            </div>
+            <div class="mt-4 pt-3 border-t border-stone-800 flex justify-end">
+                <button onclick="toggleCluePanel()" class="bg-stone-800 hover:bg-stone-700 text-stone-200 px-4 py-2 rounded-xl text-xs font-semibold">
+                    닫기
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Companion Dialogue Modal -->
+    <div id="companionModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-40 flex items-center justify-center p-4">
+        <div class="bg-stone-900 border-2 border-amber-600/80 rounded-2xl max-w-md w-full p-6 shadow-2xl flex flex-col gap-4">
+            <div class="flex items-center gap-3 border-b border-amber-800/40 pb-3">
+                <div class="w-12 h-12 bg-amber-900/40 rounded-full flex items-center justify-center border border-amber-500 text-amber-400 text-2xl">
+                    <i class="fa-solid fa-user-ninja"></i>
+                </div>
+                <div>
+                    <h3 class="text-amber-300 font-bold text-base">동료 수감자 (민수)</h3>
+                    <p class="text-stone-400 text-xs">탈출 조력자</p>
+                </div>
+            </div>
+            <div id="companionDialogueText" class="text-stone-200 text-sm leading-relaxed bg-stone-950 p-4 rounded-xl border border-stone-800">
+                "단서를 모으고 있나? 내가 탈출 경로를 도와주겠네."
+            </div>
+            <button onclick="closeCompanionModal()" class="w-full bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold py-2.5 rounded-xl transition text-sm">
+                대화 종료
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Map Areas Definition (Centered around Central Hallway, completely connected)
+        const MAP_AREAS = {
+            START_CELL: { id: 'START_CELL', name: '시작 감방', x: 60, y: 60, w: 220, h: 200 },
+            CENTRAL_HALLWAY: { id: 'CENTRAL_HALLWAY', name: '중앙 복도', x: 340, y: 60, w: 520, h: 760 },
+            WORKSHOP: { id: 'WORKSHOP', name: '작업장', x: 60, y: 310, w: 220, h: 230 },
+            CAFETERIA: { id: 'CAFETERIA', name: '식당', x: 60, y: 590, w: 220, h: 230 },
+            STORAGE: { id: 'STORAGE', name: '창고', x: 920, y: 60, w: 220, h: 220 },
+            OFFICE: { id: 'OFFICE', name: '사무실', x: 920, y: 330, w: 220, h: 230 },
+            GUARD_ROOM: { id: 'GUARD_ROOM', name: '경비실', x: 920, y: 600, w: 220, h: 220 },
+            EXIT_AREA: { id: 'EXIT_AREA', name: '최종 출입구', x: 500, y: 840, w: 200, h: 100 }
+        };
+
+        // Connecting Corridors (Wide, completely passable passages)
+        const CORRIDORS = [
+            { x: 280, y: 120, w: 60, h: 80 },  // Start Cell -> Central Hallway
+            { x: 280, y: 380, w: 60, h: 80 },  // Workshop -> Central Hallway
+            { x: 280, y: 660, w: 60, h: 80 },  // Cafeteria -> Central Hallway
+            { x: 860, y: 130, w: 60, h: 80 },  // Central Hallway -> Storage
+            { x: 860, y: 400, w: 60, h: 80 },  // Central Hallway -> Office
+            { x: 860, y: 670, w: 60, h: 80 },  // Central Hallway -> Guard Room
+            { x: 550, y: 820, w: 100, h: 20 }  // Central Hallway -> Exit Area
+        ];
+
+        // Doors
+        const DOORS = {
+            storage_door: { id: 'storage_door', x: 860, y: 130, w: 20, h: 80, locked: true, keyNeeded: 'storage_key', name: '창고 문' },
+            office_door: { id: 'office_door', x: 860, y: 400, w: 20, h: 80, locked: true, keyNeeded: 'office_key', name: '사무실 문' },
+            exit_door: { id: 'exit_door', x: 550, y: 835, w: 100, h: 20, locked: true, keyNeeded: 'master_key', name: '최종 비상 출입문' }
+        };
+
+        // Master Clue Database
+        const REQUIRED_CLUES = [
+            {
+                id: 'clue_start_cell',
+                title: '감방 벽면의 긁힌 글씨',
+                text: '“복도 건너편 작업장에 경비원의 출입 관리 일지가 숨겨져 있다.”',
+                areaId: 'START_CELL',
+                defaultPos: { x: 170, y: 160 },
+                hint: '작업장을 조사하면 경비실에 접근할 열쇠 정보를 알 수 있을 것 같아.'
+            },
+            {
+                id: 'clue_hallway',
+                title: '복도 바닥의 순찰 일지',
+                text: '“경비원들은 지정된 순찰 구역만 왕복한다. 시야 정면만 피하면 안전하다.”',
+                areaId: 'CENTRAL_HALLWAY',
+                defaultPos: { x: 600, y: 220 },
+                hint: '경비원 발각 시 단서와 아이템은 유지되니 안심하고 탐색하게.'
+            },
+            {
+                id: 'clue_workshop',
+                title: '작업장 작업대 기록',
+                text: '“사무실 열쇠는 경비실 서랍에 보관되어 있다. 경비실을 먼저 수색해야 한다.”',
+                areaId: 'WORKSHOP',
+                defaultPos: { x: 170, y: 425 },
+                hint: '경비실로 가서 사무실 열쇠를 확보해야겠군.'
+            },
+            {
+                id: 'clue_cafeteria',
+                title: '식당 식탁 밑 암호 조각',
+                text: '“탈출 비상문 암호의 앞 두 자리는 [83]이다.”',
+                areaId: 'CAFETERIA',
+                defaultPos: { x: 170, y: 700 },
+                hint: '최종 탈출 암호 앞자리는 83이야!'
+            },
+            {
+                id: 'clue_guard_room',
+                title: '경비실 서랍 보관함',
+                text: '사무실 열쇠를 발견했습니다! “사무실 서랍에 창고 열쇠와 암호 뒷자리가 보관됨.”',
+                areaId: 'GUARD_ROOM',
+                defaultPos: { x: 1030, y: 710 },
+                grantItem: 'office_key',
+                grantItemName: '사무실 열쇠',
+                hint: '사무실 열쇠를 얻었으니 중앙 복도 오른쪽 사무실 문을 열 수 있어.'
+            },
+            {
+                id: 'clue_office',
+                title: '사무실 보안 기안서',
+                text: '창고 열쇠를 발견했습니다! “탈출문 암호 뒷자리는 [92] (전체: 8392).”',
+                areaId: 'OFFICE',
+                defaultPos: { x: 1030, y: 445 },
+                grantItem: 'storage_key',
+                grantItemName: '창고 열쇠',
+                hint: '창고 열쇠를 얻었어! 창고에서 마스터 키를 얻거나 탈출문 암호(8392)를 사용하자.'
+            },
+            {
+                id: 'clue_storage',
+                title: '창고 비상 보관함',
+                text: '마스터 탈출 키를 발견했습니다! 최종 탈출 출입문을 즉시 개방할 수 있습니다.',
+                areaId: 'STORAGE',
+                defaultPos: { x: 1030, y: 170 },
+                grantItem: 'master_key',
+                grantItemName: '마스터 탈출 키',
+                hint: '마스터 키를 손에 넣었으니 남쪽 최종 출입구로 가자!'
+            },
+            {
+                id: 'clue_exit',
+                title: '최종 출입구 탈출 장치',
+                text: '비상 탈출 장치입니다. 마스터 키를 사용하거나 암호 8392를 입력하면 즉시 탈출합니다.',
+                areaId: 'EXIT_AREA',
+                defaultPos: { x: 600, y: 880 },
+                hint: '최종 출입문 앞에서 E키를 누르면 탈출을 시도할 수 있어.'
+            }
+        ];
+
+        // Dynamic Game State
+        const gameState = {
+            player: { x: 170, y: 160, radius: 14, speed: 3.2 },
+            keysPressed: {},
+            touchDirections: { Up: false, Down: false, Left: false, Right: false },
+            clues: [],
+            collectedClueIds: new Set(),
+            inventory: new Set(),
+            unlockedDoors: new Set(),
+            activePromptClue: null,
+            guards: [
+                { x: 600, y: 150, startY: 150, endY: 700, speed: 1.8, dir: 1, radius: 16, visionAngle: Math.PI / 3, visionDist: 110, heading: Math.PI / 2 },
+                { x: 1030, y: 200, startY: 100, endY: 500, speed: 1.5, dir: 1, radius: 16, visionAngle: Math.PI / 3, visionDist: 100, heading: Math.PI / 2 }
+            ],
+            companion: { x: 210, y: 160 }
+        };
+
+        /**
+         * Checks if a coordinate is strictly inside walkable area (not inside walls)
+         */
+        function isValidCluePosition(x, y) {
+            // Check if (x,y) falls within any area or corridor with padding
+            for (const key in MAP_AREAS) {
+                const a = MAP_AREAS[key];
+                if (x >= a.x + 25 && x <= a.x + a.w - 25 && y >= a.y + 25 && y <= a.y + a.h - 25) {
+                    return true;
+                }
+            }
+            for (const c of CORRIDORS) {
+                if (x >= c.x + 10 && x <= c.x + c.w - 10 && y >= c.y + 10 && y <= c.y + c.h - 10) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /**
+         * Returns a guaranteed safe center position inside the given room area
+         */
+        function findSafeCluePosition(areaId) {
+            const area = MAP_AREAS[areaId];
+            if (area) {
+                return { x: area.x + area.w / 2, y: area.y + area.h / 2 };
+            }
+            return { x: 600, y: 400 }; // Fallback central hallway
+        }
+
+        /**
+         * Mandatory Clue Validation Pipeline - ensures 100% clues exist and are reachable
+         */
+        function validateClues() {
+            ensureRequiredClues();
+            gameState.clues.forEach(clue => {
+                if (!isValidCluePosition(clue.x, clue.y)) {
+                    const safePos = findSafeCluePosition(clue.areaId);
+                    clue.x = safePos.x;
+                    clue.y = safePos.y;
+                }
+            });
+        }
+
+        /**
+         * Ensures all required clues exist in the active clue array
+         */
+        function ensureRequiredClues() {
+            REQUIRED_CLUES.forEach(req => {
+                let existing = gameState.clues.find(c => c.id === req.id);
+                if (!existing) {
+                    const safePos = req.defaultPos && isValidCluePosition(req.defaultPos.x, req.defaultPos.y) 
+                        ? req.defaultPos 
+                        : findSafeCluePosition(req.areaId);
+                    
+                    existing = {
+                        ...req,
+                        x: safePos.x,
+                        y: safePos.y,
+                        collected: gameState.collectedClueIds.has(req.id)
+                    };
+                    gameState.clues.push(existing);
+                }
+            });
+        }
+
+        function initGame() {
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            
+            // Keyboard listeners
+            window.addEventListener('keydown', (e) => {
+                gameState.keysPressed[e.key.toLowerCase()] = true;
+                if (e.key.toLowerCase() === 'e') {
+                    triggerInteract();
+                }
+                if (e.key.toLowerCase() === 'c') {
+                    openCompanionModal();
+                }
+                if (e.key.toLowerCase() === 'i') {
+                    toggleCluePanel();
+                }
+            });
+
+            window.addEventListener('keyup', (e) => {
+                gameState.keysPressed[e.key.toLowerCase()] = false;
+            });
+
+            // Initialize clues with safety validation
+            validateClues();
+            updateHUD();
+
+            // Start loop
+            requestAnimationFrame(gameLoop);
+        }
+
+        function resizeCanvas() {
+            canvas.width = 1200;
+            canvas.height = 950;
+        }
+
+        function updatePlayerMovement() {
+            let dx = 0;
+            let dy = 0;
+
+            if (gameState.keysPressed['w'] || gameState.keysPressed['arrowup'] || gameState.touchDirections.Up) dy -= 1;
+            if (gameState.keysPressed['s'] || gameState.keysPressed['arrowdown'] || gameState.touchDirections.Down) dy += 1;
+            if (gameState.keysPressed['a'] || gameState.keysPressed['arrowleft'] || gameState.touchDirections.Left) dx -= 1;
+            if (gameState.keysPressed['d'] || gameState.keysPressed['arrowright'] || gameState.touchDirections.Right) dx += 1;
+
+            if (dx !== 0 && dy !== 0) {
+                dx *= 0.7071;
+                dy *= 0.7071;
+            }
+
+            const nextX = gameState.player.x + dx * gameState.player.speed;
+            const nextY = gameState.player.y + dy * gameState.player.speed;
+
+            // X movement check
+            if (isWalkable(nextX, gameState.player.y, gameState.player.radius)) {
+                gameState.player.x = nextX;
+            }
+            // Y movement check
+            if (isWalkable(gameState.player.x, nextY, gameState.player.radius)) {
+                gameState.player.y = nextY;
+            }
+
+            // Update Current Location Badge
+            for (const key in MAP_AREAS) {
+                const a = MAP_AREAS[key];
+                if (gameState.player.x >= a.x && gameState.player.x <= a.x + a.w &&
+                    gameState.player.y >= a.y && gameState.player.y <= a.y + a.h) {
+                    document.getElementById('locationBadge').innerText = a.name;
+                    break;
+                }
+            }
+        }
+
+        /**
+         * Checks if a circular entity fits inside the floor map and locked doors
+         */
+        function isWalkable(x, y, r) {
+            // Check locked doors
+            for (const doorId in DOORS) {
+                const d = DOORS[doorId];
+                if (d.locked && !gameState.unlockedDoors.has(doorId)) {
+                    if (x + r > d.x && x - r < d.x + d.w && y + r > d.y && y - r < d.y + d.h) {
+                        return false;
+                    }
+                }
+            }
+
+            // Check if inside room or corridor
+            for (const key in MAP_AREAS) {
+                const a = MAP_AREAS[key];
+                if (x - r >= a.x && x + r <= a.x + a.w && y - r >= a.y && y + r <= a.y + a.h) {
+                    return true;
+                }
+            }
+            for (const c of CORRIDORS) {
+                if (x - r >= c.x && x + r <= c.x + c.w && y - r >= c.y && y + r <= c.y + c.h) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function updateGuards() {
+            gameState.guards.forEach(g => {
+                g.y += g.speed * g.dir;
+                if (g.y >= g.endY) { g.y = g.endY; g.dir = -1; g.heading = -Math.PI / 2; }
+                if (g.y <= g.startY) { g.y = g.startY; g.dir = 1; g.heading = Math.PI / 2; }
+
+                // Distance to player
+                const dist = Math.hypot(gameState.player.x - g.x, gameState.player.y - g.y);
+                
+                // Body collision detection
+                if (dist < gameState.player.radius + g.radius) {
+                    triggerGuardCaught();
+                }
+
+                // Vision Cone Detection
+                const angleToPlayer = Math.atan2(gameState.player.y - g.y, gameState.player.x - g.x);
+                let diffAngle = Math.abs(angleToPlayer - g.heading);
+                if (diffAngle > Math.PI) diffAngle = Math.2 * Math.PI - diffAngle;
+
+                if (dist < g.visionDist && diffAngle < g.visionAngle / 2) {
+                    triggerGuardCaught();
+                }
+            });
+        }
+
+        /**
+         * Non-resetting Guard Caught handling
+         */
+        function triggerGuardCaught() {
+            // Send player back to Start Cell
+            gameState.player.x = 170;
+            gameState.player.y = 160;
+
+            // Show Toast / Modal
+            document.getElementById('caughtOverlay').classList.remove('hidden');
+        }
+
+        function dismissCaughtOverlay() {
+            document.getElementById('caughtOverlay').classList.add('hidden');
+        }
+
+        function checkClueProximity() {
+            let closestClue = null;
+            let minDist = 55;
+
+            gameState.clues.forEach(clue => {
+                if (!clue.collected) {
+                    const dist = Math.hypot(gameState.player.x - clue.x, gameState.player.y - clue.y);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        closestClue = clue;
+                    }
+                }
+            });
+
+            // Check final exit proximity
+            const exitDist = Math.hypot(gameState.player.x - 600, gameState.player.y - 850);
+
+            const promptEl = document.getElementById('interactionPrompt');
+            const promptText = document.getElementById('interactionPromptText');
+
+            if (closestClue) {
+                gameState.activePromptClue = closestClue;
+                promptText.innerText = `[${closestClue.title}] 조사하기`;
+                promptEl.classList.remove('hidden');
+            } else if (exitDist < 60) {
+                gameState.activePromptClue = { isExit: true };
+                promptText.innerText = `[최종 비상 탈출구] 탈출 시도`;
+                promptEl.classList.remove('hidden');
+            } else {
+                gameState.activePromptClue = null;
+                promptEl.classList.add('hidden');
+            }
+        }
+
+        function triggerInteract() {
+            if (!gameState.activePromptClue) return;
+
+            if (gameState.activePromptClue.isExit) {
+                attemptExitEscape();
+                return;
+            }
+
+            const clue = gameState.activePromptClue;
+            clue.collected = true;
+            gameState.collectedClueIds.add(clue.id);
+
+            // Grant Item if available
+            if (clue.grantItem) {
+                gameState.inventory.add(clue.grantItem);
+                if (clue.grantItem === 'office_key') gameState.unlockedDoors.add('office_door');
+                if (clue.grantItem === 'storage_key') gameState.unlockedDoors.add('storage_door');
+                if (clue.grantItem === 'master_key') gameState.unlockedDoors.add('exit_door');
+
+                document.getElementById('clueItemRewardText').innerText = `${clue.grantItemName}을(를) 획득했습니다! 관련 문이 개방되었습니다.`;
+                document.getElementById('clueItemReward').classList.remove('hidden');
+            } else {
+                document.getElementById('clueItemReward').classList.add('hidden');
+            }
+
+            // Open clue modal
+            document.getElementById('clueModalTitle').innerText = clue.title;
+            document.getElementById('clueModalBody').innerText = clue.text;
+            document.getElementById('clueModal').classList.remove('hidden');
+
+            // Update objective
+            document.getElementById('currentObjectiveText').innerText = clue.hint;
+
+            updateHUD();
+        }
+
+        function closeClueModal() {
+            document.getElementById('clueModal').classList.add('hidden');
+        }
+
+        function attemptExitEscape() {
+            if (gameState.inventory.has('master_key') || gameState.collectedClueIds.has('clue_office')) {
+                showVictoryModal();
+            } else {
+                openClueNotice("문이 굳게 잠겨 있습니다. 사무실과 창고에서 열쇠 또는 탈출 암호(8392) 단서를 찾아야 합니다.");
+            }
+        }
+
+        function openClueNotice(msg) {
+            document.getElementById('clueModalTitle').innerText = "최종 출입구";
+            document.getElementById('clueModalBody').innerText = msg;
+            document.getElementById('clueItemReward').classList.add('hidden');
+            document.getElementById('clueModal').classList.remove('hidden');
+        }
+
+        function showVictoryModal() {
+            document.getElementById('clueModalTitle').innerText = "🎉 탈출 성공!";
+            document.getElementById('clueModalBody').innerText = "축하합니다! 모든 단서를 조합하여 감옥을 무사히 탈출했습니다!";
+            document.getElementById('clueItemReward').classList.add('hidden');
+            document.getElementById('clueModal').classList.remove('hidden');
+        }
+
+        function updateHUD() {
+            const count = gameState.collectedClueIds.size;
+            document.getElementById('clueCountBadge').innerText = `${count}/8`;
+        }
+
+        function toggleCluePanel() {
+            const modal = document.getElementById('clueLogModal');
+            if (modal.classList.contains('hidden')) {
+                renderClueList();
+                modal.classList.remove('hidden');
+            } else {
+                modal.classList.add('hidden');
+            }
+        }
+
+        function renderClueList() {
+            const container = document.getElementById('clueListContainer');
+            container.innerHTML = '';
+
+            REQUIRED_CLUES.forEach((req, idx) => {
+                const isFound = gameState.collectedClueIds.has(req.id);
+                const card = document.createElement('div');
+                card.className = isFound 
+                    ? "bg-amber-950/40 border border-amber-600/50 p-3.5 rounded-xl flex flex-col gap-1.5"
+                    : "bg-stone-950 border border-stone-800 p-3.5 rounded-xl opacity-60 flex items-center justify-between";
+
+                if (isFound) {
+                    card.innerHTML = `
+                        <div class="flex items-center justify-between">
+                            <span class="text-amber-300 font-bold text-xs"><i class="fa-solid fa-check text-amber-500 mr-1.5"></i> ${req.title}</span>
+                            <span class="text-[10px] bg-amber-900/60 text-amber-200 px-2 py-0.5 rounded">${MAP_AREAS[req.areaId].name}</span>
+                        </div>
+                        <p class="text-stone-300 text-xs mt-1 leading-relaxed">${req.text}</p>
+                    `;
+                } else {
+                    card.innerHTML = `
+                        <div class="flex items-center gap-2">
+                            <i class="fa-solid fa-lock text-stone-600 text-sm"></i>
+                            <span class="text-stone-500 text-xs font-semibold">미발견 단서 (${MAP_AREAS[req.areaId].name})</span>
+                        </div>
+                        <span class="text-[10px] text-stone-600">미수집</span>
+                    `;
+                }
+                container.appendChild(card);
+            });
+        }
+
+        function openCompanionModal() {
+            const dialogueEl = document.getElementById('companionDialogueText');
+            
+            // Dynamic companion hint
+            if (!gameState.collectedClueIds.has('clue_start_cell')) {
+                dialogueEl.innerText = "“감방 벽면을 구석구석 조사해보게. 첫 번째 단서가 적혀 있네.”";
+            } else if (!gameState.collectedClueIds.has('clue_workshop')) {
+                dialogueEl.innerText = "“중앙 복도 서쪽의 작업장으로 이동해서 작업대 일지를 조사하게.”";
+            } else if (!gameState.collectedClueIds.has('clue_guard_room')) {
+                dialogueEl.innerText = "“경비실 서랍에 사무실 열쇠가 있다고 하더군. 경비원 몰래 경비실로 가보게!”";
+            } else if (!gameState.collectedClueIds.has('clue_office')) {
+                dialogueEl.innerText = "“사무실 열쇠를 구했으니 동쪽 사무실로 가서 창고 열쇠와 탈출 암호를 확인하게.”";
+            } else if (!gameState.collectedClueIds.has('clue_storage')) {
+                dialogueEl.innerText = "“창고로 가면 최종 마스터 키를 얻을 수 있네!”";
+            } else {
+                dialogueEl.innerText = "“모든 열쇠와 암호를 확보했네! 남쪽 최종 출입구로 가서 탈출하게!”";
+            }
+
+            document.getElementById('companionModal').classList.remove('hidden');
+        }
+
+        function closeCompanionModal() {
+            document.getElementById('companionModal').classList.add('hidden');
+        }
+
+        function handleTouchStart(dir) { gameState.touchDirections[dir] = true; }
+        function handleTouchEnd(dir) { gameState.touchDirections[dir] = false; }
+
+        function renderGame() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 1. Render Map Floor & Rooms
+            ctx.fillStyle = '#1e1b18';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Rooms
+            for (const key in MAP_AREAS) {
+                const a = MAP_AREAS[key];
+                ctx.fillStyle = '#2a241f';
+                ctx.fillRect(a.x, a.y, a.w, a.h);
+
+                ctx.strokeStyle = '#52463a';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(a.x, a.y, a.w, a.h);
+
+                // Room Name Label
+                ctx.fillStyle = '#a89a8b';
+                ctx.font = 'bold 13px Pretendard';
+                ctx.textAlign = 'center';
+                ctx.fillText(a.name, a.x + a.w / 2, a.y + 22);
+            }
+
+            // Draw Corridors
+            CORRIDORS.forEach(c => {
+                ctx.fillStyle = '#342d27';
+                ctx.fillRect(c.x, c.y, c.w, c.h);
+            });
+
+            // Draw Doors
+            for (const doorId in DOORS) {
+                const d = DOORS[doorId];
+                const isUnlocked = gameState.unlockedDoors.has(doorId);
+                ctx.fillStyle = isUnlocked ? '#22c55e' : '#ef4444';
+                ctx.fillRect(d.x, d.y, d.w, d.h);
+            }
+
+            // 2. Render Clues with High-Visibility Glowing Pulse Effects
+            const time = Date.now() * 0.004;
+            gameState.clues.forEach(clue => {
+                if (!clue.collected) {
+                    const pulseRadius = 16 + Math.sin(time * 2) * 4;
+
+                    // Outer Glowing Halo
+                    ctx.save();
+                    ctx.shadowColor = '#f59e0b';
+                    ctx.shadowBlur = 18;
+                    ctx.fillStyle = '#fbbf24';
+                    ctx.beginPath();
+                    ctx.arc(clue.x, clue.y, pulseRadius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+
+                    // Inner Marker
+                    ctx.fillStyle = '#d97706';
+                    ctx.beginPath();
+                    ctx.arc(clue.x, clue.y, 8, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Icon / Badge
+                    ctx.fillStyle = '#1e1b18';
+                    ctx.font = 'bold 10px Pretendard';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('🔍', clue.x, clue.y - 20);
+                }
+            });
+
+            // 3. Render Guards & Vision Cones
+            gameState.guards.forEach(g => {
+                // Vision Cone
+                ctx.save();
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.25)';
+                ctx.beginPath();
+                ctx.moveTo(g.x, g.y);
+                ctx.arc(g.x, g.y, g.visionDist, g.heading - g.visionAngle / 2, g.heading + g.visionAngle / 2);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+
+                // Guard Body
+                ctx.fillStyle = '#dc2626';
+                ctx.beginPath();
+                ctx.arc(g.x, g.y, g.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#f87171';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            });
+
+            // 4. Render Companion
+            ctx.fillStyle = '#3b82f6';
+            ctx.beginPath();
+            ctx.arc(gameState.companion.x, gameState.companion.y, 12, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#93c5fd';
+            ctx.font = 'bold 10px Pretendard';
+            ctx.textAlign = 'center';
+            ctx.fillText('동료', gameState.companion.x, gameState.companion.y - 16);
+
+            // 5. Render Player
+            ctx.save();
+            ctx.shadowColor = '#f59e0b';
+            ctx.shadowBlur = 10;
+            ctx.fillStyle = '#f59e0b';
+            ctx.beginPath();
+            ctx.arc(gameState.player.x, gameState.player.y, gameState.player.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#fef3c7';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function gameLoop() {
+            validateClues(); // Keep continuous validation guard active
+            updatePlayerMovement();
+            updateGuards();
+            checkClueProximity();
+            renderGame();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Initialize on Window Load
+        window.onload = initGame;
+    </script>
+</body>
+</html>
