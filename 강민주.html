@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>잠복체 - PROJECT TERRA</title>
+<style>
+/* ============================================================
+   CONFIG :: DESIGN TOKENS
+   ============================================================ */
+:root{
+  --bg-black:#06090a;
+  --wall-teal:#16302b;
+  --wall-teal-2:#0b1c19;
+  --accent-amber:#c9a961;
+  --accent-red:#8b2635;
+  --accent-red-bright:#d4425a;
+  --sick-green:#6f9a76;
+  --text-bone:#e9e3d2;
+  --text-dim:#8d988f;
+  --panel-glass:rgba(9,18,16,0.90);
+  --panel-glass-2:rgba(14,26,23,0.95);
+  --line:#2a423b;
+  --line-bright:#4a6b60;
+  font-size:16px;
+}
+*{box-sizing:border-box;}
+html,body{
+  margin:0;padding:0;width:100%;height:100%;
+  background:var(--bg-black);
+  overflow:hidden;
+  font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;
+  color:var(--text-bone);
+}
+#game{
+  position:relative;width:100%;height:100vh;min-height:560px;
+  overflow:hidden;
+}
+canvas#bgCanvas{
+  position:absolute;top:0;left:0;width:100%;height:100%;display:block;
+}
+#scanlines{
+  position:absolute;inset:0;pointer-events:none;z-index:5;
+  background:repeating-linear-gradient(
+    to bottom, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px,
+    rgba(0,0,0,0.10) 3px, rgba(0,0,0,0) 4px
+  );
+  mix-blend-mode:multiply;
+  opacity:0.5;
+}
+#noiseFlash{
+  position:absolute;inset:0;pointer-events:none;z-index:6;
+  background:var(--accent-red-bright);
+  opacity:0;
+}
+#vignette{
+  position:absolute;inset:0;pointer-events:none;z-index:4;
+  box-shadow:inset 0 0 18vw 4vw rgba(0,0,0,0.85);
+}
+
+/* ---------- HUD TOP BAR ---------- */
+#hud{
+  position:absolute;top:0;left:0;right:0;z-index:20;
+  display:flex;align-items:center;gap:18px;
+  padding:10px 16px;
+  background:linear-gradient(to bottom, rgba(4,8,7,0.92), rgba(4,8,7,0));
+  font-family:'Consolas','Malgun Gothic',monospace;
+  letter-spacing:0.5px;
+}
+.hud-stat{display:flex;flex-direction:column;gap:3px;min-width:110px;}
+.hud-label{font-size:10px;color:var(--accent-amber);text-transform:uppercase;letter-spacing:1.5px;}
+.hud-bar{width:110px;height:7px;background:rgba(255,255,255,0.08);border:1px solid var(--line-bright);position:relative;}
+.hud-bar-fill{height:100%;background:var(--sick-green);transition:width 0.4s;}
+.hud-bar-fill.health{background:linear-gradient(to right,#5b8f63,#9ab86a);}
+.hud-bar-fill.infect{background:linear-gradient(to right,#8b2635,#d4425a);}
+#objective{
+  flex:1;font-size:12px;color:var(--text-dim);
+  border-left:1px solid var(--line-bright);padding-left:14px;
+}
+#objective b{color:var(--text-bone);font-weight:600;}
+#topButtons{display:flex;gap:8px;}
+.iconbtn{
+  background:var(--panel-glass);border:1px solid var(--line-bright);
+  color:var(--text-bone);font-size:11px;padding:7px 12px;
+  cursor:pointer;letter-spacing:1px;font-family:'Consolas',monospace;
+  transition:all .15s;
+}
+.iconbtn:hover{background:rgba(201,169,97,0.18);border-color:var(--accent-amber);color:var(--accent-amber);}
+
+/* ---------- PORTRAIT ---------- */
+#portraitWrap{
+  position:absolute;top:78px;right:24px;z-index:15;
+  width:160px;text-align:center;
+  display:none;
+}
+#portraitWrap.show{display:block;}
+.portrait-frame{
+  width:150px;height:180px;margin:0 auto;position:relative;
+  background:linear-gradient(180deg,var(--wall-teal-2),var(--bg-black));
+  border:1px solid var(--line-bright);
+  box-shadow:0 0 0 4px rgba(0,0,0,0.4), 0 0 22px rgba(0,0,0,0.6);
+}
+.portrait-frame::before{
+  content:'';position:absolute;inset:0;
+  border:1px solid rgba(201,169,97,0.25);
+  pointer-events:none;
+}
+#portraitName{
+  margin-top:6px;font-size:12px;color:var(--accent-amber);
+  letter-spacing:2px;font-family:'Consolas',monospace;
+}
+.avatar{position:relative;width:100%;height:100%;overflow:hidden;}
+
+/* shared avatar parts */
+.a-head{position:absolute;left:50%;top:22px;width:46px;height:50px;border-radius:46% 46% 40% 40%;transform:translateX(-50%);}
+.a-torso{position:absolute;left:50%;bottom:14px;width:98px;height:96px;transform:translateX(-50%);border-radius:14px 14px 6px 6px;}
+.a-badge{position:absolute;width:16px;height:16px;border-radius:50%;}
+.a-glow{filter:drop-shadow(0 0 6px currentColor);}
+
+/* commander (radio only) */
+.avatar-commander{display:flex;align-items:center;justify-content:center;}
+.radio-icon{position:relative;width:70px;height:70px;}
+.radio-icon .antenna{position:absolute;left:50%;top:-6px;width:2px;height:26px;background:var(--accent-amber);transform:translateX(-50%) rotate(-14deg);}
+.radio-icon .speaker{position:absolute;left:8px;top:22px;width:54px;height:38px;background:#1c1c1c;border:2px solid var(--accent-amber);border-radius:4px;}
+.radio-icon .speaker::after{content:'';position:absolute;inset:6px;background:repeating-linear-gradient(90deg,#333 0 3px,#111 3px 6px);}
+.radio-icon .wave{position:absolute;border:2px solid var(--accent-amber);border-radius:50%;opacity:0.5;left:50%;top:-6px;transform:translateX(-50%);}
+.radio-icon .w1{width:36px;height:36px;animation:pulse 1.6s infinite;}
+.radio-icon .w2{width:56px;height:56px;animation:pulse 1.6s infinite 0.5s;}
+@keyframes pulse{0%{opacity:0.6;transform:translateX(-50%) scale(0.7);}100%{opacity:0;transform:translateX(-50%) scale(1.3);}}
+
+/* gipsu-man (decoy) */
+.avatar-gipsu .a-head{background:#cfc3ad;}
+.avatar-gipsu .a-torso{background:#d8d3c2;}
+.avatar-gipsu .gown-line{position:absolute;left:50%;bottom:14px;width:2px;height:96px;background:#9a9382;transform:translateX(-50%);}
+.avatar-gipsu .cast{position:absolute;bottom:0;width:22px;height:40px;background:#efece2;border:1px solid #b8b39f;}
+.avatar-gipsu .cast.l{left:34px;}
+.avatar-gipsu .cast.r{right:34px;}
+.avatar-gipsu .smile{position:absolute;left:50%;top:52px;width:20px;height:8px;border-bottom:2px solid #7a6f57;border-radius:0 0 20px 20px;transform:translateX(-50%);}
+
+/* doctor (collaborator / lucid infected) */
+.avatar-doctor .a-head{background:#c9cfc4;}
+.avatar-doctor .a-torso{background:#e7e6de;}
+.avatar-doctor .glasses{position:absolute;left:50%;top:40px;width:36px;height:10px;border:2px solid #333;border-radius:3px;transform:translateX(-50%);background:rgba(120,140,120,0.25);}
+.avatar-doctor .a-badge{left:50%;bottom:60px;transform:translateX(-6px);background:radial-gradient(circle,var(--sick-green),#294a30);box-shadow:0 0 8px var(--sick-green);}
+.avatar-doctor .collar{position:absolute;left:50%;bottom:96px;width:60px;height:16px;background:#0d0d0d;transform:translateX(-50%);border-radius:0 0 8px 8px;}
+
+/* terra (scavenger w/ tank) */
+.avatar-terra .a-head{background:#d9c9a8;}
+.avatar-terra .goggles{position:absolute;left:50%;top:34px;width:40px;height:16px;transform:translateX(-50%);}
+.avatar-terra .goggles::before,.avatar-terra .goggles::after{content:'';position:absolute;top:0;width:16px;height:16px;border-radius:50%;background:radial-gradient(circle,#e9833f,#7a3a12);border:2px solid #444;}
+.avatar-terra .goggles::before{left:0;}
+.avatar-terra .goggles::after{right:0;}
+.avatar-terra .a-torso{background:#e2ddce;}
+.avatar-terra .tank{position:absolute;right:6px;bottom:20px;width:26px;height:60px;border-radius:8px;background:linear-gradient(180deg,#cfcfcf,#8f8f8f);border:1px solid #555;overflow:hidden;}
+.avatar-terra .tank-liquid{position:absolute;bottom:0;left:0;right:0;height:70%;background:linear-gradient(180deg,#8fd18a,#3c7a45);opacity:0.85;}
+.avatar-terra .hose{position:absolute;right:20px;top:36px;width:14px;height:14px;border:3px solid #5a5a5a;border-radius:50%;border-right-color:transparent;transform:rotate(30deg);}
+
+/* courier (info npc) */
+.avatar-courier .a-head{background:#e3c9a8;}
+.avatar-courier .cap{position:absolute;left:50%;top:14px;width:52px;height:20px;background:#1c3a52;border-radius:6px 6px 0 0;transform:translateX(-50%);}
+.avatar-courier .cap::after{content:'';position:absolute;left:50%;bottom:-4px;width:60px;height:6px;background:#12293c;transform:translateX(-50%);border-radius:2px;}
+.avatar-courier .cap-badge{position:absolute;left:50%;top:4px;width:8px;height:8px;background:var(--accent-amber);transform:translateX(-50%) rotate(45deg);}
+.avatar-courier .a-torso{background:#1c3a52;}
+.avatar-courier .satchel{position:absolute;left:20px;bottom:30px;width:30px;height:24px;background:#5a3d24;border:1px solid #2c1d10;transform:rotate(-8deg);}
+
+/* infected mob */
+.avatar-infected .a-head{background:#7d8a78;}
+.avatar-infected .a-torso{background:#6b7566;}
+.avatar-infected .eyes{position:absolute;left:50%;top:40px;width:30px;height:6px;transform:translateX(-50%);display:flex;justify-content:space-between;}
+.avatar-infected .eyes::before,.avatar-infected .eyes::after{content:'';width:6px;height:6px;border-radius:50%;background:var(--accent-red-bright);box-shadow:0 0 6px var(--accent-red-bright);}
+.avatar-infected .eyes::before{position:absolute;left:0;}
+.avatar-infected .eyes::after{position:absolute;right:0;}
+
+/* ---------- MAIN TEXT PANEL ---------- */
+#textPanel{
+  position:absolute;left:0;right:0;bottom:0;z-index:15;
+  padding:22px 26px 20px;
+  background:linear-gradient(to top, rgba(4,8,7,0.97) 40%, rgba(4,8,7,0.75) 80%, rgba(4,8,7,0));
+  max-height:64vh;
+  display:flex;flex-direction:column;
+}
+#storyText{
+  font-family:'Nanum Myeongjo','Batangche','Batang',serif;
+  font-size:16.5px;line-height:1.85;color:var(--text-bone);
+  max-width:760px;white-space:pre-line;
+  border-left:2px solid var(--accent-amber);
+  padding-left:16px;margin-bottom:16px;
+  max-height:26vh;overflow-y:auto;
+}
+#storyText::-webkit-scrollbar{width:5px;}
+#storyText::-webkit-scrollbar-thumb{background:var(--line-bright);}
+#choices{display:flex;flex-direction:column;gap:8px;max-width:760px;}
+.choice-btn{
+  text-align:left;
+  background:var(--panel-glass-2);
+  border:1px solid var(--line-bright);
+  color:var(--text-bone);
+  padding:12px 16px;font-size:14.5px;
+  cursor:pointer;transition:all .15s;
+  font-family:'Malgun Gothic',sans-serif;
+  position:relative;padding-left:30px;
+}
+.choice-btn::before{
+  content:'▸';position:absolute;left:12px;top:12px;color:var(--accent-amber);
+}
+.choice-btn:hover{border-color:var(--accent-amber);background:rgba(201,169,97,0.10);transform:translateX(3px);}
+.choice-btn.danger:hover{border-color:var(--accent-red-bright);background:rgba(139,38,53,0.18);}
+.choice-btn:disabled{opacity:0.35;cursor:not-allowed;}
+.choice-btn:disabled:hover{transform:none;background:var(--panel-glass-2);}
+.tag{
+  display:inline-block;font-size:10px;color:var(--bg-black);
+  background:var(--accent-amber);padding:1px 6px;border-radius:2px;
+  margin-left:8px;letter-spacing:0.5px;vertical-align:middle;
+}
+
+/* ---------- SIDE PANELS (inventory / clue log) ---------- */
+.sidepanel{
+  position:absolute;top:0;right:-340px;width:320px;height:100%;z-index:30;
+  background:var(--panel-glass);border-left:1px solid var(--line-bright);
+  padding:70px 18px 18px;transition:right .25s ease;
+  overflow-y:auto;
+}
+.sidepanel.open{right:0;}
+.sidepanel h3{
+  font-family:'Consolas',monospace;color:var(--accent-amber);
+  font-size:13px;letter-spacing:2px;text-transform:uppercase;
+  border-bottom:1px solid var(--line-bright);padding-bottom:8px;margin-top:0;
+}
+.item-row,.clue-row{
+  border:1px solid var(--line);background:rgba(255,255,255,0.02);
+  padding:10px;margin-bottom:8px;font-size:13px;
+}
+.item-row b{color:var(--accent-amber);display:block;margin-bottom:4px;font-size:13.5px;}
+.item-row span, .clue-row span{color:var(--text-dim);font-size:12px;line-height:1.5;}
+.clue-row{border-left:2px solid var(--sick-green);}
+.empty-note{color:var(--text-dim);font-size:12.5px;font-style:normal;}
+#closePanelBtns{position:absolute;top:70px;left:0;}
+
+/* ---------- END SCREEN ---------- */
+#endOverlay{
+  position:absolute;inset:0;z-index:50;display:none;
+  align-items:center;justify-content:center;flex-direction:column;
+  background:rgba(2,4,4,0.94);text-align:center;padding:40px;
+}
+#endOverlay.show{display:flex;}
+#endTitle{font-family:'Consolas',monospace;font-size:34px;letter-spacing:6px;margin-bottom:18px;}
+#endTitle.death{color:var(--accent-red-bright);text-shadow:0 0 18px rgba(212,66,90,0.6);}
+#endTitle.survive{color:#a8d18a;text-shadow:0 0 18px rgba(168,209,138,0.5);}
+#endText{
+  max-width:640px;font-family:'Nanum Myeongjo',serif;font-size:16px;
+  line-height:1.9;color:var(--text-bone);margin-bottom:28px;white-space:pre-line;
+}
+#restartBtn{
+  background:transparent;border:1px solid var(--accent-amber);color:var(--accent-amber);
+  padding:12px 26px;font-family:'Consolas',monospace;letter-spacing:2px;cursor:pointer;
+}
+#restartBtn:hover{background:var(--accent-amber);color:#000;}
+
+/* insignia watermark used in lab/control-zone scenes */
+.insignia{
+  position:absolute;z-index:2;opacity:0.10;pointer-events:none;
+  width:220px;height:220px;top:50%;left:50%;transform:translate(-50%,-58%);
+}
+</style>
+</head>
+<body>
+<div id="game">
+  <canvas id="bgCanvas"></canvas>
+  <svg id="insigniaSvg" class="insignia" viewBox="0 0 100 100" style="display:none;">
+    <circle cx="50" cy="50" r="46" fill="none" stroke="#c9a961" stroke-width="1.5"/>
+    <rect x="42" y="18" width="16" height="64" fill="#6f9a76"/>
+    <rect x="18" y="42" width="64" height="16" fill="#6f9a76"/>
+    <line x1="14" y1="14" x2="86" y2="86" stroke="#8b2635" stroke-width="4"/>
+    <text x="50" y="96" text-anchor="middle" fill="#c9a961" font-size="7" font-family="Consolas, monospace" letter-spacing="2">PROJECT TERRA</text>
+  </svg>
+  <div id="scanlines"></div>
+  <div id="noiseFlash"></div>
+  <div id="vignette"></div>
+
+  <div id="hud">
+    <div class="hud-stat">
+      <div class="hud-label">체력</div>
+      <div class="hud-bar"><div class="hud-bar-fill health" id="barHealth" style="width:100%"></div></div>
+    </div>
+    <div class="hud-stat" id="infectWrap" style="display:none;">
+      <div class="hud-label">감염 진행</div>
+      <div class="hud-bar"><div class="hud-bar-fill infect" id="barInfect" style="width:0%"></div></div>
+    </div>
+    <div id="objective">현재 목표 : <b id="objectiveText">상관과의 교신 확인</b></div>
+    <div id="topButtons">
+      <button class="iconbtn" id="btnInv">인벤토리</button>
+      <button class="iconbtn" id="btnClue">단서 기록</button>
+    </div>
+  </div>
+
+  <div id="portraitWrap">
+    <div class="portrait-frame"><div class="avatar" id="avatarBox"></div></div>
+    <div id="portraitName"></div>
+  </div>
+
+  <div id="textPanel">
+    <div id="storyText"></div>
+    <div id="choices"></div>
+  </div>
+
+  <div class="sidepanel" id="invPanel">
+    <h3>인벤토리 (<span id="invCount">0</span>/6)</h3>
+    <div id="invList"></div>
+  </div>
+  <div class="sidepanel" id="cluePanel">
+    <h3>단서 기록</h3>
+    <div id="clueList"></div>
+  </div>
+
+  <div id="endOverlay">
+    <div id="endTitle"></div>
+    <div id="endText"></div>
+    <button id="restartBtn">처음부터 다시 시작</button>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   CONFIG
+   ============================================================ */
+const CONFIG = {
+  maxInventory: 6,
+  themes: {
+    corridor: { top:'#16302b', bot:'#06100e', flicker:true, tint:null },
+    ward:     { top:'#1a3630', bot:'#07120f', flicker:true, tint:null },
+    green:    { top:'#1e3a2a', bot:'#08140f', flicker:false, tint:'#3c7a45' },
+    basement: { top:'#101f26', bot:'#04090c', flicker:true, tint:null },
+    lab:      { top:'#12241f', bot:'#050d0b', flicker:true, tint:'#6f9a76', insignia:true },
+    roof:     { top:'#0c1420', bot:'#03060a', flicker:false, tint:'#c9a961', night:true },
+    death:    { top:'#2a0a10', bot:'#050202', flicker:false, tint:'#8b2635' },
+    survive:  { top:'#20301c', bot:'#0a1409', flicker:false, tint:'#a8d18a' }
+  }
+};
+
+/* ============================================================
+   ITEM_SYSTEM
+   ============================================================ */
+const ITEMS = {
+  crutch:      { name:'낡은 목발', desc:'왼쪽 다리를 지탱해주는 목발. 없으면 제대로 걷기 힘들다.' },
+  ration:      { name:'비상식량 한 봉지', desc:'자판기 옆에서 주운 딱딱한 비상식량.' },
+  painkiller:  { name:'정체불명의 알약 (진통제로 추정)', desc:'약 보관함에서 챙긴 알약 중 하나.' },
+  sedative:    { name:'정체불명의 알약 (수면제로 추정)', desc:'약 보관함에서 챙긴 알약 중 하나.' },
+  anesthetic:  { name:'정체불명의 알약 (마취제로 추정)', desc:'약 보관함에서 챙긴 알약 중 하나.' },
+  keycard:     { name:'직원용 보안 카드', desc:'낡았지만 아직 작동하는 듯한 카드.' },
+  catalyst:    { name:'정체불명의 촉매액', desc:'식물 보존액이라던 그 여자의 탱크에서 나온 초록빛 액체. 어딘가 부자연스럽다.' },
+  vx7:         { name:'진짜 백신 (VX-7)', desc:'보급 상자와 동일한 배치 번호가 각인된 투명한 액체.' }
+};
+
+/* ============================================================
+   GAME_STATE
+   ============================================================ */
+let state = null;
+function freshState(){
+  return {
+    scene:'S01',
+    health:100,
+    infected:false,
+    infectStage:0,
+    inventory:[],
+    clues:[],
+    flags:{ earlyMed:null, gaveItemToTerra:false, doorOpened:false, trustedDoctor:false }
+  };
+}
+
+/* ============================================================
+   INVENTORY
+   ============================================================ */
+function addItem(key){
+  if(state.inventory.includes(key)) return true;
+  if(state.inventory.length >= CONFIG.maxInventory){
+    addClue('가방이 가득 찼다. 무언가를 버려야만 챙길 수 있을 것 같다.');
+    return false;
+  }
+  state.inventory.push(key);
+  renderInventory();
+  return true;
+}
+function removeItem(key){
+  state.inventory = state.inventory.filter(i=>i!==key);
+  renderInventory();
+}
+function hasItem(key){ return state.inventory.includes(key); }
+
+/* ============================================================
+   CLUE_LOG
+   ============================================================ */
+function addClue(text){
+  state.clues.push(text);
+  renderClues();
+}
+
+/* ============================================================
+   STORY :: SCENES (DIALOGUE + CHOICE_SYSTEM + EVENT_SYSTEM)
+   ============================================================ */
+const SCENES = {
+
+  S01:{ theme:'corridor', portrait:null, objective:'상관과의 교신 확인',
+    text:['- 무전기 -\n\n"...들리나. 백신을 반드시 확보해라. 위치는 5층 격리 병동으로 추정된다. 상황이 이상해도, 확인되지 않은 것은 건드리지 마라."\n\n상관의 목소리가 잡음 속에서 끊어질 듯 이어진다. 왼쪽 다리는 진입 도중 파편에 맞아 감각이 무디다. 통증이 뒤늦게 밀려온다.'],
+    choices:[{label:'"...수신했다." 라고 답한다', next:'S02'}]
+  },
+
+  S02:{ theme:'corridor', portrait:null, objective:'움직일 수단을 찾는다',
+    text:['비상등만 깜빡이는 로비. 안내데스크는 비어 있고, 유리문 너머로 인기척이 없다.\n\n다리를 끌며 몇 걸음 걷자 무릎이 꺾인다. 이대로는 3층조차 오르기 힘들 것 같다.\n\n구석에 쓰러진 청소 카트 옆으로, 누군가 두고 간 목발 하나가 보인다.'],
+    onEnter:function(){ addItem('crutch'); addClue('왼쪽 다리 부상. 목발 없이는 제대로 이동할 수 없다.'); },
+    choices:[
+      {label:'목발을 집어 짚는다', next:'S03'},
+    ]
+  },
+
+  S03:{ theme:'corridor', portrait:null, objective:'상층부로 이동',
+    text:['자판기 불빛이 홀로 깜빡이는 복도. 유리가 깨진 틈으로 비상식량 한 봉지가 떨어져 있다.\n\n주울지 말지는 잠깐의 판단이다. 무게가 늘어나는 만큼, 나중에 무언가와 바꿀 수도 있을 것이다.'],
+    choices:[
+      {label:'비상식량을 챙긴다', next:'S04', onSelect:function(){ addItem('ration'); } },
+      {label:'그냥 지나친다', next:'S04'}
+    ]
+  },
+
+  S04:{ theme:'ward', portrait:'gipsu', portraitName:'??? (환자복)', objective:'상층부로 이동',
+    text:['계단으로 향하는 길목, 양쪽 다리에 깁스를 한 남자가 벽에 기대 있다가 반갑게 손을 흔든다.\n\n"오, 살아있는 사람이네. 다리 다쳤어요? 저도 그래요. 이거 좀 드세요, 아까 병실에서 챙겨온 건데."\n\n그가 비닐에 싼 무언가를 내민다.'],
+    choices:[
+      {label:'받아서 먹는다', next:'S05_eat'},
+      {label:'거절한다', next:'S05_refuse'}
+    ]
+  },
+
+  S05_eat:{ theme:'ward', portrait:'gipsu', portraitName:'??? (환자복)', objective:'상층부로 이동',
+    text:['"자, 어서요." 그가 웃는 얼굴로 재촉한다. 배가 고팠던 참이라 별생각 없이 삼킨다.\n\n입안에 쓴맛이 오래 남는다. 몇 걸음 걷지 않아 시야가 흐려지고, 다리에 힘이 풀린다.\n\n바닥에 쓰러지는 순간, 그의 웃는 얼굴이 눈앞에서 천천히 일그러지는 것이 보인다.'],
+    choices:[{label:'...', next:'END_death_sleep'}]
+  },
+
+  S05_refuse:{ theme:'ward', portrait:'gipsu', portraitName:'??? (환자복)', objective:'상층부로 이동',
+    text:['"괜찮습니다. 아까 챙겨둔 게 있어서요." 하고 둘러대며 물러선다.\n\n그가 어깨를 으쓱하고는 몸을 돌려 계단 쪽으로 성큼성큼 걸어간다.\n\n...양쪽 다리에 깁스를 한 사람이, 방금 아무렇지도 않게 계단을 두 칸씩 뛰어 올라갔다.'],
+    onEnter:function(){ addClue('양쪽 다리에 깁스를 한 남자가 계단을 정상적으로, 심지어 빠르게 올라갔다. 무언가 이상하다.'); },
+    choices:[{label:'거리를 두고 뒤따라 올라간다', next:'S06'}]
+  },
+
+  S06:{ theme:'ward', portrait:null, objective:'옥상으로 향하는 길 확보',
+    text:['3층 복도 끝, 약품 보관함이 부서진 채 열려 있다. 라벨이 반쯤 뜯어져 정확한 이름은 알 수 없지만, 색과 형태로 대강 구분되는 알약 세 종류가 남아있다.\n\n지금 상황에서 하나만 챙길 수 있을 것 같다. 무엇에 쓰일지는 나중에야 알게 될 것이다.'],
+    choices:[
+      {label:'하얗고 둥근 알약을 챙긴다 (진통제로 보임)', next:'S07', onSelect:function(){ state.flags.earlyMed='painkiller'; addItem('painkiller'); } },
+      {label:'푸른빛이 도는 알약을 챙긴다 (수면제로 보임)', next:'S07', onSelect:function(){ state.flags.earlyMed='sedative'; addItem('sedative'); } },
+      {label:'작고 투명한 캡슐을 챙긴다 (마취제로 보임)', next:'S07', onSelect:function(){ state.flags.earlyMed='anesthetic'; addItem('anesthetic'); } }
+    ]
+  },
+
+  S07:{ theme:'green', portrait:'terra', portraitName:'방독면을 쓴 여자', objective:'옥상으로 향하는 길 확보',
+    text:['옥상으로 이어지는 계단 옆, 원래 온실이었을 법한 공간에 누군가 자리를 잡고 있다.\n\n방독면과 고글을 쓴 여자가 등에 커다란 탱크를 짊어진 채 시든 화분들을 정리하고 있다. 그녀가 인기척을 느끼고 천천히 돌아본다.\n\n"...산 사람이네. 여기 위험해요. 뭐 먹을 거 있어요? 저는 여기 오래 있었거든요."'],
+    choices:[
+      {label:'비상식량을 건넨다', next:'S07b', requires:function(){return hasItem('ration');} },
+      {label:'가진 게 없다고 말한다', next:'S07c' }
+    ]
+  },
+
+  S07b:{ theme:'green', portrait:'terra', portraitName:'방독면을 쓴 여자', objective:'옥상으로 향하는 길 확보',
+    text:['식량을 받아 든 그녀의 눈매가 마스크 너머로 풀어진다.\n\n"...고마워요. 저도 뭐라도 드려야겠네." 그녀가 등의 탱크 밸브를 조금 열어, 작은 병에 초록빛 액체를 받아 건넨다.\n\n"원예용 보존액이라는데... 요즘 여기서 나오는 물건들은 다 뭔가 이상해요. 혹시 몰라 챙겨두세요."'],
+    onEnter:function(){ removeItem('ration'); addItem('catalyst'); state.flags.gaveItemToTerra=true; addClue('방독면 여자에게서 받은 촉매액. 원예용이라기엔 어딘가 인공적인 냄새가 난다.'); },
+    choices:[{label:'감사를 표하고 옥상으로 향한다', next:'S08'}]
+  },
+
+  S07c:{ theme:'green', portrait:'terra', portraitName:'방독면을 쓴 여자', objective:'옥상으로 향하는 길 확보',
+    text:['"...그렇군요." 그녀가 조금 실망한 기색으로 다시 화분 쪽으로 돌아앉는다.\n\n더 이상 대화가 이어지지 않는다. 그녀의 탱크 안에서 찰랑거리는 초록빛 액체가 신경 쓰이지만, 지금은 방법이 없다.'],
+    choices:[{label:'옥상으로 향한다', next:'S08'}]
+  },
+
+  S08:{ theme:'ward', portrait:null, objective:'옥상으로 향하는 길 확보',
+    text:['좁은 비상계단으로 들어선 순간, 발밑에서 인기척이 들린다. 계단참 아래 그림자 속에서 무언가 천천히 몸을 일으킨다.\n\n목이 꺾인 각도로 이쪽을 향하는 형체. 사람이었던 무언가다.\n\n도망칠 곳은 좁고, 시간은 없다.'],
+    choices:function(){
+      const opts = [];
+      if(hasItem('anesthetic')) opts.push({label:'마취제로 보이는 알약을 던져 흡입시킨다', next:'S09_ok', onSelect:function(){ removeItem('anesthetic'); } });
+      if(hasItem('painkiller')) opts.push({label:'진통제로 보이는 알약을 시도해본다', next:'END_death_wrongmed', onSelect:function(){ removeItem('painkiller'); } });
+      if(hasItem('sedative')) opts.push({label:'수면제로 보이는 알약을 시도해본다', next:'END_death_wrongmed', onSelect:function(){ removeItem('sedative'); } });
+      opts.push({label:'목발을 무기 삼아 맞서 싸운다', next:'END_death_wrongmed'});
+      return opts;
+    }
+  },
+
+  S09_ok:{ theme:'ward', portrait:null, objective:'옥상 진입',
+    text:['가루를 뒤집어쓴 그것이 몇 번 휘청이더니 그대로 힘없이 주저앉는다. 완전히 멈춘 것은 아니지만, 당장의 위협은 사라졌다.\n\n숨을 몰아쉬며 옥상 문을 향해 마지막 계단을 오른다.'],
+    choices:[{label:'옥상으로 나간다', next:'S10'}]
+  },
+
+  S10:{ theme:'roof', portrait:'commander', portraitName:'상관 (무전)', objective:'상관에게 상황 보고',
+    text:['찬 바람이 부는 옥상. 도시는 멀리서도 이상할 만큼 조용하다.\n\n무전기를 붙잡고 채널을 연다. "...여기는 옥상. 백신 확보 실패. 상황 보고를 요청한다."\n\n잡음만 돌아온다. 몇 번을 다시 시도해도 마찬가지다. 응답이 없다.'],
+    onEnter:function(){ addClue('옥상에서 무전이 완전히 두절되었다. 비상 전력이 내려간 것으로 추정된다.'); },
+    choices:[{label:'비상 전력을 복구하러 지하로 내려간다', next:'S11'}]
+  },
+
+  S11:{ theme:'basement', portrait:null, objective:'비상 전력 복구',
+    text:['지하로 내려가는 입구, 엘리베이터와 비상계단이 나란히 있다. 엘리베이터 층수 표시등은 어둡지만, 버튼을 누르면 응답할지도 모른다.'],
+    choices:[
+      {label:'엘리베이터를 탄다', next:'END_death_elevator', danger:true},
+      {label:'비상계단으로 내려간다', next:'S12'}
+    ]
+  },
+
+  S12:{ theme:'basement', portrait:null, objective:'비상 전력 복구',
+    text:['지하 2층, 발전기실 표시등이 겨우 남은 배터리로 깜빡인다. 수동 레버를 있는 힘껏 당기자, 둔탁한 소리와 함께 복도 조명이 하나둘 돌아온다.\n\n불빛이 돌아오며 처음으로 눈에 들어온 것 - 벽에 쌓인 보급 상자들. 그중 하나에 낯선 코드가 스텐실로 찍혀 있다.\n\n"VX-7"\n\n그리고 그 옆 복도 안쪽, "외부인 출입 금지 / 통제구역" 표지판이 붙은 철문이 있다. 손잡이를 당겨봐도 잠겨 있다.'],
+    onEnter:function(){ addClue('보급 상자에 낯선 코드가 찍혀 있다: "VX-7". 이 코드를 기억해둔다.'); addClue('통제구역 철문은 잠겨 있다. 보안 카드가 필요해 보인다.'); },
+    choices:[{label:'다른 길을 찾아본다', next:'S13'}]
+  },
+
+  S13:{ theme:'basement', portrait:null, objective:'통제구역 진입 방법 확인',
+    text:['지하 주차장 쪽으로 발걸음을 옮긴다. 차량 몇 대가 방치된 어두운 공간 너머, 흰 가운을 입은 사람의 형체가 기둥 뒤로 스치듯 지나간다.\n\n말을 걸기도 전에 사라졌다. 이 지하에 아직 누군가 남아있다는 뜻이다.'],
+    onEnter:function(){ addClue('지하 주차장에서 흰 가운을 입은 사람의 형체를 목격했다. 누구인지는 확인하지 못했다.'); },
+    choices:[{label:'발전기실 쪽으로 돌아간다', next:'S14'}]
+  },
+
+  S14:{ theme:'basement', portrait:null, objective:'수상한 인기척 확인',
+    text:['발전기실로 돌아오니, 굳게 닫힌 옆문 너머에서 규칙적인 노크 소리가 들린다.\n\n"...저기요? 거기 누구 있나요? 저 좀 도와주세요." 남자 목소리다. 다급하지만 침착하다.\n\n이 지하에서 사람 말을 하는 무언가를 몇 번이나 겪었다. 문을 열어야 할지 판단이 서지 않는다.'],
+    choices:[
+      {label:'문을 열어준다', next:'S15'},
+      {label:'대답하지 않고 지켜본다', next:'S14b'}
+    ]
+  },
+
+  S14b:{ theme:'basement', portrait:null, objective:'수상한 인기척 확인',
+    text:['노크 소리가 잦아들고, 발소리가 문 너머로 멀어진다.\n\n문틈으로 살짝 엿보니, 흰 가운을 입은 중년 남자가 손전등을 든 채 반대쪽 복도로 걸어가는 뒷모습이 보인다. 목에 걸린 사원증이 흔들린다.\n\n대화도 없이 이대로 놓치면, 통제구역으로 향하는 유일한 단서를 잃을지도 모른다.'],
+    choices:[{label:'직접 문을 열고 그를 부른다', next:'S15'}]
+  },
+
+  S15:{ theme:'basement', portrait:'doctor', portraitName:'흰 가운의 남자', objective:'남자와 대화',
+    text:['문을 열자(혹은 부르자), 그가 놀란 듯 돌아본다. 사원증에는 흐릿하게 "연구동 · 담당의"라는 글자가 보인다.\n\n"...살아있는 사람이군요. 다행입니다. 저는 이 병원 담당 의사입니다. 통신도 끊기고, 다들 어떻게 됐는지..."\n\n그의 말투는 침착하지만, 눈을 마주칠 때 반 박자쯤 늦게 깜빡이는 것 같다.'],
+    choices:[
+      {label:'"백신이 어디 있는지 아십니까?" 라고 묻는다', next:'S16'},
+      {label:'"당신도 감염된 겁니까?" 라고 캐묻는다', next:'END_death_doctor', danger:true}
+    ]
+  },
+
+  S16:{ theme:'basement', portrait:'doctor', portraitName:'흰 가운의 남자', objective:'남자의 신뢰 얻기',
+    text:['그가 잠시 침묵하다가 목소리를 낮춘다.\n\n"...제가 알려드릴 수 있는 건 여기까지가 아닙니다. 이 아래에 뭔가가 있어요. 저 통제구역, 저것도 원래는 없던 겁니다."\n\n그가 품에서 카드 하나를 꺼내려다, 다시 손을 멈춘다. "...아니, 이건 제가 드릴 수 없습니다. 규정 위반이라서요."'],
+    choices:[
+      {label:'"규정 같은 게 지금 중요합니까." 라고 조용히 압박한다', next:'S17'},
+      {label:'말없이 그의 눈을 응시한다', next:'S17'}
+    ]
+  },
+
+  S17:{ theme:'basement', portrait:'doctor', portraitName:'흰 가운의 남자', objective:'통제구역 진입',
+    text:['그가 한숨을 내쉬듯 고개를 젓더니, 카드를 바닥에 슬쩍 떨어뜨리듯 내려놓고는 몸을 돌린다.\n\n"...저는 못 본 걸로 하겠습니다. 알아서 하세요."\n\n그가 통제구역 쪽 복도로 멀어진다. 그가 흘리고 간 카드가 바닥에 놓여 있다. 줍는 것도, 따라가는 것도 스스로 판단해야 한다.'],
+    onEnter:function(){ addItem('keycard'); addClue('의사가 일부러 카드를 흘리고 갔다. 그는 이 상황에 대해 알고 있으면서도 애매하게 발을 빼고 있다.'); },
+    choices:[{label:'카드를 주워 통제구역 문으로 향한다', next:'S18'}]
+  },
+
+  S18:{ theme:'lab', portrait:null, objective:'통제구역 내부 확인',
+    insignia:true,
+    text:['카드를 대자 잠금장치가 힘없이 풀린다. 문 안쪽은 계단으로 이어져, 지하 3층 - 원래 설계도에는 없었을 공간으로 내려간다.\n\n벽마다 낡은 초록색 마크가 반복해서 찍혀 있다. 원 안에 십자와 사선이 겹친 문양. 그 아래 작게 "PROJECT TERRA"라는 글자.\n\n부서진 배양 캡슐, 뒤엎어진 실험 기록판, 사람 형태였을 무언가가 갇혀 있던 우리들. 이 병원은 처음부터 병원이 아니었다.'],
+    onEnter:function(){ addClue('지하 3층에서 비밀 실험 구역을 발견했다. "PROJECT TERRA" - 이 병원의 진짜 정체.'); addClue('감염되어도 한동안 사람처럼 행동하는 실험체가 이곳에서 만들어졌다. 지금까지 마주친 이들 중 누가 그것이었을지 모른다.'); },
+    choices:[{label:'더 안쪽으로 들어간다', next:'S19'}]
+  },
+
+  S19:{ theme:'lab', portrait:'commander', portraitName:'상관 (무전)', objective:'백신 확보',
+    insignia:true,
+    text:['안쪽 냉장 보관고에 세 개의 유리병이 나란히 놓여 있다. 그 순간 끊겼던 무전이 갑자기 지직거리며 살아난다.\n\n"...들리는군. 다행이다. 백신은 민트색이다. 그것만 챙겨서 즉시 옥상으로 올라와라. 다른 건 절대 손대지 마라."\n\n목소리는 분명 상관이다. 하지만 그가 어떻게 이 위치를, 이 색깔을 정확히 알고 있는지는 알려주지 않는다.'],
+    choices:[
+      {label:'민트색 병을 챙긴다 (상관의 지시대로)', next:'END_death_mint', danger:true},
+      {label:'"SAMPLE-B" 라벨이 붙은 붉은빛 병을 챙긴다', next:'END_death_fake', danger:true},
+      {label:'"VX-7" 각인이 찍힌 투명한 병을 챙긴다', next:'S20'}
+    ]
+  },
+
+  S20:{ theme:'lab', portrait:null, objective:'옥상으로 귀환',
+    insignia:true,
+    text:['보급 상자에서 봤던 것과 같은 배치 번호. 상관이 말한 색깔과는 다르지만, 지금까지 본 것 중 유일하게 앞뒤가 맞는 물건이다.\n\n병을 챙겨 넣고, 왔던 계단을 다시 오른다. 무전기 너머 상관의 목소리는 더 이상 들리지 않는다.'],
+    onEnter:function(){ addItem('vx7'); },
+    choices:[{label:'옥상을 향해 서두른다', next:'S21'}]
+  },
+
+  S21:{ theme:'ward', portrait:'infected', portraitName:null, objective:'옥상으로 귀환',
+    text:['비상계단을 두 층쯤 올랐을 때, 아까 마취시켰던 것이 아직 완전히 쓰러지지 않은 채 어둠 속에서 팔을 뻗는다.\n\n피할 틈도 없이, 손목에 날카로운 통증이 스친다. 이빨 자국이 선명하게 남는다.\n\n뿌리치고 계속 달리지만, 상처 주변이 벌써 뜨겁게 부어오르기 시작한다.'],
+    onEnter:function(){ state.infected=true; state.infectStage=1; addClue('계단에서 물렸다. 상처가 빠르게 부어오른다. 감염이 시작된 것 같다.'); },
+    choices:[{label:'통증을 참으며 옥상으로 향한다', next:'S22'}]
+  },
+
+  S22:{ theme:'roof', portrait:null, objective:'감염 진행 저지',
+    text:['옥상 문을 밀고 나오자 다리가 풀려 주저앉는다. 시야 가장자리가 검게 물들고, 손이 떨려 병을 놓칠 뻔한다.\n\n혼자 힘으로는 이 흐름을 멈출 수 없다는 걸 몸이 먼저 알아챈다. 가방 속에 남은 것들을 다시 확인한다.'],
+    choices:function(){
+      const opts=[];
+      if(hasItem('vx7') && hasItem('catalyst')){
+        opts.push({label:'백신(VX-7)과 촉매액을 함께 투여한다', next:'END_survive'});
+      }
+      if(hasItem('vx7')){
+        opts.push({label:'백신(VX-7)만 단독으로 투여한다', next:'END_death_nocure'});
+      }
+      opts.push({label:'그저 버틴다', next:'END_death_nocure'});
+      return opts;
+    }
+  }
+};
+
+/* ============================================================
+   ENDINGS
+   ============================================================ */
+const ENDINGS = {
+  END_death_sleep:{ type:'death', title:'DECEIVED', text:'수면제 섞인 음식을 아무 의심 없이 삼킨 대가는 되돌릴 수 없었다.\n\n의심해야 할 것은 낯선 얼굴이 아니라, 너무 자연스러운 친절함이었다.' },
+  END_death_wrongmed:{ type:'death', title:'MISJUDGED', text:'계단참 아래에서 마주친 그것에게 통하지 않는 약을 써버렸다.\n\n정확한 판단이 필요한 순간에, 확신 없는 선택은 곧 죽음이었다.' },
+  END_death_elevator:{ type:'death', title:'TRAPPED', text:'전력이 끊긴 건물의 엘리베이터는, 열린 채로 멈춘 관 속과 다름없었다.\n\n버튼을 누른 순간 이미 되돌릴 수 없었다.' },
+  END_death_doctor:{ type:'death', title:'EXPOSED', text:'그의 눈을 정면으로 마주보며 던진 질문은, 그가 애써 유지하던 균형을 무너뜨렸다.\n\n침착하던 얼굴이 순식간에 뒤바뀌었다. 마지막으로 본 것은 그의 손이었다.' },
+  END_death_mint:{ type:'death', title:'THE LIE', text:'상관이 지목한 민트색 병 안에는, 백신이 아니라 이 사건을 조용히 마무리 짓기 위한 다른 무언가가 들어 있었다.\n\n증상은 순식간에 나타났다. 무전기 너머로는 끝까지 아무 설명도 들려오지 않았다.' },
+  END_death_fake:{ type:'death', title:'PLACEBO', text:'"SAMPLE-B"라 적힌 병 속 액체는 그저 색을 흉내 낸 가짜였다.\n\n아무 일도 일어나지 않는 것처럼 보인 그 순간에도, 시간은 계속 흘러가고 있었다.' },
+  END_death_nocure:{ type:'death', title:'INCOMPLETE', text:'진짜 백신은 손에 있었지만, 그것만으로는 부족했다.\n\n무언가 더 필요했다는 사실을, 몸이 완전히 뜨거워지고 나서야 이해했다.' },
+  END_survive:{ type:'survive', title:'EXTRACTION', text:'백신과 정체 모를 촉매액이 뒤섞이는 순간, 몸속에서 두 물질이 반응해 들끓듯 요동친다.\n\n한참 뒤, 열이 거짓말처럼 가라앉는다. 옥상 너머로 헬기 소리가 들려온다.\n\n상관이 알려준 색깔은 틀렸다. 어쩌면 처음부터, 틀리기를 바랐던 것인지도 모른다.\n\n그 답을 찾는 것은, 이 병원을 나선 뒤의 몫이다.' }
+};
+
+/* ============================================================
+   UI :: rendering
+   ============================================================ */
+const elStoryText = document.getElementById('storyText');
+const elChoices = document.getElementById('choices');
+const elPortraitWrap = document.getElementById('portraitWrap');
+const elAvatarBox = document.getElementById('avatarBox');
+const elPortraitName = document.getElementById('portraitName');
+const elObjective = document.getElementById('objectiveText');
+const elBarHealth = document.getElementById('barHealth');
+const elBarInfect = document.getElementById('barInfect');
+const elInfectWrap = document.getElementById('infectWrap');
+const elInvList = document.getElementById('invList');
+const elInvCount = document.getElementById('invCount');
+const elClueList = document.getElementById('clueList');
+const insigniaSvg = document.getElementById('insigniaSvg');
+const noiseFlash = document.getElementById('noiseFlash');
+
+function avatarHTML(key){
+  switch(key){
+    case 'commander': return '<div class="radio-icon"><div class="antenna"></div><div class="speaker"></div><div class="wave w1"></div><div class="wave w2"></div></div>';
+    case 'gipsu': return '<div class="a-head"></div><div class="a-torso"></div><div class="gown-line"></div><div class="cast l"></div><div class="cast r"></div><div class="smile"></div>';
+    case 'doctor': return '<div class="a-head"></div><div class="glasses"></div><div class="collar"></div><div class="a-torso"></div><div class="a-badge"></div>';
+    case 'terra': return '<div class="a-head"></div><div class="goggles"></div><div class="a-torso"></div><div class="tank"><div class="tank-liquid"></div></div><div class="hose"></div>';
+    case 'courier': return '<div class="a-head"></div><div class="cap"><div class="cap-badge"></div></div><div class="a-torso"></div><div class="satchel"></div>';
+    case 'infected': return '<div class="a-head"></div><div class="a-torso"></div><div class="eyes"></div>';
+    default: return '';
+  }
+}
+
+function setPortrait(key, name){
+  if(!key){ elPortraitWrap.classList.remove('show'); return; }
+  elPortraitWrap.classList.add('show');
+  elAvatarBox.className = 'avatar avatar-'+key;
+  elAvatarBox.innerHTML = avatarHTML(key);
+  elPortraitName.textContent = name || '';
+}
+
+function renderInventory(){
+  elInvCount.textContent = state.inventory.length;
+  if(state.inventory.length===0){
+    elInvList.innerHTML = '<div class="empty-note">가진 것이 없다.</div>';
+    return;
+  }
+  elInvList.innerHTML = state.inventory.map(function(k){
+    const it = ITEMS[k];
+    return '<div class="item-row"><b>'+it.name+'</b><span>'+it.desc+'</span></div>';
+  }).join('');
+}
+function renderClues(){
+  if(state.clues.length===0){
+    elClueList.innerHTML = '<div class="empty-note">아직 기록된 단서가 없다.</div>';
+    return;
+  }
+  elClueList.innerHTML = state.clues.map(function(c){
+    return '<div class="clue-row">'+c+'</div>';
+  }).join('');
+}
+function updateHud(){
+  elBarHealth.style.width = state.health+'%';
+  if(state.infected){
+    elInfectWrap.style.display='flex';
+    elBarInfect.style.width = Math.min(100, state.infectStage*45)+'%';
+  } else {
+    elInfectWrap.style.display='none';
+  }
+}
+
+function flashRed(){
+  noiseFlash.style.transition='none';
+  noiseFlash.style.opacity='0.55';
+  requestAnimationFrame(function(){
+    noiseFlash.style.transition='opacity 0.6s';
+    noiseFlash.style.opacity='0';
+  });
+}
+
+function renderScene(id){
+  state.scene = id;
+  const sc = SCENES[id];
+  if(!sc){ console.error('missing scene', id); return; }
+  if(sc.onEnter) sc.onEnter();
+  if(sc.objective) elObjective.textContent = sc.objective;
+  setPortrait(sc.portrait, sc.portraitName);
+  currentTheme = CONFIG.themes[sc.theme] || CONFIG.themes.corridor;
+  insigniaSvg.style.display = sc.insignia ? 'block' : 'none';
+  elStoryText.innerHTML = sc.text.map(function(t){ return t.replace(/\n/g,'<br>'); }).join('<br><br>');
+  elStoryText.scrollTop = 0;
+  updateHud();
+  renderChoices(sc);
+}
+
+function renderChoices(sc){
+  elChoices.innerHTML='';
+  let list = typeof sc.choices === 'function' ? sc.choices() : sc.choices;
+  list.forEach(function(c){
+    const btn = document.createElement('button');
+    btn.className = 'choice-btn' + (c.danger?' danger':'');
+    btn.textContent = c.label;
+    const allowed = c.requires ? c.requires() : true;
+    if(!allowed){ btn.disabled = true; }
+    btn.addEventListener('click', function(){
+      if(!allowed) return;
+      if(c.onSelect) c.onSelect();
+      if(c.next && c.next.indexOf('END_')===0){
+        flashRed_ifDeath(c.next);
+        showEnding(c.next);
+      } else {
+        renderScene(c.next);
+      }
+    });
+    elChoices.appendChild(btn);
+  });
+}
+function flashRed_ifDeath(endId){
+  const e = ENDINGS[endId];
+  if(e && e.type==='death') flashRed();
+}
+
+function showEnding(id){
+  const e = ENDINGS[id];
+  currentTheme = CONFIG.themes[e.type==='death' ? 'death' : 'survive'];
+  const overlay = document.getElementById('endOverlay');
+  const title = document.getElementById('endTitle');
+  const text = document.getElementById('endText');
+  title.className = e.type;
+  title.textContent = (e.type==='death' ? '사망 :: ' : '생존 :: ') + e.title;
+  text.textContent = e.text;
+  overlay.classList.add('show');
+}
+
+document.getElementById('restartBtn').addEventListener('click', function(){
+  document.getElementById('endOverlay').classList.remove('show');
+  startGame();
+});
+document.getElementById('btnInv').addEventListener('click', function(){
+  document.getElementById('invPanel').classList.toggle('open');
+  document.getElementById('cluePanel').classList.remove('open');
+});
+document.getElementById('btnClue').addEventListener('click', function(){
+  document.getElementById('cluePanel').classList.toggle('open');
+  document.getElementById('invPanel').classList.remove('open');
+});
+
+/* ============================================================
+   EFFECTS / BACKGROUND CANVAS (draw loop)
+   ============================================================ */
+const canvas = document.getElementById('bgCanvas');
+const ctx = canvas.getContext('2d');
+let currentTheme = CONFIG.themes.corridor;
+function resize(){
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+function draw(t){
+  const w = canvas.width, h = canvas.height;
+  const th = currentTheme;
+  const grad = ctx.createLinearGradient(0,0,0,h);
+  grad.addColorStop(0, th.top);
+  grad.addColorStop(1, th.bot);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,w,h);
+
+  // vertical corridor perspective lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 1;
+  const vanishX = w*0.5, vanishY = h*0.35;
+  for(let i=0;i<6;i++){
+    const off = (i-2.5)*w*0.09;
+    ctx.beginPath();
+    ctx.moveTo(vanishX+off*0.15, vanishY);
+    ctx.lineTo(vanishX+off, h);
+    ctx.stroke();
+  }
+
+  // flicker fluorescent bands
+  if(th.flicker){
+    const flick = 0.5 + 0.5*Math.sin(t/130) * (Math.random()>0.96 ? 0.2 : 1);
+    ctx.fillStyle = 'rgba(255,255,255,'+(0.02+0.02*flick)+')';
+    for(let i=0;i<4;i++){
+      ctx.fillRect(0, h*0.12*i + 20, w, 3);
+    }
+  }
+
+  // tint wash for special themes
+  if(th.tint){
+    ctx.fillStyle = th.tint;
+    ctx.globalAlpha = 0.06;
+    ctx.fillRect(0,0,w,h);
+    ctx.globalAlpha = 1;
+  }
+
+  // night stars for rooftop
+  if(th.night){
+    ctx.fillStyle='rgba(255,255,255,0.5)';
+    for(let i=0;i<40;i++){
+      const sx = (i*97.3)%w, sy=(i*53.7)%(h*0.5);
+      ctx.fillRect(sx, sy, 1.4, 1.4);
+    }
+    const sweep = (t/1800)%1;
+    const grd2 = ctx.createRadialGradient(w*sweep, h*0.05, 0, w*sweep, h*0.05, w*0.4);
+    grd2.addColorStop(0,'rgba(139,38,53,0.18)');
+    grd2.addColorStop(1,'rgba(139,38,53,0)');
+    ctx.fillStyle = grd2;
+    ctx.fillRect(0,0,w,h);
+  }
+}
+
+function loop(t){
+  draw(t);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* ============================================================
+   INPUT :: none needed beyond click handlers above
+   ============================================================ */
+
+/* ============================================================
+   SAVE/RESTART
+   ============================================================ */
+function startGame(){
+  state = freshState();
+  renderInventory();
+  renderClues();
+  renderScene('S01');
+}
+startGame();
+</script>
+</body>
+</html>
