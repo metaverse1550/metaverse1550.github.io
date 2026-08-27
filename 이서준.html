@@ -1,0 +1,1524 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SF Zombie Survival - 미래 도시 백신 회수 작전</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Noto+Sans+KR:wght@300;400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Noto Sans KR', sans-serif;
+            background-color: #030712;
+            color: #f3f4f6;
+            user-select: none;
+        }
+        .orbitron { font-family: 'Orbitron', sans-serif; }
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+        .hud-panel {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+        }
+        .glow-text {
+            text-shadow: 0 0 10px rgba(56, 189, 248, 0.7);
+        }
+        .glow-red {
+            text-shadow: 0 0 10px rgba(244, 63, 94, 0.8);
+        }
+        #minimap-container {
+            border: 2px solid rgba(56, 189, 248, 0.4);
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.2);
+            background: rgba(3, 7, 18, 0.85);
+        }
+    </style>
+</head>
+<body class="w-screen h-screen relative bg-slate-950 text-slate-100 overflow-hidden">
+
+    <!-- Game Canvas -->
+    <canvas id="game-canvas" class="w-full h-full block"></canvas>
+
+    <!-- UI Overlay Layer -->
+    <div id="ui-container" class="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 md:p-6">
+        
+        <!-- Top HUD Bar -->
+        <div class="flex justify-between items-start w-full max-w-7xl mx-auto gap-4">
+            <!-- Objective & Wave Tracker -->
+            <div class="hud-panel p-4 rounded-xl max-w-md flex-1">
+                <div class="flex justify-between items-center mb-1">
+                    <div class="text-xs font-bold text-cyan-400 tracking-wider orbitron">작전 목표</div>
+                    <div id="wave-badge" class="text-xs font-black text-rose-400 bg-rose-950/80 px-2 py-0.5 rounded border border-rose-500/40 orbitron">
+                        WAVE 1
+                    </div>
+                </div>
+                <div id="objective-text" class="text-sm font-semibold text-slate-200">
+                    도시 구역에서 백신 재료를 찾으십시오 (0 / 4)
+                </div>
+                <div class="mt-2 flex gap-1.5" id="vaccine-slots">
+                    <div id="vac-0" class="w-1/4 h-2 rounded bg-slate-700 transition-colors duration-300"></div>
+                    <div id="vac-1" class="w-1/4 h-2 rounded bg-slate-700 transition-colors duration-300"></div>
+                    <div id="vac-2" class="w-1/4 h-2 rounded bg-slate-700 transition-colors duration-300"></div>
+                    <div id="vac-3" class="w-1/4 h-2 rounded bg-slate-700 transition-colors duration-300"></div>
+                </div>
+            </div>
+
+            <!-- Timer & Next Wave Alert -->
+            <div class="hud-panel px-6 py-3 rounded-xl text-center min-w-[160px]">
+                <div class="text-xs font-bold text-slate-400 tracking-widest orbitron">남은 시간</div>
+                <div id="timer-display" class="text-3xl font-black orbitron text-cyan-400 glow-text">05:00</div>
+                <div id="next-wave-timer" class="text-[10px] text-rose-400 orbitron mt-0.5">다음 호드: 40초</div>
+            </div>
+
+            <!-- Minimap Container -->
+            <div id="minimap-container" class="relative rounded-xl overflow-hidden p-1 backdrop-blur-md hidden sm:block">
+                <canvas id="minimap-canvas" width="130" height="130" class="rounded-lg block"></canvas>
+                <div class="absolute bottom-1 right-2 text-[9px] text-cyan-400/70 font-mono pointer-events-none">RADAR</div>
+            </div>
+        </div>
+
+        <!-- Center Prompt & Crosshair -->
+        <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
+            <!-- Crosshair -->
+            <div id="crosshair" class="w-6 h-6 flex items-center justify-center opacity-80">
+                <div class="w-1.5 h-1.5 bg-cyan-400 rounded-full"></div>
+            </div>
+
+            <!-- Horde Alert Banner -->
+            <div id="horde-alert" class="hidden hud-panel px-8 py-3 rounded-xl border border-rose-500 bg-rose-950/90 text-rose-200 font-black orbitron text-xl tracking-widest glow-red mb-4 animate-bounce">
+                ⚠️ WARNING: ZOMBIE HORDE APPROACHING! ⚠️
+            </div>
+
+            <!-- Interaction Prompt -->
+            <div id="prompt-box" class="hidden hud-panel px-6 py-3 rounded-lg border border-cyan-400/60 shadow-lg shadow-cyan-500/20 animate-pulse mt-8">
+                <span id="prompt-text" class="text-lg font-bold text-cyan-300 tracking-wider"></span>
+            </div>
+
+            <!-- Warning Banners -->
+            <div id="reload-warning" class="hidden mt-4 text-rose-500 font-extrabold tracking-widest text-sm orbitron animate-bounce">
+                [RELOAD REQUIRED - PRESS F]
+            </div>
+            <div id="ammo-low-warning" class="hidden mt-2 text-amber-400 font-bold tracking-wider text-xs orbitron animate-pulse bg-slate-950/80 px-3 py-1 rounded border border-amber-500/50">
+                ⚠️ 탄약 부족! 도시 탄약 상자나 좀비 드랍을 탐색하세요
+            </div>
+        </div>
+
+        <!-- Bottom HUD Bar -->
+        <div class="flex justify-between items-end w-full max-w-7xl mx-auto">
+            <!-- Health Bar & Treatment Items -->
+            <div class="hud-panel p-4 rounded-xl w-72 md:w-96">
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-xs font-bold text-emerald-400 orbitron">PLAYER HEALTH</span>
+                    <span id="hp-text" class="text-xs font-bold text-slate-300 orbitron">100 / 100</span>
+                </div>
+                <div class="w-full h-3 bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-700 mb-2">
+                    <div id="hp-bar" class="h-full bg-emerald-500 rounded-full transition-all duration-300 w-full"></div>
+                </div>
+                
+                <!-- Treatment Item Inventory Counter -->
+                <div class="flex justify-between items-center pt-2 border-t border-slate-800">
+                    <div class="flex items-center gap-2">
+                        <span class="text-emerald-400 text-base">✚</span>
+                        <span class="text-xs text-slate-300 font-bold">소지 치료제:</span>
+                        <span id="medkit-count" class="text-sm font-black text-emerald-400 orbitron">1</span>
+                    </div>
+                    <span class="text-[10px] text-emerald-300/80 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/30 orbitron">
+                        [S] 키로 회복 (+50 HP)
+                    </span>
+                </div>
+            </div>
+
+            <!-- Ammo Display Panel -->
+            <div class="hud-panel p-4 rounded-xl w-48 text-right">
+                <div class="text-xs font-bold text-cyan-400 orbitron mb-1">AMMO</div>
+                <div class="flex items-baseline justify-end gap-1 font-black orbitron">
+                    <span id="ammo-clip" class="text-3xl text-slate-100 glow-text">30</span>
+                    <span class="text-slate-500 text-lg">/</span>
+                    <span id="ammo-reserve" class="text-sm text-cyan-400">60</span>
+                </div>
+                <div class="text-[10px] text-slate-400 mt-1 orbitron">
+                    [F] 키로 재장전
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- START SCREEN -->
+    <div id="start-screen" class="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-6 z-50">
+        <div class="max-w-xl w-full hud-panel p-8 rounded-2xl text-center border border-cyan-500/30 shadow-2xl shadow-cyan-950">
+            <h1 class="text-4xl md:text-5xl font-black orbitron text-cyan-400 glow-text mb-2 tracking-wider">CYBER ZOMBIE</h1>
+            <p class="text-slate-400 text-sm tracking-widest uppercase orbitron mb-6">SF Zombie Survival Operation</p>
+            
+            <div class="text-left bg-slate-900/80 p-4 rounded-xl border border-slate-800 text-slate-300 text-sm space-y-2 mb-6">
+                <p class="text-cyan-300 font-bold">작전 브리핑:</p>
+                <p>• 바이러스 감염으로 폐허가 된 복잡한 미로형 미래 도시를 탐색하십시오.</p>
+                <p>• <span class="text-rose-400 font-bold">정예 좀비(스토커/브루트)의 등장!</span> 개체 수는 적지만 체력과 공격력이 매우 높습니다.</p>
+                <p>• 좀비가 <span class="text-rose-500 font-bold">총성 소리를 감지</span>하며, 장애물을 <span class="text-amber-400 font-bold">지능적으로 우회해 우회/포위 공격</span>합니다!</p>
+                <p>• 체력이 낮아진 좀비는 <span class="text-rose-400 font-bold">광란(Enrage) 상태</span>가 되어 이동 속도가 폭발적으로 증가합니다.</p>
+                <p>• 우측 상단 <span class="text-cyan-400 font-bold">실시간 미니맵 레이더</span>로 좀비 위치와 백신 위치를 파악하세요.</p>
+                <p>• 도시 구역의 <span class="text-amber-400 font-bold">4개 백신 재료를 모두 획득하는 즉시 클리어</span>됩니다!</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 text-xs text-slate-400 text-left mb-6 bg-slate-900/40 p-3 rounded-lg border border-slate-800/80">
+                <div><span class="text-cyan-400 font-bold">WASD:</span> 이동 (S: 후진 & 치료)</div>
+                <div><span class="text-cyan-400 font-bold">마우스:</span> 1인칭 시야 조작</div>
+                <div><span class="text-cyan-400 font-bold">E 키:</span> 백신/아이템 획득</div>
+                <div><span class="text-cyan-400 font-bold">F 키:</span> 총기 재장전</div>
+                <div><span class="text-cyan-400 font-bold">좌클릭:</span> 총기 사격</div>
+                <div><span class="text-cyan-400 font-bold">S 키:</span> 치료제 사용 (체력 +50 회복)</div>
+            </div>
+
+            <button id="btn-start" class="pointer-events-auto w-full py-4 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black orbitron text-lg rounded-xl shadow-lg shadow-cyan-500/30 transition duration-200 cursor-pointer transform hover:-translate-y-0.5">
+                작전 시작 (START MISSION)
+            </button>
+        </div>
+    </div>
+
+    <!-- PAUSE SCREEN -->
+    <div id="pause-screen" class="hidden absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-6 z-40">
+        <div class="max-w-md w-full hud-panel p-6 rounded-2xl text-center border border-slate-700">
+            <h2 class="text-2xl font-bold orbitron text-slate-200 mb-6">작전 일시정지</h2>
+            <div class="space-y-3 pointer-events-auto">
+                <button id="btn-resume" class="w-full py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold orbitron rounded-lg transition cursor-pointer">
+                    작전 재개 (RESUME)
+                </button>
+                <button id="btn-restart-pause" class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold orbitron rounded-lg transition cursor-pointer">
+                    재시작 (RESTART)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- WIN SCREEN -->
+    <div id="win-screen" class="hidden absolute inset-0 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-6 z-50">
+        <div class="max-w-md w-full hud-panel p-8 rounded-2xl text-center border border-emerald-500/40 shadow-2xl shadow-emerald-950">
+            <div class="text-emerald-400 text-5xl mb-2">✓</div>
+            <h2 class="text-3xl font-black orbitron text-emerald-400 glow-text mb-2">MISSION SUCCESS</h2>
+            <p class="text-slate-300 text-sm mb-6">모든 백신 재료를 확보했습니다! 인류 구원의 발판을 마련했습니다.</p>
+            <div id="win-stats" class="text-xs text-slate-400 bg-slate-900/60 p-3 rounded-lg mb-6 space-y-1 text-left border border-slate-800">
+                <div>• 남은 시간: <span id="win-time" class="text-slate-200 font-bold"></span></div>
+                <div>• 처치한 좀비 수: <span id="win-kills" class="text-slate-200 font-bold"></span></div>
+            </div>
+            <button id="btn-restart-win" class="pointer-events-auto w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold orbitron rounded-xl shadow-lg shadow-emerald-500/20 transition cursor-pointer">
+                다시 플레이 (PLAY AGAIN)
+            </button>
+        </div>
+    </div>
+
+    <!-- LOSE SCREEN -->
+    <div id="lose-screen" class="hidden absolute inset-0 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-6 z-50">
+        <div class="max-w-md w-full hud-panel p-8 rounded-2xl text-center border border-rose-500/40 shadow-2xl shadow-rose-950">
+            <div class="text-rose-500 text-5xl mb-2">✕</div>
+            <h2 class="text-3xl font-black orbitron text-rose-500 glow-red mb-2">MISSION FAILED</h2>
+            <p id="lose-reason" class="text-slate-300 text-sm mb-6">작전 실패</p>
+            <button id="btn-restart-lose" class="pointer-events-auto w-full py-3.5 bg-rose-600 hover:bg-rose-500 text-white font-bold orbitron rounded-xl shadow-lg shadow-rose-600/20 transition cursor-pointer">
+                작전 재시도 (RETRY MISSION)
+            </button>
+        </div>
+    </div>
+
+    <script>
+    // ==========================================
+    // CONFIG & GAME STATE
+    // ==========================================
+    const CONFIG = {
+        TIME_LIMIT: 300,
+        PLAYER_SPEED: 8.8,
+        PLAYER_MAX_HP: 100,
+        GUN_CLIP_SIZE: 30,
+        GUN_DAMAGE: 35,
+        INITIAL_ZOMBIE_COUNT: 12, // 정예 좀비 시스템: 개체 수 축소 (기존 70개 -> 12개)
+        ZOMBIE_BASE_SPEED: 8.5,   // 이동 속도 강화
+        ZOMBIE_ATTACK_RANGE: 1.8,
+        ZOMBIE_ATTACK_DAMAGE: 55, // 데미지 대폭 상향 (기존 42 -> 55)
+        HORDE_INTERVAL: 35,
+        MAP_SIZE: 95
+    };
+
+    const STATE = {
+        START: 'START',
+        PLAYING: 'PLAYING',
+        PAUSED: 'PAUSED',
+        WIN: 'WIN',
+        LOSE: 'LOSE'
+    };
+
+    let currentState = STATE.START;
+    let scene, camera, renderer, clock;
+    let pitchObject, yawObject;
+    let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+    let isReloading = false;
+
+    let player = {
+        hp: CONFIG.PLAYER_MAX_HP,
+        maxHp: CONFIG.PLAYER_MAX_HP,
+        medkits: 1,
+        clipAmmo: CONFIG.GUN_CLIP_SIZE,
+        reserveAmmo: 60,
+        kills: 0
+    };
+
+    let currentWave = 1;
+    let hordeTimer = CONFIG.HORDE_INTERVAL;
+    let minimapCtx = null;
+
+    let zombies = [];
+    let items = [];
+    let cityWalls = [];
+    let vaccineLocations = [];
+    let vaccinesCollected = 0;
+    let labPosition = new THREE.Vector3(0, 0, 0);
+    let timeRemaining = CONFIG.TIME_LIMIT;
+    let weaponMesh, muzzleFlashLight;
+
+    // ==========================================
+    // THREE.JS INITIALIZATION
+    // ==========================================
+    function initThree() {
+        const canvas = document.getElementById('game-canvas');
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x030712);
+        scene.fog = new THREE.FogExp2(0x030712, 0.022);
+
+        clock = new THREE.Clock();
+
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 200);
+        pitchObject = new THREE.Object3D();
+        pitchObject.add(camera);
+
+        yawObject = new THREE.Object3D();
+        yawObject.position.set(0, 1.7, 12);
+        yawObject.add(pitchObject);
+        scene.add(yawObject);
+
+        renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+
+        const ambientLight = new THREE.AmbientLight(0x1e293b, 1.2);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0x38bdf8, 0.8);
+        dirLight.position.set(40, 60, 20);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        window.addEventListener('resize', onWindowResize);
+
+        const minimapCanvas = document.getElementById('minimap-canvas');
+        if (minimapCanvas) {
+            minimapCtx = minimapCanvas.getContext('2d');
+        }
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // ==========================================
+    // WEAPON SETUP
+    // ==========================================
+    function createWeapon() {
+        const gunGroup = new THREE.Group();
+
+        const bodyGeo = new THREE.BoxGeometry(0.1, 0.12, 0.5);
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.3, metalness: 0.8 });
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        gunGroup.add(body);
+
+        const barrelGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.3, 8);
+        const barrelMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.2, metalness: 0.9 });
+        const barrel = new THREE.Mesh(barrelGeo, barrelMat);
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.set(0, 0.02, -0.3);
+        gunGroup.add(barrel);
+
+        muzzleFlashLight = new THREE.PointLight(0x38bdf8, 0, 5);
+        muzzleFlashLight.position.set(0, 0.02, -0.5);
+        gunGroup.add(muzzleFlashLight);
+
+        gunGroup.position.set(0.25, -0.22, -0.45);
+        camera.add(gunGroup);
+        weaponMesh = gunGroup;
+    }
+
+    // ==========================================
+    // MAP GENERATION
+    // ==========================================
+    function buildCityMap() {
+        const floorGeo = new THREE.PlaneGeometry(CONFIG.MAP_SIZE * 2, CONFIG.MAP_SIZE * 2);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x090d16, roughness: 0.8, metalness: 0.2 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        const gridHelper = new THREE.GridHelper(CONFIG.MAP_SIZE * 2, 40, 0x0284c7, 0x1e293b);
+        gridHelper.position.y = 0.01;
+        scene.add(gridHelper);
+
+        // Research Lab Structure
+        const labGroup = new THREE.Group();
+        const labBaseGeo = new THREE.BoxGeometry(16, 8, 16);
+        const labBaseMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.4, metalness: 0.8 });
+        const labBase = new THREE.Mesh(labBaseGeo, labBaseMat);
+        labBase.position.y = 4;
+        labGroup.add(labBase);
+
+        const labRoofGeo = new THREE.BoxGeometry(14, 0.5, 14);
+        const labRoofMat = new THREE.MeshStandardMaterial({ color: 0x10b981, emissive: 0x059669, emissiveIntensity: 0.8 });
+        const labRoof = new THREE.Mesh(labRoofGeo, labRoofMat);
+        labRoof.position.y = 8.25;
+        labGroup.add(labRoof);
+
+        const labLight = new THREE.PointLight(0x10b981, 3, 20);
+        labLight.position.set(0, 3, 0);
+        labGroup.add(labLight);
+
+        scene.add(labGroup);
+        cityWalls.push(new THREE.Box3().setFromObject(labBase));
+
+        // City Buildings & Winding Street Labyrinths
+        const buildingMat = new THREE.MeshStandardMaterial({ color: 0x020617, roughness: 0.6, metalness: 0.4 });
+        const windowMat = new THREE.MeshStandardMaterial({ color: 0x0284c7, emissive: 0x0369a1, emissiveIntensity: 0.5 });
+        const barrierMat = new THREE.MeshStandardMaterial({ color: 0x1e1b4b, roughness: 0.5, metalness: 0.6 });
+
+        const isNearClearZone = function(x, z) {
+            if (Math.abs(x) < 22 && Math.abs(z) < 22) return true;
+            const vacLocs = [
+                { x: -35, z: -35 },
+                { x: 35, z: -35 },
+                { x: -35, z: 35 },
+                { x: 35, z: 35 }
+            ];
+            return vacLocs.some(function(v) { return Math.hypot(x - v.x, z - v.z) < 14; });
+        };
+
+        // Grid Buildings
+        for (let x = -CONFIG.MAP_SIZE + 15; x <= CONFIG.MAP_SIZE - 15; x += 25) {
+            for (let z = -CONFIG.MAP_SIZE + 15; z <= CONFIG.MAP_SIZE - 15; z += 25) {
+                if (isNearClearZone(x, z)) continue;
+
+                const h = 12 + Math.random() * 20;
+                const bGeo = new THREE.BoxGeometry(16, h, 16);
+                const bMesh = new THREE.Mesh(bGeo, buildingMat);
+                bMesh.position.set(x, h / 2, z);
+                scene.add(bMesh);
+
+                cityWalls.push(new THREE.Box3().setFromObject(bMesh));
+
+                if (Math.random() > 0.4) {
+                    const stripGeo = new THREE.BoxGeometry(16.2, 0.4, 16.2);
+                    const strip = new THREE.Mesh(stripGeo, windowMat);
+                    strip.position.set(x, 4 + Math.random() * (h - 6), z);
+                    scene.add(strip);
+                }
+            }
+        }
+
+        // Add Winding Alley Barriers & Zig-Zag Wall Obstacles across streets
+        const mazeBarriers = [
+            // Horizontal winding barriers
+            { x: -50, z: -12, w: 26, h: 6, d: 3 },
+            { x: -10, z: -50, w: 32, h: 6, d: 3 },
+            { x: 45, z: -12, w: 28, h: 6, d: 3 },
+            { x: -40, z: 12, w: 30, h: 6, d: 3 },
+            { x: 15, z: 48, w: 34, h: 6, d: 3 },
+            { x: 50, z: 25, w: 24, h: 6, d: 3 },
+            // Vertical winding barriers creating serpentine paths
+            { x: -25, z: -60, w: 3, h: 6, d: 28 },
+            { x: 25, z: -40, w: 3, h: 6, d: 32 },
+            { x: -62, z: 25, w: 3, h: 6, d: 26 },
+            { x: -12, z: 55, w: 3, h: 6, d: 30 },
+            { x: 38, z: -62, w: 3, h: 6, d: 25 },
+            { x: 62, z: -25, w: 3, h: 6, d: 28 },
+            { x: -12, z: -25, w: 3, h: 6, d: 22 }
+        ];
+
+        mazeBarriers.forEach(function(b) {
+            if (isNearClearZone(b.x, b.z)) return;
+            const bMesh = new THREE.Mesh(new THREE.BoxGeometry(b.w, b.h, b.d), barrierMat);
+            bMesh.position.set(b.x, b.h / 2, b.z);
+            scene.add(bMesh);
+            cityWalls.push(new THREE.Box3().setFromObject(bMesh));
+        });
+
+        // Boundary Walls
+        const wallThickness = 4;
+        const wallHeight = 15;
+        const halfSize = CONFIG.MAP_SIZE;
+
+        const outerWallGeos = [
+            { w: halfSize * 2, h: wallHeight, d: wallThickness, x: 0, y: wallHeight / 2, z: -halfSize },
+            { w: halfSize * 2, h: wallHeight, d: wallThickness, x: 0, y: wallHeight / 2, z: halfSize },
+            { w: wallThickness, h: wallHeight, d: halfSize * 2, x: -halfSize, y: wallHeight / 2, z: 0 },
+            { w: wallThickness, h: wallHeight, d: halfSize * 2, x: halfSize, y: wallHeight / 2, z: 0 }
+        ];
+
+        const outerMat = new THREE.MeshBasicMaterial({ color: 0x020617 });
+        outerWallGeos.forEach(function(w) {
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(w.w, w.h, w.d), outerMat);
+            wall.position.set(w.x, w.y, w.z);
+            scene.add(wall);
+            cityWalls.push(new THREE.Box3().setFromObject(wall));
+        });
+    }
+
+    // ==========================================
+    // ITEMS & VACCINE SPAWNING
+    // ==========================================
+    function spawnItems() {
+        items = [];
+
+        vaccineLocations = [
+            { x: -35, z: -35, name: "백신 시약 A (항원 주입체)" },
+            { x: 35, z: -35, name: "백신 시약 B (유전자 촉매)" },
+            { x: -35, z: 35, name: "백신 시약 C (나노 안정제)" },
+            { x: 35, z: 35, name: "백신 시약 D (면역 강화제)" }
+        ];
+
+        vaccineLocations.forEach(function(loc, index) {
+            const group = new THREE.Group();
+
+            const capGeo = new THREE.CylinderGeometry(0.5, 0.5, 1.4, 12);
+            const capMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.1, metalness: 0.9, emissive: 0xd97706, emissiveIntensity: 1.0 });
+            const capMesh = new THREE.Mesh(capGeo, capMat);
+            group.add(capMesh);
+
+            // Light Pillar Beacon
+            const beaconGeo = new THREE.CylinderGeometry(0.15, 0.15, 40, 8);
+            const beaconMat = new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.4 });
+            const beaconMesh = new THREE.Mesh(beaconGeo, beaconMat);
+            beaconMesh.position.y = 20;
+            group.add(beaconMesh);
+
+            const light = new THREE.PointLight(0xf59e0b, 3, 15);
+            light.position.set(0, 1.0, 0);
+            group.add(light);
+
+            group.position.set(loc.x, 0.8, loc.z);
+            scene.add(group);
+
+            items.push({
+                type: 'vaccine',
+                id: index,
+                name: loc.name,
+                mesh: group,
+                pos: group.position,
+                baseY: 0.8,
+                collected: false
+            });
+        });
+
+        const itemLocations = [
+            { type: 'medkit', x: -25, z: 20 }, 
+            { type: 'medkit', x: 28, z: -20 },
+            { type: 'medkit', x: 5, z: -30 },
+            { type: 'ammo', x: 15, z: -18 },   
+            { type: 'ammo', x: -20, z: -10 }, 
+            { type: 'ammo', x: 28, z: 28 },    
+            { type: 'ammo', x: -35, z: -8 }
+        ];
+
+        itemLocations.forEach(function(loc, i) {
+            createItemMesh(loc.type, loc.x, loc.z, 'supp_' + i);
+        });
+    }
+
+    function createItemMesh(type, x, z, id) {
+        const group = new THREE.Group();
+        const isMedkit = type === 'medkit';
+
+        const geo = new THREE.BoxGeometry(0.9, 0.5, 0.7);
+        const mat = new THREE.MeshStandardMaterial({
+            color: isMedkit ? 0x10b981 : 0x0284c7,
+            emissive: isMedkit ? 0x059669 : 0x0284c7,
+            emissiveIntensity: 0.6,
+            roughness: 0.3,
+            metalness: 0.7
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        group.add(mesh);
+
+        if (isMedkit) {
+            const crossMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const crossH = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.52, 0.12), crossMat);
+            const crossV = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.52, 0.4), crossMat);
+            group.add(crossH);
+            group.add(crossV);
+        } else {
+            const stripeGeo = new THREE.BoxGeometry(0.92, 0.1, 0.72);
+            const stripeMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+            const stripe = new THREE.Mesh(stripeGeo, stripeMat);
+            stripe.position.y = 0.05;
+            group.add(stripe);
+        }
+
+        const pLight = new THREE.PointLight(isMedkit ? 0x10b981 : 0x38bdf8, 1.5, 6);
+        pLight.position.set(0, 0.5, 0);
+        group.add(pLight);
+
+        group.position.set(x, 0.5, z);
+        scene.add(group);
+
+        items.push({
+            type: type,
+            id: id,
+            name: isMedkit ? '치료제 키트 (획득 후 [S]키로 사용)' : '탄약 상자 (+30 Ammo)',
+            mesh: group,
+            pos: group.position,
+            baseY: 0.5,
+            collected: false
+        });
+    }
+
+    function spawnZombieDrop(position) {
+        const rand = Math.random();
+        if (rand < 0.15) {
+            createItemMesh('ammo', position.x, position.z, 'drop_ammo_' + Date.now());
+        } else if (rand < 0.20) {
+            createItemMesh('medkit', position.x, position.z, 'drop_med_' + Date.now());
+        }
+    }
+
+    function collectItem(item) {
+        if (!item || item.collected) return;
+        item.collected = true;
+        if (item.mesh) scene.remove(item.mesh);
+        sounds.playPickup();
+
+        if (item.type === 'vaccine') {
+            vaccinesCollected++;
+            const vacSlot = document.getElementById('vac-' + item.id);
+            if (vacSlot) {
+                vacSlot.classList.remove('bg-slate-700');
+                vacSlot.classList.add('bg-amber-400');
+            }
+            updateObjectiveText();
+            if (vaccinesCollected >= 4) {
+                endGame(true);
+            }
+        } else if (item.type === 'medkit') {
+            player.medkits++;
+            updateHUD();
+        } else if (item.type === 'ammo') {
+            player.reserveAmmo += 30;
+            updateHUD();
+        }
+    }
+
+    function updateItems(delta) {
+        const time = clock.getElapsedTime();
+        const playerPos = yawObject.position;
+
+        items.forEach(function(item) {
+            if (item.collected || !item.mesh) return;
+            item.mesh.rotation.y += delta * 1.5;
+            item.mesh.position.y = item.baseY + Math.sin(time * 3 + item.pos.x) * 0.15;
+
+            const dist2D = Math.hypot(playerPos.x - item.pos.x, playerPos.z - item.pos.z);
+            if (dist2D < 4.8) {
+                collectItem(item);
+            }
+        });
+    }
+
+    // ==========================================
+    // SOUND SYNTHESIZER
+    // ==========================================
+    const sounds = {
+        ctx: null,
+        init: function() {
+            if (!this.ctx) {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (AudioCtx) this.ctx = new AudioCtx();
+            }
+            if (this.ctx && this.ctx.state === 'suspended') {
+                this.ctx.resume();
+            }
+        },
+        playShoot: function() {
+            if (!this.ctx) return;
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(300, now);
+            osc.frequency.exponentialRampToValueAtTime(40, now + 0.15);
+            gain.gain.setValueAtTime(0.3, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.15);
+        },
+        playZombieHit: function() {
+            if (!this.ctx) return;
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(120, now);
+            osc.frequency.exponentialRampToValueAtTime(30, now + 0.1);
+            gain.gain.setValueAtTime(0.4, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.1);
+        },
+        playPlayerHurt: function() {
+            if (!this.ctx) return;
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(80, now);
+            osc.frequency.linearRampToValueAtTime(40, now + 0.2);
+            gain.gain.setValueAtTime(0.5, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.2);
+        },
+        playReload: function() {
+            if (!this.ctx) return;
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(600, now);
+            osc.frequency.setValueAtTime(900, now + 0.1);
+            gain.gain.setValueAtTime(0.2, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.25);
+        },
+        playPickup: function() {
+            if (!this.ctx) return;
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(523.25, now);
+            osc.frequency.setValueAtTime(659.25, now + 0.08);
+            gain.gain.setValueAtTime(0.2, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.2);
+        },
+        playHeal: function() {
+            if (!this.ctx) return;
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(400, now);
+            osc.frequency.exponentialRampToValueAtTime(800, now + 0.3);
+            gain.gain.setValueAtTime(0.2, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.3);
+        },
+        playHordeAlarm: function() {
+            if (!this.ctx) return;
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(440, now);
+            osc.frequency.linearRampToValueAtTime(880, now + 0.4);
+            gain.gain.setValueAtTime(0.3, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.5);
+        }
+    };
+
+    // ==========================================
+    // ZOMBIES & AI
+    // ==========================================
+    function createZombieMesh(type) {
+        const group = new THREE.Group();
+        const isBrute = type === 'BRUTE';
+
+        // Body Dimensions
+        const bodyWidth = isBrute ? 1.2 : 0.85;
+        const bodyHeight = isBrute ? 1.8 : 1.4;
+        const bodyDepth = isBrute ? 0.8 : 0.55;
+
+        const bodyGeo = new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyDepth);
+        const bodyMat = new THREE.MeshStandardMaterial({
+            color: isBrute ? 0x4c0519 : 0x1e1b4b,
+            roughness: 0.6,
+            metalness: 0.3
+        });
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.position.y = bodyHeight / 2;
+        group.add(body);
+
+        // Head (with headshot detection metadata)
+        const headSize = isBrute ? 0.65 : 0.5;
+        const headGeo = new THREE.BoxGeometry(headSize, headSize, headSize);
+        const headMat = new THREE.MeshStandardMaterial({
+            color: isBrute ? 0x881337 : 0x312e81,
+            roughness: 0.5
+        });
+        const head = new THREE.Mesh(headGeo, headMat);
+        head.position.set(0, bodyHeight + headSize / 2, 0);
+        head.userData = { isHead: true };
+        group.add(head);
+
+        // Glowing Eyes (Cyan for Stalkers, Glowing Crimson for Brutes)
+        const eyeGeo = new THREE.BoxGeometry(isBrute ? 0.16 : 0.12, 0.09, 0.1);
+        const eyeMat = new THREE.MeshBasicMaterial({ color: isBrute ? 0xf43f5e : 0x06b6d4 });
+        const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
+        eyeL.position.set(-headSize * 0.28, bodyHeight + headSize / 2, -headSize * 0.51);
+        const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
+        eyeR.position.set(headSize * 0.28, bodyHeight + headSize / 2, -headSize * 0.51);
+        group.add(eyeL);
+        group.add(eyeR);
+
+        // Arms Extended
+        const armGeo = new THREE.BoxGeometry(isBrute ? 0.35 : 0.25, 0.3, isBrute ? 1.0 : 0.85);
+        const armMat = new THREE.MeshStandardMaterial({ color: isBrute ? 0x881337 : 0x3730a3 });
+        const armL = new THREE.Mesh(armGeo, armMat);
+        armL.position.set(-bodyWidth / 2 - 0.12, bodyHeight * 0.65, -0.3);
+        const armR = new THREE.Mesh(armGeo, armMat);
+        armR.position.set(bodyWidth / 2 + 0.12, bodyHeight * 0.65, -0.3);
+        group.add(armL);
+        group.add(armR);
+
+        return group;
+    }
+
+    function spawnZombies() {
+        zombies.forEach(function(z) { scene.remove(z.mesh); });
+        zombies = [];
+
+        for (let i = 0; i < CONFIG.INITIAL_ZOMBIE_COUNT; i++) {
+            let x, z;
+            do {
+                x = (Math.random() - 0.5) * (CONFIG.MAP_SIZE * 1.6);
+                z = (Math.random() - 0.5) * (CONFIG.MAP_SIZE * 1.6);
+            } while (Math.abs(x) < 25 && Math.abs(z) < 25);
+
+            const isBrute = Math.random() < 0.4;
+            const zType = isBrute ? 'BRUTE' : 'STALKER';
+            const zMesh = createZombieMesh(zType);
+            zMesh.position.set(x, 0, z);
+            scene.add(zMesh);
+
+            zombies.push({
+                mesh: zMesh,
+                type: zType,
+                hp: isBrute ? 420 : 260, // 대폭 상향된 체력
+                maxHp: isBrute ? 420 : 260,
+                speedMultiplier: isBrute ? 1.15 : 1.65, // 스토커는 강력하고 매우 빠름
+                flankAngle: (Math.random() - 0.5) * 1.4, // 우회 공격 각도
+                alive: true,
+                state: 'WANDER',
+                wanderTarget: new THREE.Vector3(x + (Math.random() - 0.5) * 20, 0, z + (Math.random() - 0.5) * 20),
+                lastAttackTime: 0
+            });
+        }
+    }
+
+    function spawnHordeWave() {
+        currentWave++;
+        sounds.playHordeAlarm();
+
+        const alertBox = document.getElementById('horde-alert');
+        if (alertBox) {
+            alertBox.innerText = '⚠️ WARNING: ELITE HORDE WAVE ' + currentWave + ' APPROACHING! ⚠️';
+            alertBox.classList.remove('hidden');
+            setTimeout(function() { alertBox.classList.add('hidden'); }, 3500);
+        }
+
+        const waveBadge = document.getElementById('wave-badge');
+        if (waveBadge) waveBadge.innerText = 'WAVE ' + currentWave;
+
+        const hordeSize = 4 + currentWave * 2;
+        const playerPos = yawObject.position;
+
+        for (let i = 0; i < hordeSize; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 50 + Math.random() * 25;
+            const x = Math.max(-CONFIG.MAP_SIZE + 5, Math.min(CONFIG.MAP_SIZE - 5, playerPos.x + Math.cos(angle) * dist));
+            const z = Math.max(-CONFIG.MAP_SIZE + 5, Math.min(CONFIG.MAP_SIZE - 5, playerPos.z + Math.sin(angle) * dist));
+
+            const isBrute = Math.random() < 0.5;
+            const zType = isBrute ? 'BRUTE' : 'STALKER';
+            const zMesh = createZombieMesh(zType);
+            zMesh.position.set(x, 0, z);
+            scene.add(zMesh);
+
+            const zSpeed = (CONFIG.ZOMBIE_BASE_SPEED + currentWave * 0.4) * (isBrute ? 1.2 : 1.7);
+
+            zombies.push({
+                mesh: zMesh,
+                type: zType,
+                hp: (isBrute ? 450 : 280) + currentWave * 40,
+                maxHp: (isBrute ? 450 : 280) + currentWave * 40,
+                speedMultiplier: zSpeed / CONFIG.ZOMBIE_BASE_SPEED,
+                flankAngle: (Math.random() - 0.5) * 1.5,
+                alive: true,
+                state: 'CHASE',
+                wanderTarget: playerPos.clone(),
+                lastAttackTime: 0
+            });
+        }
+    }
+
+    function updateZombies(delta) {
+        const playerPos = yawObject.position;
+        const now = clock.getElapsedTime();
+
+        const currentBaseSpeed = CONFIG.ZOMBIE_BASE_SPEED + (currentWave - 1) * 0.3;
+        const currentDmg = CONFIG.ZOMBIE_ATTACK_DAMAGE + (currentWave - 1) * 4;
+
+        zombies.forEach(function(z) {
+            if (!z.alive) return;
+
+            const distToPlayer = z.mesh.position.distanceTo(playerPos);
+            let actualSpeed = currentBaseSpeed * z.speedMultiplier;
+
+            // Enrage boost when health drops below 35%
+            if (z.hp / z.maxHp < 0.35) {
+                actualSpeed *= 1.25;
+            }
+
+            if (distToPlayer < CONFIG.ZOMBIE_ATTACK_RANGE) {
+                z.state = 'ATTACK';
+            } else if (distToPlayer < 55 + currentWave * 5) {
+                z.state = 'CHASE';
+            } else if (z.state !== 'INVESTIGATE') {
+                z.state = 'WANDER';
+            }
+
+            if (z.state === 'CHASE' || z.state === 'INVESTIGATE') {
+                // Calculate target position with flanking vector offset
+                const targetPos = z.state === 'CHASE' ? playerPos.clone() : z.wanderTarget.clone();
+                if (z.state === 'CHASE') {
+                    const dirToPlayer = new THREE.Vector3().subVectors(playerPos, z.mesh.position).normalize();
+                    const flankOffset = dirToPlayer.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), z.flankAngle).multiplyScalar(4.5);
+                    targetPos.add(flankOffset);
+                }
+
+                // Obstacle Avoidance Vector
+                let moveDir = new THREE.Vector3().subVectors(targetPos, z.mesh.position).normalize();
+                
+                // Detect wall collision ahead
+                const zBox = new THREE.Box3().setFromCenterAndSize(
+                    z.mesh.position.clone().add(moveDir.clone().multiplyScalar(1.5)),
+                    new THREE.Vector3(1.2, 1.8, 1.2)
+                );
+
+                let obstacleAhead = false;
+                for (let i = 0; i < cityWalls.length; i++) {
+                    if (zBox.intersectsBox(cityWalls[i])) {
+                        obstacleAhead = true;
+                        break;
+                    }
+                }
+
+                // Steer left or right to dynamically navigate around wall obstacles
+                if (obstacleAhead) {
+                    const steerAngle = Math.sin(now * 4 + z.mesh.id) > 0 ? Math.PI / 2.5 : -Math.PI / 2.5;
+                    moveDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), steerAngle);
+                }
+
+                z.mesh.lookAt(z.mesh.position.x + moveDir.x, z.mesh.position.y, z.mesh.position.z + moveDir.z);
+                z.mesh.position.x += moveDir.x * actualSpeed * delta;
+                z.mesh.position.z += moveDir.z * actualSpeed * delta;
+
+            } else if (z.state === 'ATTACK') {
+                z.mesh.lookAt(playerPos.x, z.mesh.position.y, playerPos.z);
+                if (now - z.lastAttackTime > 0.9) {
+                    z.lastAttackTime = now;
+                    player.hp -= currentDmg;
+                    sounds.playPlayerHurt();
+                    updateHUD();
+
+                    if (player.hp <= 0) {
+                        endGame(false, '정예 좀비의 강력한 기습에 사망했습니다.');
+                    }
+                }
+            } else if (z.state === 'WANDER') {
+                const distToWander = z.mesh.position.distanceTo(z.wanderTarget);
+                if (distToWander < 2.0 || Math.random() < 0.01) {
+                    z.wanderTarget.set(
+                        z.mesh.position.x + (Math.random() - 0.5) * 25,
+                        0,
+                        z.mesh.position.z + (Math.random() - 0.5) * 25
+                    );
+                }
+                const moveDir = new THREE.Vector3().subVectors(z.wanderTarget, z.mesh.position).normalize();
+                z.mesh.lookAt(z.mesh.position.x + moveDir.x, z.mesh.position.y, z.mesh.position.z + moveDir.z);
+                z.mesh.position.x += moveDir.x * (actualSpeed * 0.45) * delta;
+                z.mesh.position.z += moveDir.z * (actualSpeed * 0.45) * delta;
+            }
+        });
+    }
+
+    // ==========================================
+    // CONTROLS & COMBAT SYSTEM
+    // ==========================================
+    function setupInput() {
+        document.addEventListener('keydown', function(e) {
+            if (currentState !== STATE.PLAYING) return;
+            const k = e.key.toLowerCase();
+            
+            if (e.code === 'KeyW' || k === 'w' || k === 'ㅈ' || e.code === 'ArrowUp') moveForward = true;
+            if (e.code === 'KeyS' || k === 's' || k === 'ㄴ' || e.code === 'ArrowDown') {
+                moveBackward = true;
+                if (player.hp < player.maxHp && player.medkits > 0) {
+                    useMedkit();
+                }
+            }
+            if (e.code === 'KeyA' || k === 'a' || k === 'ㅁ' || e.code === 'ArrowLeft') moveLeft = true;
+            if (e.code === 'KeyD' || k === 'd' || k === 'ㅇ' || e.code === 'ArrowRight') moveRight = true;
+            if (e.code === 'KeyF' || k === 'ㄹ') reloadWeapon();
+            if (e.code === 'KeyE' || k === 'e' || k === 'ㄷ') interactWithNearby();
+        });
+
+        document.addEventListener('keyup', function(e) {
+            const k = e.key.toLowerCase();
+            if (e.code === 'KeyW' || k === 'w' || k === 'ㅈ' || e.code === 'ArrowUp') moveForward = false;
+            if (e.code === 'KeyS' || k === 's' || k === 'ㄴ' || e.code === 'ArrowDown') moveBackward = false;
+            if (e.code === 'KeyA' || k === 'a' || k === 'ㅁ' || e.code === 'ArrowLeft') moveLeft = false;
+            if (e.code === 'KeyD' || k === 'd' || k === 'ㅇ' || e.code === 'ArrowRight') moveRight = false;
+        });
+
+        document.addEventListener('mousemove', function(e) {
+            if (document.pointerLockElement !== document.body || currentState !== STATE.PLAYING) return;
+
+            const movementX = e.movementX || 0;
+            const movementY = e.movementY || 0;
+
+            yawObject.rotation.y -= movementX * 0.0022;
+            pitchObject.rotation.x -= movementY * 0.0022;
+
+            pitchObject.rotation.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, pitchObject.rotation.x));
+        });
+
+        document.addEventListener('mousedown', function(e) {
+            if (e.button === 0 && currentState === STATE.PLAYING) {
+                shootWeapon();
+            }
+        });
+    }
+
+    function shootWeapon() {
+        if (isReloading) return;
+
+        if (player.clipAmmo <= 0) {
+            const relWarn = document.getElementById('reload-warning');
+            if (relWarn) relWarn.classList.remove('hidden');
+            return;
+        }
+
+        const relWarn = document.getElementById('reload-warning');
+        if (relWarn) relWarn.classList.add('hidden');
+
+        player.clipAmmo--;
+        sounds.playShoot();
+        updateHUD();
+
+        // Sound detection: Alert surrounding zombies upon gunshot sound
+        const soundRadius = 75;
+        zombies.forEach(function(z) {
+            if (z.alive && z.mesh.position.distanceTo(yawObject.position) < soundRadius) {
+                z.state = 'CHASE';
+            }
+        });
+
+        weaponMesh.position.z = -0.38;
+        muzzleFlashLight.intensity = 4;
+        setTimeout(function() {
+            weaponMesh.position.z = -0.45;
+            muzzleFlashLight.intensity = 0;
+        }, 50);
+
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+
+        const zombieMeshes = zombies.filter(function(z) { return z.alive; }).map(function(z) { return z.mesh; });
+        const intersects = raycaster.intersectObjects(zombieMeshes, true);
+
+        if (intersects.length > 0) {
+            const hitObj = intersects[0].object;
+            const hitPoint = intersects[0].point;
+
+            let isHeadshot = hitObj.userData && hitObj.userData.isHead;
+
+            let hitZombieMesh = hitObj;
+            while (hitZombieMesh.parent && hitZombieMesh.parent.type !== 'Scene') {
+                if (hitZombieMesh.userData && hitZombieMesh.userData.isHead) {
+                    isHeadshot = true;
+                }
+                hitZombieMesh = hitZombieMesh.parent;
+            }
+
+            const zombieData = zombies.find(function(z) { return z.mesh === hitZombieMesh; });
+            if (zombieData && zombieData.alive) {
+                const dmg = isHeadshot ? CONFIG.GUN_DAMAGE * 2.5 : CONFIG.GUN_DAMAGE;
+                zombieData.hp -= dmg;
+                sounds.playZombieHit();
+
+                createHitSparks(hitPoint, isHeadshot ? 0xf59e0b : 0xf43f5e);
+
+                if (zombieData.hp <= 0) {
+                    zombieData.alive = false;
+                    zombieData.state = 'DEAD';
+                    player.kills++;
+                    
+                    spawnZombieDrop(zombieData.mesh.position);
+
+                    zombieData.mesh.rotation.x = Math.PI / 2;
+                    zombieData.mesh.position.y = 0.2;
+                    setTimeout(function() { scene.remove(zombieData.mesh); }, 2500);
+                } else {
+                    zombieData.state = 'CHASE';
+                }
+            }
+        } else {
+            const wallIntersects = raycaster.intersectObjects(scene.children, true);
+            if (wallIntersects.length > 0) {
+                createHitSparks(wallIntersects[0].point, 0x38bdf8);
+            }
+        }
+    }
+
+    function createHitSparks(point, colorHex) {
+        const pGeo = new THREE.BufferGeometry();
+        const pCount = 8;
+        const positions = new Float32Array(pCount * 3);
+
+        for (let i = 0; i < pCount * 3; i++) {
+            positions[i] = (Math.random() - 0.5) * 0.3;
+        }
+
+        pGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const pMat = new THREE.PointsMaterial({ color: colorHex, size: 0.1, transparent: true, opacity: 0.9 });
+        const pSystem = new THREE.Points(pGeo, pMat);
+        pSystem.position.copy(point);
+        scene.add(pSystem);
+
+        setTimeout(function() { scene.remove(pSystem); }, 200);
+    }
+
+    function reloadWeapon() {
+        if (isReloading || player.clipAmmo === CONFIG.GUN_CLIP_SIZE || player.reserveAmmo <= 0) return;
+
+        isReloading = true;
+        sounds.playReload();
+        const relWarn = document.getElementById('reload-warning');
+        if (relWarn) relWarn.classList.add('hidden');
+
+        setTimeout(function() {
+            const needed = CONFIG.GUN_CLIP_SIZE - player.clipAmmo;
+            const toAdd = Math.min(needed, player.reserveAmmo);
+            player.clipAmmo += toAdd;
+            player.reserveAmmo -= toAdd;
+            isReloading = false;
+            updateHUD();
+        }, 1200);
+    }
+
+    // ==========================================
+    // INTERACTION SYSTEM
+    // ==========================================
+    function checkInteractions() {
+        const playerPos = yawObject.position;
+        const promptBox = document.getElementById('prompt-box');
+        const promptText = document.getElementById('prompt-text');
+
+        if (!promptBox || !promptText) return;
+
+        let canInteract = false;
+
+        items.forEach(function(item) {
+            if (item.collected) return;
+            const dist2D = Math.hypot(playerPos.x - item.pos.x, playerPos.z - item.pos.z);
+            if (dist2D < 6.0) {
+                canInteract = true;
+                promptText.innerText = '[E] 또는 접근시 ' + item.name + ' 획득';
+            }
+        });
+
+        const distToLab = Math.hypot(playerPos.x - labPosition.x, playerPos.z - labPosition.z);
+        if (distToLab < 12.0) {
+            canInteract = true;
+            if (vaccinesCollected < 4) {
+                promptText.innerText = '[E] 연구실 구역 - 백신 재료 수집 필요 (' + vaccinesCollected + '/4)';
+            } else {
+                promptText.innerText = '모든 백신 확보 완료!';
+            }
+        }
+
+        if (canInteract) {
+            promptBox.classList.remove('hidden');
+        } else {
+            promptBox.classList.add('hidden');
+        }
+    }
+
+    function useMedkit() {
+        if (player.medkits <= 0 || player.hp >= player.maxHp) return;
+
+        player.medkits--;
+        player.hp = Math.min(player.maxHp, player.hp + 50);
+        sounds.playHeal();
+        updateHUD();
+
+        const hpBar = document.getElementById('hp-bar');
+        if (hpBar) {
+            hpBar.classList.add('brightness-150');
+            setTimeout(function() { hpBar.classList.remove('brightness-150'); }, 300);
+        }
+    }
+
+    function interactWithNearby() {
+        const playerPos = yawObject.position;
+
+        items.forEach(function(item) {
+            if (item.collected) return;
+            const dist2D = Math.hypot(playerPos.x - item.pos.x, playerPos.z - item.pos.z);
+            if (dist2D < 6.0) {
+                collectItem(item);
+            }
+        });
+    }
+
+    function updateObjectiveText() {
+        const objText = document.getElementById('objective-text');
+        if (!objText) return;
+
+        if (vaccinesCollected < 4) {
+            objText.innerText = '도시 구역에서 백신 재료를 찾으십시오 (' + vaccinesCollected + ' / 4)';
+        } else {
+            objText.innerText = '모든 백신 재료 확보 완료! 작전 성공!';
+            objText.classList.add('text-emerald-400', 'animate-pulse');
+        }
+    }
+
+    function updateHUD() {
+        const hpText = document.getElementById('hp-text');
+        const hpBar = document.getElementById('hp-bar');
+        const clipText = document.getElementById('ammo-clip');
+        const resText = document.getElementById('ammo-reserve');
+        const medText = document.getElementById('medkit-count');
+        const ammoLow = document.getElementById('ammo-low-warning');
+
+        if (hpText) hpText.innerText = Math.max(0, Math.ceil(player.hp)) + ' / ' + player.maxHp;
+        if (hpBar) {
+            const pct = Math.max(0, (player.hp / player.maxHp) * 100);
+            hpBar.style.width = pct + '%';
+            if (pct < 30) {
+                hpBar.className = 'h-full bg-rose-500 rounded-full transition-all duration-300';
+            } else if (pct < 60) {
+                hpBar.className = 'h-full bg-amber-500 rounded-full transition-all duration-300';
+            } else {
+                hpBar.className = 'h-full bg-emerald-500 rounded-full transition-all duration-300';
+            }
+        }
+
+        if (clipText) clipText.innerText = player.clipAmmo;
+        if (resText) resText.innerText = player.reserveAmmo;
+        if (medText) medText.innerText = player.medkits;
+
+        if (ammoLow) {
+            if (player.clipAmmo === 0 && player.reserveAmmo === 0) {
+                ammoLow.classList.remove('hidden');
+            } else {
+                ammoLow.classList.add('hidden');
+            }
+        }
+    }
+
+    // ==========================================
+    // MINIMAP RENDERER
+    // ==========================================
+    function drawMinimap() {
+        if (!minimapCtx) return;
+
+        const ctx = minimapCtx;
+        const w = 130, h = 130;
+        const scale = 0.65;
+
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = '#030712';
+        ctx.fillRect(0, 0, w, h);
+
+        const px = yawObject.position.x;
+        const pz = yawObject.position.z;
+
+        // Draw Lab
+        const labX = w / 2 + (0 - px) * scale;
+        const labY = h / 2 + (0 - pz) * scale;
+        ctx.fillStyle = 'rgba(16, 185, 129, 0.4)';
+        ctx.fillRect(labX - 6, labY - 6, 12, 12);
+
+        // Draw Vaccines & Supplies
+        items.forEach(function(item) {
+            if (item.collected) return;
+            const ix = w / 2 + (item.pos.x - px) * scale;
+            const iy = h / 2 + (item.pos.z - pz) * scale;
+
+            if (ix >= 0 && ix <= w && iy >= 0 && iy <= h) {
+                if (item.type === 'vaccine') {
+                    ctx.fillStyle = '#f59e0b';
+                    ctx.beginPath();
+                    ctx.arc(ix, iy, 3.5, 0, Math.PI * 2);
+                    ctx.fill();
+                } else {
+                    ctx.fillStyle = item.type === 'medkit' ? '#10b981' : '#38bdf8';
+                    ctx.fillRect(ix - 1.5, iy - 1.5, 3, 3);
+                }
+            }
+        });
+
+        // Draw Zombies (Brute = Crimson, Stalker = Cyan/Purple)
+        zombies.forEach(function(z) {
+            if (!z.alive) return;
+            const zx = w / 2 + (z.mesh.position.x - px) * scale;
+            const zy = h / 2 + (z.mesh.position.z - pz) * scale;
+
+            if (zx >= 0 && zx <= w && zy >= 0 && zy <= h) {
+                ctx.fillStyle = z.type === 'BRUTE' ? '#f43f5e' : '#a855f7';
+                ctx.beginPath();
+                ctx.arc(zx, zy, z.type === 'BRUTE' ? 3 : 2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        });
+
+        // Draw Player Arrow
+        ctx.save();
+        ctx.translate(w / 2, h / 2);
+        ctx.rotate(-yawObject.rotation.y);
+        ctx.fillStyle = '#38bdf8';
+        ctx.beginPath();
+        ctx.moveTo(0, -5);
+        ctx.lineTo(-4, 4);
+        ctx.lineTo(4, 4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+
+    // ==========================================
+    // GAME LOOP & MOVEMENT
+    // ==========================================
+    function animate() {
+        requestAnimationFrame(animate);
+
+        if (currentState !== STATE.PLAYING) return;
+
+        const delta = clock.getDelta();
+
+        // Update Timers
+        timeRemaining -= delta;
+        if (timeRemaining <= 0) {
+            timeRemaining = 0;
+            endGame(false, '제한 시간이 초과되었습니다.');
+        }
+
+        hordeTimer -= delta;
+        if (hordeTimer <= 0) {
+            hordeTimer = CONFIG.HORDE_INTERVAL;
+            spawnHordeWave();
+        }
+
+        // Timer Displays
+        const mins = Math.floor(timeRemaining / 60);
+        const secs = Math.floor(timeRemaining % 60);
+        const timerDisp = document.getElementById('timer-display');
+        if (timerDisp) timerDisp.innerText = (mins < 10 ? '0' + mins : mins) + ':' + (secs < 10 ? '0' + secs : secs);
+
+        const nextWaveDisp = document.getElementById('next-wave-timer');
+        if (nextWaveDisp) nextWaveDisp.innerText = '다음 호드: ' + Math.ceil(hordeTimer) + '초';
+
+        // Player Movement
+        const moveSpeed = CONFIG.PLAYER_SPEED * delta;
+        const dir = new THREE.Vector3();
+
+        if (moveForward) dir.z -= 1;
+        if (moveBackward) dir.z += 1;
+        if (moveLeft) dir.x -= 1;
+        if (moveRight) dir.x += 1;
+
+        dir.normalize();
+        dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), yawObject.rotation.y);
+
+        const newPos = yawObject.position.clone().add(dir.multiplyScalar(moveSpeed));
+
+        // Boundary Check
+        const bound = CONFIG.MAP_SIZE - 2;
+        newPos.x = Math.max(-bound, Math.min(bound, newPos.x));
+        newPos.z = Math.max(-bound, Math.min(bound, newPos.z));
+
+        // Collision Check with City Walls
+        let playerBox = new THREE.Box3().setFromCenterAndSize(
+            new THREE.Vector3(newPos.x, 1.7, newPos.z),
+            new THREE.Vector3(1.0, 2.0, 1.0)
+        );
+
+        let collided = false;
+        for (let i = 0; i < cityWalls.length; i++) {
+            if (playerBox.intersectsBox(cityWalls[i])) {
+                collided = true;
+                break;
+            }
+        }
+
+        if (!collided) {
+            yawObject.position.copy(newPos);
+        }
+
+        // Entity Updates
+        updateZombies(delta);
+        updateItems(delta);
+        checkInteractions();
+        drawMinimap();
+
+        renderer.render(scene, camera);
+    }
+
+    // ==========================================
+    // GAME STATE & MENU MANAGEMENT
+    // ==========================================
+    function startGame() {
+        currentState = STATE.PLAYING;
+        sounds.init();
+
+        document.getElementById('start-screen').classList.add('hidden');
+        document.getElementById('pause-screen').classList.add('hidden');
+        document.getElementById('win-screen').classList.add('hidden');
+        document.getElementById('lose-screen').classList.add('hidden');
+
+        document.body.requestPointerLock();
+        clock.start();
+    }
+
+    function pauseGame() {
+        if (currentState !== STATE.PLAYING) return;
+        currentState = STATE.PAUSED;
+        document.getElementById('pause-screen').classList.remove('hidden');
+        document.exitPointerLock();
+    }
+
+    function resumeGame() {
+        if (currentState !== STATE.PAUSED) return;
+        currentState = STATE.PLAYING;
+        document.getElementById('pause-screen').classList.add('hidden');
+        document.body.requestPointerLock();
+    }
+
+    function endGame(isWin, reason) {
+        if (reason === undefined) reason = '';
+        currentState = isWin ? STATE.WIN : STATE.LOSE;
+        document.exitPointerLock();
+
+        if (isWin) {
+            const mins = Math.floor(timeRemaining / 60);
+            const secs = Math.floor(timeRemaining % 60);
+            document.getElementById('win-time').innerText = mins + '분 ' + secs + '초';
+            document.getElementById('win-kills').innerText = player.kills + ' 마리';
+            document.getElementById('win-screen').classList.remove('hidden');
+        } else {
+            document.getElementById('lose-reason').innerText = reason;
+            document.getElementById('lose-screen').classList.remove('hidden');
+        }
+    }
+
+    function resetGame() {
+        player = {
+            hp: CONFIG.PLAYER_MAX_HP,
+            maxHp: CONFIG.PLAYER_MAX_HP,
+            medkits: 1,
+            clipAmmo: CONFIG.GUN_CLIP_SIZE,
+            reserveAmmo: 60,
+            kills: 0
+        };
+
+        vaccinesCollected = 0;
+        currentWave = 1;
+        hordeTimer = CONFIG.HORDE_INTERVAL;
+        timeRemaining = CONFIG.TIME_LIMIT;
+
+        const waveBadge = document.getElementById('wave-badge');
+        if (waveBadge) waveBadge.innerText = 'WAVE 1';
+
+        for (let i = 0; i < 4; i++) {
+            const slot = document.getElementById('vac-' + i);
+            if (slot) {
+                slot.className = 'w-1/4 h-2 rounded bg-slate-700 transition-colors duration-300';
+            }
+        }
+
+        yawObject.position.set(0, 1.7, 12);
+        yawObject.rotation.y = 0;
+        pitchObject.rotation.x = 0;
+
+        spawnItems();
+        spawnZombies();
+        updateObjectiveText();
+        updateHUD();
+        startGame();
+    }
+
+    // ==========================================
+    // INITIALIZATION & EVENT LISTENERS
+    // ==========================================
+    window.onload = function() {
+        initThree();
+        createWeapon();
+        buildCityMap();
+        spawnItems();
+        spawnZombies();
+        setupInput();
+
+        // UI Event Handlers
+        document.getElementById('btn-start').addEventListener('click', startGame);
+        document.getElementById('btn-resume').addEventListener('click', resumeGame);
+        document.getElementById('btn-restart-pause').addEventListener('click', resetGame);
+        document.getElementById('btn-restart-win').addEventListener('click', resetGame);
+        document.getElementById('btn-restart-lose').addEventListener('click', resetGame);
+
+        // Pointer Lock & Pause Handler
+        document.addEventListener('pointerlockchange', function() {
+            if (document.pointerLockElement !== document.body && currentState === STATE.PLAYING) {
+                pauseGame();
+            }
+        });
+
+        // Start Loop
+        animate();
+    };
+    </script>
+</body>
+</html>
