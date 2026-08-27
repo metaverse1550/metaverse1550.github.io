@@ -135,6 +135,21 @@
                 0 0 22px rgba(245, 158, 11, 0.65);
         }
 
+        @keyframes siteNoticeToastIn {
+            from { opacity: 0; transform: translate(-50%, -12px) scale(0.96); }
+            to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+        }
+        #site-notice-toast {
+            animation: siteNoticeToastIn 0.35s cubic-bezier(0.34, 1.4, 0.64, 1);
+        }
+        @keyframes siteNoticePulse {
+            0%, 100% { box-shadow: 0 8px 32px rgba(14, 165, 233, 0.2); }
+            50% { box-shadow: 0 8px 40px rgba(14, 165, 233, 0.45); }
+        }
+        #site-notice-toast .site-notice-toast-inner {
+            animation: siteNoticePulse 2.5s ease-in-out infinite;
+        }
+
         /* 🎰 눈길을 끄는 무지개색 반짝이 텍스트 (가챠/뽑기 강조용) */
         @keyframes rainbowShimmer {
             0% { background-position: 0% 50%; }
@@ -400,6 +415,23 @@
         </div>
     </nav>
 
+    <!-- 📢 전체 공지 토스트 (닫기 또는 3분 후 자동 닫힘) -->
+    <div id="site-notice-toast" class="hidden fixed top-[4.5rem] left-1/2 -translate-x-1/2 z-[10004] w-[min(92vw,420px)]">
+        <div class="site-notice-toast-inner bg-gradient-to-br from-sky-950/98 via-indigo-950/98 to-slate-950/98 border-2 border-sky-400/50 backdrop-blur-xl rounded-2xl shadow-2xl overflow-hidden">
+            <div class="flex items-start gap-3 px-4 py-3.5">
+                <span class="text-2xl flex-shrink-0">📢</span>
+                <div class="flex-grow min-w-0 pt-0.5">
+                    <div class="text-[10px] font-black text-sky-300 uppercase tracking-wider font-orbitron">전체 공지</div>
+                    <p id="site-notice-toast-text" class="text-sm font-bold text-white mt-1 leading-snug break-words whitespace-pre-wrap"></p>
+                    <p class="text-[10px] text-slate-500 mt-2 font-semibold">닫기 누르거나 3분 후 자동으로 사라집니다</p>
+                </div>
+                <button type="button" onclick="window.dismissSiteNoticeToast()" class="flex-shrink-0 p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all" title="닫기">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- 🎰 가챠 유도 배너 (STEP1 미완료/뽑기 가능 시) -->
     <div id="gacha-nudge-banner" class="hidden fixed top-[4.25rem] left-1/2 -translate-x-1/2 z-30 w-[92vw] max-w-lg">
         <div class="bg-slate-950/95 border border-amber-500/50 backdrop-blur-md rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3">
@@ -596,6 +628,25 @@
 
             <!-- PAGE 1: 게임 배포 등록 -->
             <div id="admin-tab-form" class="space-y-6">
+                <div class="bg-sky-950/30 border border-sky-500/40 rounded-2xl p-4 md:p-5 space-y-3">
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-sm font-black text-sky-300 flex items-center gap-2">
+                            <span>📢</span> 전체 공지 (토스트)
+                        </label>
+                        <span id="admin-notice-status" class="text-[10px] text-slate-400 font-semibold">현재: 공지 없음</span>
+                    </div>
+                    <textarea id="admin-notice-input" rows="3" maxlength="500" placeholder="예: 10분 뒤 쉬는 시간! 게임 저장하고 자리 정리해주세요 🔔" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-sky-500 resize-y min-h-[5rem]"></textarea>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" onclick="window.publishSiteNotice()" class="px-5 py-2.5 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white text-xs font-black rounded-xl shadow-lg transition-all flex items-center gap-1.5">
+                            <i data-lucide="megaphone" class="w-3.5 h-3.5"></i> 공지 게시
+                        </button>
+                        <button type="button" onclick="window.clearSiteNotice()" class="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition-all flex items-center gap-1.5">
+                            <i data-lucide="bell-off" class="w-3.5 h-3.5"></i> 공지 내리기
+                        </button>
+                    </div>
+                    <p class="text-[10px] text-slate-500">게시 즉시 모든 화면에 토스트로 표시됩니다. (닫기 또는 3분 후 자동 닫힘 · 최대 500자)</p>
+                </div>
+
                 <div class="bg-indigo-950/30 border border-indigo-500/40 rounded-2xl p-4 md:p-5 space-y-3">
                     <div class="flex items-center justify-between">
                         <label class="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
@@ -2640,6 +2691,144 @@
             console.error("수업 세션 리스너 에러:", err);
         });
 
+        window.siteNoticeActive = false;
+        window.lastSiteNoticeData = null;
+        window.currentSiteNoticeKey = null;
+        const SITE_NOTICE_AUTO_DISMISS_MS = 3 * 60 * 1000;
+        let siteNoticeToastTimer = null;
+
+        window.refreshSiteNoticeAdminUI = function() {
+            renderSiteNotice(window.lastSiteNoticeData);
+        };
+
+        function getDismissedSiteNoticeKey() {
+            return sessionStorage.getItem("meta_notice_dismissed_key") || "";
+        }
+
+        function hideSiteNoticeToastEl() {
+            const el = document.getElementById("site-notice-toast");
+            if (el) el.classList.add("hidden");
+        }
+
+        window.dismissSiteNoticeToast = function() {
+            if (siteNoticeToastTimer) {
+                clearTimeout(siteNoticeToastTimer);
+                siteNoticeToastTimer = null;
+            }
+            if (window.currentSiteNoticeKey) {
+                sessionStorage.setItem("meta_notice_dismissed_key", window.currentSiteNoticeKey);
+            }
+            hideSiteNoticeToastEl();
+        };
+
+        function showSiteNoticeToast(message, noticeKey) {
+            const el = document.getElementById("site-notice-toast");
+            const textEl = document.getElementById("site-notice-toast-text");
+            if (!el || !textEl) return;
+
+            window.currentSiteNoticeKey = noticeKey;
+            textEl.textContent = message;
+            el.classList.remove("hidden");
+            if (typeof window.refreshLucideIcons === "function") window.refreshLucideIcons(el);
+
+            if (siteNoticeToastTimer) clearTimeout(siteNoticeToastTimer);
+            siteNoticeToastTimer = setTimeout(() => {
+                window.dismissSiteNoticeToast();
+            }, SITE_NOTICE_AUTO_DISMISS_MS);
+        }
+
+        function renderSiteNotice(data) {
+            window.lastSiteNoticeData = data;
+            const input = document.getElementById("admin-notice-input");
+            const status = document.getElementById("admin-notice-status");
+
+            const message = data && data.active ? String(data.message || "").trim() : "";
+            const active = !!message;
+            window.siteNoticeActive = active;
+
+            if (input && window.isAdminAuthenticated && document.activeElement !== input) {
+                input.value = active ? message : "";
+            }
+            if (status && window.isAdminAuthenticated) {
+                status.textContent = active && data.updatedAt
+                    ? `현재 게시 중 · ${new Date(data.updatedAt).toLocaleString()}`
+                    : "현재: 공지 없음";
+            }
+
+            if (!active) {
+                if (siteNoticeToastTimer) {
+                    clearTimeout(siteNoticeToastTimer);
+                    siteNoticeToastTimer = null;
+                }
+                window.currentSiteNoticeKey = null;
+                hideSiteNoticeToastEl();
+                return;
+            }
+
+            const noticeKey = data.updatedAt || message;
+            if (getDismissedSiteNoticeKey() === noticeKey) {
+                hideSiteNoticeToastEl();
+                return;
+            }
+
+            showSiteNoticeToast(message, noticeKey);
+        }
+
+        window.publishSiteNotice = async function() {
+            if (!window.isAdminAuthenticated) {
+                window.showAdminAlert("관리자만 공지를 게시할 수 있습니다.", "error");
+                return;
+            }
+            const input = document.getElementById("admin-notice-input");
+            const message = (input?.value || "").trim();
+            if (!message) {
+                window.showAdminAlert("공지 내용을 입력해주세요.", "error");
+                return;
+            }
+            try {
+                await setDoc(doc(db, "system", "site_notice"), {
+                    active: true,
+                    message,
+                    updatedAt: new Date().toISOString(),
+                    updatedBy: "관리자"
+                }, { merge: true });
+                window.logUserAction("ADMIN_NOTICE", `전체 공지 게시: ${message.length > 80 ? message.slice(0, 80) + "…" : message}`);
+                window.showAdminAlert("전체 공지가 게시되었습니다!", "success");
+            } catch (e) {
+                console.error("공지 게시 실패", e);
+                window.showAdminAlert("공지 게시에 실패했습니다.", "error");
+            }
+        };
+
+        window.clearSiteNotice = async function() {
+            if (!window.isAdminAuthenticated) {
+                window.showAdminAlert("관리자만 공지를 내릴 수 있습니다.", "error");
+                return;
+            }
+            if (!confirm("전체 공지를 내릴까요?")) return;
+            try {
+                await setDoc(doc(db, "system", "site_notice"), {
+                    active: false,
+                    message: "",
+                    updatedAt: new Date().toISOString(),
+                    updatedBy: "관리자"
+                }, { merge: true });
+                const input = document.getElementById("admin-notice-input");
+                if (input) input.value = "";
+                window.logUserAction("ADMIN_NOTICE", "전체 공지를 내렸습니다.");
+                window.showAdminAlert("공지를 내렸습니다.", "success");
+            } catch (e) {
+                console.error("공지 내리기 실패", e);
+                window.showAdminAlert("공지 내리기에 실패했습니다.", "error");
+            }
+        };
+
+        onSnapshot(doc(db, "system", "site_notice"), (snap) => {
+            renderSiteNotice(snap.exists() ? snap.data() : null);
+        }, (err) => {
+            console.error("전체 공지 리스너 에러:", err);
+        });
+
         function getLogUserTag() {
             if (window.isAdminAuthenticated) return "관리자";
             return getStudentClientId();
@@ -2798,7 +2987,7 @@
             { id: "CALL", label: "🙋 호출", types: ["CALL_TEACHER"] },
             { id: "CHAT", label: "💬 채팅", types: ["CHAT_BROADCAST", "CHAT_RESET", "CHAT_RESET_SEAT"] },
             { id: "REGISTER", label: "⚙️ 관리", types: ["REGISTER"] },
-            { id: "SESSION", label: "🔔 수업", types: ["CLASS_RESET"] }
+            { id: "SESSION", label: "🔔 수업", types: ["CLASS_RESET", "ADMIN_NOTICE"] }
         ];
 
         function getLogTypeMeta(type) {
@@ -2816,7 +3005,8 @@
                 CHAT_BROADCAST: { badgeClass: "text-violet-400 border-violet-500/30 bg-violet-950/40", emoji: "📢" },
                 CHAT_RESET: { badgeClass: "text-sky-400 border-sky-500/30 bg-sky-950/40", emoji: "🗑️" },
                 CHAT_RESET_SEAT: { badgeClass: "text-sky-400 border-sky-500/30 bg-sky-950/40", emoji: "🗑️" },
-                CLASS_RESET: { badgeClass: "text-orange-400 border-orange-500/30 bg-orange-950/40", emoji: "🔔" }
+                CLASS_RESET: { badgeClass: "text-orange-400 border-orange-500/30 bg-orange-950/40", emoji: "🔔" },
+                ADMIN_NOTICE: { badgeClass: "text-sky-400 border-sky-500/30 bg-sky-950/40", emoji: "📢" }
             };
             return map[type] || { badgeClass: "text-slate-400 border-slate-700 bg-slate-900", emoji: "📋" };
         }
@@ -4249,6 +4439,9 @@
             }
             applyAdminAuthUI();
             lucide.createIcons();
+            if (status && typeof window.refreshSiteNoticeAdminUI === "function") {
+                window.refreshSiteNoticeAdminUI();
+            }
         }
 
         async function tryAccessAdminFromSeatPicker() {
