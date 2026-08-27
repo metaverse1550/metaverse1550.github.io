@@ -1,0 +1,1243 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>DARK BUILDING - Horror Escape</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Creepster&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+
+<style>
+*{ box-sizing: border-box; touch-action: manipulation; user-select: none; }
+html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #030303;
+    font-family: 'Inter', sans-serif;
+    color: #fff;
+}
+
+.font-creep {
+    font-family: 'Creepster', cursive;
+}
+
+#game-container {
+    position: fixed;
+    inset: 0;
+}
+
+#game-container canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* Vignette overlay for horror ambience */
+.vignette {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(circle, transparent 40%, rgba(0,0,0,0.88) 90%);
+    z-index: 4;
+}
+
+/* Red blood overlay on damage */
+#damage-overlay {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(circle, rgba(220,20,20,0.35) 20%, rgba(150,0,0,0.85) 90%);
+    opacity: 0;
+    transition: opacity 0.15s ease-out;
+    z-index: 5;
+}
+
+/* Flash overlay for jumpscare / exit event */
+#flash-overlay {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: #fff;
+    opacity: 0;
+    z-index: 8;
+    transition: opacity 0.1s ease-out;
+}
+
+/* Jumpscare face overlay */
+#jumpscare-overlay {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 12;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    background: rgba(0,0,0,0.9);
+    transition: opacity 0.05s ease-in;
+}
+
+.jumpscare-shake {
+    animation: shake 0.08s infinite alternate;
+}
+
+@keyframes shake {
+    0% { transform: translate(-10px, -10px) scale(1.1) rotate(-2deg); }
+    100% { transform: translate(10px, 10px) scale(1.15) rotate(2deg); }
+}
+
+.glow-red {
+    text-shadow: 0 0 12px rgba(239, 68, 68, 0.8), 0 0 24px rgba(220, 38, 38, 0.5);
+}
+
+.glow-green {
+    text-shadow: 0 0 12px rgba(34, 197, 94, 0.8), 0 0 24px rgba(22, 163, 74, 0.5);
+}
+
+@keyframes pulse-fast {
+    0%, 100% { transform: scale(1); opacity: 0.8; }
+    50% { transform: scale(1.08); opacity: 1; }
+}
+
+.heart-pulse {
+    animation: pulse-fast 0.4s infinite;
+}
+</style>
+</head>
+
+<body>
+
+<div id="game-container"></div>
+<div class="vignette"></div>
+<div id="damage-overlay"></div>
+<div id="flash-overlay"></div>
+
+<!-- Jumpscare Overlay -->
+<div id="jumpscare-overlay">
+    <svg id="monster-face" class="w-80 h-80 text-red-700 jumpscare-shake" viewBox="0 0 100 100" fill="currentColor">
+        <path d="M50 5 C25 5 10 25 10 50 C10 75 25 95 50 95 C75 95 90 75 90 50 C90 25 75 5 50 5 Z M30 35 A10 10 0 0 1 50 35 A10 10 0 0 1 30 35 Z M50 35 A10 10 0 0 1 70 35 A10 10 0 0 1 50 35 Z M25 65 Q50 90 75 65 Q50 70 25 65 Z" fill="#110000" stroke="#ff0000" stroke-width="3"/>
+        <circle cx="38" cy="35" r="4" fill="#ff0000"/>
+        <circle cx="62" cy="35" r="4" fill="#ff0000"/>
+        <path d="M 30 65 L 35 75 L 40 65 L 45 78 L 50 65 L 55 78 L 60 65 L 65 75 L 70 65" stroke="#ffffff" stroke-width="2" fill="none"/>
+    </svg>
+</div>
+
+<!-- HUD -->
+<div id="hud" class="fixed inset-0 pointer-events-none z-10 flex flex-col justify-between p-4 sm:p-6 hidden">
+    <!-- Top HUD Row -->
+    <div class="flex justify-between items-start w-full">
+        <div class="bg-black/75 backdrop-blur border border-white/10 rounded-xl p-3 sm:p-4 text-xs sm:text-sm space-y-2 text-gray-200 min-w-[160px] shadow-2xl">
+            <div class="flex items-center justify-between gap-3">
+                <span class="text-gray-400 font-semibold">🔑 열쇠:</span>
+                <span id="keyText" class="font-bold text-yellow-400 text-base">0 / 5</span>
+            </div>
+            <div class="flex items-center justify-between gap-3">
+                <span class="text-gray-400 font-semibold">❤️ 체력:</span>
+                <span id="lifeText" class="font-bold text-red-500 text-base">100%</span>
+            </div>
+            <div class="w-full bg-gray-800 rounded-full h-2 overflow-hidden">
+                <div id="healthBar" class="bg-red-600 h-full w-full transition-all duration-300"></div>
+            </div>
+            <div class="flex items-center justify-between gap-3 pt-1 border-t border-white/10">
+                <span class="text-gray-400 font-semibold">🔦 손전등:</span>
+                <span id="flashText" class="font-bold text-green-400">ON</span>
+            </div>
+        </div>
+
+        <!-- Minimap -->
+        <div class="relative bg-black/85 border-2 border-gray-700 rounded-xl overflow-hidden shadow-2xl">
+            <canvas id="minimap" width="140" height="140" class="w-[110px] h-[110px] sm:w-[140px] sm:h-[140px]"></canvas>
+            <div class="absolute bottom-1 right-2 text-[9px] text-gray-500 uppercase tracking-widest font-bold">RADAR</div>
+        </div>
+    </div>
+
+    <!-- Center Crosshair -->
+    <div id="crosshair" class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-2.5 h-2.5 border-2 border-white/80 rounded-full opacity-70 pointer-events-none"></div>
+
+    <!-- Grapple Mash Prompt Overlay -->
+    <div id="grapple-prompt" class="absolute inset-x-0 top-1/3 text-center hidden pointer-events-auto">
+        <div class="inline-block bg-red-950/90 border-2 border-red-600 rounded-2xl p-6 shadow-2xl heart-pulse max-w-sm mx-auto">
+            <h2 class="text-2xl sm:text-3xl font-extrabold text-red-500 glow-red mb-2">괴물에게 잡혔습니다!</h2>
+            <p class="text-sm text-gray-200 mb-4">탈출하려면 버튼을 계속 연타하세요!</p>
+            <button id="mash-button" class="bg-red-600 hover:bg-red-500 active:bg-red-700 text-white font-black py-4 px-8 rounded-xl text-xl uppercase tracking-wider w-full shadow-lg border border-red-400 transition-transform active:scale-95">
+                연타하기! (<span id="mash-count">0</span> / <span id="mash-target">8</span>)
+            </button>
+            <p class="text-xs text-gray-400 mt-2">PC: [SPACE] 키 연타 가능</p>
+        </div>
+    </div>
+
+    <!-- Bottom Message & Controls Info -->
+    <div class="w-full flex flex-col items-center justify-end text-center space-y-2 pb-2">
+        <div id="message" class="min-h-[32px] text-base sm:text-xl font-bold text-yellow-300 drop-shadow-[0_2px_8px_rgba(0,0,0,1)] px-4 py-1.5 rounded-lg bg-black/60 border border-white/10 backdrop-blur empty:hidden"></div>
+        <div id="controls-hint" class="text-xs text-gray-400 bg-black/50 px-3 py-1 rounded-full border border-white/5 hidden sm:block">
+            WASD: 이동 | 마우스: 시점 변환 | Shift: 조용히 걷기 | E: 상호작용 | F: 손전등 | Tab: 마우스 고정
+        </div>
+    </div>
+
+    <!-- Mobile Touch Controls -->
+    <div id="touch-controls" class="fixed bottom-4 left-4 right-4 pointer-events-auto flex justify-between items-end sm:hidden z-20">
+        <!-- D-Pad -->
+        <div class="grid grid-cols-3 gap-1 w-32 h-32 bg-black/40 p-1 rounded-2xl border border-white/10 backdrop-blur">
+            <div></div>
+            <button id="btn-up" class="bg-white/10 active:bg-white/30 rounded-lg flex items-center justify-center text-lg font-bold">▲</button>
+            <div></div>
+            <button id="btn-left" class="bg-white/10 active:bg-white/30 rounded-lg flex items-center justify-center text-lg font-bold">◀</button>
+            <div class="bg-white/5 rounded-lg"></div>
+            <button id="btn-right" class="bg-white/10 active:bg-white/30 rounded-lg flex items-center justify-center text-lg font-bold">▶</button>
+            <div></div>
+            <button id="btn-down" class="bg-white/10 active:bg-white/30 rounded-lg flex items-center justify-center text-lg font-bold">▼</button>
+            <div></div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex flex-col gap-2">
+            <button id="btn-interact" class="w-14 h-14 bg-yellow-600/80 active:bg-yellow-500 rounded-2xl border border-yellow-400 text-white font-bold text-sm shadow-lg flex items-center justify-center">E</button>
+            <button id="btn-flashlight" class="w-14 h-14 bg-blue-600/80 active:bg-blue-500 rounded-2xl border border-blue-400 text-white font-bold text-sm shadow-lg flex items-center justify-center">F</button>
+        </div>
+    </div>
+</div>
+
+<!-- START SCREEN -->
+<div id="startScreen" class="fixed inset-0 z-30 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md">
+    <div class="max-w-md w-full bg-neutral-900/90 border border-neutral-800 rounded-2xl p-6 sm:p-8 text-center shadow-2xl space-y-6">
+        <div>
+            <h1 class="text-4xl sm:text-5xl font-black text-red-600 font-creep tracking-widest glow-red mb-2">DARK BUILDING</h1>
+            <p class="text-xs uppercase tracking-widest text-gray-400">Horror Escape Survival</p>
+        </div>
+
+        <div class="space-y-3 text-sm text-gray-300 bg-black/50 p-4 rounded-xl border border-white/5 text-left leading-relaxed">
+            <p>👁️ 어두운 폐건물에 갇혔습니다.</p>
+            <p>🔑 건물 구석구석에 위치한 <b class="text-yellow-400">열쇠 5개</b>를 찾아 탈출구를 개척하세요.</p>
+            <p>👹 열쇠를 찾을수록 괴물의 추적이 가혹해집니다.</p>
+            <p>🔊 손전등(<b class="text-blue-400">F</b>)을 끄면 어둠 속에 숨을 수 있습니다.</p>
+        </div>
+
+        <!-- Sound Enable Notice -->
+        <div class="flex items-center justify-between bg-neutral-800/60 p-3 rounded-lg border border-neutral-700 text-xs text-gray-300">
+            <span>🔊 입체 음향 효과 사용</span>
+            <input type="checkbox" id="soundToggle" checked class="w-4 h-4 accent-red-600">
+        </div>
+
+        <button id="startButton" class="w-full bg-red-700 hover:bg-red-600 active:bg-red-800 text-white font-black py-4 rounded-xl text-lg tracking-wider uppercase shadow-xl transition-all border border-red-500 hover:scale-[1.02]">
+            게임 시작
+        </button>
+    </div>
+</div>
+
+<!-- GAME OVER SCREEN -->
+<div id="gameOver" class="fixed inset-0 z-30 flex items-center justify-center bg-black/95 p-4 hidden backdrop-blur-md">
+    <div class="max-w-md w-full bg-red-950/40 border border-red-900/50 rounded-2xl p-6 sm:p-8 text-center shadow-2xl space-y-6">
+        <h1 class="text-5xl font-black text-red-600 font-creep tracking-widest glow-red">YOU DIED</h1>
+        <p class="text-gray-300 text-sm leading-relaxed">어둠 속 괴물에게 사로잡혀 서서히 차가운 바닥으로 가라앉았습니다...</p>
+        
+        <div id="fail-stats" class="bg-black/60 p-4 rounded-xl text-xs text-gray-400 space-y-1 text-left border border-white/5">
+            <div>수집한 열쇠: <span id="fail-keys" class="text-yellow-400 font-bold">0</span> / 5</div>
+            <div>생존 시간: <span id="fail-time" class="text-white font-bold">0초</span></div>
+        </div>
+
+        <button id="restartButton" class="w-full bg-red-700 hover:bg-red-600 text-white font-bold py-3.5 rounded-xl text-base tracking-wider uppercase border border-red-500 shadow-lg">
+            다시 시도
+        </button>
+    </div>
+</div>
+
+<!-- WIN SCREEN -->
+<div id="winScreen" class="fixed inset-0 z-30 flex items-center justify-center bg-black/95 p-4 hidden backdrop-blur-md">
+    <div class="max-w-md w-full bg-emerald-950/40 border border-emerald-800/50 rounded-2xl p-6 sm:p-8 text-center shadow-2xl space-y-6">
+        <h1 class="text-5xl font-black text-green-500 font-creep tracking-widest glow-green">ESCAPED</h1>
+        <p class="text-gray-200 text-sm leading-relaxed">축하합니다! 모든 열쇠를 찾아 끔찍한 빌딩의 어둠으로부터 무사히 탈출했습니다.</p>
+        
+        <div id="win-stats" class="bg-black/60 p-4 rounded-xl text-sm text-gray-300 space-y-2 text-left border border-white/5">
+            <div class="flex justify-between"><span>탈출 소요 시간:</span> <b id="win-time" class="text-green-400">0초</b></div>
+            <div class="flex justify-between"><span>남은 체력:</span> <b id="win-hp" class="text-red-400">100%</b></div>
+        </div>
+
+        <button id="winButton" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3.5 rounded-xl text-base tracking-wider uppercase border border-emerald-400 shadow-lg">
+            다시 시작
+        </button>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+<script>
+'use strict';
+
+const CONFIG = {
+    playerSpeed: 3.6,
+    silentSpeed: 1.8,
+    monsterSpeed: 2.2,
+    keyCount: 5,
+    catchDistance: 1.8,
+    grabDamage: 12,
+    escapeDamage: 5,
+    escapePresses: 6,
+    flashlightPower: 8.5,
+    flashlightDistance: 38,
+    ambientLight: 0.15,
+    cellSize: 4
+};
+
+// Procedural 12x12 Maze Layout
+// 1 = Wall, 0 = Corridor, 2 = Key Spawn, 3 = Player Spawn, 4 = Exit
+const MAZE_MAP = [
+    [1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,3,0,0,1,0,0,0,0,2,0,1],
+    [1,1,1,0,1,0,1,1,1,1,0,1],
+    [1,2,0,0,0,0,1,2,0,1,0,1],
+    [1,0,1,1,1,0,1,0,0,1,0,1],
+    [1,0,1,0,0,0,0,0,1,1,0,1],
+    [1,0,1,0,1,1,1,0,0,0,0,1],
+    [1,0,0,0,1,2,1,0,1,1,0,1],
+    [1,1,1,0,1,0,1,0,1,2,0,1],
+    [1,0,0,0,0,0,0,0,1,0,0,1],
+    [1,0,1,1,1,1,1,0,0,0,4,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1]
+];
+
+let scene, camera, webglRenderer, clock;
+let player, monster, flashlight;
+let keys = [], keyPositions = [];
+let exit, exitPosition;
+let lights = [];
+let wallBoundingBoxes = [];
+
+let collectedKeys = 0;
+let life = 100;
+let gameStarted = false;
+let gameEnded = false;
+let finalPhase = false;
+let grabbed = false;
+let escapeCount = 0;
+let grabDamageTimer = 0;
+let monsterTimer = 4;
+let finalLightTimer = 0;
+let gameStartTime = 0;
+
+let yaw = 0, pitch = 0;
+const pressed = {};
+let messageTimer = 0;
+let footstepTimer = 0;
+
+/* DOM Cache */
+const keyText = document.getElementById('keyText');
+const lifeText = document.getElementById('lifeText');
+const healthBar = document.getElementById('healthBar');
+const flashText = document.getElementById('flashText');
+const message = document.getElementById('message');
+const minimap = document.getElementById('minimap');
+const mapCtx = minimap ? minimap.getContext('2d') : null;
+const soundToggle = document.getElementById('soundToggle');
+
+function getDistanceXZ(pos1, pos2) {
+    if (!pos1 || !pos2) return 999;
+    const dx = pos1.x - pos2.x;
+    const dz = pos1.z - pos2.z;
+    return Math.sqrt(dx * dx + dz * dz);
+}
+
+class AudioEngine {
+    constructor() {
+        this.ctx = null;
+        this.soundEnabled = true;
+    }
+
+    init() {
+        if (!this.ctx) {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            this.ctx = new AudioCtx();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+            this.ctx.resume();
+        }
+    }
+
+    playTone(freq, type, duration, vol = 0.1) {
+        if (!this.soundEnabled || !this.ctx) return;
+        try {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+            gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start();
+            osc.stop(this.ctx.currentTime + duration);
+        } catch(e) {}
+    }
+
+    playFootstep() {
+        if (!this.soundEnabled || !this.ctx) return;
+        this.playTone(80 + Math.random() * 20, 'triangle', 0.08, 0.08);
+    }
+
+    playFlashlightClick() {
+        this.playTone(800, 'square', 0.04, 0.12);
+    }
+
+    playKeyCollect() {
+        if (!this.soundEnabled || !this.ctx) return;
+        this.playTone(523.25, 'sine', 0.15, 0.2);
+        setTimeout(() => this.playTone(659.25, 'sine', 0.2, 0.2), 100);
+        setTimeout(() => this.playTone(783.99, 'sine', 0.3, 0.2), 200);
+    }
+
+    playHeartbeat() {
+        if (!this.soundEnabled || !this.ctx) return;
+        this.playTone(55, 'sine', 0.12, 0.25);
+        setTimeout(() => this.playTone(45, 'sine', 0.1, 0.2), 140);
+    }
+
+    playMonsterScream() {
+        if (!this.soundEnabled || !this.ctx) return;
+        try {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(600, this.ctx.currentTime + 0.3);
+            osc.frequency.exponentialRampToValueAtTime(80, this.ctx.currentTime + 0.8);
+            gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.8);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start();
+            osc.stop(this.ctx.currentTime + 0.8);
+        } catch(e) {}
+    }
+}
+
+const audio = new AudioEngine();
+
+function damageLife(amount) {
+    if (gameEnded) return;
+    life = Math.max(0, life - amount);
+    if (lifeText) lifeText.textContent = `${Math.round(life)}%`;
+    if (healthBar) healthBar.style.width = `${life}%`;
+
+    const dmgOverlay = document.getElementById('damage-overlay');
+    if (dmgOverlay) {
+        dmgOverlay.style.opacity = '0.8';
+        setTimeout(() => { dmgOverlay.style.opacity = '0'; }, 200);
+    }
+
+    if (life <= 0) {
+        endGame(false);
+    }
+}
+
+function triggerEscapeMash() {
+    if (!grabbed || gameEnded) return;
+
+    escapeCount++;
+    const countEl = document.getElementById('mash-count');
+    if (countEl) countEl.textContent = escapeCount;
+
+    if (escapeCount >= CONFIG.escapePresses) {
+        grabbed = false;
+        const promptEl = document.getElementById('grapple-prompt');
+        if (promptEl) promptEl.classList.add('hidden');
+        
+        // Push monster back safely checking wall collision step-by-step
+        if (monster && player) {
+            const pushDir = new THREE.Vector3(
+                monster.position.x - player.position.x,
+                0,
+                monster.position.z - player.position.z
+            ).normalize();
+
+            let distToPush = 5.0;
+            const step = 0.25;
+            let currentPushed = 0;
+            while (currentPushed < distToPush) {
+                const nextX = monster.position.x + pushDir.x * step;
+                const nextZ = monster.position.z + pushDir.z * step;
+
+                const mBox = new THREE.Box3(
+                    new THREE.Vector3(nextX - 0.45, 0, nextZ - 0.45),
+                    new THREE.Vector3(nextX + 0.45, 2.5, nextZ + 0.45)
+                );
+
+                let collided = false;
+                for (let box of wallBoundingBoxes) {
+                    if (box.intersectsBox(mBox)) {
+                        collided = true;
+                        break;
+                    }
+                }
+                if (collided) break;
+                monster.position.x = nextX;
+                monster.position.z = nextZ;
+                currentPushed += step;
+            }
+        }
+
+        damageLife(CONFIG.escapeDamage);
+        showMessage('💥 괴물을 뿌리치고 탈출했습니다!');
+    }
+}
+
+function generateWallTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = '#2b2b2b';
+    ctx.fillRect(0, 0, 256, 256);
+
+    ctx.strokeStyle = '#181818';
+    ctx.lineWidth = 4;
+    const rows = 16, cols = 8;
+    const rh = 256 / rows, cw = 256 / cols;
+
+    for (let r = 0; r <= rows; r++) {
+        ctx.beginPath();
+        ctx.moveTo(0, r * rh);
+        ctx.lineTo(256, r * rh);
+        ctx.stroke();
+    }
+
+    for (let r = 0; r < rows; r++) {
+        const offset = (r % 2) * (cw / 2);
+        for (let c = 0; c <= cols + 1; c++) {
+            ctx.beginPath();
+            ctx.moveTo(c * cw - offset, r * rh);
+            ctx.lineTo(c * cw - offset, (r + 1) * rh);
+            ctx.stroke();
+        }
+    }
+
+    for (let i = 0; i < 800; i++) {
+        ctx.fillStyle = Math.random() > 0.5 ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.03)';
+        ctx.fillRect(Math.random() * 256, Math.random() * 256, 3, 3);
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    return texture;
+}
+
+function generateFloorTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, 0, 256, 256);
+
+    ctx.strokeStyle = '#0d0d0d';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(0, 0, 256, 256);
+    ctx.strokeRect(0, 0, 128, 128);
+    ctx.strokeRect(128, 128, 128, 128);
+
+    for (let i = 0; i < 500; i++) {
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.fillRect(Math.random() * 256, Math.random() * 256, 4, 4);
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    return texture;
+}
+
+let wallMaterial, floorMaterial, ceilingMaterial;
+
+function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x030303);
+    scene.fog = new THREE.FogExp2(0x030303, 0.06);
+
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+
+    const wallTex = generateWallTexture();
+    wallTex.repeat.set(2, 2);
+
+    const floorTex = generateFloorTexture();
+    floorTex.repeat.set(8, 8);
+
+    wallMaterial = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.9, metalness: 0.1 });
+    floorMaterial = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.8, metalness: 0.2 });
+    ceilingMaterial = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 1.0 });
+
+    webglRenderer = new THREE.WebGLRenderer({ antialias: true });
+    webglRenderer.setSize(window.innerWidth, window.innerHeight);
+    webglRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    webglRenderer.shadowMap.enabled = true;
+    webglRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    webglRenderer.outputColorSpace = THREE.SRGBColorSpace;
+    webglRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+    webglRenderer.toneMappingExposure = 1.1;
+
+    const container = document.getElementById('game-container');
+    if (container) {
+        container.innerHTML = '';
+        container.appendChild(webglRenderer.domElement);
+    }
+
+    clock = new THREE.Clock();
+
+    buildMazeFromGrid();
+    createLighting();
+    createPlayer();
+    createKeys();
+    createExit();
+    createMonster();
+
+    window.addEventListener('resize', onResize);
+    setupTouchControls();
+    webglRenderer.render(scene, camera);
+}
+
+function createBox(x, y, z, width, height, depth, material, isWall = false) {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
+    mesh.position.set(x, y, z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+
+    if (isWall) {
+        const box = new THREE.Box3().setFromObject(mesh);
+        wallBoundingBoxes.push(box);
+    }
+    return mesh;
+}
+
+function buildMazeFromGrid() {
+    const rows = MAZE_MAP.length;
+    const cols = MAZE_MAP[0].length;
+    const cs = CONFIG.cellSize;
+
+    const mapWidth = cols * cs;
+    const mapDepth = rows * cs;
+
+    createBox(mapWidth / 2 - cs/2, -0.1, mapDepth / 2 - cs/2, mapWidth, 0.2, mapDepth, floorMaterial);
+    createBox(mapWidth / 2 - cs/2, 3.6, mapDepth / 2 - cs/2, mapWidth, 0.2, mapDepth, ceilingMaterial);
+
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            const cell = MAZE_MAP[r][c];
+            const x = c * cs;
+            const z = r * cs;
+
+            if (cell === 1) {
+                createBox(x, 1.75, z, cs, 3.5, cs, wallMaterial, true);
+            } else if (cell === 2) {
+                keyPositions.push(new THREE.Vector3(x, 0.8, z));
+            } else if (cell === 4) {
+                exitPosition = new THREE.Vector3(x, 1.2, z);
+            }
+        }
+    }
+}
+
+function createLighting() {
+    const ambient = new THREE.AmbientLight(0x223344, CONFIG.ambientLight);
+    scene.add(ambient);
+
+    const lightCoords = [
+        [4, 4], [20, 4], [36, 4],
+        [12, 16], [28, 16], [44, 16],
+        [4, 28], [24, 28], [40, 36]
+    ];
+
+    lightCoords.forEach(([lx, lz]) => {
+        const pLight = new THREE.PointLight(0xffa855, 0.8, 10);
+        pLight.position.set(lx, 3.0, lz);
+        scene.add(pLight);
+        lights.push(pLight);
+
+        const fixture = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.2, 0.2, 0.1, 8),
+            new THREE.MeshBasicMaterial({ color: 0xffa855 })
+        );
+        fixture.position.set(lx, 3.5, lz);
+        scene.add(fixture);
+    });
+}
+
+function createPlayer() {
+    player = new THREE.Object3D();
+    player.position.set(1 * CONFIG.cellSize, 1.6, 1 * CONFIG.cellSize);
+    scene.add(player);
+
+    player.add(camera);
+    camera.position.set(0, 0, 0);
+
+    flashlight = new THREE.SpotLight(0xffffff, CONFIG.flashlightPower, CONFIG.flashlightDistance, Math.PI / 6, 0.4, 1);
+    flashlight.position.set(0.2, -0.1, -0.1);
+    flashlight.castShadow = true;
+    camera.add(flashlight);
+
+    const flTarget = new THREE.Object3D();
+    flTarget.position.set(0, 0, -10);
+    camera.add(flTarget);
+    flashlight.target = flTarget;
+}
+
+function createKeys() {
+    keyPositions.forEach((pos) => {
+        const group = new THREE.Group();
+        const mat = new THREE.MeshStandardMaterial({
+            color: 0xffd700,
+            emissive: 0x996500,
+            emissiveIntensity: 0.8,
+            metalness: 0.8,
+            roughness: 0.2
+        });
+
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.05, 8, 16), mat);
+        ring.rotation.x = Math.PI / 2;
+        group.add(ring);
+
+        const stem = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.4, 0.08), mat);
+        stem.position.y = -0.2;
+        group.add(stem);
+
+        const tooth = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.08), mat);
+        tooth.position.set(0.06, -0.3, 0);
+        group.add(tooth);
+
+        group.position.copy(pos);
+        scene.add(group);
+        keys.push(group);
+    });
+}
+
+function createExit() {
+    exit = new THREE.Group();
+    const doorMat = new THREE.MeshStandardMaterial({
+        color: 0x22c55e,
+        emissive: 0x15803d,
+        emissiveIntensity: 0.9
+    });
+
+    const door = new THREE.Mesh(new THREE.BoxGeometry(2.0, 3.0, 0.2), doorMat);
+    door.position.y = 1.5;
+    exit.add(door);
+
+    if (exitPosition) exit.position.copy(exitPosition);
+    exit.visible = false;
+    scene.add(exit);
+}
+
+function createMonster() {
+    monster = new THREE.Group();
+
+    const bodyMat = new THREE.MeshStandardMaterial({ 
+        color: 0x111111, 
+        roughness: 0.5,
+        emissive: 0x330000,
+        emissiveIntensity: 0.4
+    });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.25, 2.3, 12), bodyMat);
+    body.position.y = 1.15;
+    monster.add(body);
+
+    const headMat = new THREE.MeshStandardMaterial({ 
+        color: 0x1a0505, 
+        roughness: 0.4,
+        emissive: 0x440000,
+        emissiveIntensity: 0.5
+    });
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 16), headMat);
+    head.position.y = 2.45;
+    monster.add(head);
+
+    const eyeMat = new THREE.MeshStandardMaterial({ 
+        color: 0xff0000, 
+        emissive: 0xff0000, 
+        emissiveIntensity: 3.5 
+    });
+    const eye1 = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), eyeMat);
+    eye1.position.set(-0.16, 2.5, -0.42);
+    monster.add(eye1);
+
+    const eye2 = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), eyeMat);
+    eye2.position.set(0.16, 2.5, -0.42);
+    monster.add(eye2);
+
+    const redLight = new THREE.PointLight(0xff0000, 4.0, 10);
+    redLight.position.set(0, 2.2, -0.2);
+    monster.add(redLight);
+
+    monster.visible = false;
+    scene.add(monster);
+}
+
+function setupTouchControls() {
+    const bindTouch = (id, code) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('touchstart', (e) => { e.preventDefault(); pressed[code] = true; });
+        el.addEventListener('touchend', (e) => { e.preventDefault(); pressed[code] = false; });
+    };
+
+    bindTouch('btn-up', 'KeyW');
+    bindTouch('btn-down', 'KeyS');
+    bindTouch('btn-left', 'KeyA');
+    bindTouch('btn-right', 'KeyD');
+
+    const btnFlash = document.getElementById('btn-flashlight');
+    if (btnFlash) {
+        btnFlash.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            toggleFlashlight();
+        });
+    }
+
+    const btnInteract = document.getElementById('btn-interact');
+    if (btnInteract) {
+        btnInteract.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            pressed['KeyE'] = true;
+            setTimeout(() => pressed['KeyE'] = false, 200);
+        });
+    }
+
+    const btnMash = document.getElementById('mash-button');
+    if (btnMash) {
+        btnMash.addEventListener('click', triggerEscapeMash);
+    }
+}
+
+document.addEventListener('mousemove', (e) => {
+    if (!webglRenderer || !webglRenderer.domElement) return;
+    if (document.pointerLockElement !== webglRenderer.domElement) return;
+    if (grabbed || gameEnded || !gameStarted) return;
+
+    yaw -= e.movementX * 0.0022;
+    pitch -= e.movementY * 0.0022;
+    pitch = THREE.MathUtils.clamp(pitch, -1.4, 1.4);
+
+    if (player) player.rotation.y = yaw;
+    if (camera) camera.rotation.x = pitch;
+});
+
+document.addEventListener('keydown', (e) => {
+    pressed[e.code] = true;
+
+    if (e.code === 'KeyF' && gameStarted && !gameEnded) {
+        toggleFlashlight();
+    }
+
+    if (e.code === 'Space' && grabbed) {
+        triggerEscapeMash();
+    }
+});
+
+document.addEventListener('keyup', (e) => {
+    pressed[e.code] = false;
+});
+
+function toggleFlashlight() {
+    if (!flashlight) return;
+    flashlight.visible = !flashlight.visible;
+    if (flashText) {
+        flashText.textContent = flashlight.visible ? 'ON' : 'OFF';
+        flashText.className = flashlight.visible ? 'font-bold text-green-400' : 'font-bold text-red-500';
+    }
+    audio.playFlashlightClick();
+}
+
+function movePlayer(delta) {
+    if (grabbed || gameEnded || !gameStarted || !player) return;
+
+    let forward = 0, side = 0;
+    if (pressed['KeyW']) forward += 1;
+    if (pressed['KeyS']) forward -= 1;
+    if (pressed['KeyA']) side -= 1;
+    if (pressed['KeyD']) side += 1;
+
+    if (forward === 0 && side === 0) return;
+
+    const isSilent = pressed['ShiftLeft'] || pressed['ShiftRight'];
+    const speed = isSilent ? CONFIG.silentSpeed : CONFIG.playerSpeed;
+
+    const moveDir = new THREE.Vector3(side, 0, -forward).normalize();
+    moveDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+
+    const moveStep = moveDir.clone().multiplyScalar(speed * delta);
+
+    const futureX = player.position.x + moveStep.x;
+    const futureZ = player.position.z + moveStep.z;
+    const playerRadius = 0.5;
+
+    let canMoveX = true;
+    let canMoveZ = true;
+
+    for (let box of wallBoundingBoxes) {
+        const playerBoxX = new THREE.Box3(
+            new THREE.Vector3(futureX - playerRadius, 0, player.position.z - playerRadius),
+            new THREE.Vector3(futureX + playerRadius, 2, player.position.z + playerRadius)
+        );
+        if (box.intersectsBox(playerBoxX)) canMoveX = false;
+
+        const playerBoxZ = new THREE.Box3(
+            new THREE.Vector3(player.position.x - playerRadius, 0, futureZ - playerRadius),
+            new THREE.Vector3(player.position.x + playerRadius, 2, futureZ + playerRadius)
+        );
+        if (box.intersectsBox(playerBoxZ)) canMoveZ = false;
+    }
+
+    if (canMoveX) player.position.x += moveStep.x;
+    if (canMoveZ) player.position.z += moveStep.z;
+
+    footstepTimer += delta * (isSilent ? 6 : 11);
+    if (footstepTimer > Math.PI * 2) {
+        footstepTimer = 0;
+        audio.playFootstep();
+    }
+    if (camera) camera.position.y = Math.sin(footstepTimer) * 0.05;
+}
+
+function updateKeys() {
+    if (!player) return;
+    keys.forEach((key) => {
+        if (!key.visible) return;
+
+        key.rotation.y += 0.03;
+        key.position.y = 0.8 + Math.sin(performance.now() * 0.004) * 0.1;
+
+        if (getDistanceXZ(player.position, key.position) < 1.5) {
+            key.visible = false;
+            collectedKeys++;
+            if (keyText) keyText.textContent = `${collectedKeys} / ${CONFIG.keyCount}`;
+            audio.playKeyCollect();
+            showMessage('🔑 열쇠를 찾았습니다!');
+
+            if (collectedKeys >= CONFIG.keyCount) {
+                activateFinalPhase();
+            }
+        }
+    });
+}
+
+function activateFinalPhase() {
+    finalPhase = true;
+    if (exit) exit.visible = true;
+    finalLightTimer = 8;
+    showMessage('⚡ 모든 열쇠를 찾았습니다! 탈출구가 열렸습니다!', 4000);
+
+    const flash = document.getElementById('flash-overlay');
+    if (flash) {
+        flash.style.opacity = '0.9';
+        setTimeout(() => flash.style.opacity = '0', 200);
+    }
+}
+
+function spawnMonster() {
+    if (!monster || monster.visible || !gameStarted || gameEnded || grabbed || !player) return;
+
+    const openCells = [];
+    const cs = CONFIG.cellSize;
+    for (let r = 0; r < MAZE_MAP.length; r++) {
+        for (let c = 0; c < MAZE_MAP[0].length; c++) {
+            if (MAZE_MAP[r][c] !== 1) {
+                const worldX = c * cs;
+                const worldZ = r * cs;
+                const distToPlayer = getDistanceXZ(player.position, { x: worldX, z: worldZ });
+                if (distToPlayer > 8 && distToPlayer < 22) {
+                    openCells.push({ x: worldX, z: worldZ });
+                }
+            }
+        }
+    }
+
+    if (openCells.length === 0) return;
+
+    const spawnPos = openCells[Math.floor(Math.random() * openCells.length)];
+    monster.position.set(spawnPos.x, 0, spawnPos.z);
+    monster.visible = true;
+
+    audio.playHeartbeat();
+    showMessage('...어둠 속에서 섬뜩한 기운이 다가옵니다.');
+}
+
+function updateMonster(delta) {
+    if (!monster || !monster.visible || gameEnded || !player) return;
+
+    const dist = getDistanceXZ(player.position, monster.position);
+
+    if (dist < 12 && Math.random() < 0.03) {
+        audio.playHeartbeat();
+    }
+
+    if (dist > 0.3) {
+        const speed = CONFIG.monsterSpeed * (finalPhase ? 1.35 : 1.0);
+        const dir = new THREE.Vector3(
+            player.position.x - monster.position.x,
+            0,
+            player.position.z - monster.position.z
+        ).normalize();
+
+        const moveX = dir.x * speed * delta;
+        const moveZ = dir.z * speed * delta;
+
+        const monsterRadius = 0.45;
+        const futureX = monster.position.x + moveX;
+        const futureZ = monster.position.z + moveZ;
+
+        // Collision helper to prevent diagonal wall clipping
+        const checkCollision = (x, z) => {
+            const mBox = new THREE.Box3(
+                new THREE.Vector3(x - monsterRadius, 0, z - monsterRadius),
+                new THREE.Vector3(x + monsterRadius, 2.5, z + monsterRadius)
+            );
+            for (let box of wallBoundingBoxes) {
+                if (box.intersectsBox(mBox)) return true;
+            }
+            return false;
+        };
+
+        // Attempt full diagonal move, then fall back to sliding along X or Z
+        if (!checkCollision(futureX, futureZ)) {
+            monster.position.x = futureX;
+            monster.position.z = futureZ;
+        } else if (!checkCollision(futureX, monster.position.z)) {
+            monster.position.x = futureX;
+        } else if (!checkCollision(monster.position.x, futureZ)) {
+            monster.position.z = futureZ;
+        }
+
+        monster.lookAt(player.position.x, 1.2, player.position.z);
+    }
+
+    if (grabbed) {
+        grabDamageTimer += delta;
+        if (grabDamageTimer >= 0.8) {
+            damageLife(3);
+            grabDamageTimer = 0;
+        }
+    }
+
+    if (dist < CONFIG.catchDistance && !grabbed) {
+        triggerGrapple();
+    }
+}
+
+function triggerGrapple() {
+    if (!monster || !player) return;
+    grabbed = true;
+    escapeCount = 0;
+    grabDamageTimer = 0;
+    audio.playMonsterScream();
+
+    // Place monster in front of player while preventing inside-wall placement
+    const forwardDir = new THREE.Vector3(0, 0, -1.1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    let targetX = player.position.x + forwardDir.x;
+    let targetZ = player.position.z + forwardDir.z;
+
+    const mBox = new THREE.Box3(
+        new THREE.Vector3(targetX - 0.45, 0, targetZ - 0.45),
+        new THREE.Vector3(targetX + 0.45, 2.5, targetZ + 0.45)
+    );
+
+    let inWall = false;
+    for (let box of wallBoundingBoxes) {
+        if (box.intersectsBox(mBox)) {
+            inWall = true;
+            break;
+        }
+    }
+
+    if (inWall) {
+        targetX = player.position.x + forwardDir.x * 0.3;
+        targetZ = player.position.z + forwardDir.z * 0.3;
+    }
+
+    monster.position.set(targetX, 0, targetZ);
+    monster.lookAt(player.position.x, 1.2, player.position.z);
+    monster.visible = true;
+
+    const jumpscare = document.getElementById('jumpscare-overlay');
+    if (jumpscare) {
+        jumpscare.style.opacity = '1';
+        setTimeout(() => jumpscare.style.opacity = '0', 350);
+    }
+
+    damageLife(CONFIG.grabDamage);
+
+    const promptEl = document.getElementById('grapple-prompt');
+    const countEl = document.getElementById('mash-count');
+    if (promptEl) promptEl.classList.remove('hidden');
+    if (countEl) countEl.textContent = '0';
+}
+
+function checkExit() {
+    if (!finalPhase || gameEnded || !player || !exitPosition) return;
+
+    if (getDistanceXZ(player.position, exitPosition) < 2.5) {
+        showMessage('🚪 E 키 또는 버튼을 눌러 탈출하세요!');
+        if (pressed['KeyE']) {
+            endGame(true);
+        }
+    }
+}
+
+function drawMinimap() {
+    if (!mapCtx || !player) return;
+
+    const cs = CONFIG.cellSize;
+    const mapSize = MAZE_MAP.length * cs;
+    const canvasSize = 140;
+    const scale = canvasSize / mapSize;
+
+    mapCtx.fillStyle = '#050505';
+    mapCtx.fillRect(0, 0, canvasSize, canvasSize);
+
+    mapCtx.fillStyle = '#333333';
+    for (let r = 0; r < MAZE_MAP.length; r++) {
+        for (let c = 0; c < MAZE_MAP[0].length; c++) {
+            if (MAZE_MAP[r][c] === 1) {
+                mapCtx.fillRect(c * cs * scale, r * cs * scale, cs * scale, cs * scale);
+            }
+        }
+    }
+
+    if (finalPhase && exitPosition) {
+        mapCtx.fillStyle = '#22c55e';
+        mapCtx.beginPath();
+        mapCtx.arc(exitPosition.x * scale, exitPosition.z * scale, 5, 0, Math.PI * 2);
+        mapCtx.fill();
+    }
+
+    // Monster position on minimap
+    if (monster && monster.visible) {
+        mapCtx.fillStyle = '#ef4444';
+        mapCtx.beginPath();
+        mapCtx.arc(monster.position.x * scale, monster.position.z * scale, 4, 0, Math.PI * 2);
+        mapCtx.fill();
+
+        mapCtx.strokeStyle = 'rgba(239, 68, 68, 0.6)';
+        mapCtx.lineWidth = 1.5;
+        mapCtx.beginPath();
+        mapCtx.arc(monster.position.x * scale, monster.position.z * scale, 6 + Math.sin(performance.now() * 0.01) * 2, 0, Math.PI * 2);
+        mapCtx.stroke();
+    }
+
+    mapCtx.fillStyle = '#ffffff';
+    mapCtx.beginPath();
+    mapCtx.arc(player.position.x * scale, player.position.z * scale, 3.5, 0, Math.PI * 2);
+    mapCtx.fill();
+
+    mapCtx.strokeStyle = '#ffffff';
+    mapCtx.lineWidth = 1.5;
+    mapCtx.beginPath();
+    mapCtx.moveTo(player.position.x * scale, player.position.z * scale);
+    mapCtx.lineTo(
+        (player.position.x - Math.sin(yaw) * 3) * scale,
+        (player.position.z - Math.cos(yaw) * 3) * scale
+    );
+    mapCtx.stroke();
+}
+
+function showMessage(text, duration = 2000) {
+    if (message) {
+        message.textContent = text;
+        messageTimer = duration / 1000;
+    }
+}
+
+function startGame() {
+    audio.init();
+    if (soundToggle) audio.soundEnabled = soundToggle.checked;
+
+    const startScr = document.getElementById('startScreen');
+    const hudEl = document.getElementById('hud');
+    if (startScr) startScr.classList.add('hidden');
+    if (hudEl) hudEl.classList.remove('hidden');
+
+    gameStarted = true;
+    gameEnded = false;
+    gameStartTime = Date.now();
+
+    if (webglRenderer && webglRenderer.domElement) {
+        webglRenderer.domElement.requestPointerLock?.();
+    }
+}
+
+function endGame(win) {
+    gameEnded = true;
+    document.exitPointerLock?.();
+
+    const elapsedSec = Math.floor((Date.now() - gameStartTime) / 1000);
+
+    if (win) {
+        const timeEl = document.getElementById('win-time');
+        const hpEl = document.getElementById('win-hp');
+        const winScr = document.getElementById('winScreen');
+        if (timeEl) timeEl.textContent = `${elapsedSec}초`;
+        if (hpEl) hpEl.textContent = `${Math.round(life)}%`;
+        if (winScr) winScr.classList.remove('hidden');
+    } else {
+        const keyEl = document.getElementById('fail-keys');
+        const failTimeEl = document.getElementById('fail-time');
+        const failScr = document.getElementById('gameOver');
+        if (keyEl) keyEl.textContent = collectedKeys;
+        if (failTimeEl) failTimeEl.textContent = `${elapsedSec}초`;
+        if (failScr) failScr.classList.remove('hidden');
+    }
+}
+
+function restartGame() {
+    location.reload();
+}
+
+function onResize() {
+    if (!webglRenderer || !camera) return;
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    webglRenderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function update(delta) {
+    if (!gameStarted || gameEnded) return;
+
+    movePlayer(delta);
+    updateKeys();
+    updateMonster(delta);
+    checkExit();
+
+    if (messageTimer > 0) {
+        messageTimer -= delta;
+        if (messageTimer <= 0 && message) message.textContent = '';
+    }
+
+    monsterTimer -= delta;
+    if (monsterTimer <= 0) {
+        spawnMonster();
+        monsterTimer = finalPhase ? 3.5 : Math.max(3.0, 9.0 - collectedKeys * 1.2);
+    }
+
+    drawMinimap();
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    const delta = clock ? clock.getDelta() : 0.016;
+    update(delta);
+    if (webglRenderer && scene && camera) {
+        webglRenderer.render(scene, camera);
+    }
+}
+
+document.getElementById('startButton')?.addEventListener('click', startGame);
+document.getElementById('restartButton')?.addEventListener('click', restartGame);
+document.getElementById('winButton')?.addEventListener('click', restartGame);
+
+window.onload = () => {
+    init();
+    animate();
+};
+</script>
+</body>
+</html>
