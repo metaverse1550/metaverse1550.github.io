@@ -1,0 +1,1332 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>복서의 길: 초보에서 세계 챔피언까지</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            user-select: none;
+            overflow: hidden;
+            background-color: #0f172a;
+            color: #f8fafc;
+        }
+        canvas {
+            display: block;
+            touch-action: none;
+        }
+        .hud-glass {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .floating-text {
+            animation: floatUp 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        @keyframes floatUp {
+            0% { opacity: 1; transform: translateY(0) scale(1); }
+            50% { transform: translateY(-25px) scale(1.15); }
+            100% { opacity: 0; transform: translateY(-50px) scale(0.9); }
+        }
+        .pulse-gold {
+            animation: pulseGold 2s infinite;
+        }
+        @keyframes pulseGold {
+            0%, 100% { box-shadow: 0 0 15px rgba(234, 179, 8, 0.4); }
+            50% { box-shadow: 0 0 30px rgba(234, 179, 8, 0.8); }
+        }
+    </style>
+</head>
+<body class="w-screen h-screen relative flex flex-col justify-center items-center overflow-hidden">
+
+    <!-- Main Game Canvas Container -->
+    <div id="game-container" class="relative w-full h-full flex items-center justify-center">
+        <canvas id="gameCanvas" class="w-full h-full"></canvas>
+
+        <!-- Top Status HUD (Gym / Navigation mode) -->
+        <div id="hud-main" class="absolute top-4 left-4 right-4 flex flex-wrap justify-between items-center gap-3 p-4 rounded-xl hud-glass shadow-2xl pointer-events-none transition-all duration-300">
+            <!-- Left Group: Player Info & Stage -->
+            <div class="flex items-center space-x-4">
+                <div class="bg-gradient-to-r from-amber-600 to-red-600 px-3 py-1.5 rounded-lg shadow font-black text-sm tracking-wider uppercase flex items-center gap-2">
+                    <i class="fa-solid fa-trophy"></i>
+                    <span id="hud-stage">1단계: 체육관 초보</span>
+                </div>
+                <div class="bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700 text-sm font-bold text-amber-400">
+                    DAY <span id="hud-day" class="text-white text-base">1</span>
+                </div>
+                <div class="bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700 text-sm font-bold text-slate-300">
+                    체중: <span id="hud-weight" class="text-white">95.0</span> kg
+                </div>
+            </div>
+
+            <!-- Center Group: EXP & Level -->
+            <div class="flex items-center space-x-3 min-w-[240px] flex-1 max-w-md">
+                <span class="font-black text-amber-400 text-sm">LV.<span id="hud-level">1</span></span>
+                <div class="w-full bg-slate-900 h-3 rounded-full overflow-hidden border border-slate-700/50 relative">
+                    <div id="hud-exp-bar" class="bg-gradient-to-r from-amber-500 to-yellow-300 h-full w-0% transition-all duration-300"></div>
+                </div>
+                <span id="hud-exp-text" class="text-xs font-semibold text-slate-400 whitespace-nowrap">0 / 100</span>
+            </div>
+
+            <!-- Right Group: Quick Stats & Camera Mode -->
+            <div class="flex items-center space-x-3">
+                <div class="flex items-center gap-1.5 bg-red-950/60 border border-red-800/50 px-2.5 py-1 rounded-lg text-xs font-bold text-red-400">
+                    <i class="fa-solid fa-heart"></i> <span id="hud-hp">100</span>
+                </div>
+                <div class="flex items-center gap-1.5 bg-blue-950/60 border border-blue-800/50 px-2.5 py-1 rounded-lg text-xs font-bold text-blue-400">
+                    <i class="fa-solid fa-bolt"></i> <span id="hud-stamina">100</span>
+                </div>
+                <div class="flex items-center gap-1.5 bg-purple-950/60 border border-purple-800/50 px-2.5 py-1 rounded-lg text-xs font-bold text-purple-400">
+                    <i class="fa-solid fa-battery-half"></i> 피로도: <span id="hud-fatigue">0</span>%
+                </div>
+                <button id="camera-btn" class="pointer-events-auto bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-lg border border-slate-600 font-semibold transition active:scale-95">
+                    <i class="fa-solid fa-camera mr-1"></i> 시점: <span id="hud-cam-mode">3인칭</span> (V)
+                </button>
+            </div>
+        </div>
+
+        <!-- Combat Overlay HUD (Active during Sparring & Matches) -->
+        <div id="hud-fight" class="absolute top-4 left-4 right-4 hidden flex-col gap-2 pointer-events-none">
+            <!-- Round & Timer Banner -->
+            <div class="self-center bg-slate-900/90 border border-amber-500/50 px-6 py-2 rounded-full text-center shadow-2xl flex items-center gap-6">
+                <div class="text-amber-400 font-extrabold text-sm uppercase" id="fight-round">ROUND 1</div>
+                <div class="text-3xl font-black font-mono tracking-widest text-white" id="fight-timer">03:00</div>
+                <div class="text-slate-400 font-bold text-xs" id="fight-match-type">체육관 스파링</div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-6 mt-2">
+                <!-- Player Fighter Status -->
+                <div class="p-3 rounded-xl hud-glass border-l-4 border-l-blue-500">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="font-extrabold text-sm text-blue-400 flex items-center gap-2">
+                            <i class="fa-solid fa-user-ninja"></i> 나 (복서)
+                        </span>
+                        <span class="text-xs text-slate-300 font-bold" id="fight-player-hp-text">100 / 100</span>
+                    </div>
+                    <!-- Player HP Bar -->
+                    <div class="w-full bg-slate-900 h-3.5 rounded-full overflow-hidden border border-slate-700 mb-2">
+                        <div id="fight-player-hp-bar" class="bg-gradient-to-r from-emerald-500 to-green-400 h-full w-full transition-all duration-200"></div>
+                    </div>
+                    <!-- Player Stamina Bar -->
+                    <div class="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-700/60">
+                        <div id="fight-player-sta-bar" class="bg-gradient-to-r from-blue-500 to-cyan-300 h-full w-full transition-all duration-100"></div>
+                    </div>
+                </div>
+
+                <!-- Opponent Fighter Status -->
+                <div class="p-3 rounded-xl hud-glass border-r-4 border-r-red-500 text-right">
+                    <div class="flex justify-between items-center mb-1 flex-row-reverse">
+                        <span class="font-extrabold text-sm text-red-400 flex items-center gap-2" id="fight-opp-name">
+                            상대 복서 <i class="fa-solid fa-skull"></i>
+                        </span>
+                        <span class="text-xs text-slate-300 font-bold" id="fight-opp-hp-text">100 / 100</span>
+                    </div>
+                    <!-- Opponent HP Bar -->
+                    <div class="w-full bg-slate-900 h-3.5 rounded-full overflow-hidden border border-slate-700 mb-2 flex justify-end">
+                        <div id="fight-opp-hp-bar" class="bg-gradient-to-r from-red-600 to-rose-400 h-full w-full transition-all duration-200"></div>
+                    </div>
+                    <!-- Opponent Stamina Bar -->
+                    <div class="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-700/60 flex justify-end">
+                        <div id="fight-opp-sta-bar" class="bg-gradient-to-r from-amber-600 to-orange-400 h-full w-full transition-all duration-100"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Proximity Action Indicator Modal/Toast -->
+        <div id="interaction-prompt" class="absolute bottom-12 left-1/2 -translate-x-1/2 hidden bg-slate-900/90 border border-amber-500/80 px-6 py-3 rounded-2xl shadow-2xl backdrop-blur-md text-center pointer-events-none transition-all">
+            <p id="prompt-action" class="text-base font-extrabold text-amber-400 flex items-center justify-center gap-2">
+                <span class="bg-amber-500 text-slate-950 px-2 py-0.5 rounded font-black text-sm">E</span>
+                <span>샌드백 훈련하기</span>
+            </p>
+            <p id="prompt-desc" class="text-xs text-slate-300 mt-1">공격력 & 펀치 기술 숙련도 상승</p>
+        </div>
+
+        <!-- Training Mini-Game Modal Overlay -->
+        <div id="training-modal" class="absolute inset-0 bg-slate-950/80 backdrop-blur-md hidden flex items-center justify-center z-30">
+            <div class="bg-slate-900 border border-slate-700 p-6 rounded-2xl max-w-lg w-full shadow-2xl text-center relative">
+                <h2 id="train-title" class="text-2xl font-black text-amber-400 mb-2">샌드백 훈련</h2>
+                <p id="train-instruction" class="text-slate-300 text-sm mb-6">타이밍에 맞춰 키를 눌러 펀치를 날리세요!</p>
+                
+                <!-- Training Progress / Visual area -->
+                <div id="train-game-area" class="w-full h-40 bg-slate-950 rounded-xl border border-slate-800 flex flex-col justify-center items-center relative overflow-hidden mb-6">
+                    <div id="train-meter-bg" class="w-4/5 h-6 bg-slate-800 rounded-full relative overflow-hidden border border-slate-700">
+                        <div id="train-target-zone" class="absolute h-full bg-emerald-500/40 border-x-2 border-emerald-400 left-1/2 -translate-x-1/2 w-1/4"></div>
+                        <div id="train-indicator" class="absolute top-0 bottom-0 w-2 bg-yellow-400 shadow-[0_0_10px_#facc15] left-0"></div>
+                    </div>
+                    <p id="train-score-text" class="mt-4 font-extrabold text-xl text-white">성공: <span id="train-count" class="text-amber-400">0</span> / 5</p>
+                </div>
+
+                <div class="flex justify-center gap-4">
+                    <button id="train-action-btn" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black px-8 py-3 rounded-xl transition shadow-lg active:scale-95">
+                        펀치! (SPACE)
+                    </button>
+                    <button id="train-close-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-5 py-3 rounded-xl transition">
+                        중단
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Career & Stats Modal -->
+        <div id="stats-modal" class="absolute inset-0 bg-slate-950/85 backdrop-blur-md hidden flex items-center justify-center z-40 p-4">
+            <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+                <button id="stats-close-btn" class="absolute top-4 right-4 text-slate-400 hover:text-white text-xl">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+                <h2 class="text-2xl font-black text-amber-400 mb-4 flex items-center gap-2">
+                    <i class="fa-solid fa-address-card"></i> 복서 프로필 & 능력치
+                </h2>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Left: Player Silhouette Preview & Stage -->
+                    <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 flex flex-col items-center justify-center text-center">
+                        <canvas id="body-preview-canvas" width="180" height="220" class="mb-2 bg-slate-900/50 rounded-lg border border-slate-800/80"></canvas>
+                        <span id="profile-body-type" class="text-xs font-bold text-amber-400 bg-amber-950/60 border border-amber-800/60 px-3 py-1 rounded-full mb-1">체형: 초보자 (체지방 높음)</span>
+                        <h3 id="profile-title" class="text-lg font-black text-white mt-1">체육관 초보 복서</h3>
+                        <p class="text-xs text-slate-400">랭킹: <span id="profile-rank" class="text-amber-400 font-bold">아마추어 미등록</span></p>
+                    </div>
+
+                    <!-- Right: Detailed Stats Matrix -->
+                    <div class="space-y-3 text-sm">
+                        <div class="flex justify-between border-b border-slate-800 pb-1.5">
+                            <span class="text-slate-400"><i class="fa-solid fa-dumbbell text-amber-500 mr-2"></i>공격력 (Attack)</span>
+                            <span id="stat-att" class="font-black text-white">10</span>
+                        </div>
+                        <div class="flex justify-between border-b border-slate-800 pb-1.5">
+                            <span class="text-slate-400"><i class="fa-solid fa-shield-halved text-blue-500 mr-2"></i>방어력 (Defense)</span>
+                            <span id="stat-def" class="font-black text-white">5</span>
+                        </div>
+                        <div class="flex justify-between border-b border-slate-800 pb-1.5">
+                            <span class="text-slate-400"><i class="fa-solid fa-heart text-red-500 mr-2"></i>최대 체력 (Max HP)</span>
+                            <span id="stat-hp" class="font-black text-white">100</span>
+                        </div>
+                        <div class="flex justify-between border-b border-slate-800 pb-1.5">
+                            <span class="text-slate-400"><i class="fa-solid fa-bolt text-yellow-500 mr-2"></i>최대 스태미나</span>
+                            <span id="stat-sta" class="font-black text-white">100</span>
+                        </div>
+                        <div class="flex justify-between border-b border-slate-800 pb-1.5">
+                            <span class="text-slate-400"><i class="fa-solid fa-hand-fist text-purple-500 mr-2"></i>펀치 속도</span>
+                            <span id="stat-pspeed" class="font-black text-white">1.0x</span>
+                        </div>
+                        <div class="flex justify-between border-b border-slate-800 pb-1.5">
+                            <span class="text-slate-400"><i class="fa-solid fa-person-running text-emerald-500 mr-2"></i>이동 속도</span>
+                            <span id="stat-mspeed" class="font-black text-white">1.0x</span>
+                        </div>
+                        <div class="flex justify-between border-b border-slate-800 pb-1.5">
+                            <span class="text-slate-400"><i class="fa-solid fa-coins text-yellow-400 mr-2"></i>소지금 / 명성</span>
+                            <span class="font-black text-white"><span id="stat-money">0</span>$ / <span id="stat-fame">0</span> P</span>
+                        </div>
+                        <div class="flex justify-between border-b border-slate-800 pb-1.5">
+                            <span class="text-slate-400"><i class="fa-solid fa-trophy text-amber-400 mr-2"></i>전적 (스파링 / 전적)</span>
+                            <span class="font-black text-amber-400"><span id="stat-sparring-wins">0</span>승 (공식 <span id="stat-match-record">0승 0패</span>)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Unlocked Boxing Skills -->
+                <div class="mt-6 border-t border-slate-800 pt-4">
+                    <h4 class="text-sm font-extrabold text-slate-300 mb-2">보유 기술 목록</h4>
+                    <div id="skills-list" class="flex flex-wrap gap-2">
+                        <!-- Dynamically filled skill badges -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- World Champion Victory & Ending Screen -->
+        <div id="champion-screen" class="absolute inset-0 bg-black/90 z-50 hidden flex flex-col items-center justify-center p-6 text-center">
+            <i class="fa-solid fa-trophy text-7xl text-amber-400 pulse-gold mb-6"></i>
+            <h1 class="text-5xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-600 tracking-wider mb-4">
+                WORLD CHAMPION
+            </h1>
+            <p class="text-xl md:text-2xl text-slate-200 max-w-2xl font-bold mb-6">
+                축하합니다! 뚱뚱하고 힘없던 초보 복서에서 땀방울과 결실로 세계 복싱 챔피언 자리에 올랐습니다!
+            </p>
+            <div id="final-stats-summary" class="bg-slate-900 border border-amber-500/50 rounded-xl p-6 max-w-md w-full mb-8 text-left space-y-2 text-sm text-slate-300">
+                <!-- Dynamically filled final stats -->
+            </div>
+            <button onclick="location.reload()" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black px-8 py-4 rounded-2xl text-lg shadow-2xl transition transform hover:scale-105 active:scale-95">
+                새로운 챔피언의 도전 시작
+            </button>
+        </div>
+
+        <!-- Floating Notification Container -->
+        <div id="floating-text-container" class="absolute inset-0 pointer-events-none z-20"></div>
+
+        <!-- Bottom Controls Bar (Help / Buttons) -->
+        <div class="absolute bottom-4 right-4 flex items-center gap-2 pointer-events-auto">
+            <button id="open-stats-btn" class="bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-600 px-4 py-2 rounded-xl text-xs font-extrabold shadow-lg flex items-center gap-2">
+                <i class="fa-solid fa-chart-line text-amber-400"></i> 프로필 & 정보 (C)
+            </button>
+            <div class="bg-slate-900/80 border border-slate-700/80 px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hidden md:block">
+                이동: <kbd class="bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 text-amber-400">WASD</kbd> | 
+                상호작용: <kbd class="bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 text-amber-400">E</kbd> | 
+                공격: <kbd class="bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 text-amber-400">좌/우클릭, Q, E</kbd> | 
+                가드/회피: <kbd class="bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 text-amber-400">F / Space</kbd>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Web Audio API Sound Synthesizer for procedural visceral boxing sound effects
+        class SoundEngine {
+            constructor() {
+                this.ctx = null;
+            }
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+            playPunchJab() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(160, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.1);
+            }
+            playPunchHeavy() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(20, this.ctx.currentTime + 0.25);
+                gain.gain.setValueAtTime(0.7, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.25);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.25);
+            }
+            playBlock() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(80, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(40, this.ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.08);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.08);
+            }
+            playBell() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, this.ctx.currentTime);
+                gain.gain.setValueAtTime(0.6, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 1.2);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 1.2);
+            }
+            playLevelUp() {
+                if (!this.ctx) return;
+                const notes = [261.63, 329.63, 392.00, 523.25];
+                notes.forEach((freq, idx) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.value = freq;
+                    const startTime = this.ctx.currentTime + idx * 0.08;
+                    gain.gain.setValueAtTime(0.2, startTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.3);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(startTime);
+                    osc.stop(startTime + 0.3);
+                });
+            }
+        }
+        const audio = new SoundEngine();
+
+        // Player State & Growth System
+        const player = {
+            // Gym position
+            x: 400,
+            y: 350,
+            angle: 0,
+            radius: 20,
+
+            // Core Growth Attributes
+            level: 1,
+            exp: 0,
+            expToNext: 100,
+            stage: 1, // 1: 초보, 2: 아마추어, 3: 프로, 4: 챔피언 도전
+            stageName: "1단계: 체육관 초보",
+
+            // Stats
+            attack: 12,
+            defense: 5,
+            hp: 100,
+            maxHp: 100,
+            stamina: 100,
+            maxStamina: 100,
+            punchSpeed: 1.0,
+            moveSpeed: 2.8,
+
+            // Weight & Body Fat
+            weight: 95.0, // Initial heavy weight (kg)
+            fatigue: 0,   // 0 - 100%
+            day: 1,
+
+            // Career Records & Unlocks
+            sparringWins: 0,
+            proWins: 0,
+            proLosses: 0,
+            proRank: 50, // Starts at rank 50 when going Pro
+            money: 0,
+            fame: 0,
+
+            // Boxing state
+            isGuarding: false,
+            isDodging: false,
+            dodgeCooldown: 0,
+            currentPunch: null, // 'jab', 'straight', 'hookL', 'hookR', 'uppercut'
+            punchTimer: 0,
+
+            // Skills
+            skills: ['잽 (Left Jab)', '스트레이트 (Straight)']
+        };
+
+        // Camera mode: '3P' or '1P'
+        let cameraMode = '3P';
+
+        // Global Game States
+        const GAME_STATES = {
+            GYM: 'GYM',
+            MINIGAME: 'MINIGAME',
+            FIGHT: 'FIGHT',
+            CHAMPION: 'CHAMPION'
+        };
+        let currentState = GAME_STATES.GYM;
+
+        // Gym Equipment Zones
+        const gymZones = [
+            { id: 'weights', name: '웨이트 기구', icon: 'fa-dumbbell', x: 120, y: 120, width: 100, height: 80, color: '#3b82f6', desc: '경험치 & 공격력 증가' },
+            { id: 'heavybag', name: '샌드백', icon: 'fa-box', x: 300, y: 120, width: 80, height: 80, color: '#ef4444', desc: '경험치 & 펀치 속도/기술 증가' },
+            { id: 'treadmill', name: '러닝머신', icon: 'fa-person-running', x: 480, y: 120, width: 100, height: 80, color: '#10b981', desc: '경험치 & 체력/스태미나 증가 / 체중 감량' },
+            { id: 'jumprope', name: '줄넘기 공간', icon: 'fa-bolt', x: 660, y: 120, width: 90, height: 80, color: '#f59e0b', desc: '경험치 & 이동속도 증가' },
+            { id: 'ring', name: '스파링 / 경기 링', icon: 'fa-trophy', x: 550, y: 380, width: 200, height: 180, color: '#8b5cf6', desc: '스파링 및 공식 경기 진행' },
+            { id: 'rest', name: '휴식 공간', icon: 'fa-bed', x: 120, y: 380, width: 120, height: 120, color: '#06b6d4', desc: '피로도 해소 & 다음 날로 진행 (DAY+1)' }
+        ];
+
+        let activeZone = null;
+
+        // Opponent Boxing Fighters Data
+        class Opponent {
+            constructor(name, type, level, attack, hp, stamina, speed, rank = 0) {
+                this.name = name;
+                this.type = type; // 'Power', 'Speed', 'Defense', 'Aggressive', 'Counter'
+                this.level = level;
+                this.attack = attack;
+                this.maxHp = hp;
+                this.hp = hp;
+                this.maxStamina = stamina;
+                this.stamina = stamina;
+                this.speed = speed;
+                this.rank = rank;
+
+                this.x = 0;
+                this.y = 0;
+                this.angle = 0;
+                this.isGuarding = false;
+                this.currentPunch = null;
+                this.punchTimer = 0;
+                this.aiActionTimer = 0;
+                this.hitStun = 0;
+            }
+        }
+
+        let currentOpponent = null;
+        let fightTimer = 180; // 3 minutes round
+        let currentRound = 1;
+        let fightInterval = null;
+
+        // Input Handler
+        const keys = {};
+        let mouseX = 0;
+        let mouseY = 0;
+
+        window.addEventListener('keydown', (e) => {
+            audio.init();
+            keys[e.key.toLowerCase()] = true;
+
+            // Camera switch key 'V'
+            if (e.key.toLowerCase() === 'v') {
+                cameraMode = (cameraMode === '3P') ? '1P' : '3P';
+                document.getElementById('hud-cam-mode').textContent = cameraMode === '3P' ? '3인칭' : '1인칭';
+                showFloatingText(`시점 전환: ${cameraMode === '3P' ? '3인칭 (전체)' : '1인칭 (몰입)'}`, window.innerWidth / 2, 100, '#facc15');
+            }
+
+            // Stats modal key 'C'
+            if (e.key.toLowerCase() === 'c' && currentState === GAME_STATES.GYM) {
+                toggleStatsModal();
+            }
+
+            // Interaction key 'E' in Gym
+            if (e.key.toLowerCase() === 'e' && currentState === GAME_STATES.GYM && activeZone) {
+                handleZoneInteraction(activeZone);
+            }
+
+            // Combat dodge 'Space'
+            if (e.code === 'Space' && currentState === GAME_STATES.FIGHT) {
+                triggerPlayerDodge();
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            const canvas = document.getElementById('gameCanvas');
+            const rect = canvas.getBoundingClientRect();
+            mouseX = e.clientX - rect.left;
+            mouseY = e.clientY - rect.top;
+        });
+
+        window.addEventListener('mousedown', (e) => {
+            audio.init();
+            if (currentState === GAME_STATES.FIGHT) {
+                if (e.button === 0) { // Left click: Jab
+                    executePlayerPunch('jab');
+                } else if (e.button === 2) { // Right click: Straight
+                    executePlayerPunch('straight');
+                }
+            }
+        });
+
+        window.addEventListener('contextmenu', e => e.preventDefault());
+
+        /**
+         * Renders player body procedurally according to weight and muscle progress.
+         * Stages: 
+         *  - Weight >= 90: Fat belly, wide waist, soft shoulders
+         *  - Weight 82-89: Medium fat, waist narrowing, slight shoulder expansion
+         *  - Weight 75-81: Athletic boxer, visible abs, muscular shoulders & back
+         *  - Weight < 75: World Champion physique, broad shoulders, ripped V-taper chest/arms
+         */
+        function drawProceduralBody(ctx, centerX, centerY, scale = 1.0, isBack = false, angle = 0) {
+            ctx.save();
+            ctx.translate(centerX, centerY);
+            ctx.rotate(angle);
+            ctx.scale(scale, scale);
+
+            // Compute body morph factors (0 = Overweight, 1 = Ripped Champion)
+            const fatFactor = Math.max(0, Math.min(1, (player.weight - 70) / 25)); // 1.0 at 95kg, 0.0 at 70kg
+            const muscleFactor = Math.min(1, player.attack / 60);
+
+            // Dynamic Body Dimensions
+            const bellyRadius = 24 * fatFactor + 10 * (1 - fatFactor);
+            const shoulderWidth = 32 + (1 - fatFactor) * 16 + muscleFactor * 12;
+            const armGirth = 8 + muscleFactor * 6;
+            const skinColor = '#e0a96d';
+            const shadowSkin = '#c2884c';
+            const shortsColor = '#1e3a8a';
+            const gloveColor = '#dc2626';
+
+            // Shadow
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.beginPath();
+            ctx.ellipse(0, 35, shoulderWidth * 0.7, 12, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Legs
+            ctx.fillStyle = shadowSkin;
+            ctx.fillRect(-shoulderWidth * 0.3, 10, 10, 25);
+            ctx.fillRect(shoulderWidth * 0.3 - 10, 10, 10, 25);
+
+            // Boxing Shorts
+            ctx.fillStyle = shortsColor;
+            ctx.beginPath();
+            ctx.roundRect(-shoulderWidth * 0.45, -5, shoulderWidth * 0.9, 25, 4);
+            ctx.fill();
+            // Gold belt trim
+            ctx.fillStyle = '#f59e0b';
+            ctx.fillRect(-shoulderWidth * 0.45, -5, shoulderWidth * 0.9, 6);
+
+            // Torso (Belly / Chest morphing)
+            ctx.fillStyle = skinColor;
+            ctx.beginPath();
+            // Shoulder line
+            ctx.moveTo(-shoulderWidth / 2, -30);
+            ctx.lineTo(shoulderWidth / 2, -30);
+            // Ribs / Waist
+            ctx.lineTo(shoulderWidth * 0.35, -5);
+            ctx.lineTo(-shoulderWidth * 0.35, -5);
+            ctx.closePath();
+            ctx.fill();
+
+            // Belly (Fat overlay if overweight)
+            if (fatFactor > 0.1) {
+                ctx.fillStyle = '#db9c5e';
+                ctx.beginPath();
+                ctx.ellipse(0, -10, bellyRadius, bellyRadius * 0.8, 0, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                // Ripped Abs lines if fit
+                ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(0, -25); ctx.lineTo(0, -5);
+                ctx.moveTo(-6, -20); ctx.lineTo(6, -20);
+                ctx.moveTo(-6, -14); ctx.lineTo(6, -14);
+                ctx.stroke();
+            }
+
+            // Head & Face/Hair
+            ctx.fillStyle = skinColor;
+            ctx.beginPath();
+            ctx.arc(0, -42, 14, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Hair
+            ctx.fillStyle = '#1e293b';
+            ctx.beginPath();
+            ctx.arc(0, -45, 14, Math.PI, Math.PI * 2);
+            ctx.fill();
+
+            // Arms & Gloves (Positioned according to Guard / Punch state)
+            const leftArmX = -shoulderWidth / 2 - 4;
+            const rightArmX = shoulderWidth / 2 + 4;
+
+            // Left Arm
+            ctx.fillStyle = skinColor;
+            ctx.beginPath();
+            ctx.arc(leftArmX, -25, armGirth, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Right Arm
+            ctx.beginPath();
+            ctx.arc(rightArmX, -25, armGirth, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Boxing Gloves
+            ctx.fillStyle = gloveColor;
+            let leftGloveOffset = { x: leftArmX - 4, y: -40 };
+            let rightGloveOffset = { x: rightArmX + 4, y: -40 };
+
+            if (player.currentPunch === 'jab') leftGloveOffset.y -= 25;
+            if (player.currentPunch === 'straight') rightGloveOffset.y -= 30;
+            if (player.isGuarding) {
+                leftGloveOffset = { x: -8, y: -48 };
+                rightGloveOffset = { x: 8, y: -48 };
+            }
+
+            ctx.beginPath();
+            ctx.arc(leftGloveOffset.x, leftGloveOffset.y, 11, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(rightGloveOffset.x, rightGloveOffset.y, 11, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        function updateGymLogic() {
+            // Movement WASD
+            let dx = 0;
+            let dy = 0;
+            if (keys['w'] || keys['arrowup']) dy -= 1;
+            if (keys['s'] || keys['arrowdown']) dy += 1;
+            if (keys['a'] || keys['arrowleft']) dx -= 1;
+            if (keys['d'] || keys['arrowright']) dx += 1;
+
+            if (dx !== 0 || dy !== 0) {
+                const len = Math.hypot(dx, dy);
+                const speed = player.moveSpeed * (1 - (player.fatigue / 200)); // Slowed down when fatigued
+                player.x += (dx / len) * speed;
+                player.y += (dy / len) * speed;
+
+                // Facing angle
+                player.angle = Math.atan2(dy, dx) + Math.PI / 2;
+            }
+
+            // Canvas boundary clamp
+            const canvas = document.getElementById('gameCanvas');
+            player.x = Math.max(30, Math.min(canvas.width - 30, player.x));
+            player.y = Math.max(30, Math.min(canvas.height - 30, player.y));
+
+            // Proximity check for zones
+            activeZone = null;
+            for (const zone of gymZones) {
+                if (
+                    player.x >= zone.x - 20 &&
+                    player.x <= zone.x + zone.width + 20 &&
+                    player.y >= zone.y - 20 &&
+                    player.y <= zone.y + zone.height + 20
+                ) {
+                    activeZone = zone;
+                    break;
+                }
+            }
+
+            const promptEl = document.getElementById('interaction-prompt');
+            if (activeZone) {
+                document.getElementById('prompt-action').innerHTML = `
+                    <span class="bg-amber-500 text-slate-950 px-2 py-0.5 rounded font-black text-sm">E</span>
+                    <span>${activeZone.name} 이용하기</span>
+                `;
+                document.getElementById('prompt-desc').textContent = activeZone.desc;
+                promptEl.classList.remove('hidden');
+            } else {
+                promptEl.classList.add('hidden');
+            }
+        }
+
+        function drawGymView(ctx, canvas) {
+            // Background / Gym Floor Mat Texture
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Wood / Rubber Tile Grid Lines
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+            ctx.lineWidth = 1;
+            const tileSize = 50;
+            for (let x = 0; x < canvas.width; x += tileSize) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+            }
+            for (let y = 0; y < canvas.height; y += tileSize) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+            }
+
+            // Draw Gym Equipment Zones
+            gymZones.forEach(zone => {
+                const isHovered = activeZone && activeZone.id === zone.id;
+
+                ctx.save();
+                ctx.fillStyle = zone.color + '22';
+                ctx.strokeStyle = isHovered ? '#facc15' : zone.color;
+                ctx.lineWidth = isHovered ? 3 : 2;
+
+                ctx.beginPath();
+                ctx.roundRect(zone.x, zone.y, zone.width, zone.height, 12);
+                ctx.fill();
+                ctx.stroke();
+
+                // Highlight Effect for Active Zone
+                if (isHovered) {
+                    ctx.shadowColor = '#facc15';
+                    ctx.shadowBlur = 15;
+                    ctx.stroke();
+                }
+
+                // Zone Title & Icon
+                ctx.fillStyle = '#f8fafc';
+                ctx.font = 'bold 13px Noto Sans KR';
+                ctx.textAlign = 'center';
+                ctx.fillText(zone.name, zone.x + zone.width / 2, zone.y + zone.height / 2 + 4);
+
+                ctx.restore();
+            });
+
+            // Draw Gym Ring Details (Ring ropes, canvas floor)
+            const ringZone = gymZones.find(z => z.id === 'ring');
+            if (ringZone) {
+                ctx.save();
+                ctx.strokeStyle = '#ef4444';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(ringZone.x + 10, ringZone.y + 10, ringZone.width - 20, ringZone.height - 20);
+                // Corner posts
+                ctx.fillStyle = '#dc2626';
+                ctx.beginPath(); ctx.arc(ringZone.x + 10, ringZone.y + 10, 6, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(ringZone.x + ringZone.width - 10, ringZone.y + 10, 6, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(ringZone.x + 10, ringZone.y + ringZone.height - 10, 6, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(ringZone.x + ringZone.width - 10, ringZone.y + ringZone.height - 10, 6, 0, Math.PI * 2); ctx.fill();
+                ctx.restore();
+            }
+
+            // Render Player Avatar in Gym
+            if (cameraMode === '3P') {
+                drawProceduralBody(ctx, player.x, player.y, 0.9, false, player.angle);
+            } else {
+                // 1P Camera indicator marker in Gym
+                ctx.save();
+                ctx.fillStyle = '#facc15';
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, 10, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.font = 'bold 10px Noto Sans KR';
+                ctx.fillStyle = '#0f172a';
+                ctx.textAlign = 'center';
+                ctx.fillText("1P", player.x, player.y + 3);
+                ctx.restore();
+            }
+        }
+
+        // Training Minigame Logic Variables
+        let trainType = null;
+        let trainScore = 0;
+        let trainTarget = 5;
+        let trainIndicatorPos = 0;
+        let trainIndicatorSpeed = 3;
+        let trainAnimFrame = null;
+
+        function handleZoneInteraction(zone) {
+            if (zone.id === 'rest') {
+                // Advance Day and recover fatigue
+                player.day += 1;
+                player.fatigue = Math.max(0, player.fatigue - 70);
+                player.hp = player.maxHp;
+                player.stamina = player.maxStamina;
+
+                showFloatingText("하루 휴식 완료! 피로도 감소 & 체력 회복!", window.innerWidth / 2, window.innerHeight / 2, '#38bdf8');
+                audio.playBell();
+                updateHUD();
+                return;
+            }
+
+            if (zone.id === 'ring') {
+                startBoxingMatch();
+                return;
+            }
+
+            // Check Fatigue limit
+            if (player.fatigue >= 100) {
+                showFloatingText("너무 피곤합니다! 휴식 공간에서 쉬어주세요.", player.x, player.y - 30, '#ef4444');
+                return;
+            }
+
+            // Start Training Mini-Game
+            trainType = zone.id;
+            trainScore = 0;
+            document.getElementById('train-title').textContent = zone.name;
+            document.getElementById('train-count').textContent = trainScore;
+            document.getElementById('training-modal').classList.remove('hidden');
+            currentState = GAME_STATES.MINIGAME;
+
+            startMinigameLoop();
+        }
+
+        function startMinigameLoop() {
+            trainIndicatorPos = 0;
+            trainIndicatorSpeed = 3 + player.level * 0.5;
+
+            function loop() {
+                if (currentState !== GAME_STATES.MINIGAME) return;
+
+                trainIndicatorPos += trainIndicatorSpeed;
+                if (trainIndicatorPos > 100 || trainIndicatorPos < 0) {
+                    trainIndicatorSpeed *= -1;
+                }
+
+                const indicatorEl = document.getElementById('train-indicator');
+                if (indicatorEl) {
+                    indicatorEl.style.left = trainIndicatorPos + '%';
+                }
+
+                trainAnimFrame = requestAnimationFrame(loop);
+            }
+            loop();
+        }
+
+        document.getElementById('train-action-btn').addEventListener('click', executeTrainingHit);
+
+        function executeTrainingHit() {
+            if (currentState !== GAME_STATES.MINIGAME) return;
+
+            // Target zone is between 37.5% and 62.5%
+            if (trainIndicatorPos >= 37.5 && trainIndicatorPos <= 62.5) {
+                trainScore++;
+                audio.playPunchJab();
+                showFloatingText("GOOD HIT!", window.innerWidth / 2, window.innerHeight / 2 - 40, '#4ade80');
+                document.getElementById('train-count').textContent = trainScore;
+
+                if (trainScore >= trainTarget) {
+                    completeTraining();
+                }
+            } else {
+                audio.playBlock();
+                showFloatingText("MISS!", window.innerWidth / 2, window.innerHeight / 2 - 40, '#f87171');
+            }
+        }
+
+        document.getElementById('train-close-btn').addEventListener('click', closeTrainingModal);
+
+        function closeTrainingModal() {
+            cancelAnimationFrame(trainAnimFrame);
+            document.getElementById('training-modal').classList.add('hidden');
+            currentState = GAME_STATES.GYM;
+        }
+
+        function completeTraining() {
+            closeTrainingModal();
+
+            let expGained = 30 + player.level * 10;
+            let statMsg = "";
+
+            player.fatigue = Math.min(100, player.fatigue + 15);
+
+            if (trainType === 'weights') {
+                player.attack += 2;
+                statMsg = "ATTACK +2";
+            } else if (trainType === 'heavybag') {
+                player.punchSpeed = parseFloat((player.punchSpeed + 0.05).toFixed(2));
+                statMsg = "펀치 속도 +0.05";
+            } else if (trainType === 'treadmill') {
+                player.maxHp += 10;
+                player.maxStamina += 10;
+                player.weight = Math.max(70, parseFloat((player.weight - 0.8).toFixed(1))); // Burn weight
+                statMsg = "최대 체력/스태미나 +10 & 체중 -0.8kg";
+            } else if (trainType === 'jumprope') {
+                player.moveSpeed = parseFloat((player.moveSpeed + 0.15).toFixed(2));
+                statMsg = "이동 속도 +0.15";
+            }
+
+            addEXP(expGained);
+            showFloatingText(`훈련 성공! +${expGained} EXP | ${statMsg}`, window.innerWidth / 2, window.innerHeight / 2, '#facc15');
+            audio.playLevelUp();
+            updateHUD();
+        }
+
+        function addEXP(amount) {
+            player.exp += amount;
+            if (player.exp >= player.expToNext) {
+                player.exp -= player.expToNext;
+                player.level += 1;
+                player.expToNext = Math.floor(player.expToNext * 1.4);
+                player.attack += 3;
+                player.defense += 2;
+                player.maxHp += 15;
+                player.hp = player.maxHp;
+
+                // Unlock Skills on Level
+                if (player.level === 3 && !player.skills.includes('왼쪽 훅 (L-Hook)')) {
+                    player.skills.push('왼쪽 훅 (L-Hook)');
+                    showFloatingText("새로운 기술 해금: 왼쪽 훅 (Q)", window.innerWidth / 2, window.innerHeight / 2 - 80, '#38bdf8');
+                }
+                if (player.level === 5 && !player.skills.includes('카운터 어퍼컷 (Uppercut)')) {
+                    player.skills.push('카운터 어퍼컷 (Uppercut)');
+                    showFloatingText("새로운 기술 해금: 어퍼컷 (E)", window.innerWidth / 2, window.innerHeight / 2 - 80, '#38bdf8');
+                }
+
+                showFloatingText(`LEVEL UP! LV.${player.level}`, window.innerWidth / 2, window.innerHeight / 2 - 50, '#facc15');
+                audio.playLevelUp();
+            }
+        }
+
+        function startBoxingMatch() {
+            // Select opponent based on stage
+            if (player.stage === 1) {
+                currentOpponent = new Opponent("체육관 선배 (스파링)", "Power", 1, 8, 80, 80, 1.0);
+            } else if (player.stage === 2) {
+                currentOpponent = new Opponent("아마추어 토너먼트 복서", "Speed", 3, 15, 120, 100, 1.2);
+            } else if (player.stage === 3) {
+                currentOpponent = new Opponent(`프로 랭커 #${player.proRank}`, "Counter", 5, 25 + (50 - player.proRank), 180, 140, 1.4, player.proRank);
+            } else if (player.stage === 4) {
+                currentOpponent = new Opponent("세계 챔피언 '더 리퍼'", "Aggressive", 10, 45, 300, 200, 1.7);
+            }
+
+            // Position fighters
+            player.x = 250; player.y = 300;
+            currentOpponent.x = 550; currentOpponent.y = 300;
+            player.hp = player.maxHp;
+            player.stamina = player.maxStamina;
+
+            currentState = GAME_STATES.FIGHT;
+            document.getElementById('hud-main').classList.add('hidden');
+            document.getElementById('hud-fight').classList.remove('hidden');
+            document.getElementById('fight-opp-name').innerHTML = `${currentOpponent.name} <i class="fa-solid fa-skull"></i>`;
+
+            fightTimer = 180;
+            currentRound = 1;
+            audio.playBell();
+
+            if (fightInterval) clearInterval(fightInterval);
+            fightInterval = setInterval(() => {
+                if (currentState === GAME_STATES.FIGHT) {
+                    fightTimer--;
+                    const mins = Math.floor(fightTimer / 60).toString().padStart(2, '0');
+                    const secs = (fightTimer % 60).toString().padStart(2, '0');
+                    document.getElementById('fight-timer').textContent = `${mins}:${secs}`;
+
+                    if (fightTimer <= 0) {
+                        endBoxingMatch('decision');
+                    }
+                }
+            }, 1000);
+        }
+
+        function updateFightLogic() {
+            if (currentState !== GAME_STATES.FIGHT || !currentOpponent) return;
+
+            // Player Combat Input Handlers
+            player.isGuarding = keys['f'];
+
+            // Movement in fight ring
+            let dx = 0, dy = 0;
+            if (keys['w']) dy -= 1;
+            if (keys['s']) dy += 1;
+            if (keys['a']) dx -= 1;
+            if (keys['d']) dx += 1;
+
+            if (dx !== 0 || dy !== 0) {
+                const len = Math.hypot(dx, dy);
+                player.x += (dx / len) * player.moveSpeed;
+                player.y += (dy / len) * player.moveSpeed;
+            }
+
+            // Angle towards opponent
+            player.angle = Math.atan2(currentOpponent.y - player.y, currentOpponent.x - player.x) + Math.PI / 2;
+
+            // Opponent AI behavior
+            updateOpponentAI();
+
+            // Passive Stamina Recovery
+            if (!player.currentPunch && player.stamina < player.maxStamina) {
+                player.stamina = Math.min(player.maxStamina, player.stamina + 0.3);
+            }
+            if (!currentOpponent.currentPunch && currentOpponent.stamina < currentOpponent.maxStamina) {
+                currentOpponent.stamina = Math.min(currentOpponent.maxStamina, currentOpponent.stamina + 0.3);
+            }
+
+            // Punch Timers
+            if (player.punchTimer > 0) {
+                player.punchTimer--;
+                if (player.punchTimer <= 0) player.currentPunch = null;
+            }
+            if (currentOpponent.punchTimer > 0) {
+                currentOpponent.punchTimer--;
+                if (currentOpponent.punchTimer <= 0) currentOpponent.currentPunch = null;
+            }
+
+            // Knockout Check
+            if (currentOpponent.hp <= 0) {
+                endBoxingMatch('ko_win');
+            } else if (player.hp <= 0) {
+                endBoxingMatch('ko_loss');
+            }
+
+            updateFightHUD();
+        }
+
+        function updateOpponentAI() {
+            const dist = Math.hypot(currentOpponent.x - player.x, currentOpponent.y - player.y);
+            currentOpponent.angle = Math.atan2(player.y - currentOpponent.y, player.x - currentOpponent.x) + Math.PI / 2;
+
+            // AI Movement towards or away from player
+            if (dist > 80) {
+                currentOpponent.x += Math.cos(currentOpponent.angle - Math.PI / 2) * currentOpponent.speed * 1.5;
+                currentOpponent.y += Math.sin(currentOpponent.angle - Math.PI / 2) * currentOpponent.speed * 1.5;
+            }
+
+            // AI Attack Trigger
+            currentOpponent.aiActionTimer++;
+            if (currentOpponent.aiActionTimer > 60 / currentOpponent.speed) {
+                currentOpponent.aiActionTimer = 0;
+
+                if (dist < 100 && Math.random() < 0.7) {
+                    // Execute AI Punch
+                    currentOpponent.currentPunch = Math.random() < 0.6 ? 'jab' : 'straight';
+                    currentOpponent.punchTimer = 15;
+
+                    // Calculate damage to player
+                    let dmg = currentOpponent.attack;
+                    if (player.isGuarding) {
+                        dmg *= 0.2;
+                        audio.playBlock();
+                        showFloatingText("GUARD!", player.x, player.y - 40, '#38bdf8');
+                    } else if (player.isDodging) {
+                        dmg = 0;
+                        showFloatingText("DODGE!", player.x, player.y - 40, '#facc15');
+                    } else {
+                        audio.playPunchHeavy();
+                        showFloatingText(`-${Math.round(dmg)}`, player.x, player.y - 40, '#ef4444');
+                    }
+
+                    player.hp = Math.max(0, player.hp - dmg);
+                }
+            }
+        }
+
+        function executePlayerPunch(type) {
+            if (player.stamina < 10 || player.currentPunch) return;
+
+            player.currentPunch = type;
+            player.punchTimer = Math.floor(15 / player.punchSpeed);
+            player.stamina -= 12;
+
+            const dist = Math.hypot(currentOpponent.x - player.x, currentOpponent.y - player.y);
+
+            if (dist < 110) {
+                let dmg = player.attack;
+                if (type === 'straight') dmg *= 1.3;
+                if (type === 'hookL' || type === 'hookR') dmg *= 1.5;
+
+                // Counter hit bonus if opponent is attacking
+                if (currentOpponent.currentPunch) {
+                    dmg *= 1.6;
+                    showFloatingText("COUNTER HIT!", currentOpponent.x, currentOpponent.y - 50, '#f59e0b');
+                }
+
+                currentOpponent.hp = Math.max(0, currentOpponent.hp - dmg);
+                audio.playPunchHeavy();
+                showFloatingText(`-${Math.round(dmg)}`, currentOpponent.x, currentOpponent.y - 30, '#facc15');
+            } else {
+                audio.playPunchJab();
+            }
+        }
+
+        function triggerPlayerDodge() {
+            if (player.stamina >= 15 && !player.isDodging) {
+                player.isDodging = true;
+                player.stamina -= 15;
+                setTimeout(() => player.isDodging = false, 400);
+            }
+        }
+
+        function endBoxingMatch(result) {
+            clearInterval(fightInterval);
+            audio.playBell();
+
+            let title = "";
+            let rewardMsg = "";
+
+            if (result === 'ko_win' || result === 'decision') {
+                title = "경기 승리! (VICTORY)";
+                const expReward = 80 + player.level * 20;
+                addEXP(expReward);
+
+                if (player.stage === 1) {
+                    player.sparringWins++;
+                    rewardMsg = `스파링 승리! (총 ${player.sparringWins}승/10승)`;
+                    if (player.sparringWins >= 3) { // Reduced threshold for smooth progression
+                        player.stage = 2;
+                        player.stageName = "2단계: 아마추어 선수";
+                        rewardMsg += " -> 아마추어 자격 획득!";
+                    }
+                } else if (player.stage === 2) {
+                    player.proWins++;
+                    player.money += 300;
+                    rewardMsg = "아마추어 경기 승리! 상금 +300$";
+                    if (player.proWins >= 2) {
+                        player.stage = 3;
+                        player.stageName = "3단계: 프로 선수";
+                        rewardMsg += " -> 프로 복서 데뷔 해금!";
+                    }
+                } else if (player.stage === 3) {
+                    player.proWins++;
+                    player.money += 1000;
+                    player.proRank = Math.max(1, player.proRank - 8);
+                    rewardMsg = `프로 승리! 랭킹 상승 (#${player.proRank}) | 상금 +1000$`;
+
+                    if (player.proRank === 1) {
+                        player.stage = 4;
+                        player.stageName = "4단계: 세계 챔피언 도전";
+                        rewardMsg += " -> 세계 챔피언 타이틀 매치 해금!";
+                    }
+                } else if (player.stage === 4) {
+                    // WORLD CHAMPION VICTORY!
+                    currentState = GAME_STATES.CHAMPION;
+                    document.getElementById('hud-fight').classList.add('hidden');
+                    document.getElementById('champion-screen').classList.remove('hidden');
+                    document.getElementById('final-stats-summary').innerHTML = `
+                        <p><strong>달성 일수:</strong> DAY ${player.day}</p>
+                        <p><strong>최종 레벨:</strong> LV.${player.level}</p>
+                        <p><strong>최종 체중:</strong> ${player.weight} kg (슬림 탄탄 복서 체형)</p>
+                        <p><strong>공격력 / HP:</strong> ${player.attack} / ${player.maxHp}</p>
+                        <p><strong>스파링 & 프로 전적:</strong> ${player.sparringWins + player.proWins}승</p>
+                    `;
+                    return;
+                }
+            } else {
+                title = "KO 패배 (DEFEAT)";
+                rewardMsg = "체력을 회복하고 체육관에서 더 훈련하세요!";
+            }
+
+            alert(`${title}\n${rewardMsg}`);
+
+            // Return to Gym
+            currentState = GAME_STATES.GYM;
+            player.x = 400; player.y = 350;
+            document.getElementById('hud-fight').classList.add('hidden');
+            document.getElementById('hud-main').classList.remove('hidden');
+            updateHUD();
+        }
+
+        function drawFightView(ctx, canvas) {
+            // Ring Canvas Background
+            ctx.fillStyle = '#1e293b';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Ring Ropes & Canvas Mat
+            ctx.strokeStyle = '#dc2626';
+            ctx.lineWidth = 6;
+            ctx.strokeRect(50, 50, canvas.width - 100, canvas.height - 100);
+
+            if (cameraMode === '3P') {
+                // Render Opponent & Player in 3P Perspective
+                drawProceduralBody(ctx, currentOpponent.x, currentOpponent.y, 1.0, false, currentOpponent.angle);
+                drawProceduralBody(ctx, player.x, player.y, 1.0, true, player.angle);
+            } else {
+                // 1P First Person Camera View
+                // Opponent in direct front view
+                drawProceduralBody(ctx, canvas.width / 2, canvas.height / 2 + 20, 1.8, false, 0);
+
+                // Player Gloves Overlay in Foreground
+                ctx.save();
+                ctx.fillStyle = '#dc2626';
+                let leftGloveY = canvas.height - 60;
+                let rightGloveY = canvas.height - 60;
+
+                if (player.currentPunch === 'jab') leftGloveY -= 80;
+                if (player.currentPunch === 'straight') rightGloveY -= 100;
+                if (player.isGuarding) { leftGloveY -= 40; rightGloveY -= 40; }
+
+                ctx.beginPath();
+                ctx.arc(canvas.width / 2 - 120, leftGloveY, 40, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.beginPath();
+                ctx.arc(canvas.width / 2 + 120, rightGloveY, 40, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        function updateHUD() {
+            document.getElementById('hud-stage').textContent = player.stageName;
+            document.getElementById('hud-day').textContent = player.day;
+            document.getElementById('hud-weight').textContent = player.weight.toFixed(1);
+            document.getElementById('hud-level').textContent = player.level;
+            document.getElementById('hud-exp-bar').style.width = `${(player.exp / player.expToNext) * 100}%`;
+            document.getElementById('hud-exp-text').textContent = `${player.exp} / ${player.expToNext}`;
+
+            document.getElementById('hud-hp').textContent = `${Math.round(player.hp)}/${player.maxHp}`;
+            document.getElementById('hud-stamina').textContent = `${Math.round(player.stamina)}/${player.maxStamina}`;
+            document.getElementById('hud-fatigue').textContent = player.fatigue;
+
+            // Profile Modal Stats Sync
+            document.getElementById('stat-att').textContent = player.attack;
+            document.getElementById('stat-def').textContent = player.defense;
+            document.getElementById('stat-hp').textContent = player.maxHp;
+            document.getElementById('stat-sta').textContent = player.maxStamina;
+            document.getElementById('stat-pspeed').textContent = `${player.punchSpeed}x`;
+            document.getElementById('stat-mspeed').textContent = `${player.moveSpeed}x`;
+            document.getElementById('stat-money').textContent = player.money;
+            document.getElementById('stat-fame').textContent = player.fame;
+            document.getElementById('stat-sparring-wins').textContent = player.sparringWins;
+            document.getElementById('stat-match-record').textContent = `${player.proWins}승 ${player.proLosses}패`;
+            document.getElementById('profile-title').textContent = player.stageName;
+            document.getElementById('profile-rank').textContent = player.stage >= 3 ? `#${player.proRank}` : '아마추어 미등록';
+
+            let bodyTypeDesc = "초보자 (뚱뚱한 체형 / high fat)";
+            if (player.weight < 88) bodyTypeDesc = "운동하는 복서 (체지방 감소중)";
+            if (player.weight < 80) bodyTypeDesc = "탄탄한 복서 체형 (Muscular)";
+            if (player.weight < 75) bodyTypeDesc = "세계 챔피언 피지컬 (Ripped Champion)";
+            document.getElementById('profile-body-type').textContent = `체형: ${bodyTypeDesc}`;
+
+            // Sync Skill Badges
+            const skillsContainer = document.getElementById('skills-list');
+            skillsContainer.innerHTML = '';
+            player.skills.forEach(skill => {
+                const badge = document.createElement('span');
+                badge.className = 'bg-slate-800 text-amber-400 border border-amber-500/30 text-xs px-2.5 py-1 rounded-lg font-bold';
+                badge.textContent = skill;
+                skillsContainer.appendChild(badge);
+            });
+
+            // Draw Silhouette Preview in Modal
+            drawBodyPreviewCanvas();
+        }
+
+        function updateFightHUD() {
+            document.getElementById('fight-player-hp-text').textContent = `${Math.round(player.hp)} / ${player.maxHp}`;
+            document.getElementById('fight-player-hp-bar').style.width = `${Math.max(0, (player.hp / player.maxHp) * 100)}%`;
+            document.getElementById('fight-player-sta-bar').style.width = `${Math.max(0, (player.stamina / player.maxStamina) * 100)}%`;
+
+            if (currentOpponent) {
+                document.getElementById('fight-opp-hp-text').textContent = `${Math.round(currentOpponent.hp)} / ${currentOpponent.maxHp}`;
+                document.getElementById('fight-opp-hp-bar').style.width = `${Math.max(0, (currentOpponent.hp / currentOpponent.maxHp) * 100)}%`;
+                document.getElementById('fight-opp-sta-bar').style.width = `${Math.max(0, (currentOpponent.stamina / currentOpponent.maxStamina) * 100)}%`;
+            }
+        }
+
+        function drawBodyPreviewCanvas() {
+            const canvas = document.getElementById('body-preview-canvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawProceduralBody(ctx, canvas.width / 2, canvas.height / 2 + 30, 1.4, false, 0);
+        }
+
+        function showFloatingText(text, x, y, color = '#facc15') {
+            const container = document.getElementById('floating-text-container');
+            const el = document.createElement('div');
+            el.className = 'absolute floating-text font-black text-lg drop-shadow-md pointer-events-none whitespace-nowrap';
+            el.style.left = `${x}px`;
+            el.style.top = `${y}px`;
+            el.style.color = color;
+            el.textContent = text;
+            container.appendChild(el);
+            setTimeout(() => el.remove(), 1200);
+        }
+
+        function toggleStatsModal() {
+            const modal = document.getElementById('stats-modal');
+            modal.classList.toggle('hidden');
+            if (!modal.classList.contains('hidden')) {
+                updateHUD();
+            }
+        }
+
+        document.getElementById('open-stats-btn').addEventListener('click', toggleStatsModal);
+        document.getElementById('stats-close-btn').addEventListener('click', toggleStatsModal);
+        document.getElementById('camera-btn').addEventListener('click', () => {
+            cameraMode = (cameraMode === '3P') ? '1P' : '3P';
+            document.getElementById('hud-cam-mode').textContent = cameraMode === '3P' ? '3인칭' : '1인칭';
+        });
+
+        function resizeCanvas() {
+            const canvas = document.getElementById('gameCanvas');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+
+        function mainLoop() {
+            const canvas = document.getElementById('gameCanvas');
+            const ctx = canvas.getContext('2d');
+
+            if (currentState === GAME_STATES.GYM || currentState === GAME_STATES.MINIGAME) {
+                updateGymLogic();
+                drawGymView(ctx, canvas);
+            } else if (currentState === GAME_STATES.FIGHT) {
+                updateFightLogic();
+                drawFightView(ctx, canvas);
+            }
+
+            requestAnimationFrame(mainLoop);
+        }
+
+        window.onload = () => {
+            resizeCanvas();
+            updateHUD();
+            mainLoop();
+        };
+    </script>
+</body>
+</html>

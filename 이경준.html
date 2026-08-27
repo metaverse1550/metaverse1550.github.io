@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2.5D Luxury Baccarat Casino</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #050508;
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+            color: #f0e6d2;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            max-width: 1280px;
+            max-height: 720px;
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.9);
+            background: #000;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .keyboard-guide {
+            position: absolute;
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(10, 10, 15, 0.85);
+            border: 1px solid rgba(212, 175, 55, 0.4);
+            border-radius: 8px;
+            padding: 6px 16px;
+            font-size: 12px;
+            color: #d4af37;
+            display: flex;
+            gap: 16px;
+            pointer-events: none;
+            backdrop-filter: blur(4px);
+        }
+
+        .key-badge {
+            background: #2a2820;
+            color: #fff;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid #d4af37;
+            font-family: monospace;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="casino-canvas"></canvas>
+    
+    <div class="keyboard-guide">
+        <span><span class="key-badge">← / 1</span> PLAYER</span>
+        <span><span class="key-badge">↑ / 2</span> TIE</span>
+        <span><span class="key-badge">→ / 3</span> BANKER</span>
+        <span><span class="key-badge">Z/X/C/V</span> 칩 선택</span>
+        <span><span class="key-badge">Enter</span> 베팅 확정</span>
+        <span><span class="key-badge">Esc</span> VIP 휴식</span>
+        <span><span class="key-badge">R</span> 재시작</span>
+    </div>
+</div>
+
+<script>
+const CONFIG = {
+    SESSION_TIME: 180, // 3 minutes limit
+    STARTING_CHIPS: 1000,
+    CHIP_VALUES: [10, 50, 100, 500],
+    PAYOUTS: { PLAYER: 1.0, BANKER: 0.95, TIE: 8.0 },
+    
+    // Excitement mechanics
+    MAX_EXCITEMENT: 100,
+    REST_COOL_RATE: 18, // Excitement reduced per sec during rest
+    STREAK_BONUS_MULT: 0.2, // Additional win reward ratio per streak
+};
+
+const canvas = document.getElementById('casino-canvas');
+const ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+    const container = document.getElementById('game-container');
+    canvas.width = container.clientWidth;
+    canvas.height = container.clientHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+class SoundEngine {
+    constructor() {
+        this.audioCtx = null;
+    }
+    
+    init() {
+        if (!this.audioCtx) {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (AudioCtx) this.audioCtx = new AudioCtx();
+        }
+    }
+
+    playChip() {
+        this.init();
+        if (!this.audioCtx) return;
+        const osc = this.audioCtx.createOscillator();
+        const gain = this.audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1200, this.audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(400, this.audioCtx.currentTime + 0.05);
+        gain.gain.setValueAtTime(0.15, this.audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.audioCtx.currentTime + 0.05);
+        osc.connect(gain);
+        gain.connect(this.audioCtx.destination);
+        osc.start();
+        osc.stop(this.audioCtx.currentTime + 0.05);
+    }
+
+    playCard() {
+        this.init();
+        if (!this.audioCtx) return;
+        const bufferSize = this.audioCtx.sampleRate * 0.05;
+        const buffer = this.audioCtx.createBuffer(1, bufferSize, this.audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+        const noise = this.audioCtx.createBufferSource();
+        noise.buffer = buffer;
+        const filter = this.audioCtx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = 900;
+        const gain = this.audioCtx.createGain();
+        gain.gain.setValueAtTime(0.1, this.audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.audioCtx.currentTime + 0.05);
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.audioCtx.destination);
+        noise.start();
+    }
+
+    playWin() {
+        this.init();
+        if (!this.audioCtx) return;
+        const now = this.audioCtx.currentTime;
+        [523.25, 659.25, 783.99, 1046.50].forEach((freq, i) => {
+            const osc = this.audioCtx.createOscillator();
+            const gain = this.audioCtx.createGain();
+            osc.frequency.setValueAtTime(freq, now + i * 0.06);
+            gain.gain.setValueAtTime(0.12, now + i * 0.06);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.06 + 0.2);
+            osc.connect(gain);
+            gain.connect(this.audioCtx.destination);
+            osc.start(now + i * 0.06);
+            osc.stop(now + i * 0.06 + 0.2);
+        });
+    }
+}
+const sounds = new SoundEngine();
+
+class BaccaratEngine {
+    constructor() {
+        this.resetShoe();
+    }
+
+    resetShoe() {
+        const suits = ['♠', '♥', '♦', '♣'];
+        const values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+        this.deck = [];
+
+        for (let d = 0; d < 8; d++) { // 8 Decks
+            for (let suit of suits) {
+                for (let value of values) {
+                    let point = 0;
+                    if (value === 'A') point = 1;
+                    else if (['10', 'J', 'Q', 'K'].includes(value)) point = 0;
+                    else point = parseInt(value);
+
+                    this.deck.push({
+                        suit, value, point,
+                        color: (suit === '♥' || suit === '♦') ? '#d90429' : '#111827'
+                    });
+                }
+            }
+        }
+        this.shuffle();
+    }
+
+    shuffle() {
+        for (let i = this.deck.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [this.deck[i], this.deck[j]] = [this.deck[j], this.deck[i]];
+        }
+    }
+
+    drawCard() {
+        if (this.deck.length < 20) this.resetShoe();
+        return this.deck.pop();
+    }
+
+    calculateScore(cards) {
+        return cards.reduce((sum, c) => sum + c.point, 0) % 10;
+    }
+
+    evaluateThirdCard(pScore, bScore) {
+        if (pScore >= 8 || bScore >= 8) return { drawP: false, drawB: false };
+        let drawP = pScore <= 5;
+        let drawB = !drawP && bScore <= 5;
+        return { drawP, drawB };
+    }
+
+    shouldBankerDrawOnPlayer3rd(bScore, p3rdPoint) {
+        switch (bScore) {
+            case 0: case 1: case 2: return true;
+            case 3: return p3rdPoint !== 8;
+            case 4: return [2, 3, 4, 5, 6, 7].includes(p3rdPoint);
+            case 5: return [4, 5, 6, 7].includes(p3rdPoint);
+            case 6: return [6, 7].includes(p3rdPoint);
+            default: return false;
+        }
+    }
+}
+
+class EffectSystem {
+    constructor() {
+        this.particles = [];
+        this.floatingTexts = [];
+    }
+
+    addConfetti(x, y) {
+        for (let i = 0; i < 35; i++) {
+            this.particles.push({
+                x, y,
+                vx: (Math.random() - 0.5) * 8,
+                vy: (Math.random() - 0.8) * 8,
+                color: ['#d4af37', '#ffd700', '#ffffff', '#e63946', '#2a9d8f'][Math.floor(Math.random() * 5)],
+                size: Math.random() * 6 + 3,
+                life: 1.0,
+                decay: Math.random() * 0.02 + 0.015
+            });
+        }
+    }
+
+    addFloatingText(text, x, y, color = '#ffd700') {
+        this.floatingTexts.push({
+            text, x, y, color,
+            alpha: 1.0,
+            vy: -1.2
+        });
+    }
+
+    update() {
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            let p = this.particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += 0.2; // Gravity
+            p.life -= p.decay;
+            if (p.life <= 0) this.particles.splice(i, 1);
+        }
+
+        for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
+            let t = this.floatingTexts[i];
+            t.y += t.vy;
+            t.alpha -= 0.015;
+            if (t.alpha <= 0) this.floatingTexts.splice(i, 1);
+        }
+    }
+
+    draw(ctx) {
+        this.particles.forEach(p => {
+            ctx.save();
+            ctx.globalAlpha = Math.max(0, p.life);
+            ctx.fillStyle = p.color;
+            ctx.fillRect(p.x, p.y, p.size, p.size);
+            ctx.restore();
+        });
+
+        this.floatingTexts.forEach(t => {
+            ctx.save();
+            ctx.globalAlpha = Math.max(0, t.alpha);
+            ctx.font = 'bold 22px Segoe UI, sans-serif';
+            ctx.fillStyle = t.color;
+            ctx.textAlign = 'center';
+            ctx.shadowColor = '#000';
+            ctx.shadowBlur = 6;
+            ctx.fillText(t.text, t.x, t.y);
+            ctx.restore();
+        });
+    }
+}
+
+class DealerRenderer {
+    constructor() {
+        this.eyeBlinkTimer = 0;
+        this.isBlinking = false;
+        this.armState = 'IDLE'; // IDLE, DEAL_LEFT, DEAL_RIGHT
+        this.dialogue = "신사 숙녀 여러분, 베팅을 시작해 주십시오.";
+    }
+
+    update() {
+        this.eyeBlinkTimer++;
+        if (this.eyeBlinkTimer > 180) {
+            this.isBlinking = true;
+            if (this.eyeBlinkTimer > 192) {
+                this.isBlinking = false;
+                this.eyeBlinkTimer = 0;
+            }
+        }
+    }
+
+    draw(ctx, width, height) {
+        const cx = width / 2;
+        const cy = height * 0.24;
+
+        ctx.save();
+
+        // --- Dealer Shadow ---
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+        ctx.beginPath();
+        ctx.ellipse(cx, cy + 110, 80, 20, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // --- Dealer Hair Back ---
+        ctx.fillStyle = '#1c130e';
+        ctx.beginPath();
+        ctx.ellipse(cx, cy - 10, 48, 55, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // --- Torso / Formal Evening Vest & Dress ---
+        ctx.fillStyle = '#0f111a'; // Dark luxury suit vest
+        ctx.beginPath();
+        ctx.moveTo(cx - 42, cy + 110);
+        ctx.lineTo(cx - 30, cy + 40);
+        ctx.lineTo(cx + 30, cy + 40);
+        ctx.lineTo(cx + 42, cy + 110);
+        ctx.closePath();
+        ctx.fill();
+
+        // Red bow tie / Silk collar
+        ctx.fillStyle = '#e63946';
+        ctx.beginPath();
+        ctx.moveTo(cx - 12, cy + 42);
+        ctx.lineTo(cx + 12, cy + 42);
+        ctx.lineTo(cx, cy + 52);
+        ctx.closePath();
+        ctx.fill();
+
+        // Gold brooch accent
+        ctx.fillStyle = '#d4af37';
+        ctx.beginPath();
+        ctx.arc(cx, cy + 42, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // --- Neck ---
+        ctx.fillStyle = '#fceade';
+        ctx.fillRect(cx - 10, cy + 25, 20, 18);
+
+        // --- Head & Face Structure ---
+        ctx.fillStyle = '#fdf0e6';
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, 32, 38, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Stylish Hair Front / Fringe
+        ctx.fillStyle = '#2b1e16';
+        ctx.beginPath();
+        ctx.moveTo(cx - 34, cy - 10);
+        ctx.quadraticCurveTo(cx - 10, cy - 45, cx + 34, cy - 15);
+        ctx.quadraticCurveTo(cx + 15, cy - 35, cx - 34, cy - 10);
+        ctx.fill();
+
+        // Eyes (Cold & Professional)
+        ctx.fillStyle = '#1e293b';
+        if (!this.isBlinking) {
+            // Left Eye
+            ctx.beginPath();
+            ctx.ellipse(cx - 12, cy - 2, 4, 2.5, 0, 0, Math.PI * 2);
+            ctx.fill();
+            // Right Eye
+            ctx.beginPath();
+            ctx.ellipse(cx + 12, cy - 2, 4, 2.5, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Eyeliner / Eyelashes
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 1.8;
+            ctx.beginPath();
+            ctx.arc(cx - 12, cy - 3, 6, Math.PI * 1.1, Math.PI * 1.9);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(cx + 12, cy - 3, 6, Math.PI * 1.1, Math.PI * 1.9);
+            ctx.stroke();
+        } else {
+            // Closed eyes line
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(cx - 16, cy - 2); ctx.lineTo(cx - 8, cy - 2);
+            ctx.moveTo(cx + 8, cy - 2); ctx.lineTo(cx + 16, cy - 2);
+            ctx.stroke();
+        }
+
+        // Lips
+        ctx.fillStyle = '#c1121f';
+        ctx.beginPath();
+        ctx.ellipse(cx, cy + 18, 6, 2.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Arms Gesture
+        ctx.strokeStyle = '#0f111a';
+        ctx.lineWidth = 14;
+        ctx.lineCap = 'round';
+
+        ctx.beginPath();
+        if (this.armState === 'DEAL_LEFT') {
+            ctx.moveTo(cx - 32, cy + 50);
+            ctx.lineTo(cx - 80, cy + 90);
+            ctx.moveTo(cx + 32, cy + 50);
+            ctx.lineTo(cx + 45, cy + 95);
+        } else if (this.armState === 'DEAL_RIGHT') {
+            ctx.moveTo(cx - 32, cy + 50);
+            ctx.lineTo(cx - 45, cy + 95);
+            ctx.moveTo(cx + 32, cy + 50);
+            ctx.lineTo(cx + 80, cy + 90);
+        } else { // IDLE
+            ctx.moveTo(cx - 32, cy + 50);
+            ctx.lineTo(cx - 50, cy + 95);
+            ctx.moveTo(cx + 32, cy + 50);
+            ctx.lineTo(cx + 50, cy + 95);
+        }
+        ctx.stroke();
+
+        // --- Speech Bubble ---
+        ctx.font = '500 13px Segoe UI, sans-serif';
+        const textWidth = ctx.measureText(`딜러: "${this.dialogue}"`).width;
+        const bubbleW = Math.max(220, textWidth + 30);
+        const bubbleH = 32;
+        const bubbleX = cx - bubbleW / 2;
+        const bubbleY = cy - 65;
+
+        ctx.fillStyle = 'rgba(15, 20, 28, 0.9)';
+        ctx.strokeStyle = '#d4af37';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.roundRect(bubbleX, bubbleY, bubbleW, bubbleH, 16);
+        ctx.fill();
+        ctx.stroke();
+
+        // Speech Tail
+        ctx.beginPath();
+        ctx.moveTo(cx - 6, bubbleY + bubbleH);
+        ctx.lineTo(cx + 6, bubbleY + bubbleH);
+        ctx.lineTo(cx, bubbleY + bubbleH + 6);
+        ctx.closePath();
+        ctx.fillStyle = '#d4af37';
+        ctx.fill();
+
+        ctx.fillStyle = '#f3e5ab';
+        ctx.textAlign = 'center';
+        ctx.fillText(`딜러: "${this.dialogue}"`, cx, bubbleY + 20);
+
+        ctx.restore();
+    }
+}
+
+class BaccaratGame {
+    constructor() {
+        this.baccarat = new BaccaratEngine();
+        this.dealer = new DealerRenderer();
+        this.effects = new EffectSystem();
+
+        this.chips = CONFIG.STARTING_CHIPS;
+        this.highScore = CONFIG.STARTING_CHIPS;
+        this.winStreak = 0;
+        this.maxStreak = 0;
+        this.excitement = 0;
+        this.timeRemaining = CONFIG.SESSION_TIME;
+
+        this.selectedBetTarget = 'PLAYER'; // 'PLAYER', 'TIE', 'BANKER'
+        this.selectedChipIdx = 1; // Default 50 chips
+        this.currentBet = { target: null, amount: 0 };
+
+        this.playerCards = [];
+        this.bankerCards = [];
+        
+        // Game state: 'BETTING', 'DEALING', 'RESULT', 'RESTING', 'GAME_OVER', 'TIME_UP'
+        this.state = 'BETTING';
+
+        this.animatedCards = []; // Cards in transition animation
+
+        this.setupKeyboard();
+        this.startTimer();
+    }
+
+    startTimer() {
+        setInterval(() => {
+            if (this.state === 'GAME_OVER' || this.state === 'TIME_UP') return;
+
+            if (this.state === 'RESTING') {
+                this.excitement = Math.max(0, this.excitement - (CONFIG.REST_COOL_RATE / 2));
+            } else {
+                if (this.timeRemaining > 0) {
+                    this.timeRemaining--;
+                    if (this.timeRemaining === 0) {
+                        this.state = 'TIME_UP';
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    setupKeyboard() {
+        window.addEventListener('keydown', (e) => {
+            if (this.state === 'GAME_OVER' || this.state === 'TIME_UP') {
+                if (e.key.toLowerCase() === 'r') this.restart();
+                return;
+            }
+
+            if (e.key === 'Escape') {
+                this.toggleRestMode();
+                return;
+            }
+
+            if (this.state === 'BETTING') {
+                if (e.key === 'ArrowLeft' || e.key === '1') {
+                    this.selectedBetTarget = 'PLAYER';
+                    sounds.playChip();
+                }
+                if (e.key === 'ArrowUp' || e.key === '2') {
+                    this.selectedBetTarget = 'TIE';
+                    sounds.playChip();
+                }
+                if (e.key === 'ArrowRight' || e.key === '3') {
+                    this.selectedBetTarget = 'BANKER';
+                    sounds.playChip();
+                }
+
+                // Chip Denominations
+                if (e.key.toLowerCase() === 'z') this.selectedChipIdx = 0;
+                if (e.key.toLowerCase() === 'x') this.selectedChipIdx = 1;
+                if (e.key.toLowerCase() === 'c') this.selectedChipIdx = 2;
+                if (e.key.toLowerCase() === 'v') this.selectedChipIdx = 3;
+
+                if (e.key === 'Enter') {
+                    this.confirmBet();
+                }
+            }
+        });
+    }
+
+    toggleRestMode() {
+        if (this.state === 'BETTING') {
+            this.state = 'RESTING';
+            this.dealer.dialogue = "VIP 라운지에서 휴식을 취하십시오.";
+        } else if (this.state === 'RESTING') {
+            this.state = 'BETTING';
+            this.dealer.dialogue = "테이블 복귀를 환영합니다. 베팅을 시작하십시오.";
+        }
+    }
+
+    confirmBet() {
+        let chipValue = CONFIG.CHIP_VALUES[this.selectedChipIdx];
+        if (chipValue > this.chips) chipValue = this.chips;
+
+        if (chipValue <= 0) {
+            this.dealer.dialogue = "베팅 가능한 칩이 부족합니다!";
+            return;
+        }
+
+        this.chips -= chipValue;
+        this.currentBet = { target: this.selectedBetTarget, amount: chipValue };
+
+        // Excitement increases with bet amount and streak
+        const betRatio = chipValue / (this.chips + chipValue);
+        const gain = Math.round((betRatio * 25 + 6) * (1 + this.winStreak * CONFIG.STREAK_BONUS_MULT));
+        this.excitement = Math.min(CONFIG.MAX_EXCITEMENT, this.excitement + gain);
+
+        if (this.excitement >= CONFIG.MAX_EXCITEMENT) {
+            this.state = 'GAME_OVER';
+            return;
+        }
+
+        this.state = 'DEALING';
+        this.dealer.dialogue = `${this.selectedBetTarget} 영역에 $${chipValue} 베팅 확인. 카드를 배분합니다.`;
+        this.startDealingProcess();
+    }
+
+    startDealingProcess() {
+        this.playerCards = [this.baccarat.drawCard(), this.baccarat.drawCard()];
+        this.bankerCards = [this.baccarat.drawCard(), this.baccarat.drawCard()];
+        this.animatedCards = [];
+
+        const W = canvas.width;
+        const H = canvas.height;
+
+        // Animate deal sequences
+        const shoeX = W * 0.82;
+        const shoeY = H * 0.28;
+
+        const p1Target = { x: W * 0.32, y: H * 0.52 };
+        const b1Target = { x: W * 0.62, y: H * 0.52 };
+        const p2Target = { x: W * 0.38, y: H * 0.52 };
+        const b2Target = { x: W * 0.68, y: H * 0.52 };
+
+        // Deal Timeline
+        setTimeout(() => {
+            sounds.playCard();
+            this.dealer.armState = 'DEAL_LEFT';
+            this.addCardAnim(this.playerCards[0], shoeX, shoeY, p1Target.x, p1Target.y);
+        }, 200);
+
+        setTimeout(() => {
+            sounds.playCard();
+            this.dealer.armState = 'DEAL_RIGHT';
+            this.addCardAnim(this.bankerCards[0], shoeX, shoeY, b1Target.x, b1Target.y);
+        }, 600);
+
+        setTimeout(() => {
+            sounds.playCard();
+            this.dealer.armState = 'DEAL_LEFT';
+            this.addCardAnim(this.playerCards[1], shoeX, shoeY, p2Target.x, p2Target.y);
+        }, 1000);
+
+        setTimeout(() => {
+            sounds.playCard();
+            this.dealer.armState = 'DEAL_RIGHT';
+            this.addCardAnim(this.bankerCards[1], shoeX, shoeY, b2Target.x, b2Target.y);
+        }, 1400);
+
+        setTimeout(() => {
+            this.dealer.armState = 'IDLE';
+            this.evaluateThirdCardRule();
+        }, 2000);
+    }
+
+    addCardAnim(cardData, startX, startY, targetX, targetY) {
+        this.animatedCards.push({
+            data: cardData,
+            x: startX,
+            y: startY,
+            startX, startY, targetX, targetY,
+            progress: 0
+        });
+    }
+
+    evaluateThirdCardRule() {
+        const W = canvas.width;
+        const H = canvas.height;
+        const shoeX = W * 0.82;
+        const shoeY = H * 0.28;
+
+        let pScore = this.baccarat.calculateScore(this.playerCards);
+        let bScore = this.baccarat.calculateScore(this.bankerCards);
+
+        let third = this.baccarat.evaluateThirdCard(pScore, bScore);
+
+        if (third.drawP) {
+            setTimeout(() => {
+                sounds.playCard();
+                const p3 = this.baccarat.drawCard();
+                this.playerCards.push(p3);
+                this.addCardAnim(p3, shoeX, shoeY, W * 0.44, H * 0.52);
+                this.dealer.dialogue = "플레이어 추가 카드 배분.";
+
+                if (this.baccarat.shouldBankerDrawOnPlayer3rd(bScore, p3.point)) {
+                    setTimeout(() => {
+                        sounds.playCard();
+                        const b3 = this.baccarat.drawCard();
+                        this.bankerCards.push(b3);
+                        this.addCardAnim(b3, shoeX, shoeY, W * 0.74, H * 0.52);
+                        this.dealer.dialogue = "뱅커 추가 카드 배분.";
+                        this.finalizeRound();
+                    }, 800);
+                } else {
+                    this.finalizeRound();
+                }
+            }, 500);
+        } else if (third.drawB) {
+            setTimeout(() => {
+                sounds.playCard();
+                const b3 = this.baccarat.drawCard();
+                this.bankerCards.push(b3);
+                this.addCardAnim(b3, shoeX, shoeY, W * 0.74, H * 0.52);
+                this.dealer.dialogue = "뱅커 추가 카드 배분.";
+                this.finalizeRound();
+            }, 500);
+        } else {
+            this.finalizeRound();
+        }
+    }
+
+    finalizeRound() {
+        setTimeout(() => {
+            const pScore = this.baccarat.calculateScore(this.playerCards);
+            const bScore = this.baccarat.calculateScore(this.bankerCards);
+
+            let result = 'TIE';
+            if (pScore > bScore) result = 'PLAYER';
+            else if (bScore > pScore) result = 'BANKER';
+
+            this.state = 'RESULT';
+
+            if (this.currentBet.target === result) {
+                sounds.playWin();
+                this.winStreak++;
+                this.maxStreak = Math.max(this.maxStreak, this.winStreak);
+
+                const baseWin = Math.floor(this.currentBet.amount * CONFIG.PAYOUTS[result]);
+                const streakBonus = Math.floor(baseWin * (this.winStreak - 1) * CONFIG.STREAK_BONUS_MULT);
+                const totalWin = this.currentBet.amount + baseWin + streakBonus;
+
+                this.chips += totalWin;
+                this.effects.addConfetti(canvas.width / 2, canvas.height * 0.5);
+                this.effects.addFloatingText(`+$${totalWin} (${this.winStreak}연승!)`, canvas.width / 2, canvas.height * 0.45);
+
+                this.dealer.dialogue = `🎉 ${result} 승리! (${pScore} : ${bScore}) +$${totalWin} 획득!`;
+            } else if (result === 'TIE' && this.currentBet.target !== 'TIE') {
+                this.chips += this.currentBet.amount; // Refund on Tie
+                this.dealer.dialogue = `무승부(Tie)입니다. (${pScore} : ${bScore}) 베팅금이 반환됩니다.`;
+            } else {
+                this.winStreak = 0;
+                this.dealer.dialogue = `${result} 승리. (${pScore} : ${bScore}) 베팅 실패.`;
+            }
+
+            this.highScore = Math.max(this.highScore, this.chips);
+
+            if (this.chips <= 0) {
+                setTimeout(() => { this.state = 'GAME_OVER'; }, 1500);
+                return;
+            }
+
+            setTimeout(() => {
+                if (this.state !== 'GAME_OVER' && this.state !== 'TIME_UP') {
+                    this.state = 'BETTING';
+                    this.currentBet = { target: null, amount: 0 };
+                }
+            }, 2500);
+        }, 800);
+    }
+
+    restart() {
+        this.chips = CONFIG.STARTING_CHIPS;
+        this.winStreak = 0;
+        this.maxStreak = 0;
+        this.excitement = 0;
+        this.timeRemaining = CONFIG.SESSION_TIME;
+        this.state = 'BETTING';
+        this.currentBet = { target: null, amount: 0 };
+        this.playerCards = [];
+        this.bankerCards = [];
+        this.animatedCards = [];
+        this.dealer.dialogue = "새로운 바카라 세션이 시작되었습니다. 베팅하십시오.";
+    }
+
+    update() {
+        this.dealer.update();
+        this.effects.update();
+
+        // Update card animation trajectories
+        this.animatedCards.forEach(c => {
+            if (c.progress < 1) {
+                c.progress += 0.08;
+                if (c.progress > 1) c.progress = 1;
+                c.x = c.startX + (c.targetX - c.startX) * c.progress;
+                c.y = c.startY + (c.targetY - c.startY) * c.progress;
+            }
+        });
+    }
+
+    draw() {
+        const W = canvas.width;
+        const H = canvas.height;
+
+        ctx.clearRect(0, 0, W, H);
+
+        // --- 1. Realistic Luxury Casino Background ---
+        const bgGrad = ctx.createRadialGradient(W / 2, H * 0.3, 50, W / 2, H / 2, W * 0.8);
+        bgGrad.addColorStop(0, '#1a1f2c');
+        bgGrad.addColorStop(0.6, '#0a0d14');
+        bgGrad.addColorStop(1, '#020305');
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, W, H);
+
+        // --- 2. 2.5D Perspective Felt Table Base ---
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(W * 0.15, H * 0.95);
+        ctx.lineTo(W * 0.25, H * 0.38);
+        ctx.lineTo(W * 0.75, H * 0.38);
+        ctx.lineTo(W * 0.85, H * 0.95);
+        ctx.closePath();
+
+        const tableGrad = ctx.createLinearGradient(0, H * 0.38, 0, H * 0.95);
+        tableGrad.addColorStop(0, '#0a3d24'); // Dark luxury felt green
+        tableGrad.addColorStop(1, '#041f12');
+        ctx.fillStyle = tableGrad;
+        ctx.fill();
+
+        // Table Gold Trim Outer Ring
+        ctx.strokeStyle = '#d4af37';
+        ctx.lineWidth = 6;
+        ctx.stroke();
+        ctx.restore();
+
+        // --- 3. Dealer Model ---
+        this.dealer.draw(ctx, W, H);
+
+        // Card Shoe 3D Graphic
+        ctx.fillStyle = '#1e1b18';
+        ctx.strokeStyle = '#d4af37';
+        ctx.lineWidth = 2;
+        ctx.fillRect(W * 0.80, H * 0.24, 60, 40);
+        ctx.strokeRect(W * 0.80, H * 0.24, 60, 40);
+
+        // --- 4. Baccarat Betting Zones (PLAYER / TIE / BANKER) ---
+        const zones = [
+            { id: 'PLAYER', label: 'PLAYER (1:1)', x: W * 0.26, y: H * 0.68, w: W * 0.14, h: H * 0.18, col: '#1e3a8a' },
+            { id: 'TIE', label: 'TIE (8:1)', x: W * 0.43, y: H * 0.68, w: W * 0.14, h: H * 0.18, col: '#15803d' },
+            { id: 'BANKER', label: 'BANKER (0.95:1)', x: W * 0.60, y: H * 0.68, w: W * 0.14, h: H * 0.18, col: '#991b1b' }
+        ];
+
+        zones.forEach(z => {
+            ctx.save();
+            ctx.fillStyle = (this.selectedBetTarget === z.id && this.state === 'BETTING') ? z.col : 'rgba(15, 23, 42, 0.75)';
+            ctx.strokeStyle = (this.selectedBetTarget === z.id) ? '#ffd700' : 'rgba(212, 175, 55, 0.4)';
+            ctx.lineWidth = (this.selectedBetTarget === z.id) ? 3 : 1;
+
+            ctx.beginPath();
+            ctx.roundRect(z.x, z.y, z.w, z.h, 12);
+            ctx.fill();
+            ctx.stroke();
+
+            // Label Text
+            ctx.font = 'bold 13px Segoe UI, sans-serif';
+            ctx.fillStyle = '#f3e5ab';
+            ctx.textAlign = 'center';
+            ctx.fillText(z.label, z.x + z.w / 2, z.y + 28);
+
+            // Display Stacked Bet Chips inside zone
+            if (this.currentBet.target === z.id && this.currentBet.amount > 0) {
+                ctx.fillStyle = '#d4af37';
+                ctx.beginPath();
+                ctx.arc(z.x + z.w / 2, z.y + z.h / 2 + 10, 18, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                ctx.fillStyle = '#000';
+                ctx.font = 'bold 12px sans-serif';
+                ctx.fillText(`$${this.currentBet.amount}`, z.x + z.w / 2, z.y + z.h / 2 + 14);
+            }
+
+            ctx.restore();
+        });
+
+        // --- 5. Render Dealt Cards ---
+        this.animatedCards.forEach(c => {
+            this.drawCard(ctx, c.data, c.x, c.y);
+        });
+
+        // Scores Display
+        if (this.playerCards.length >= 2) {
+            const pScore = this.baccarat.calculateScore(this.playerCards);
+            ctx.fillStyle = '#3b82f6';
+            ctx.font = 'bold 18px Segoe UI';
+            ctx.textAlign = 'center';
+            ctx.fillText(`PLAYER: ${pScore}`, W * 0.36, H * 0.48);
+        }
+        if (this.bankerCards.length >= 2) {
+            const bScore = this.baccarat.calculateScore(this.bankerCards);
+            ctx.fillStyle = '#ef4444';
+            ctx.font = 'bold 18px Segoe UI';
+            ctx.textAlign = 'center';
+            ctx.fillText(`BANKER: ${bScore}`, W * 0.66, H * 0.48);
+        }
+
+        // --- 6. Effects Overlay ---
+        this.effects.draw(ctx);
+
+        // --- 7. Top HUD Bar ---
+        this.drawHUD(ctx, W, H);
+
+        // --- 8. Modals (REST / GAME OVER / TIME UP) ---
+        if (this.state === 'RESTING') {
+            this.drawModal(ctx, W, H, "☕ VIP 라운지 휴식 중", "독한 흥분감을 가라앉히는 중입니다.\n흥분지수가 빠르게 감소합니다.", "복귀하려면 [Esc] 누르기");
+        } else if (this.state === 'GAME_OVER') {
+            this.drawModal(ctx, W, H, "💥 GAME OVER", `과도한 흥분과 압박감으로 게임 진행이 불가합니다.\n\n최종 칩: $${this.chips.toLocaleString()} | 최고 연승: ${this.maxStreak}회`, "재시작하려면 [R] 누르기");
+        } else if (this.state === 'TIME_UP') {
+            this.drawModal(ctx, W, H, "⏱ 세션 시간 종료", `제한 시간이 종료되었습니다!\n\n최종 칩: $${this.chips.toLocaleString()} | 최고 기록: $${this.highScore.toLocaleString()}`, "다시 도전하려면 [R] 누르기");
+        }
+    }
+
+    drawCard(ctx, card, x, y) {
+        ctx.save();
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#cccccc';
+        ctx.lineWidth = 1;
+
+        ctx.beginPath();
+        ctx.roundRect(x - 22, y - 32, 44, 64, 6);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = card.color;
+        ctx.font = 'bold 13px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(card.value, x - 17, y - 16);
+        ctx.fillText(card.suit, x - 17, y - 2);
+
+        ctx.font = '22px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(card.suit, x, y + 16);
+        ctx.restore();
+    }
+
+    drawHUD(ctx, W, H) {
+        ctx.save();
+        // HUD Top Header Box
+        ctx.fillStyle = 'rgba(10, 12, 18, 0.92)';
+        ctx.strokeStyle = 'rgba(212, 175, 55, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.fillRect(0, 0, W, 54);
+        ctx.strokeRect(0, 0, W, 54);
+
+        // Time Remaining
+        const min = Math.floor(this.timeRemaining / 60).toString().padStart(2, '0');
+        const sec = (this.timeRemaining % 60).toString().padStart(2, '0');
+        ctx.fillStyle = '#d4af37';
+        ctx.font = '10px Segoe UI';
+        ctx.fillText('남은 시간', 30, 20);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 18px Segoe UI';
+        ctx.fillText(`${min}:${sec}`, 30, 42);
+
+        // Chips
+        ctx.fillStyle = '#d4af37';
+        ctx.font = '10px Segoe UI';
+        ctx.fillText('보유 칩', 130, 20);
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = 'bold 18px Segoe UI';
+        ctx.fillText(`$${this.chips.toLocaleString()}`, 130, 42);
+
+        // Win Streak
+        ctx.fillStyle = '#d4af37';
+        ctx.font = '10px Segoe UI';
+        ctx.fillText('연승 기록', 250, 20);
+        ctx.fillStyle = '#f97316';
+        ctx.font = 'bold 18px Segoe UI';
+        ctx.fillText(`${this.winStreak} 회`, 250, 42);
+
+        // Excitement Meter Gauge Bar
+        const barX = W - 240;
+        const barY = 20;
+        const barW = 200;
+        const barH = 18;
+
+        ctx.fillStyle = '#d4af37';
+        ctx.font = '10px Segoe UI';
+        ctx.textAlign = 'right';
+        ctx.fillText('흥분지수', barX - 10, 33);
+
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(barX, barY, barW, barH);
+
+        const fillW = (this.excitement / CONFIG.MAX_EXCITEMENT) * barW;
+        const gaugeGrad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+        gaugeGrad.addColorStop(0, '#22c55e');
+        gaugeGrad.addColorStop(0.6, '#eab308');
+        gaugeGrad.addColorStop(1, '#ef4444');
+
+        ctx.fillStyle = gaugeGrad;
+        ctx.fillRect(barX, barY, fillW, barH);
+
+        ctx.strokeStyle = '#d4af37';
+        ctx.strokeRect(barX, barY, barW, barH);
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${Math.round(this.excitement)}%`, barX + barW / 2, barY + 13);
+
+        ctx.restore();
+    }
+
+    drawModal(ctx, W, H, title, desc, actionHint) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(2, 4, 8, 0.88)';
+        ctx.fillRect(0, 0, W, H);
+
+        const cardW = 460;
+        const cardH = 240;
+        const cx = W / 2 - cardW / 2;
+        const cy = H / 2 - cardH / 2;
+
+        ctx.fillStyle = '#0f172a';
+        ctx.strokeStyle = '#d4af37';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(cx, cy, cardW, cardH, 16);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#d4af37';
+        ctx.font = 'bold 26px Segoe UI';
+        ctx.fillText(title, W / 2, cy + 50);
+
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = '14px Segoe UI';
+        const lines = desc.split('\n');
+        lines.forEach((l, i) => {
+            ctx.fillText(l, W / 2, cy + 100 + (i * 22));
+        });
+
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = 'bold 15px Segoe UI';
+        ctx.fillText(actionHint, W / 2, cy + cardH - 30);
+
+        ctx.restore();
+    }
+}
+
+let game;
+window.onload = () => {
+    game = new BaccaratGame();
+
+    function mainLoop() {
+        game.update();
+        game.draw();
+        requestAnimationFrame(mainLoop);
+    }
+    mainLoop();
+};
+</script>
+</body>
+</html>
