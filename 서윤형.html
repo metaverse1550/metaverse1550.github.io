@@ -1,0 +1,1515 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>사파고등학교: 탈출 (Sapa High: Escape)</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Nanum+Gothic+Coding:wght@400;700&display=swap');
+
+        body {
+            font-family: 'Nanum Gothic Coding', monospace;
+            background-color: #030305;
+            color: #d1d5db;
+            user-select: none;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+        }
+
+        .horror-font {
+            font-family: 'Gowun Batang', serif;
+        }
+
+        /* Scanline and Horror Overlay */
+        .scanlines {
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.4) 50%
+            ), linear-gradient(
+                90deg,
+                rgba(255, 0, 0, 0.03),
+                rgba(0, 255, 0, 0.01),
+                rgba(0, 0, 255, 0.03)
+            );
+            background-size: 100% 4px, 6px 100%;
+            pointer-events: none;
+        }
+
+        /* Pulse Vignette when chased */
+        @keyframes chase-vignette {
+            0% { box-shadow: inset 0 0 40px rgba(180, 0, 0, 0.6); }
+            50% { box-shadow: inset 0 0 130px rgba(255, 0, 0, 0.9); }
+            100% { box-shadow: inset 0 0 40px rgba(180, 0, 0, 0.6); }
+        }
+
+        .chase-active {
+            animation: chase-vignette 0.8s infinite alternate;
+        }
+
+        /* Glitch effect on caught */
+        @keyframes glitch-anim {
+            0% { transform: translate(0) }
+            20% { transform: translate(-4px, 4px) }
+            40% { transform: translate(-4px, -4px) }
+            60% { transform: translate(4px, 4px) }
+            80% { transform: translate(4px, -4px) }
+            100% { transform: translate(0) }
+        }
+
+        .glitch-screen {
+            animation: glitch-anim 0.15s infinite;
+        }
+
+        /* Custom Scrollbar for Game UI Log */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #374151;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body class="w-screen h-screen flex flex-col justify-center items-center relative overflow-hidden bg-black select-none">
+
+    <!-- Game Canvas Wrapper -->
+    <div id="game-container" class="relative w-full h-full max-w-[1280px] max-h-[720px] bg-black shadow-2xl flex items-center justify-center border border-gray-900 rounded-lg overflow-hidden">
+        
+        <!-- Canvas for 2.5D Rendering -->
+        <canvas id="gameCanvas" class="w-full h-full block cursor-crosshair"></canvas>
+
+        <!-- Scanline Overlay -->
+        <div id="vignette-overlay" class="absolute inset-0 scanlines pointer-events-none transition-all duration-300"></div>
+
+        <!-- HUD UI Overlay -->
+        <div id="hud" class="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 md:p-6 text-sm text-gray-300">
+            <!-- Top HUD Bar -->
+            <div class="flex justify-between items-start w-full">
+                <!-- Location, Timer & Lives -->
+                <div class="bg-gray-950/80 border border-gray-800 backdrop-blur-md px-4 py-2 rounded-lg flex flex-col gap-1.5 shadow-lg pointer-events-auto">
+                    <div class="flex items-center justify-between gap-4">
+                        <div class="flex items-center gap-2">
+                            <i data-lucide="building" class="w-4 h-4 text-red-500"></i>
+                            <span id="floor-display" class="font-bold text-lg text-red-400 tracking-wider">1층 - 본관 로비</span>
+                        </div>
+                        <!-- Lives Indicator (3 Hearts) -->
+                        <div class="flex items-center gap-1 bg-red-950/50 border border-red-800/60 px-2 py-0.5 rounded-full">
+                            <span class="text-[10px] text-red-300 font-bold mr-1">목숨</span>
+                            <div id="lives-container" class="flex items-center gap-1">
+                                <i data-lucide="heart" class="w-3.5 h-3.5 fill-red-600 text-red-600"></i>
+                                <i data-lucide="heart" class="w-3.5 h-3.5 fill-red-600 text-red-600"></i>
+                                <i data-lucide="heart" class="w-3.5 h-3.5 fill-red-600 text-red-600"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 text-xs text-gray-400">
+                        <i data-lucide="clock" class="w-3.5 h-3.5 text-amber-500"></i>
+                        <span>경과 시간: <strong id="timer-display" class="text-gray-200 font-mono">00:00.0</strong></span>
+                    </div>
+                </div>
+
+                <!-- Keys / Inventory HUD -->
+                <div class="bg-gray-950/80 border border-gray-800 backdrop-blur-md px-4 py-2 rounded-lg flex flex-col gap-2 shadow-lg min-w-[160px] pointer-events-auto">
+                    <div class="flex items-center gap-2 text-xs font-semibold text-gray-400 border-b border-gray-800 pb-1">
+                        <i data-lucide="key" class="w-3.5 h-3.5 text-yellow-400"></i>
+                        <span>소지한 열쇠</span>
+                    </div>
+                    <div id="keys-list" class="flex flex-wrap gap-1.5 text-xs">
+                        <span class="text-gray-600 italic">없음</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Middle Notification Alert / Prompt -->
+            <div class="flex flex-col items-center justify-center gap-2 my-auto">
+                <div id="interaction-prompt" class="hidden bg-black/85 border border-yellow-500/50 text-yellow-300 px-5 py-2.5 rounded-full font-semibold text-sm shadow-xl flex items-center gap-2 animate-bounce">
+                    <i data-lucide="hand" class="w-4 h-4"></i>
+                    <span id="prompt-text">E키 또는 클릭: 상호작용</span>
+                </div>
+                
+                <div id="status-message" class="opacity-0 transition-opacity duration-300 bg-red-950/90 border border-red-600 text-red-200 px-4 py-2 rounded text-xs font-medium tracking-wide shadow-2xl">
+                    경고 메세지
+                </div>
+            </div>
+
+            <!-- Bottom HUD Bar -->
+            <div class="flex justify-between items-end w-full">
+                <!-- Stamina & Flashlight Bars -->
+                <div class="bg-gray-950/80 border border-gray-800 backdrop-blur-md p-3 rounded-lg flex flex-col gap-2 w-64 shadow-lg pointer-events-auto">
+                    <!-- Stamina Bar -->
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs text-gray-400">
+                            <span class="flex items-center gap-1"><i data-lucide="zap" class="w-3 h-3 text-emerald-400"></i> 스태미너</span>
+                            <span id="stamina-text" class="text-[10px]">100%</span>
+                        </div>
+                        <div class="w-full h-2 bg-gray-800 rounded-full overflow-hidden border border-gray-700">
+                            <div id="stamina-bar" class="h-full bg-emerald-500 transition-all duration-100" style="width: 100%;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Flashlight Battery -->
+                    <div class="flex flex-col gap-1">
+                        <div class="flex justify-between text-xs text-gray-400">
+                            <span class="flex items-center gap-1"><i data-lucide="flashlight" class="w-3 h-3 text-amber-300"></i> 손전등 [Space]</span>
+                            <span id="flashlight-status" class="text-[10px] text-amber-300">ON</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hiding State Alert -->
+                <div id="hiding-indicator" class="hidden bg-indigo-950/90 border border-indigo-500 text-indigo-200 px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 animate-pulse">
+                    <i data-lucide="shield-check" class="w-4 h-4 text-indigo-400"></i>
+                    <span>은신 중 (추적자에게 보이지 않음)</span>
+                </div>
+
+                <!-- Controls Reminder -->
+                <div class="hidden md:flex bg-gray-950/80 border border-gray-800 backdrop-blur-md p-3 rounded-lg text-xs text-gray-400 flex-col gap-1 pointer-events-auto">
+                    <div><span class="text-yellow-400 font-mono">방향키 (▲▼◄►) / WASD</span> : 이동</div>
+                    <div><span class="text-yellow-400 font-mono">Shift</span> : 달리기</div>
+                    <div><span class="text-yellow-400 font-mono">E / 클릭</span> : 상호작용 / 문 / 은신 / 열쇠</div>
+                    <div><span class="text-yellow-400 font-mono">Space</span> : 손전등 On/Off</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- START / MENU OVERLAY -->
+        <div id="start-screen" class="absolute inset-0 bg-gray-950/95 backdrop-blur-md flex flex-col items-center justify-center p-6 z-30 text-center">
+            <h1 class="text-4xl md:text-6xl font-extrabold text-red-600 mb-2 horror-font tracking-widest drop-shadow-[0_5px_10px_rgba(255,0,0,0.5)]">
+                사 파 고 : 학 교 탈 출
+            </h1>
+            <p class="text-gray-400 text-sm md:text-base max-w-lg mb-8 leading-relaxed">
+                어둡고 음산한 밤의 사파고등학교에 갇혔습니다.<br>
+                추적자를 피해 열쇠를 찾아 옥상으로 탈출하십시오. (옥상에는 3명의 추적자가 있습니다)
+            </p>
+
+            <div class="bg-gray-900/80 border border-gray-800 rounded-lg p-5 max-w-md w-full mb-8 text-left text-xs text-gray-300 space-y-2">
+                <div class="text-emerald-400 font-bold text-sm mb-2 border-b border-gray-800 pb-1 flex items-center gap-2">
+                    <i data-lucide="shield" class="w-4 h-4"></i> 난이도 안내
+                </div>
+                <p>• <strong class="text-white">추적자 감지 저하:</strong> 추적자의 이동 속도와 시야 범위가 감소했습니다.</p>
+                <p>• <strong class="text-white">기회 제공:</strong> 잡혀도 최대 <strong class="text-emerald-400">3번</strong>까지 재도전 가능합니다.</p>
+                <p>• <strong class="text-white">스태미너 강화:</strong> 달리기 시 스태미너 소모가 적고 빠르게 회복됩니다.</p>
+                <p>• <strong class="text-white">부활 보호:</strong> 잡힌 후 복귀 시 7초 동안 절대 안전 상태가 유지됩니다.</p>
+                <p>• <strong class="text-red-400 font-bold">옥상 특수 조건:</strong> 옥상에는 3명의 추적자가 동시에 수색 중입니다!</p>
+            </div>
+
+            <button id="start-btn" class="px-8 py-3.5 bg-red-700 hover:bg-red-600 active:scale-95 text-white font-bold text-base rounded-lg shadow-lg shadow-red-900/50 transition-all flex items-center gap-2 border border-red-500 cursor-pointer">
+                <i data-lucide="play" class="w-5 h-5"></i> 탈출 시작하기
+            </button>
+            <button id="open-hof-btn" class="mt-3 px-6 py-2.5 bg-gray-900 hover:bg-gray-800 text-yellow-400 font-bold text-sm rounded-lg shadow border border-yellow-600/50 transition-all flex items-center gap-2 cursor-pointer">
+                <i data-lucide="trophy" class="w-4 h-4 text-yellow-400"></i> 명예의 전당 (리더보드)
+            </button>
+        </div>
+
+        <!-- GAME OVER / CAUGHT RESPAWN OVERLAY -->
+        <div id="respawn-overlay" class="hidden absolute inset-0 bg-red-950/90 backdrop-blur-lg z-40 flex flex-col items-center justify-center text-center p-6">
+            <div class="glitch-screen flex flex-col items-center">
+                <i data-lucide="skull" class="w-20 h-20 text-red-600 mb-4 animate-bounce"></i>
+                <h2 class="text-3xl md:text-5xl font-black text-red-500 mb-2 horror-font">추적자에게 잡혔습니다!</h2>
+                <p class="text-gray-300 text-sm mb-1">의식을 잃고 가까운 안전지대로 끌려왔습니다...</p>
+                <p id="lives-left-msg" class="text-emerald-400 font-bold text-xs mb-6">남은 기회: 4회</p>
+                <button id="respawn-btn" class="px-6 py-2.5 bg-gray-900 hover:bg-gray-800 border border-red-600 text-red-300 font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer">
+                    <i data-lucide="rotate-ccw" class="w-4 h-4"></i> 정신 차리기 (7초 무적 보호)
+                </button>
+            </div>
+        </div>
+
+        <!-- PERMANENT GAME OVER OVERLAY -->
+        <div id="gameover-screen" class="hidden absolute inset-0 bg-black/95 backdrop-blur-xl z-50 flex flex-col items-center justify-center p-6 text-center">
+            <div class="glitch-screen flex flex-col items-center max-w-md w-full bg-red-950/40 border border-red-800/80 p-8 rounded-xl shadow-2xl">
+                <i data-lucide="skull" class="w-20 h-20 text-red-700 mb-4 animate-pulse"></i>
+                <h2 class="text-4xl font-extrabold text-red-600 mb-2 horror-font tracking-widest">G A M E  O V E R</h2>
+                <p class="text-gray-300 text-sm mb-6 leading-relaxed">
+                    추적자에게 3번 붙잡혔습니다.<br>
+                    더 이상 지친 몸을 일으킬 수 없습니다...
+                </p>
+                <button id="gameover-restart-btn" class="w-full py-3 bg-red-800 hover:bg-red-700 active:scale-95 text-white font-bold rounded-lg shadow-lg shadow-red-900/50 transition-all flex items-center justify-center gap-2 cursor-pointer border border-red-500">
+                    <i data-lucide="refresh-cw" class="w-4 h-4"></i> 처음부터 다시 도전
+                </button>
+            </div>
+        </div>
+
+        <!-- VICTORY ESCAPE OVERLAY -->
+        <div id="victory-screen" class="hidden absolute inset-0 bg-gray-950/95 backdrop-blur-xl z-50 flex flex-col items-center justify-center p-6 text-center">
+            <div class="max-w-md w-full bg-gray-900/90 border border-emerald-600/50 p-8 rounded-xl shadow-2xl flex flex-col items-center">
+                <div class="w-16 h-16 bg-emerald-950 border border-emerald-500 rounded-full flex items-center justify-center mb-4">
+                    <i data-lucide="trophy" class="w-8 h-8 text-emerald-400"></i>
+                </div>
+                <h2 class="text-3xl font-extrabold text-emerald-400 mb-2 horror-font">사파고 탈출 성공!</h2>
+                <p class="text-gray-400 text-xs mb-6">차가운 밤바람을 맞으며 옥상에서 구출되었습니다.</p>
+
+                <div class="w-full bg-black/60 border border-gray-800 rounded-lg p-4 mb-6 flex flex-col gap-2 text-sm text-left">
+                    <div class="flex justify-between items-center border-b border-gray-800 pb-2">
+                        <span class="text-gray-400">총 탈출 소요 시간:</span>
+                        <strong id="final-time" class="text-yellow-400 font-mono text-base">00:00.0</strong>
+                    </div>
+                    <div class="flex justify-between items-center border-b border-gray-800 pb-2">
+                        <span class="text-gray-400">잡힌 횟수:</span>
+                        <strong id="caught-count" class="text-red-400 font-mono">0 회</strong>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-gray-400">생존 랭크:</span>
+                        <strong id="survival-rank" class="text-emerald-400 font-bold">S CLASS</strong>
+                    </div>
+                </div>
+
+                <!-- Hall of Fame Record Submission -->
+                <div id="record-submit-box" class="w-full bg-yellow-950/20 border border-yellow-600/40 p-3.5 rounded-lg mb-6 flex flex-col gap-2.5">
+                    <div class="text-xs font-bold text-yellow-300 flex items-center gap-1.5">
+                        <i data-lucide="award" class="w-4 h-4"></i> 명예의 전당 기록 등록
+                    </div>
+                    <div class="flex gap-2">
+                        <input type="text" id="player-nickname" maxlength="8" placeholder="생존자 닉네임 (최대 8자)" class="bg-black/80 border border-gray-700 text-white text-xs rounded px-3 py-2 w-full focus:outline-none focus:border-yellow-500">
+                        <button id="submit-score-btn" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-black font-bold text-xs rounded whitespace-nowrap transition-all flex items-center gap-1 cursor-pointer">
+                            <i data-lucide="send" class="w-3.5 h-3.5"></i> 등록
+                        </button>
+                    </div>
+                    <div id="submit-msg" class="text-[11px] text-emerald-400 hidden font-semibold">성공적으로 등록되었습니다!</div>
+                </div>
+
+                <div class="flex gap-2 w-full">
+                    <button id="victory-hof-btn" class="w-1/2 py-3 bg-yellow-950/80 hover:bg-yellow-900 border border-yellow-600/60 text-yellow-300 font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs cursor-pointer">
+                        <i data-lucide="trophy" class="w-4 h-4 text-yellow-400"></i> 명예의 전당
+                    </button>
+                    <button id="restart-btn" class="w-1/2 py-3 bg-emerald-700 hover:bg-emerald-600 text-white font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 text-xs cursor-pointer">
+                        <i data-lucide="refresh-cw" class="w-4 h-4"></i> 다시 도전
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- HALL OF FAME MODAL -->
+        <div id="hall-of-fame-modal" class="hidden absolute inset-0 bg-black/95 backdrop-blur-md z-50 flex flex-col items-center justify-center p-4">
+            <div class="max-w-md w-full bg-gray-950 border border-yellow-600/50 p-6 rounded-xl shadow-2xl flex flex-col h-[520px]">
+                <div class="flex justify-between items-center border-b border-gray-800 pb-3 mb-4">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="trophy" class="w-6 h-6 text-yellow-400"></i>
+                        <h2 class="text-xl font-bold text-yellow-400 horror-font">명예의 전당 (탈출 기록)</h2>
+                    </div>
+                    <button id="close-hof-btn" class="text-gray-400 hover:text-white p-1 rounded-lg transition-colors cursor-pointer">
+                        <i data-lucide="x" class="w-5 h-5"></i>
+                    </button>
+                </div>
+
+                <div class="flex-1 overflow-y-auto pr-1">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead>
+                            <tr class="border-b border-gray-800 text-gray-400">
+                                <th class="pb-2 text-center w-12">순위</th>
+                                <th class="pb-2">생존자</th>
+                                <th class="pb-2 text-center">기록</th>
+                                <th class="pb-2 text-center">피격</th>
+                                <th class="pb-2 text-right">일자</th>
+                            </tr>
+                        </thead>
+                        <tbody id="hof-list-body" class="divide-y divide-gray-900 text-gray-300">
+                            <tr>
+                                <td colspan="5" class="py-8 text-center text-gray-500">기록을 불러오는 중...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="mt-4 pt-3 border-t border-gray-800 text-[11px] text-gray-500 flex justify-between items-center">
+                    <span>* 최단 탈출 시간 및 적은 피격 횟수 기준 (브라우저 영구 저장)</span>
+                    <button id="reset-hof-btn" class="text-red-400 hover:text-red-300 underline cursor-pointer">로컬 기록 초기화</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- FIREBASE SERVICES FOR HALL OF FAME -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'school-horror-escape';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+
+        let db = null;
+        let auth = null;
+        const LOCAL_STORAGE_KEY = 'school_horror_escape_hof_v1';
+
+        let defaultHofRecords = [
+            { name: "야간경비원", elapsedTime: 112.4, caughtCount: 0, date: "2026. 8. 20." },
+            { name: "도망자", elapsedTime: 154.8, caughtCount: 1, date: "2026. 8. 23." },
+            { name: "학생A", elapsedTime: 210.3, caughtCount: 2, date: "2026. 8. 25." }
+        ];
+
+        function getStoredLocalRecords() {
+            try {
+                const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+                if (saved) return JSON.parse(saved);
+            } catch (e) {
+                console.warn("localStorage read failed:", e);
+            }
+            return [...defaultHofRecords];
+        }
+
+        function saveLocalRecords(records) {
+            try {
+                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(records));
+            } catch (e) {
+                console.warn("localStorage write failed:", e);
+            }
+        }
+
+        async function initStorage() {
+            if (firebaseConfig) {
+                try {
+                    const app = initializeApp(firebaseConfig);
+                    auth = getAuth(app);
+                    db = getFirestore(app);
+
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                } catch(e) {
+                    console.warn("Cloud storage fallback to local mode:", e);
+                }
+            }
+        }
+
+        async function loadHallOfFame() {
+            const listBody = document.getElementById('hof-list-body');
+            listBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-gray-500">기록 불러오는 중...</td></tr>';
+
+            let records = getStoredLocalRecords();
+
+            if (db && auth && auth.currentUser) {
+                try {
+                    const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'hallOfFame');
+                    const snapshot = await getDocs(colRef);
+                    const cloudRecords = [];
+                    snapshot.forEach(doc => cloudRecords.push(doc.data()));
+                    if (cloudRecords.length > 0) {
+                        records = cloudRecords;
+                    }
+                } catch (e) {
+                    console.warn("Failed to load cloud Hall of Fame:", e);
+                }
+            }
+
+            // Sort by elapsedTime ascending, then caughtCount ascending
+            records.sort((a, b) => {
+                if (a.elapsedTime !== b.elapsedTime) return a.elapsedTime - b.elapsedTime;
+                return a.caughtCount - b.caughtCount;
+            });
+
+            if (records.length === 0) {
+                listBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-gray-500">등록된 기록이 없습니다. 첫 번째 명예의 전당 주인이 되어보세요!</td></tr>';
+                return;
+            }
+
+            listBody.innerHTML = records.map((r, i) => {
+                let badge = `<span class="font-bold text-gray-400">${i + 1}</span>`;
+                if (i === 0) badge = '🥇';
+                else if (i === 1) badge = '🥈';
+                else if (i === 2) badge = '🥉';
+
+                const minutes = Math.floor(r.elapsedTime / 60).toString().padStart(2, '0');
+                const seconds = (r.elapsedTime % 60).toFixed(1).padStart(4, '0');
+                const timeStr = `${minutes}:${seconds}`;
+
+                return `
+                    <tr class="hover:bg-gray-900/60 transition-colors">
+                        <td class="py-2.5 text-center font-semibold">${badge}</td>
+                        <td class="py-2.5 font-bold text-gray-200">${escapeHtml(r.name || '익명')}</td>
+                        <td class="py-2.5 text-center font-mono text-yellow-400">${timeStr}</td>
+                        <td class="py-2.5 text-center text-red-400 font-mono">${r.caughtCount ?? 0}회</td>
+                        <td class="py-2.5 text-right text-gray-500 text-[10px]">${r.date || '-'}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function submitRecord() {
+            const nickInput = document.getElementById('player-nickname');
+            const submitBtn = document.getElementById('submit-score-btn');
+            const submitMsg = document.getElementById('submit-msg');
+
+            const name = nickInput.value.trim() || '익명 학생';
+            const elapsedTime = window.gameState ? window.gameState.elapsedTime : 0;
+            const caughtCount = window.gameState ? window.gameState.caughtCount : 0;
+            const date = new Date().toLocaleDateString('ko-KR');
+
+            const recordData = { name, elapsedTime, caughtCount, date };
+
+            submitBtn.disabled = true;
+            submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+            // Save to browser localStorage so records persist permanently
+            const currentLocal = getStoredLocalRecords();
+            currentLocal.push(recordData);
+            saveLocalRecords(currentLocal);
+
+            if (db && auth && auth.currentUser) {
+                try {
+                    const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'hallOfFame');
+                    await addDoc(colRef, recordData);
+                } catch(e) {
+                    console.warn("Failed to save cloud record, saving locally:", e);
+                }
+            }
+
+            submitMsg.classList.remove('hidden');
+            setTimeout(() => {
+                document.getElementById('record-submit-box').classList.add('hidden');
+            }, 1800);
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        }
+
+        // Initialize Firebase on window load
+        window.addEventListener('DOMContentLoaded', async () => {
+            await initStorage();
+
+            document.getElementById('open-hof-btn')?.addEventListener('click', () => {
+                document.getElementById('hall-of-fame-modal').classList.remove('hidden');
+                loadHallOfFame();
+            });
+
+            document.getElementById('victory-hof-btn')?.addEventListener('click', () => {
+                document.getElementById('hall-of-fame-modal').classList.remove('hidden');
+                loadHallOfFame();
+            });
+
+            document.getElementById('close-hof-btn')?.addEventListener('click', () => {
+                document.getElementById('hall-of-fame-modal').classList.add('hidden');
+            });
+
+            document.getElementById('reset-hof-btn')?.addEventListener('click', () => {
+                try {
+                    localStorage.removeItem(LOCAL_STORAGE_KEY);
+                    loadHallOfFame();
+                } catch(e) {}
+            });
+
+            document.getElementById('submit-score-btn')?.addEventListener('click', submitRecord);
+        });
+    </script>
+
+    <script>
+        /* ==========================================================================
+           1. CONFIG & GAME SETTINGS
+           ========================================================================== */
+        const CONFIG = {
+            TILE_SIZE: 48,
+            WALL_HEIGHT: 28,
+            PLAYER_SPEED: 2.8,
+            PLAYER_RUN_SPEED: 4.6,
+            STAMINA_MAX: 100,
+            STAMINA_DRAIN: 15,
+            STAMINA_RECOVERY: 25,
+            ENEMY_PATROL_SPEED: 1.1,
+            ENEMY_CHASE_SPEED: 2.1,
+            ENEMY_FOV_ANGLE: Math.PI / 3.2,
+            ENEMY_VIEW_DIST: 160,
+            PLAYER_LIGHT_RADIUS: 320,
+            INTERACTION_DIST: 58,
+            MAX_LIVES: 3
+        };
+
+        let cameraOffset = { x: 0, y: 0 };
+
+        /* ==========================================================================
+           2. AUDIO SYSTEM (Synthesizer for Horror SFX)
+           ========================================================================== */
+        class SoundSystem {
+            constructor() {
+                this.ctx = null;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    try {
+                        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                        if (AudioCtx) this.ctx = new AudioCtx();
+                    } catch (e) {}
+                }
+                if (this.ctx && this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            playTone(freq, type, duration, vol = 0.1) {
+                if (!this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                    gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + duration);
+                } catch (e) {}
+            }
+
+            playFootstep() {
+                this.playTone(90 + Math.random() * 30, 'triangle', 0.08, 0.03);
+            }
+
+            playHeartbeat(rate = 1) {
+                if (!this.ctx) return;
+                this.playTone(60, 'sine', 0.15, 0.25 * rate);
+                setTimeout(() => this.playTone(45, 'sine', 0.2, 0.2 * rate), 180);
+            }
+
+            playKeyPickup() {
+                this.playTone(523.25, 'sine', 0.1, 0.15);
+                setTimeout(() => this.playTone(659.25, 'sine', 0.25, 0.15), 100);
+            }
+
+            playDoorOpen() {
+                this.playTone(180, 'sawtooth', 0.3, 0.08);
+            }
+
+            playDoorLocked() {
+                this.playTone(120, 'square', 0.1, 0.1);
+                setTimeout(() => this.playTone(100, 'square', 0.15, 0.1), 120);
+            }
+
+            playScream() {
+                if (!this.ctx) return;
+                this.playTone(380, 'sawtooth', 0.5, 0.25);
+                this.playTone(200, 'square', 0.5, 0.15);
+            }
+        }
+
+        const audio = new SoundSystem();
+
+        /* ==========================================================================
+           3. INPUT SYSTEM
+           ========================================================================== */
+        const INPUT = {
+            keys: {},
+            mouse: { x: 0, y: 0 },
+            interactPressed: false,
+            spacePressed: false
+        };
+
+        window.addEventListener('keydown', (e) => {
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code) || e.key === ' ') {
+                e.preventDefault();
+            }
+            INPUT.keys[e.key.toLowerCase()] = true;
+            if (e.key.toLowerCase() === 'e') INPUT.interactPressed = true;
+            if (e.code === 'Space') INPUT.spacePressed = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            INPUT.keys[e.key.toLowerCase()] = false;
+        });
+
+        const canvas = document.getElementById('gameCanvas');
+
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            INPUT.mouse.x = (e.clientX - rect.left) * (canvas.width / rect.width);
+            INPUT.mouse.y = (e.clientY - rect.top) * (canvas.height / rect.height);
+        });
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.button === 0) {
+                INPUT.interactPressed = true;
+                audio.init();
+            }
+        });
+
+        /* ==========================================================================
+           4. GAME STATE & MAP DATA (5 FLOORS)
+           ========================================================================== */
+        const MAP_DATA = {
+            1: {
+                name: "1층 - 본관 로비",
+                grid: [
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                    [1,0,0,0,1,0,0,0,0,0,0,1,0,0,3,1],
+                    [1,0,5,0,2,0,0,1,1,0,0,2,0,5,0,1],
+                    [1,0,0,0,1,0,0,1,1,0,0,1,0,0,0,1],
+                    [1,1,2,1,1,0,0,0,0,0,0,1,1,2,1,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,0,0,1,2,1,0,0,0,0,0,0,1],
+                    [1,0,5,0,0,0,1,0,1,0,0,0,0,5,0,1],
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+                ],
+                spawn: { x: 1, y: 1 },
+                checkpoint: { x: 1, y: 1 },
+                keys: [{ id: 'key1', name: '2층 계단 열쇠', x: 13, y: 6 }],
+                doors: [{ x: 14, y: 1, requiresKey: 'key1', targetFloor: 2, targetX: 13, targetY: 1 }]
+            },
+            2: {
+                name: "2층 - 교실 복도",
+                grid: [
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                    [1,4,0,0,1,0,0,0,0,0,0,1,0,0,3,1],
+                    [1,0,0,0,2,0,5,1,1,5,0,2,0,0,0,1],
+                    [1,0,5,0,1,0,0,1,1,0,0,1,0,5,0,1],
+                    [1,1,2,1,1,0,0,0,0,0,0,1,1,2,1,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,1,2,1,0,0,1,2,1,0,0,0,1],
+                    [1,0,5,0,1,0,1,0,0,1,0,1,0,5,0,1],
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+                ],
+                spawn: { x: 13, y: 1 },
+                checkpoint: { x: 13, y: 1 },
+                keys: [{ id: 'key2', name: '3층 계단 열쇠', x: 2, y: 6 }],
+                doors: [
+                    { x: 1, y: 1, requiresKey: null, targetFloor: 1, targetX: 13, targetY: 1 },
+                    { x: 14, y: 1, requiresKey: 'key2', targetFloor: 3, targetX: 13, targetY: 1 }
+                ]
+            },
+            3: {
+                name: "3층 - 특별실 구역",
+                grid: [
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                    [1,4,0,0,1,0,0,0,0,0,0,1,0,0,3,1],
+                    [1,0,5,0,2,0,0,1,1,0,0,2,0,5,0,1],
+                    [1,0,0,0,1,0,0,1,1,0,0,1,0,0,0,1],
+                    [1,1,2,1,1,0,0,0,0,0,0,1,1,2,1,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,1,2,1,1,1,1,2,1,0,0,0,1],
+                    [1,0,5,0,1,0,0,0,0,0,0,1,0,5,0,1],
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+                ],
+                spawn: { x: 13, y: 1 },
+                checkpoint: { x: 13, y: 1 },
+                keys: [{ id: 'key3', name: '4층 계단 열쇠', x: 8, y: 7 }],
+                doors: [
+                    { x: 1, y: 1, requiresKey: null, targetFloor: 2, targetX: 13, targetY: 1 },
+                    { x: 14, y: 1, requiresKey: 'key3', targetFloor: 4, targetX: 13, targetY: 1 }
+                ]
+            },
+            4: {
+                name: "4층 - 폐쇄된 미로 통로 (⚠️ 고난도)",
+                grid: [
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                    [1,4,0,0,0,0,1,0,0,0,0,0,0,0,3,1],
+                    [1,0,1,1,1,0,1,0,1,1,1,1,1,0,0,1],
+                    [1,0,1,0,0,0,0,0,0,0,0,0,1,0,1,1],
+                    [1,0,1,0,1,1,1,1,1,1,1,0,1,0,0,1],
+                    [1,0,0,0,1,0,0,0,0,0,1,0,1,1,0,1],
+                    [1,1,1,0,1,0,1,1,1,0,1,0,0,0,0,1],
+                    [1,5,0,0,0,0,1,0,0,0,1,0,1,5,0,1],
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+                ],
+                spawn: { x: 13, y: 1 },
+                checkpoint: { x: 13, y: 1 },
+                keys: [{ id: 'keyRooftop', name: '옥상 마스터 열쇠', x: 1, y: 7 }],
+                doors: [
+                    { x: 1, y: 1, requiresKey: null, targetFloor: 3, targetX: 13, targetY: 1 },
+                    { x: 14, y: 1, requiresKey: 'keyRooftop', targetFloor: 5, targetX: 7, targetY: 6 }
+                ]
+            },
+            5: {
+                name: "5층 - 옥상 (⚠️ 추적자 3명 경계 중)",
+                grid: [
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,1,1,0,0,0,0,0,0,0,0,1,1,0,1],
+                    [1,0,1,1,0,0,0,0,0,0,0,0,1,1,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+                    [1,0,0,0,0,0,0,4,0,0,0,0,0,0,0,1],
+                    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+                ],
+                spawn: { x: 7, y: 6 },
+                checkpoint: { x: 7, y: 6 },
+                keys: [],
+                doors: [
+                    { x: 7, y: 7, requiresKey: null, targetFloor: 4, targetX: 13, targetY: 1 }
+                ],
+                escapeZone: { x: 7, y: 2 }
+            }
+        };
+
+        const gameState = {
+            currentFloor: 1,
+            inventory: new Set(),
+            startTime: 0,
+            elapsedTime: 0,
+            caughtCount: 0,
+            isGameOver: false,
+            isEscaped: false,
+            isHiding: false,
+            hidingSpot: null,
+            chaseActive: false,
+            heartbeatTimer: 0,
+            isCaught: false
+        };
+        window.gameState = gameState;
+
+        /* ==========================================================================
+           5. PLAYER CLASS
+           ========================================================================== */
+        class Player {
+            constructor(x, y) {
+                this.x = x * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+                this.y = y * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+                this.radius = 14;
+                this.angle = 0;
+                this.stamina = CONFIG.STAMINA_MAX;
+                this.isRunning = false;
+                this.flashlightOn = true;
+                this.footstepTimer = 0;
+                this.invulnerableTimer = 0;
+            }
+
+            respawn(tileX, tileY) {
+                this.x = tileX * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+                this.y = tileY * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+                this.stamina = CONFIG.STAMINA_MAX;
+                this.invulnerableTimer = 7.0;
+                gameState.isHiding = false;
+            }
+
+            update(dt) {
+                if (this.invulnerableTimer > 0) {
+                    this.invulnerableTimer = Math.max(0, this.invulnerableTimer - dt);
+                }
+
+                if (gameState.isHiding) return;
+
+                let dx = 0;
+                let dy = 0;
+
+                if (INPUT.keys['w'] || INPUT.keys['arrowup']) dy -= 1;
+                if (INPUT.keys['s'] || INPUT.keys['arrowdown']) dy += 1;
+                if (INPUT.keys['a'] || INPUT.keys['arrowleft']) dx -= 1;
+                if (INPUT.keys['d'] || INPUT.keys['arrowright']) dx += 1;
+
+                if (dx !== 0 && dy !== 0) {
+                    dx *= 0.7071;
+                    dy *= 0.7071;
+                }
+
+                const wantRun = INPUT.keys['shift'] && (dx !== 0 || dy !== 0) && this.stamina > 5;
+                this.isRunning = wantRun;
+
+                let speed = wantRun ? CONFIG.PLAYER_RUN_SPEED : CONFIG.PLAYER_SPEED;
+
+                if (wantRun) {
+                    this.stamina = Math.max(0, this.stamina - CONFIG.STAMINA_DRAIN * dt);
+                } else {
+                    this.stamina = Math.min(CONFIG.STAMINA_MAX, this.stamina + CONFIG.STAMINA_RECOVERY * dt);
+                }
+
+                const moveX = dx * speed;
+                const moveY = dy * speed;
+
+                if (!this.checkCollision(this.x + moveX, this.y)) {
+                    this.x += moveX;
+                }
+                if (!this.checkCollision(this.x, this.y + moveY)) {
+                    this.y += moveY;
+                }
+
+                if (dx !== 0 || dy !== 0) {
+                    this.footstepTimer += dt * (wantRun ? 2.2 : 1.2);
+                    if (this.footstepTimer >= 0.5) {
+                        audio.playFootstep();
+                        this.footstepTimer = 0;
+                    }
+                }
+
+                if (INPUT.spacePressed) {
+                    this.flashlightOn = !this.flashlightOn;
+                    INPUT.spacePressed = false;
+                    audio.playTone(800, 'sine', 0.05, 0.1);
+                }
+
+                const screenPlayerX = cameraOffset.x + this.x;
+                const screenPlayerY = cameraOffset.y + this.y;
+                this.angle = Math.atan2(INPUT.mouse.y - screenPlayerY, INPUT.mouse.x - screenPlayerX);
+            }
+
+            checkCollision(newX, newY) {
+                const floorMap = MAP_DATA[gameState.currentFloor].grid;
+                const minTileX = Math.floor((newX - this.radius) / CONFIG.TILE_SIZE);
+                const maxTileX = Math.floor((newX + this.radius) / CONFIG.TILE_SIZE);
+                const minTileY = Math.floor((newY - this.radius) / CONFIG.TILE_SIZE);
+                const maxTileY = Math.floor((newY + this.radius) / CONFIG.TILE_SIZE);
+
+                for (let ty = minTileY; ty <= maxTileY; ty++) {
+                    for (let tx = minTileX; tx <= maxTileX; tx++) {
+                        if (ty < 0 || ty >= floorMap.length || tx < 0 || tx >= floorMap[0].length) return true;
+                        if (floorMap[ty][tx] === 1) return true;
+                    }
+                }
+                return false;
+            }
+
+            draw(ctx) {
+                if (gameState.isHiding) return;
+
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                if (this.invulnerableTimer > 0 && Math.floor(this.invulnerableTimer * 8) % 2 === 0) {
+                    ctx.globalAlpha = 0.35;
+                }
+
+                ctx.beginPath();
+                ctx.ellipse(0, 10, this.radius, this.radius * 0.5, 0, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                ctx.fill();
+
+                ctx.rotate(this.angle);
+
+                ctx.fillStyle = '#374151';
+                ctx.fillRect(-6, -14, 14, 28);
+
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius - 3, 0, Math.PI * 2);
+                ctx.fillStyle = '#f3f4f6';
+                ctx.fill();
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#1f2937';
+                ctx.stroke();
+
+                if (this.flashlightOn) {
+                    ctx.fillStyle = '#f59e0b';
+                    ctx.fillRect(8, 4, 8, 4);
+                }
+
+                ctx.restore();
+            }
+        }
+
+        /* ==========================================================================
+           6. HUMANOID ENEMY AI CLASS
+           ========================================================================== */
+        class ChaserEnemy {
+            constructor(x, y, customPatrolNodes = null) {
+                this.x = x * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+                this.y = y * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+                this.radius = 16;
+                this.angle = 0;
+                this.state = 'PATROL';
+                this.patrolNodes = customPatrolNodes || [
+                    { x: 2, y: 5 }, { x: 13, y: 5 }, { x: 13, y: 2 }, { x: 2, y: 2 }
+                ];
+                this.currentNodeIndex = 0;
+                this.targetPos = null;
+                this.investigateTimer = 0;
+                this.auraTimer = Math.random() * 10;
+            }
+
+            update(dt, player) {
+                this.auraTimer += dt * 5;
+
+                const isFloor4 = gameState.currentFloor === 4;
+                const isFloor5 = gameState.currentFloor === 5;
+                const viewDist = isFloor4 ? 280 : CONFIG.ENEMY_VIEW_DIST;
+                const fovAngle = isFloor4 ? Math.PI / 2.1 : CONFIG.ENEMY_FOV_ANGLE;
+                const chaseSpeed = isFloor4 ? 3.3 : (isFloor5 ? 2.4 : CONFIG.ENEMY_CHASE_SPEED);
+                const patrolSpeed = isFloor4 ? 1.7 : CONFIG.ENEMY_PATROL_SPEED;
+
+                const distToPlayer = Math.hypot(player.x - this.x, player.y - this.y);
+                const angleToPlayer = Math.atan2(player.y - this.y, player.x - this.x);
+                let angleDiff = Math.abs(this.angle - angleToPlayer);
+                if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
+
+                const isTargetable = !gameState.isHiding && player.invulnerableTimer <= 0;
+                const canSeePlayer = isTargetable && distToPlayer < viewDist && angleDiff < fovAngle / 2;
+                const canHearPlayer = isTargetable && player.isRunning && distToPlayer < (isFloor4 ? 250 : 180);
+
+                if (canSeePlayer || canHearPlayer) {
+                    if (this.state !== 'CHASE') {
+                        audio.playScream();
+                    }
+                    this.state = 'CHASE';
+                    this.targetPos = { x: player.x, y: player.y };
+                } else if (this.state === 'CHASE') {
+                    this.state = 'INVESTIGATE';
+                    this.investigateTimer = isFloor4 ? 4.0 : 2.5;
+                }
+
+                let speed = (this.state === 'CHASE') ? chaseSpeed : patrolSpeed;
+
+                if (this.state === 'PATROL') {
+                    const targetNode = this.patrolNodes[this.currentNodeIndex];
+                    const targetX = targetNode.x * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+                    const targetY = targetNode.y * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+
+                    const d = Math.hypot(targetX - this.x, targetY - this.y);
+                    if (d < 10) {
+                        this.currentNodeIndex = (this.currentNodeIndex + 1) % this.patrolNodes.length;
+                    } else {
+                        this.moveTowards(targetX, targetY, speed);
+                    }
+                } else if (this.state === 'CHASE') {
+                    this.moveTowards(player.x, player.y, speed);
+
+                    if (distToPlayer < this.radius + player.radius && player.invulnerableTimer <= 0) {
+                        triggerCaughtRespawn();
+                    }
+                } else if (this.state === 'INVESTIGATE') {
+                    if (this.targetPos) {
+                        this.moveTowards(this.targetPos.x, this.targetPos.y, speed);
+                        if (Math.hypot(this.targetPos.x - this.x, this.targetPos.y - this.y) < 15) {
+                            this.targetPos = null;
+                        }
+                    }
+                    this.investigateTimer -= dt;
+                    if (this.investigateTimer <= 0) {
+                        this.state = 'PATROL';
+                    }
+                }
+            }
+
+            moveTowards(tx, ty, speed) {
+                const angle = Math.atan2(ty - this.y, tx - this.x);
+                this.angle = angle;
+                const vx = Math.cos(angle) * speed;
+                const vy = Math.sin(angle) * speed;
+
+                if (!this.checkCollision(this.x + vx, this.y)) this.x += vx;
+                if (!this.checkCollision(this.x, this.y + vy)) this.y += vy;
+            }
+
+            checkCollision(newX, newY) {
+                const floorMap = MAP_DATA[gameState.currentFloor].grid;
+                const tileX = Math.floor(newX / CONFIG.TILE_SIZE);
+                const tileY = Math.floor(newY / CONFIG.TILE_SIZE);
+                if (tileY < 0 || tileY >= floorMap.length || tileX < 0 || tileX >= floorMap[0].length) return true;
+                return floorMap[tileY][tileX] === 1;
+            }
+
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                const pulse = Math.sin(this.auraTimer) * 4;
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius + 8 + pulse, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(220, 38, 38, 0.15)';
+                ctx.fill();
+
+                ctx.save();
+                ctx.rotate(this.angle);
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.arc(0, 0, CONFIG.ENEMY_VIEW_DIST, -CONFIG.ENEMY_FOV_ANGLE / 2, CONFIG.ENEMY_FOV_ANGLE / 2);
+                ctx.closePath();
+                const fovGrad = ctx.createRadialGradient(0, 0, 10, 0, 0, CONFIG.ENEMY_VIEW_DIST);
+                fovGrad.addColorStop(0, this.state === 'CHASE' ? 'rgba(255, 0, 0, 0.35)' : 'rgba(255, 200, 0, 0.15)');
+                fovGrad.addColorStop(1, 'transparent');
+                ctx.fillStyle = fovGrad;
+                ctx.fill();
+                ctx.restore();
+
+                ctx.rotate(this.angle);
+                ctx.fillStyle = '#000000';
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#dc2626';
+                ctx.beginPath();
+                ctx.arc(6, -5, 2.5, 0, Math.PI * 2);
+                ctx.arc(6, 5, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.restore();
+            }
+        }
+
+        /* ==========================================================================
+           7. INITIALIZATION & GLOBAL OBJECTS
+           ========================================================================== */
+        const player = new Player(1, 1);
+        let enemies = [];
+
+        function setupEnemiesForFloor(floorNum) {
+            enemies = [];
+            if (floorNum === 5) {
+                // 옥상: 추적자 3명 배치
+                enemies.push(new ChaserEnemy(2, 2, [
+                    { x: 2, y: 2 }, { x: 13, y: 2 }, { x: 13, y: 4 }, { x: 2, y: 4 }
+                ]));
+                enemies.push(new ChaserEnemy(13, 6, [
+                    { x: 13, y: 6 }, { x: 2, y: 6 }, { x: 2, y: 3 }, { x: 13, y: 3 }
+                ]));
+                enemies.push(new ChaserEnemy(7, 1, [
+                    { x: 7, y: 1 }, { x: 1, y: 4 }, { x: 14, y: 4 }
+                ]));
+            } else if (floorNum === 4) {
+                enemies.push(new ChaserEnemy(13, 5, [
+                    { x: 3, y: 3 }, { x: 7, y: 3 }, { x: 11, y: 3 }, { x: 7, y: 7 }, { x: 1, y: 5 }
+                ]));
+            } else {
+                enemies.push(new ChaserEnemy(13, 5, [
+                    { x: 2, y: 5 }, { x: 13, y: 5 }, { x: 13, y: 2 }, { x: 2, y: 2 }
+                ]));
+            }
+        }
+
+        const lightCanvas = document.createElement('canvas');
+        const lightCtx = lightCanvas.getContext('2d');
+
+        /* ==========================================================================
+           8. INTERACTION & SYSTEM LOGIC
+           ========================================================================== */
+        function checkInteractions() {
+            const currentMap = MAP_DATA[gameState.currentFloor];
+            const pTileX = Math.floor(player.x / CONFIG.TILE_SIZE);
+            const pTileY = Math.floor(player.y / CONFIG.TILE_SIZE);
+
+            let promptMsg = null;
+
+            if (currentMap.grid[pTileY] && currentMap.grid[pTileY][pTileX] === 5) {
+                if (!gameState.isHiding) {
+                    promptMsg = "[E / 클릭] 캐비닛에 숨기";
+                    if (INPUT.interactPressed) {
+                        gameState.isHiding = true;
+                        gameState.hidingSpot = { x: pTileX, y: pTileY };
+                        INPUT.interactPressed = false;
+                        audio.playDoorOpen();
+                        showStatus("캐비닛 속에 숨었습니다.");
+                    }
+                }
+            }
+
+            if (gameState.isHiding) {
+                promptMsg = "[E / 클릭] 캐비닛에서 나가기";
+                if (INPUT.interactPressed) {
+                    gameState.isHiding = false;
+                    gameState.hidingSpot = null;
+                    INPUT.interactPressed = false;
+                    audio.playDoorOpen();
+                }
+            }
+
+            currentMap.keys.forEach((key, index) => {
+                const keyWorldX = key.x * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+                const keyWorldY = key.y * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+                if (Math.hypot(player.x - keyWorldX, player.y - keyWorldY) < CONFIG.INTERACTION_DIST) {
+                    promptMsg = `[E / 클릭] ${key.name} 획득하기`;
+                    if (INPUT.interactPressed) {
+                        gameState.inventory.add(key.id);
+                        audio.playKeyPickup();
+                        showStatus(`${key.name}을(를) 획득했습니다!`);
+                        currentMap.keys.splice(index, 1);
+                        INPUT.interactPressed = false;
+                        updateKeyHUD();
+                    }
+                }
+            });
+
+            currentMap.doors.forEach(door => {
+                const doorWorldX = door.x * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+                const doorWorldY = door.y * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+                if (Math.hypot(player.x - doorWorldX, player.y - doorWorldY) < CONFIG.INTERACTION_DIST) {
+                    if (door.requiresKey && !gameState.inventory.has(door.requiresKey)) {
+                        promptMsg = "잠겨 있음 (열쇠가 필요합니다)";
+                        if (INPUT.interactPressed) {
+                            audio.playDoorLocked();
+                            showStatus("문이 굳게 잠겨 있습니다. 열쇠를 찾으세요.");
+                            INPUT.interactPressed = false;
+                        }
+                    } else {
+                        promptMsg = "[E / 클릭] 문/계단 이용하기";
+                        if (INPUT.interactPressed) {
+                            audio.playDoorOpen();
+                            changeFloor(door.targetFloor, door.targetX, door.targetY);
+                            INPUT.interactPressed = false;
+                        }
+                    }
+                }
+            });
+
+            if (currentMap.escapeZone) {
+                const escWorldX = currentMap.escapeZone.x * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+                const escWorldY = currentMap.escapeZone.y * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+                if (Math.hypot(player.x - escWorldX, player.y - escWorldY) < CONFIG.INTERACTION_DIST + 10) {
+                    triggerVictory();
+                }
+            }
+
+            const promptEl = document.getElementById('interaction-prompt');
+            if (promptMsg) {
+                promptEl.classList.remove('hidden');
+                document.getElementById('prompt-text').textContent = promptMsg;
+            } else {
+                promptEl.classList.add('hidden');
+            }
+
+            INPUT.interactPressed = false;
+        }
+
+        function changeFloor(newFloor, spawnX, spawnY) {
+            gameState.currentFloor = newFloor;
+            player.respawn(spawnX, spawnY);
+            setupEnemiesForFloor(newFloor);
+            document.getElementById('floor-display').textContent = MAP_DATA[newFloor].name;
+            
+            if (newFloor === 5) {
+                showStatus("🚨 경고: 옥상에 추적자 3명이 수색 중입니다!");
+            } else if (newFloor === 4) {
+                showStatus("⚠️ 경고: 4층은 추적자의 이동 속도와 감지 시야가 위험 수준입니다!");
+            } else {
+                showStatus(`${MAP_DATA[newFloor].name}에 진입했습니다.`);
+            }
+        }
+
+        function triggerCaughtRespawn() {
+            if (gameState.isCaught || gameState.isGameOver) return;
+            gameState.isCaught = true;
+            gameState.caughtCount++;
+            updateLivesHUD();
+            audio.playScream();
+
+            if (gameState.caughtCount >= CONFIG.MAX_LIVES) {
+                gameState.isGameOver = true;
+                gameState.chaseActive = false;
+                document.getElementById('gameover-screen').classList.remove('hidden');
+            } else {
+                const remaining = CONFIG.MAX_LIVES - gameState.caughtCount;
+                document.getElementById('lives-left-msg').textContent = `남은 기회: ${remaining}회`;
+                document.getElementById('respawn-overlay').classList.remove('hidden');
+            }
+        }
+
+        document.getElementById('respawn-btn').addEventListener('click', () => {
+            document.getElementById('respawn-overlay').classList.add('hidden');
+            const cp = MAP_DATA[gameState.currentFloor].checkpoint;
+            player.respawn(cp.x, cp.y);
+            setupEnemiesForFloor(gameState.currentFloor);
+            gameState.chaseActive = false;
+            gameState.isCaught = false;
+            showStatus("정신을 차렸습니다! (7초간 무적 보호 상태)");
+        });
+
+        function triggerVictory() {
+            gameState.isEscaped = true;
+            document.getElementById('victory-screen').classList.remove('hidden');
+            document.getElementById('final-time').textContent = formatTime(gameState.elapsedTime);
+            document.getElementById('caught-count').textContent = `${gameState.caughtCount} 회`;
+
+            const submitBox = document.getElementById('record-submit-box');
+            if (submitBox) {
+                submitBox.classList.remove('hidden');
+                const submitBtn = document.getElementById('submit-score-btn');
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                }
+                const submitMsg = document.getElementById('submit-msg');
+                if (submitMsg) submitMsg.classList.add('hidden');
+            }
+
+            let rank = 'S CLASS';
+            if (gameState.caughtCount > 3 || gameState.elapsedTime > 360) rank = 'B CLASS';
+            else if (gameState.caughtCount > 1 || gameState.elapsedTime > 240) rank = 'A CLASS';
+            document.getElementById('survival-rank').textContent = rank;
+        }
+
+        function showStatus(text) {
+            const el = document.getElementById('status-message');
+            el.textContent = text;
+            el.style.opacity = '1';
+            setTimeout(() => { el.style.opacity = '0'; }, 2500);
+        }
+
+        function updateLivesHUD() {
+            const remaining = Math.max(0, CONFIG.MAX_LIVES - gameState.caughtCount);
+            const container = document.getElementById('lives-container');
+            if (!container) return;
+
+            let html = '';
+            for (let i = 0; i < CONFIG.MAX_LIVES; i++) {
+                if (i < remaining) {
+                    html += '<i data-lucide="heart" class="w-3.5 h-3.5 fill-red-600 text-red-600"></i>';
+                } else {
+                    html += '<i data-lucide="heart-off" class="w-3.5 h-3.5 text-gray-600"></i>';
+                }
+            }
+            container.innerHTML = html;
+            if (typeof lucide !== 'undefined' && lucide.createIcons) {
+                lucide.createIcons();
+            }
+        }
+
+        function updateKeyHUD() {
+            const container = document.getElementById('keys-list');
+            if (gameState.inventory.size === 0) {
+                container.innerHTML = '<span class="text-gray-600 italic">없음</span>';
+                return;
+            }
+            container.innerHTML = '';
+            gameState.inventory.forEach(keyId => {
+                const badge = document.createElement('span');
+                badge.className = 'bg-yellow-950/80 border border-yellow-600/50 text-yellow-300 px-2 py-0.5 rounded text-[10px] font-bold';
+                badge.textContent = keyId.toUpperCase();
+                container.appendChild(badge);
+            });
+        }
+
+        function formatTime(sec) {
+            const m = Math.floor(sec / 60).toString().padStart(2, '0');
+            const s = (sec % 60).toFixed(1).padStart(4, '0');
+            return `${m}:${s}`;
+        }
+
+        /* ==========================================================================
+           9. 2.5D RENDERING ENGINE
+           ========================================================================== */
+        function renderScene(ctx) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const currentMap = MAP_DATA[gameState.currentFloor];
+            const grid = currentMap.grid;
+
+            const viewWidth = grid[0].length * CONFIG.TILE_SIZE;
+            const viewHeight = grid.length * CONFIG.TILE_SIZE;
+            cameraOffset.x = (canvas.width - viewWidth) / 2;
+            cameraOffset.y = (canvas.height - viewHeight) / 2;
+
+            ctx.save();
+            ctx.translate(cameraOffset.x, cameraOffset.y);
+
+            // Floor & Tiles
+            for (let r = 0; r < grid.length; r++) {
+                for (let c = 0; c < grid[r].length; c++) {
+                    const x = c * CONFIG.TILE_SIZE;
+                    const y = r * CONFIG.TILE_SIZE;
+                    const tile = grid[r][c];
+
+                    ctx.fillStyle = (r + c) % 2 === 0 ? '#1e293b' : '#111827';
+                    ctx.fillRect(x, y, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+                    ctx.strokeStyle = '#334155';
+                    ctx.strokeRect(x, y, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+
+                    if (tile === 2) {
+                        ctx.fillStyle = '#9a3412';
+                        ctx.fillRect(x + 4, y + 4, CONFIG.TILE_SIZE - 8, CONFIG.TILE_SIZE - 8);
+                    } else if (tile === 3 || tile === 4) {
+                        ctx.fillStyle = '#475569';
+                        for (let i = 0; i < 4; i++) {
+                            ctx.fillRect(x + 4, y + 4 + i * 10, CONFIG.TILE_SIZE - 8, 4);
+                        }
+                    } else if (tile === 5) {
+                        ctx.fillStyle = '#334155';
+                        ctx.fillRect(x + 6, y + 6, CONFIG.TILE_SIZE - 12, CONFIG.TILE_SIZE - 12);
+                        ctx.strokeStyle = '#64748b';
+                        ctx.strokeRect(x + 6, y + 6, CONFIG.TILE_SIZE - 12, CONFIG.TILE_SIZE - 12);
+                    }
+                }
+            }
+
+            // Keys
+            currentMap.keys.forEach(key => {
+                const kx = key.x * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+                const ky = key.y * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+                ctx.beginPath();
+                ctx.arc(kx, ky, 7, 0, Math.PI * 2);
+                ctx.fillStyle = '#fbbf24';
+                ctx.fill();
+                ctx.strokeStyle = '#d97706';
+                ctx.stroke();
+            });
+
+            // Escape Zone Marker
+            if (currentMap.escapeZone) {
+                const ex = currentMap.escapeZone.x * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+                const ey = currentMap.escapeZone.y * CONFIG.TILE_SIZE + CONFIG.TILE_SIZE / 2;
+                ctx.beginPath();
+                ctx.arc(ex, ey, 28, 0, Math.PI * 2);
+                ctx.strokeStyle = '#10b981';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                ctx.fillStyle = '#10b981';
+                ctx.font = 'bold 20px monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('H', ex, ey);
+            }
+
+            // Draw Characters
+            player.draw(ctx);
+            enemies.forEach(e => e.draw(ctx));
+
+            // 2.5D Wall Height Projection
+            for (let r = 0; r < grid.length; r++) {
+                for (let c = 0; c < grid[r].length; c++) {
+                    if (grid[r][c] === 1) {
+                        const x = c * CONFIG.TILE_SIZE;
+                        const y = r * CONFIG.TILE_SIZE;
+
+                        ctx.fillStyle = '#111827';
+                        ctx.fillRect(x, y - CONFIG.WALL_HEIGHT, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+
+                        ctx.fillStyle = '#030712';
+                        ctx.fillRect(x, y - CONFIG.WALL_HEIGHT + CONFIG.TILE_SIZE, CONFIG.TILE_SIZE, CONFIG.WALL_HEIGHT);
+
+                        ctx.strokeStyle = '#1f2937';
+                        ctx.strokeRect(x, y - CONFIG.WALL_HEIGHT, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+                    }
+                }
+            }
+
+            ctx.restore();
+
+            renderLighting(ctx);
+        }
+
+        function renderLighting(ctx) {
+            lightCtx.clearRect(0, 0, lightCanvas.width, lightCanvas.height);
+
+            lightCtx.fillStyle = 'rgba(10, 12, 20, 0.55)';
+            lightCtx.fillRect(0, 0, lightCanvas.width, lightCanvas.height);
+
+            const screenPx = cameraOffset.x + player.x;
+            const screenPy = cameraOffset.y + player.y;
+
+            lightCtx.save();
+            lightCtx.globalCompositeOperation = 'destination-out';
+
+            if (player.flashlightOn && !gameState.isHiding) {
+                const grad = lightCtx.createRadialGradient(
+                    screenPx, screenPy, 10,
+                    screenPx, screenPy, CONFIG.PLAYER_LIGHT_RADIUS
+                );
+                grad.addColorStop(0, 'rgba(0,0,0,1)');
+                grad.addColorStop(0.7, 'rgba(0,0,0,0.85)');
+                grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+                lightCtx.beginPath();
+                lightCtx.moveTo(screenPx, screenPy);
+                lightCtx.arc(
+                    screenPx, screenPy,
+                    CONFIG.PLAYER_LIGHT_RADIUS,
+                    player.angle - Math.PI / 2.8,
+                    player.angle + Math.PI / 2.8
+                );
+                lightCtx.closePath();
+                lightCtx.fillStyle = grad;
+                lightCtx.fill();
+            }
+
+            if (!gameState.isHiding) {
+                const innerGrad = lightCtx.createRadialGradient(
+                    screenPx, screenPy, 0,
+                    screenPx, screenPy, 100
+                );
+                innerGrad.addColorStop(0, 'rgba(0,0,0,1)');
+                innerGrad.addColorStop(1, 'rgba(0,0,0,0)');
+                lightCtx.beginPath();
+                lightCtx.arc(screenPx, screenPy, 100, 0, Math.PI * 2);
+                lightCtx.fillStyle = innerGrad;
+                lightCtx.fill();
+            }
+
+            lightCtx.restore();
+
+            ctx.drawImage(lightCanvas, 0, 0);
+        }
+
+        /* ==========================================================================
+           10. MAIN GAME LOOP
+           ========================================================================== */
+        let lastTime = 0;
+
+        function gameLoop(timestamp) {
+            if (!lastTime) lastTime = timestamp;
+            const dt = Math.min((timestamp - lastTime) / 1000, 0.1);
+            lastTime = timestamp;
+
+            if (!gameState.isGameOver && !gameState.isEscaped && !gameState.isCaught && gameState.startTime > 0) {
+                gameState.elapsedTime += dt;
+                document.getElementById('timer-display').textContent = formatTime(gameState.elapsedTime);
+
+                player.update(dt);
+                
+                let anyChase = false;
+                enemies.forEach(e => {
+                    e.update(dt, player);
+                    if (e.state === 'CHASE') anyChase = true;
+                });
+                gameState.chaseActive = anyChase;
+
+                checkInteractions();
+
+                document.getElementById('stamina-bar').style.width = `${player.stamina}%`;
+                document.getElementById('stamina-text').textContent = `${Math.round(player.stamina)}%`;
+                document.getElementById('flashlight-status').textContent = player.flashlightOn ? 'ON' : 'OFF';
+
+                if (gameState.isHiding) {
+                    document.getElementById('hiding-indicator').classList.remove('hidden');
+                } else {
+                    document.getElementById('hiding-indicator').classList.add('hidden');
+                }
+
+                const overlay = document.getElementById('vignette-overlay');
+                if (gameState.chaseActive) {
+                    overlay.classList.add('chase-active');
+                    gameState.heartbeatTimer += dt;
+                    if (gameState.heartbeatTimer > 0.5) {
+                        audio.playHeartbeat(1.5);
+                        gameState.heartbeatTimer = 0;
+                    }
+                } else {
+                    overlay.classList.remove('chase-active');
+                }
+            }
+
+            renderScene(canvas.getContext('2d'));
+            requestAnimationFrame(gameLoop);
+        }
+
+        function resizeCanvas() {
+            canvas.width = 1280;
+            canvas.height = 720;
+            lightCanvas.width = canvas.width;
+            lightCanvas.height = canvas.height;
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        setupEnemiesForFloor(1);
+
+        document.getElementById('start-btn').addEventListener('click', () => {
+            audio.init();
+            document.getElementById('start-screen').classList.add('hidden');
+            gameState.startTime = performance.now();
+            gameState.elapsedTime = 0;
+            gameState.caughtCount = 0;
+            gameState.isCaught = false;
+            updateLivesHUD();
+            updateKeyHUD();
+            if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+        });
+
+        document.getElementById('restart-btn').addEventListener('click', () => {
+            location.reload();
+        });
+
+        document.getElementById('gameover-restart-btn').addEventListener('click', () => {
+            location.reload();
+        });
+
+        if (typeof lucide !== 'undefined' && lucide.createIcons) {
+            lucide.createIcons();
+        }
+
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
