@@ -1,0 +1,1217 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>LOL 3D Skill Simulator - Mid Lane Map & Fixes</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #050508; font-family: 'Malgun Gothic', sans-serif; user-select: none; }
+        #canvas-container { width: 100vw; height: 100vh; }
+        
+        #champion-select-modal {
+            position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(5, 8, 15, 0.92); display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 100;
+        }
+        #champion-select-modal h1 { color: #f0e6d2; font-size: 28px; margin-bottom: 30px; letter-spacing: 2px; text-shadow: 0 0 10px #c8aa6e; }
+        .cards-container { display: flex; gap: 25px; }
+        .champ-card {
+            width: 180px; height: 260px; background: rgba(15, 25, 35, 0.85); border: 2px solid #c8aa6e;
+            border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: space-around;
+            padding: 15px; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 0 15px rgba(0,0,0,0.6);
+        }
+        .champ-card:hover { transform: translateY(-10px); border-color: #00f0ff; box-shadow: 0 0 25px rgba(0,240,255,0.5); }
+        .champ-card .avatar { width: 90px; height: 90px; border-radius: 50%; border: 3px solid #c8aa6e; display: flex; align-items: center; justify-content: center; font-size: 36px; }
+        .champ-card .name { color: #f0e6d2; font-weight: bold; font-size: 18px; }
+        .champ-card .role { color: #a0aab8; font-size: 12px; }
+
+        #restart-btn {
+            position: absolute; top: 20px; right: 20px; z-index: 10;
+            background: linear-gradient(135deg, #c8aa6e, #785a28); color: #fff;
+            border: 2px solid #f0e6d2; padding: 10px 20px; font-weight: bold; font-size: 14px;
+            border-radius: 8px; cursor: pointer; box-shadow: 0 0 10px rgba(0,0,0,0.5); transition: all 0.2s;
+        }
+        #restart-btn:hover { background: linear-gradient(135deg, #f0e6d2, #c8aa6e); color: #111; transform: scale(1.05); }
+
+        #info-panel {
+            position: absolute; top: 20px; left: 20px; color: #fff;
+            background: rgba(10, 15, 25, 0.85); padding: 15px; border-radius: 8px; font-size: 13px;
+            border: 1px solid rgba(200, 170, 110, 0.4); max-width: 330px; z-index: 10;
+        }
+
+        #score-panel {
+            font-size: 18px; font-weight: bold; color: #ffd700; margin-top: 10px;
+            padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1);
+        }
+
+        #ui {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 12px; background: rgba(10, 15, 25, 0.85);
+            padding: 12px 20px; border-radius: 12px; border: 1px solid rgba(200, 170, 110, 0.4);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.6); z-index: 10;
+        }
+        .skill-slot {
+            width: 65px; height: 65px; background: #1a1f2c; border: 2px solid #3b4861;
+            border-radius: 8px; display: flex; flex-direction: column; align-items: center;
+            justify-content: space-between; color: #fff; position: relative; overflow: hidden; padding: 4px;
+            background-size: cover; background-position: center;
+        }
+        .skill-key { font-weight: bold; font-size: 14px; color: #ffd700; text-shadow: 0 0 4px #000; z-index: 2; align-self: flex-start; }
+        .skill-name { font-size: 10px; color: #ffffff; text-align: center; padding: 1px 3px; background: rgba(0,0,0,0.6); border-radius: 4px; width: 90%; z-index: 2; }
+        .cooldown-overlay {
+            position: absolute; top:0; left:0; width:100%; height:100%;
+            background: rgba(0,0,0,0.78); color: #ff4d4d; font-weight: bold;
+            display: flex; align-items: center; justify-content: center; font-size: 16px; z-index: 3;
+        }
+        .charge-badge {
+            position: absolute; top: 2px; right: 4px; background: #00f0ff; color: #000;
+            font-weight: bold; font-size: 11px; padding: 1px 5px; border-radius: 10px; z-index: 4;
+        }
+
+        #game-over-overlay {
+            position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.75); display: none; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 90;
+        }
+        #game-over-overlay h2 { color: #ff4d4d; font-size: 42px; margin-bottom: 20px; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <button id="restart-btn" onclick="openChampSelect()">🔄 챔피언 변경 / 재시작</button>
+
+    <div id="champion-select-modal">
+        <h1>챔피언을 선택하세요</h1>
+        <div class="cards-container">
+            <div class="champ-card" onclick="selectChampion('Ezreal')">
+                <div class="avatar" style="background:#2b5999; color:#ffeb3b;">🏹</div>
+                <div class="name">이즈리얼</div>
+                <div class="role">원거리 딜러</div>
+            </div>
+            <div class="champ-card" onclick="selectChampion('Ahri')">
+                <div class="avatar" style="background:#ff66cc; color:#fff;">🦊</div>
+                <div class="name">아리</div>
+                <div class="role">마법사 / 암살자</div>
+            </div>
+            <div class="champ-card" onclick="selectChampion('Lux')">
+                <div class="avatar" style="background:#ffea00; color:#333;">✨</div>
+                <div class="name">럭스</div>
+                <div class="role">마법사 / 서포터</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="game-over-overlay">
+        <h2 id="game-over-title">패배했습니다!</h2>
+        <button onclick="openChampSelect()" style="padding: 12px 28px; font-size: 18px; cursor: pointer; background: #c8aa6e; border: none; border-radius: 6px; font-weight: bold;">다시 시작하기</button>
+    </div>
+
+    <div id="info-panel">
+        <h3 id="champ-title" style="margin:0 0 8px 0; color:#4deeea;">조작 방법</h3>
+        • <b>마우스 우클릭</b>: 지정 위치로 이동<br>
+        • <b>A 키</b>: 일반 공격<br>
+        • <b>S 키</b>: 이동 멈춤<br>
+        <div id="skill-descriptions"></div>
+        <div id="score-panel">점수: <span id="score-val">0</span></div>
+    </div>
+
+    <div id="ui">
+        <div id="slot-Q" class="skill-slot"><span class="skill-key">Q</span><span id="name-Q" class="skill-name">-</span><div id="cd-Q" class="cooldown-overlay" style="display:none;"></div></div>
+        <div id="slot-W" class="skill-slot"><span class="skill-key">W</span><span id="name-W" class="skill-name">-</span><div id="cd-W" class="cooldown-overlay" style="display:none;"></div></div>
+        <div id="slot-E" class="skill-slot"><span class="skill-key">E</span><span id="name-E" class="skill-name">-</span><div id="cd-E" class="cooldown-overlay" style="display:none;"></div></div>
+        <div id="slot-R" class="skill-slot">
+            <span class="skill-key">R</span><span id="name-R" class="skill-name">-</span>
+            <div id="badge-R" class="charge-badge" style="display:none;">3</div>
+            <div id="cd-R" class="cooldown-overlay" style="display:none;"></div>
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script>
+        const MAP_SIZE = 35; 
+        const CHAMP_SCALE = 1.35;
+        const MOVE_SPEED = 0.17; 
+        
+        let scene, camera, renderer;
+        let player, playerTarget = null, selectedChampName = '';
+        let enemies = [], projectiles = [], walls = [];
+        let raycaster = new THREE.Raycaster();
+        let mouse = new THREE.Vector2(0, 0);
+        let groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+        let score = 0;
+        let lastAutoAttackTime = 0;
+        const autoAttackCooldown = 380;
+
+        let enemySpawnInterval = null;
+        let luxEZone = null;
+        let ahriRCharges = 0;
+
+        const cooldowns = { Q: 0, W: 0, E: 0, R: 0 };
+        let maxCooldowns = { Q: 3, W: 6, E: 10, R: 20 };
+
+        const champData = {
+            Ezreal: {
+                title: "이즈리얼 (Ezreal)",
+                cd: { Q: 3, W: 5, E: 8, R: 18 },
+                names: { Q: "신비한 화살", W: "정수의 흐름", E: "비전 이동", R: "정조준 일격" },
+                icons: {
+                    Q: "https://ddragon.leagueoflegends.com/cdn/14.1.1/img/spell/EzrealQ.png",
+                    W: "https://ddragon.leagueoflegends.com/cdn/14.1.1/img/spell/EzrealW.png",
+                    E: "https://ddragon.leagueoflegends.com/cdn/14.1.1/img/spell/EzrealE.png",
+                    R: "https://ddragon.leagueoflegends.com/cdn/14.1.1/img/spell/EzrealR.png"
+                },
+                desc: "• <b>W (정수의 흐름)</b>: 댐지 0, 표식 부여 -> 타격 시 폭발하며 추가 점수!<br>• <b>Q (신비한 화살)</b>: 적중 시 쿨타임 감소<br>• <b>E (비전 이동)</b>: 순간이동 + 유도탄<br>• <b>R (정조준 일격)</b>: 1초 선딜 후 관통 파동"
+            },
+            Ahri: {
+                title: "아리 (Ahri)",
+                cd: { Q: 4, W: 5, E: 8, R: 18 },
+                names: { Q: "현혹의 구체", W: "여우불", E: "매혹", R: "혼령 질주" },
+                icons: {
+                    Q: "https://ddragon.leagueoflegends.com/cdn/14.1.1/img/spell/AhriQ.png",
+                    W: "https://ddragon.leagueoflegends.com/cdn/14.1.1/img/spell/AhriW.png",
+                    E: "https://ddragon.leagueoflegends.com/cdn/14.1.1/img/spell/AhriE.png",
+                    R: "https://ddragon.leagueoflegends.com/cdn/14.1.1/img/spell/AhriR.png"
+                },
+                desc: "• <b>E (매혹)</b>: 댐지 0, 맞은 적이 무방비로 끌려옴<br>• <b>R (혼령 질주)</b>: 연속 3회 사용 가능 대시<br>• <b>Q (현혹의 구체)</b>: 왕복 구체 발사<br>• <b>W (여우불)</b>: 적 추적 여우불"
+            },
+            Lux: {
+                title: "럭스 (Lux)",
+                cd: { Q: 5, W: 6, E: 7, R: 20 },
+                names: { Q: "빛의 속박", W: "프리즘 보호막", E: "휘광의 특이점", R: "최후의 섬광" },
+                icons: {
+                    Q: "https://ddragon.leagueoflegends.com/cdn/14.1.1/img/spell/LuxLightBinding.png",
+                    W: "https://ddragon.leagueoflegends.com/cdn/14.1.1/img/spell/LuxPrismaticBarrier.png",
+                    E: "https://ddragon.leagueoflegends.com/cdn/14.1.1/img/spell/LuxLightStrikeKugel.png",
+                    R: "https://ddragon.leagueoflegends.com/cdn/14.1.1/img/spell/LuxR.png"
+                },
+                desc: "• <b>W (프리즘 보호막)</b>: 던질 때 & 돌아올 때 보호막 부여!<br>• <b>Q (빛의 속박)</b>: 적 2초간 속박<br>• <b>E (휘광의 특이점)</b>: 설치 후 E 재사용 시 폭발<br>• <b>R (최후의 섬광)</b>: 1초 조준 후 강력 레이저"
+            }
+        };
+
+        function addScore(pts) {
+            score += pts;
+            document.getElementById('score-val').innerText = score;
+        }
+
+        function openChampSelect() {
+            if (enemySpawnInterval) clearInterval(enemySpawnInterval);
+            document.getElementById('game-over-overlay').style.display = 'none';
+            document.getElementById('champion-select-modal').style.display = 'flex';
+        }
+
+        function selectChampion(champ) {
+            selectedChampName = champ;
+            document.getElementById('champion-select-modal').style.display = 'none';
+            setupUI();
+            restartGame();
+        }
+
+        function setupUI() {
+            const data = champData[selectedChampName];
+            document.getElementById('champ-title').innerText = data.title;
+            document.getElementById('skill-descriptions').innerHTML = data.desc;
+            maxCooldowns = data.cd;
+            for (let k in data.names) {
+                document.getElementById(`name-${k}`).innerText = data.names[k];
+                const slot = document.getElementById(`slot-${k}`);
+                if (data.icons && data.icons[k]) {
+                    slot.style.backgroundImage = `url('${data.icons[k]}')`;
+                }
+            }
+        }
+
+        function createHealthBarSprite() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128; canvas.height = 16;
+            const tex = new THREE.CanvasTexture(canvas);
+            const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false });
+            const sprite = new THREE.Sprite(mat);
+            sprite.scale.set(2.4, 0.3, 1);
+            sprite.position.y = 2.6;
+            sprite.userData = { canvas, ctx: canvas.getContext('2d'), tex };
+            return sprite;
+        }
+
+        function updateHealthBar(entity, isPlayer = false) {
+            if (!entity.hpBar) return;
+            const { canvas, ctx, tex } = entity.hpBar.userData;
+            const pct = Math.max(0, entity.hp / entity.maxHp);
+            const shieldPct = entity.shield ? Math.min(1.0, entity.shield / entity.maxHp) : 0;
+            
+            ctx.clearRect(0, 0, 128, 16);
+            ctx.fillStyle = '#111'; ctx.fillRect(0, 0, 128, 16);
+            
+            ctx.fillStyle = isPlayer ? '#22ff55' : '#ff3344';
+            ctx.fillRect(2, 2, Math.floor(124 * pct), 12);
+
+            if (shieldPct > 0) {
+                ctx.fillStyle = 'rgba(255, 255, 200, 0.85)';
+                const hpWidth = Math.floor(124 * pct);
+                const shieldWidth = Math.floor(124 * shieldPct);
+                ctx.fillRect(Math.max(2, 2 + hpWidth - shieldWidth), 2, shieldWidth, 12);
+            }
+
+            ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+            ctx.strokeRect(1, 1, 126, 14);
+            tex.needsUpdate = true;
+        }
+
+        function createGlowSprite(hexColor, size) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128; canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            const c = new THREE.Color(hexColor);
+            const r = Math.floor(c.r * 255), g = Math.floor(c.g * 255), b = Math.floor(c.b * 255);
+            const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+            grad.addColorStop(0, `rgba(${r},${g},${b},1)`);
+            grad.addColorStop(0.4, `rgba(${r},${g},${b},0.55)`);
+            grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 128, 128);
+            const tex = new THREE.CanvasTexture(canvas);
+            const mat = new THREE.SpriteMaterial({ map: tex, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
+            const sprite = new THREE.Sprite(mat);
+            sprite.scale.set(size, size, 1);
+            return sprite;
+        }
+
+        function createHitEffect(x, y, z, hexColor) {
+            for (let i = 0; i < 10; i++) {
+                const spark = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.15, 4, 4),
+                    new THREE.MeshBasicMaterial({ color: hexColor })
+                );
+                spark.position.set(x, y, z);
+                scene.add(spark);
+
+                let dir = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.5,
+                    Math.random() * 0.4 + 0.1,
+                    (Math.random() - 0.5) * 0.5
+                );
+
+                let life = 0;
+                const timer = setInterval(() => {
+                    spark.position.add(dir);
+                    spark.scale.multiplyScalar(0.85);
+                    life++;
+                    if (life > 8) {
+                        clearInterval(timer);
+                        scene.remove(spark);
+                    }
+                }, 30);
+            }
+        }
+
+        function init() {
+            const container = document.getElementById('canvas-container');
+            container.innerHTML = '';
+
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x101a14, 0.012);
+            scene.background = new THREE.Color(0x0a120c);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 32, 24);
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            if (renderer.outputColorSpace !== undefined) renderer.outputColorSpace = THREE.SRGBColorSpace;
+            container.appendChild(renderer.domElement);
+
+            const hemi = new THREE.HemisphereLight(0xbdf0a8, 0x1c3817, 0.85);
+            scene.add(hemi);
+
+            const dirLight = new THREE.DirectionalLight(0xfff5cc, 1.25);
+            dirLight.position.set(25, 45, 20);
+            dirLight.castShadow = true;
+            scene.add(dirLight);
+
+            createMap();
+
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('contextmenu', e => e.preventDefault());
+            window.addEventListener('mousedown', onMouseDown);
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('keydown', onKeyDown);
+        }
+
+        function createMap() {
+            walls = []; // 장애물 충돌체 데이터 리셋
+
+            const gridGeo = new THREE.PlaneGeometry(MAP_SIZE * 2, MAP_SIZE * 2);
+            const gridMat = new THREE.MeshStandardMaterial({ color: 0x1d3a18, roughness: 0.9 });
+            const ground = new THREE.Mesh(gridGeo, gridMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            const laneGeo = new THREE.PlaneGeometry(12, MAP_SIZE * 2);
+            const laneMat = new THREE.MeshStandardMaterial({ color: 0x4a4338, roughness: 0.7 });
+            const lane = new THREE.Mesh(laneGeo, laneMat);
+            lane.rotation.x = -Math.PI / 2;
+            lane.position.y = 0.01;
+            scene.add(lane);
+
+            const riverGeo = new THREE.PlaneGeometry(MAP_SIZE * 2, 9);
+            const riverMat = new THREE.MeshStandardMaterial({ color: 0x1a5276, transparent: true, opacity: 0.75, roughness: 0.2 });
+            const river = new THREE.Mesh(riverGeo, riverMat);
+            river.rotation.x = -Math.PI / 2;
+            river.position.set(0, 0.02, 0);
+            scene.add(river);
+
+            createBush(-10, 0);
+            createBush(10, 0);
+            createBush(-7, -11);
+            createBush(7, 11);
+
+            // 정글 벽 장애물 생성 및 충돌체 등록
+            createJungleWall(-12, -8, 6, 8);
+            createJungleWall(12, -8, 6, 8);
+            createJungleWall(-12, 8, 6, 8);
+            createJungleWall(12, 8, 6, 8);
+        }
+
+        function createBush(x, z) {
+            const bushGroup = new THREE.Group();
+            const mat = new THREE.MeshStandardMaterial({ color: 0x228b22, roughness: 0.9, transparent: true, opacity: 0.85 });
+            for (let i = 0; i < 7; i++) {
+                const leaf = new THREE.Mesh(new THREE.SphereGeometry(1.3 + Math.random() * 0.4, 8, 8), mat);
+                leaf.position.set((Math.random() - 0.5) * 2.2, 0.6, (Math.random() - 0.5) * 2.2);
+                bushGroup.add(leaf);
+            }
+            bushGroup.position.set(x, 0, z);
+            scene.add(bushGroup);
+        }
+
+        function createJungleWall(x, z, w, d) {
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x3a3f47, roughness: 0.8 });
+            const wall = new THREE.Mesh(new THREE.BoxGeometry(w, 3.5, d), wallMat);
+            wall.position.set(x, 1.75, z);
+            scene.add(wall);
+
+            // 맵 뚫기 방지를 위한 정글 벽 충돌체 저장
+            walls.push({
+                minX: x - w / 2 - 0.8,
+                maxX: x + w / 2 + 0.8,
+                minZ: z - d / 2 - 0.8,
+                maxZ: z + d / 2 + 0.8
+            });
+        }
+
+        // 맵 뚫기 및 벽 통과 방지 알고리즘 (AABB Collision)
+        function resolveCollisions(pos) {
+            const bound = MAP_SIZE - 1.2;
+            pos.x = Math.max(-bound, Math.min(bound, pos.x));
+            pos.z = Math.max(-bound, Math.min(bound, pos.z));
+
+            walls.forEach(w => {
+                if (pos.x > w.minX && pos.x < w.maxX && pos.z > w.minZ && pos.z < w.maxZ) {
+                    let dx1 = pos.x - w.minX;
+                    let dx2 = w.maxX - pos.x;
+                    let dz1 = pos.z - w.minZ;
+                    let dz2 = w.maxZ - pos.z;
+                    let min = Math.min(dx1, dx2, dz1, dz2);
+
+                    if (min === dx1) pos.x = w.minX;
+                    else if (min === dx2) pos.x = w.maxX;
+                    else if (min === dz1) pos.z = w.minZ;
+                    else if (min === dz2) pos.z = w.maxZ;
+                }
+            });
+        }
+
+        function addShield(entity, amount) {
+            entity.shield = (entity.shield || 0) + amount;
+
+            if (!entity.shieldMesh) {
+                const shieldGeo = new THREE.SphereGeometry(1.2, 16, 16);
+                const shieldMat = new THREE.MeshBasicMaterial({
+                    color: 0xffff88,
+                    transparent: true,
+                    opacity: 0.35,
+                    wireframe: true
+                });
+                entity.shieldMesh = new THREE.Mesh(shieldGeo, shieldMat);
+                entity.shieldMesh.position.y = 1.0;
+                entity.shieldMesh.add(createGlowSprite(0xffffaa, 2.2));
+                entity.add(entity.shieldMesh);
+            }
+            entity.shieldMesh.visible = true;
+            updateHealthBar(entity, entity === player);
+
+            if (entity.shieldTimer) clearTimeout(entity.shieldTimer);
+            entity.shieldTimer = setTimeout(() => {
+                entity.shield = 0;
+                if (entity.shieldMesh) entity.shieldMesh.visible = false;
+                updateHealthBar(entity, entity === player);
+            }, 4000);
+        }
+
+        function spawnPlayer() {
+            if (player) scene.remove(player);
+            player = createChampionMesh(selectedChampName);
+            player.scale.set(CHAMP_SCALE, CHAMP_SCALE, CHAMP_SCALE);
+            player.position.set(0, 0, 16);
+            player.hp = 1000; player.maxHp = 1000; player.shield = 0;
+            player.hpBar = createHealthBarSprite();
+            player.add(player.hpBar);
+            updateHealthBar(player, true);
+            scene.add(player);
+        }
+
+        function startEnemySpawner() {
+            if (enemySpawnInterval) clearInterval(enemySpawnInterval);
+            enemies.forEach(e => scene.remove(e));
+            enemies = [];
+
+            enemySpawnInterval = setInterval(() => {
+                if (!player || player.hp <= 0) return;
+                // 상대 인원수 소폭 축소 (15명 -> 8명)
+                if (enemies.length >= 8) return;
+
+                // 동서남북 4방향 외곽 무작위 스폰
+                let x, z;
+                const side = Math.floor(Math.random() * 4);
+                const spawnMargin = MAP_SIZE - 2.5;
+
+                if (side === 0) { x = (Math.random() - 0.5) * (spawnMargin * 2); z = -spawnMargin; } // 북쪽
+                else if (side === 1) { x = (Math.random() - 0.5) * (spawnMargin * 2); z = spawnMargin; } // 남쪽
+                else if (side === 2) { x = -spawnMargin; z = (Math.random() - 0.5) * (spawnMargin * 2); } // 서쪽
+                else if (side === 3) { x = spawnMargin; z = (Math.random() - 0.5) * (spawnMargin * 2); } // 동쪽
+
+                const champList = ['Ezreal', 'Ahri', 'Lux'];
+                const randomChamp = champList[Math.floor(Math.random() * champList.length)];
+                const enemyMesh = createChampionMesh(randomChamp);
+                enemyMesh.scale.set(CHAMP_SCALE, CHAMP_SCALE, CHAMP_SCALE);
+                enemyMesh.position.set(x, 0, z);
+                enemyMesh.hp = 100; enemyMesh.maxHp = 100; enemyMesh.shield = 0;
+                enemyMesh.charmedTimer = 0;
+                enemyMesh.rootedTimer = 0;
+                enemyMesh.skillTimer = Math.random() * 2;
+                enemyMesh.wMarked = false;
+                enemyMesh.wMarkMesh = null;
+                
+                enemyMesh.hpBar = createHealthBarSprite();
+                enemyMesh.add(enemyMesh.hpBar);
+                updateHealthBar(enemyMesh, false);
+                scene.add(enemyMesh);
+                enemies.push(enemyMesh);
+            }, 1100);
+        }
+
+        function restartGame() {
+            document.getElementById('game-over-overlay').style.display = 'none';
+            playerTarget = null;
+            score = 0;
+            addScore(0);
+            ahriRCharges = 0;
+            if (luxEZone) { scene.remove(luxEZone.zone); scene.remove(luxEZone.glow); luxEZone = null; }
+            projectiles.forEach(p => scene.remove(p.mesh));
+            projectiles = [];
+            for (let k in cooldowns) cooldowns[k] = 0;
+            spawnPlayer();
+            startEnemySpawner();
+        }
+
+        function createChampionMesh(type) {
+            if (type === 'Ezreal') return createEzreal();
+            if (type === 'Ahri') return createAhri();
+            if (type === 'Lux') return createLux();
+        }
+
+        function createEzreal() {
+            const group = new THREE.Group();
+            const skinMat = new THREE.MeshStandardMaterial({ color: 0xffdbac });
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2b5999 });
+            const hairMat = new THREE.MeshStandardMaterial({ color: 0xdfab38 });
+
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.32, 1.6, 10), bodyMat);
+            body.position.y = 0.9; group.add(body);
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 12), skinMat);
+            head.position.y = 1.95; group.add(head);
+
+            for (let i = 0; i < 5; i++) {
+                const spike = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.32, 5), hairMat);
+                spike.position.set((i - 2) * 0.1, 2.2, -0.02); group.add(spike);
+            }
+            const gauntlet = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.38, 0.62), new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00c8d8 }));
+            gauntlet.position.set(-0.5, 1.0, 0.3); group.add(gauntlet);
+            gauntlet.add(createGlowSprite(0x00ffff, 1.1));
+            return group;
+        }
+
+        function createAhri() {
+            const group = new THREE.Group();
+            const skinMat = new THREE.MeshStandardMaterial({ color: 0xffe0c2 });
+            const dressMat = new THREE.MeshStandardMaterial({ color: 0xff66cc });
+            const tailMat = new THREE.MeshStandardMaterial({ color: 0xfff4e6, emissive: 0xff88cc, emissiveIntensity: 0.15 });
+
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.3, 1.6, 10), dressMat);
+            body.position.y = 0.9; group.add(body);
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 12), skinMat);
+            head.position.y = 1.95; group.add(head);
+
+            for (let i = 0; i < 9; i++) {
+                const angle = (i / 8 - 0.5) * Math.PI * 0.75;
+                const tail = new THREE.Mesh(new THREE.ConeGeometry(0.08, 1.1, 6), tailMat);
+                tail.position.set(Math.sin(angle) * 0.35, 0.85, -0.35 - Math.cos(angle) * 0.15);
+                tail.rotation.x = Math.PI * 0.42; tail.rotation.z = angle * 0.6;
+                group.add(tail);
+            }
+            const orb = createGlowSprite(0x00d2ff, 1.0);
+            orb.position.set(0.65, 1.3, 0.2); group.add(orb);
+            return group;
+        }
+
+        function createLux() {
+            const group = new THREE.Group();
+            const skinMat = new THREE.MeshStandardMaterial({ color: 0xffe0c2 });
+            const dressMat = new THREE.MeshStandardMaterial({ color: 0xffea00 });
+
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.3, 1.6, 10), dressMat);
+            body.position.y = 0.9; group.add(body);
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 12), skinMat);
+            head.position.y = 1.95; group.add(head);
+
+            const staff = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 2.3, 8), new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.8 }));
+            staff.position.set(0.55, 1.0, 0); group.add(staff);
+            const staffOrb = createGlowSprite(0xfff2a0, 0.9);
+            staffOrb.position.set(0.55, 2.15, 0); group.add(staffOrb);
+            return group;
+        }
+
+        function onMouseMove(e) {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        }
+
+        function getMouseWorldPos() {
+            raycaster.setFromCamera(mouse, camera);
+            let point = new THREE.Vector3();
+            raycaster.ray.intersectPlane(groundPlane, point);
+            return point;
+        }
+
+        function onMouseDown(e) {
+            if (e.button === 2) {
+                let point = getMouseWorldPos();
+                resolveCollisions(point);
+                playerTarget = point;
+            }
+        }
+
+        function onKeyDown(e) {
+            const key = e.key.toUpperCase();
+            if (key === 'S') { playerTarget = null; return; }
+
+            if (key === 'A') {
+                const now = Date.now();
+                if (now - lastAutoAttackTime >= autoAttackCooldown) {
+                    lastAutoAttackTime = now;
+                    castAutoAttack();
+                }
+                return;
+            }
+
+            if (['Q', 'W', 'E', 'R'].includes(key)) {
+                if (key === 'E' && selectedChampName === 'Lux' && luxEZone) {
+                    detonateLuxE();
+                    return;
+                }
+                if (key === 'R' && selectedChampName === 'Ahri') {
+                    if (ahriRCharges > 0 || cooldowns.R <= 0) {
+                        castSkill(selectedChampName, key, getMouseWorldPos());
+                    }
+                    return;
+                }
+                if (cooldowns[key] <= 0) {
+                    castSkill(selectedChampName, key, getMouseWorldPos());
+                }
+            }
+        }
+
+        function castAutoAttack() {
+            if (!player || player.hp <= 0) return;
+            const mouseWorld = getMouseWorldPos();
+
+            let targetEnemy = null;
+            let minDist = 14;
+            enemies.forEach(e => {
+                if (e.hp > 0) {
+                    let d = e.position.distanceTo(mouseWorld);
+                    if (d < minDist) { minDist = d; targetEnemy = e; }
+                }
+            });
+            if (!targetEnemy) targetEnemy = getNearestEnemy();
+
+            let mainColor = 0xffd700;
+            if (selectedChampName === 'Ahri') mainColor = 0xff66cc;
+            if (selectedChampName === 'Lux') mainColor = 0xffff66;
+
+            const mesh = new THREE.Mesh(
+                new THREE.SphereGeometry(0.28, 8, 8),
+                new THREE.MeshBasicMaterial({ color: mainColor })
+            );
+            mesh.position.copy(player.position).add(new THREE.Vector3(0, 1.2, 0));
+            mesh.add(createGlowSprite(mainColor, 0.9));
+
+            if (targetEnemy) {
+                projectiles.push({
+                    mesh, target: targetEnemy, speed: 0.42, damage: 50, color: mainColor, isPlayer: true, type: 'HOMING'
+                });
+            } else {
+                const dir = new THREE.Vector3().subVectors(mouseWorld, player.position);
+                dir.y = 0; if (dir.lengthSq() < 0.0001) dir.set(0, 0, 1);
+                dir.normalize();
+                projectiles.push({
+                    mesh, dir, speed: 0.42, range: 22, dist: 0, damage: 50, color: mainColor, isPlayer: true
+                });
+            }
+            scene.add(mesh);
+        }
+
+        function castSkill(champ, key, targetPos) {
+            if (!player || player.hp <= 0) return;
+            const dir = new THREE.Vector3().subVectors(targetPos, player.position);
+            dir.y = 0; if (dir.lengthSq() < 0.0001) dir.set(0, 0, 1);
+            dir.normalize();
+
+            if (champ === 'Ezreal') castEzrealSkill(key, dir, targetPos);
+            else if (champ === 'Ahri') castAhriSkill(key, dir, targetPos);
+            else if (champ === 'Lux') castLuxSkill(key, dir, targetPos);
+        }
+
+        function attachEzrealWMark(enemy) {
+            if (!enemy || enemy.wMarked) return;
+            enemy.wMarked = true;
+            
+            const ringGeo = new THREE.TorusGeometry(0.7, 0.08, 8, 24);
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0xffd700 });
+            const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+            ringMesh.rotation.x = Math.PI / 2;
+            ringMesh.position.y = 0.9;
+            ringMesh.add(createGlowSprite(0xffd700, 1.4));
+
+            enemy.wMarkMesh = ringMesh;
+            enemy.add(ringMesh);
+        }
+
+        function detonateEzrealWMark(enemy) {
+            if (!enemy || !enemy.wMarked) return;
+            enemy.wMarked = false;
+            if (enemy.wMarkMesh) {
+                enemy.remove(enemy.wMarkMesh);
+                enemy.wMarkMesh = null;
+            }
+            createHitEffect(enemy.position.x, enemy.position.y + 1, enemy.position.z, 0xffd700);
+            addScore(200);
+            applyDamage(enemy, 100, 0xffff00, true);
+        }
+
+        function castEzrealSkill(key, dir, targetPos) {
+            if (key === 'Q') {
+                cooldowns.Q = maxCooldowns.Q;
+                const mesh = new THREE.Mesh(new THREE.ConeGeometry(0.25, 1.3, 8), new THREE.MeshBasicMaterial({ color: 0x00ffff }));
+                mesh.geometry.rotateX(Math.PI / 2);
+                mesh.position.copy(player.position).add(new THREE.Vector3(0, 1.2, 0));
+                mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+                mesh.add(createGlowSprite(0x00ffff, 1.0));
+                projectiles.push({ mesh, dir, speed: 0.45, range: 24, dist: 0, damage: 100, color: 0x00ffff, isPlayer: true, onHit: () => reduceCooldowns(1.5) });
+                scene.add(mesh);
+            } else if (key === 'W') {
+                cooldowns.W = maxCooldowns.W;
+                const mesh = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.12, 8, 16), new THREE.MeshBasicMaterial({ color: 0xffd700 }));
+                mesh.position.copy(player.position).add(new THREE.Vector3(0, 1.2, 0));
+                mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+                mesh.add(createGlowSprite(0xffd700, 1.1));
+                projectiles.push({ 
+                    mesh, dir, speed: 0.42, range: 20, dist: 0, damage: 0, color: 0xffd700, isPlayer: true,
+                    onHit: (target) => { attachEzrealWMark(target); } 
+                });
+                scene.add(mesh);
+            } else if (key === 'E') {
+                cooldowns.E = maxCooldowns.E;
+                let blinkTarget = player.position.clone().add(dir.clone().multiplyScalar(7.5));
+                resolveCollisions(blinkTarget); // 이동 위치 맵 뚫기 방지
+                player.position.copy(blinkTarget); playerTarget = null;
+
+                let nearest = getNearestEnemy();
+                if (nearest) {
+                    const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.28, 8, 8), new THREE.MeshBasicMaterial({ color: 0x00ffff }));
+                    bolt.position.copy(player.position).add(new THREE.Vector3(0, 1.2, 0));
+                    bolt.add(createGlowSprite(0x00ffff, 1.0));
+                    projectiles.push({ mesh: bolt, target: nearest, speed: 0.55, damage: 100, color: 0x00ffff, isPlayer: true, type: 'HOMING' });
+                    scene.add(bolt);
+                }
+            } else if (key === 'R') {
+                cooldowns.R = maxCooldowns.R;
+                const chargeGlow = createGlowSprite(0xffcf6b, 3.8);
+                chargeGlow.position.copy(player.position).add(new THREE.Vector3(0, 1.2, 0));
+                scene.add(chargeGlow);
+
+                setTimeout(() => {
+                    scene.remove(chargeGlow);
+                    if (!player || player.hp <= 0) return;
+
+                    const waveShape = new THREE.Shape();
+                    waveShape.absarc(0, 0, 3.8, -Math.PI / 3, Math.PI / 3, false);
+                    waveShape.absarc(0, 0, 2.4, Math.PI / 3, -Math.PI / 3, true);
+                    const waveGeo = new THREE.ShapeGeometry(waveShape);
+                    waveGeo.rotateX(-Math.PI / 2);
+                    waveGeo.rotateY(Math.PI);
+
+                    const mesh = new THREE.Mesh(waveGeo, new THREE.MeshStandardMaterial({ color: 0xffecb3, emissive: 0xffcf6b, emissiveIntensity: 1, side: THREE.DoubleSide }));
+                    mesh.position.copy(player.position).add(new THREE.Vector3(0, 1.2, 0));
+                    mesh.rotation.y = Math.atan2(dir.x, dir.z);
+
+                    projectiles.push({ mesh, dir, speed: 0.42, range: 70, dist: 0, damage: 100, color: 0xffcf6b, isPlayer: true, isPenetrating: true });
+                    scene.add(mesh);
+                }, 1000);
+            }
+        }
+
+        function castAhriSkill(key, dir, targetPos) {
+            if (key === 'Q') {
+                cooldowns.Q = maxCooldowns.Q;
+                const orb = new THREE.Mesh(new THREE.SphereGeometry(0.55, 16, 16), new THREE.MeshStandardMaterial({ color: 0x00d2ff, emissive: 0x0088ff, emissiveIntensity: 0.8 }));
+                orb.position.copy(player.position).add(new THREE.Vector3(0, 1.2, 0));
+                const glow = createGlowSprite(0x00d2ff, 1.5);
+                orb.add(glow);
+                projectiles.push({ mesh: orb, glow, dir, origin: player.position.clone(), speed: 0.38, maxDist: 17, damage: 100, state: 'FORWARD', isPlayer: true, color: 0x00d2ff, type: 'AHRI_Q' });
+                scene.add(orb);
+            } else if (key === 'W') {
+                cooldowns.W = maxCooldowns.W;
+                for (let i = 0; i < 3; i++) {
+                    setTimeout(() => {
+                        if (!player || player.hp <= 0) return;
+                        const flame = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 12), new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x0088ff, emissiveIntensity: 1.0 }));
+                        const angle = (i * Math.PI * 2) / 3;
+                        flame.position.copy(player.position).add(new THREE.Vector3(Math.cos(angle) * 1.5, 1.3, Math.sin(angle) * 1.5));
+                        flame.add(createGlowSprite(0x00ffff, 1.2));
+                        let target = getNearestEnemy();
+                        projectiles.push({ mesh: flame, target: target, speed: 0.48, damage: 100, isPlayer: true, color: 0x00ffff, type: 'HOMING' });
+                        scene.add(flame);
+                    }, i * 100);
+                }
+            } else if (key === 'E') {
+                cooldowns.E = maxCooldowns.E;
+                const heartShape = new THREE.Shape();
+                heartShape.moveTo(0,0);
+                heartShape.bezierCurveTo(0,0.3,-0.3,0.6,-0.6,0.6);
+                heartShape.bezierCurveTo(-1.0,0.6,-1.0,0,-1.0,0);
+                heartShape.bezierCurveTo(-1.0,-0.3,-0.4,-0.7,0,-1.0);
+                heartShape.bezierCurveTo(0.4,-0.7,1.0,-0.3,1.0,0);
+                heartShape.bezierCurveTo(1.0,0,1.0,0.6,0.6,0.6);
+                heartShape.bezierCurveTo(0.3,0.6,0,0.3,0,0);
+
+                const geo = new THREE.ExtrudeGeometry(heartShape, { depth: 0.2, bevelEnabled: true, bevelSize: 0.05, bevelThickness: 0.05 });
+                geo.scale(0.35, 0.35, 0.35);
+                const heart = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xff33aa, emissive: 0xff0066, emissiveIntensity: 0.8 }));
+                heart.position.copy(player.position).add(new THREE.Vector3(0, 1.2, 0));
+                heart.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+                heart.add(createGlowSprite(0xff33cc, 1.5));
+                projectiles.push({
+                    mesh: heart, dir, speed: 0.35, range: 20, dist: 0, damage: 0, color: 0xff33cc, isPlayer: true,
+                    onHit: (target) => { target.charmedTimer = 2.0; }
+                });
+                scene.add(heart);
+            } else if (key === 'R') {
+                if (ahriRCharges === 0) ahriRCharges = 3;
+                ahriRCharges--;
+
+                let dashTarget = player.position.clone().add(dir.clone().multiplyScalar(7.0));
+                resolveCollisions(dashTarget); // 이동 위치 맵 뚫기 방지
+                player.position.copy(dashTarget); playerTarget = null;
+
+                enemies.forEach(en => {
+                    if (player.position.distanceTo(en.position) < 12) {
+                        const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({ color: 0x00d2ff }));
+                        bolt.position.copy(player.position).add(new THREE.Vector3(0, 1.2, 0));
+                        bolt.add(createGlowSprite(0x00ffff, 1.1));
+                        projectiles.push({ mesh: bolt, target: en, speed: 0.55, damage: 100, color: 0x00d2ff, isPlayer: true, type: 'HOMING' });
+                        scene.add(bolt);
+                    }
+                });
+
+                if (ahriRCharges <= 0) {
+                    cooldowns.R = maxCooldowns.R;
+                    ahriRCharges = 0;
+                }
+            }
+        }
+
+        function castLuxSkill(key, dir, targetPos) {
+            if (key === 'Q') {
+                cooldowns.Q = maxCooldowns.Q;
+                const cageGroup = new THREE.Group();
+                const cage = new THREE.Mesh(new THREE.SphereGeometry(0.75, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffff33, wireframe: true }));
+                const core = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+                cageGroup.add(cage, core);
+                cageGroup.position.copy(player.position).add(new THREE.Vector3(0, 1.2, 0));
+                cageGroup.add(createGlowSprite(0xffffaa, 1.6));
+                projectiles.push({
+                    mesh: cageGroup, dir, speed: 0.35, range: 22, dist: 0, damage: 100, color: 0xffff33, isPlayer: true, spin: true,
+                    onHit: (target) => { target.rootedTimer = 2.0; }
+                });
+                scene.add(cageGroup);
+            } else if (key === 'W') {
+                cooldowns.W = maxCooldowns.W;
+                addShield(player, 120);
+
+                const wandGroup = new THREE.Group();
+                const wand = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.4, 8), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff2a0 }));
+                wand.rotation.z = Math.PI / 2;
+                wandGroup.add(wand);
+                wandGroup.add(createGlowSprite(0xfff2a0, 1.7));
+                wandGroup.position.copy(player.position).add(new THREE.Vector3(0, 1.2, 0));
+
+                projectiles.push({
+                    mesh: wandGroup, dir, origin: player.position.clone(), speed: 0.42, maxDist: 16, state: 'FORWARD',
+                    isPlayer: true, color: 0xfff2a0, spin: true, type: 'LUX_W'
+                });
+                scene.add(wandGroup);
+            } else if (key === 'E') {
+                cooldowns.E = maxCooldowns.E;
+                const zoneGeo = new THREE.CylinderGeometry(4.2, 4.2, 0.15, 32);
+                const zoneMat = new THREE.MeshBasicMaterial({ color: 0xffea00, transparent: true, opacity: 0.5 });
+                const zone = new THREE.Mesh(zoneGeo, zoneMat);
+                resolveCollisions(targetPos);
+                zone.position.copy(targetPos); zone.position.y = 0.08;
+                const glow = createGlowSprite(0xffffaa, 4.5);
+                glow.position.copy(targetPos); glow.position.y = 0.5;
+                scene.add(zone, glow);
+
+                const autoTimer = setTimeout(() => { detonateLuxE(); }, 5000);
+                luxEZone = { zone, glow, targetPos, autoTimer };
+            } else if (key === 'R') {
+                cooldowns.R = maxCooldowns.R;
+                const laserLen = 65;
+
+                const aimGeo = new THREE.CylinderGeometry(0.18, 0.18, laserLen, 8);
+                aimGeo.rotateX(Math.PI / 2);
+                const aimMesh = new THREE.Mesh(aimGeo, new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.4 }));
+                let spawnPos = player.position.clone().add(dir.clone().multiplyScalar(laserLen / 2));
+                aimMesh.position.set(spawnPos.x, 1.2, spawnPos.z);
+                aimMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+                scene.add(aimMesh);
+
+                setTimeout(() => {
+                    scene.remove(aimMesh);
+                    if (!player || player.hp <= 0) return;
+
+                    const laserGroup = new THREE.Group();
+                    const outer = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, laserLen, 16), new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.85 }));
+                    const inner = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, laserLen, 16), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.98 }));
+                    outer.geometry.rotateX(Math.PI / 2); inner.geometry.rotateX(Math.PI / 2);
+                    laserGroup.add(outer, inner);
+
+                    let laserPos = player.position.clone().add(dir.clone().multiplyScalar(laserLen / 2));
+                    laserGroup.position.set(laserPos.x, 1.2, laserPos.z);
+                    laserGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+                    laserGroup.add(createGlowSprite(0xffff00, 7.0));
+                    scene.add(laserGroup);
+
+                    enemies.forEach(e => {
+                        if (e.hp <= 0) return;
+                        let toEnemy = new THREE.Vector3().subVectors(e.position, player.position);
+                        let proj = toEnemy.dot(dir);
+                        if (proj > 0 && proj < laserLen) {
+                            let normalDist = toEnemy.clone().sub(dir.clone().multiplyScalar(proj)).length();
+                            if (normalDist < 3.0) {
+                                applyDamage(e, 100, 0xffff00);
+                            }
+                        }
+                    });
+
+                    setTimeout(() => scene.remove(laserGroup), 450);
+                }, 1000);
+            }
+        }
+
+        function detonateLuxE() {
+            if (!luxEZone) return;
+            const { zone, glow, targetPos, autoTimer } = luxEZone;
+            clearTimeout(autoTimer);
+            createHitEffect(targetPos.x, 0.5, targetPos.z, 0xffff00);
+            enemies.forEach(e => {
+                if (e.hp > 0 && Math.hypot(e.position.x - targetPos.x, e.position.z - targetPos.z) < 4.2) {
+                    applyDamage(e, 100, 0xffff00);
+                }
+            });
+            scene.remove(zone); scene.remove(glow);
+            luxEZone = null;
+        }
+
+        function applyDamage(target, amount, effectColor, isWDetonation = false) {
+            if (!target || target.hp <= 0) return;
+
+            if (target.wMarked && !isWDetonation) {
+                detonateEzrealWMark(target);
+            }
+
+            if (target.shield && target.shield > 0) {
+                if (target.shield >= amount) {
+                    target.shield -= amount;
+                    amount = 0;
+                } else {
+                    amount -= target.shield;
+                    target.shield = 0;
+                }
+                if (target.shield <= 0 && target.shieldMesh) {
+                    target.shieldMesh.visible = false;
+                }
+            }
+
+            target.hp = Math.max(0, target.hp - amount);
+            const isPlayer = (target === player);
+            updateHealthBar(target, isPlayer);
+            createHitEffect(target.position.x, 1.4, target.position.z, effectColor);
+
+            target.traverse(child => {
+                if (child.isMesh && child.material && child.material.color) {
+                    const origColor = child.material.color.getHex();
+                    child.material.color.setHex(0xff0000);
+                    setTimeout(() => child.material.color.setHex(origColor), 120);
+                }
+            });
+
+            if (!isPlayer && target.hp <= 0) {
+                if (target.wMarkMesh) target.remove(target.wMarkMesh);
+                scene.remove(target);
+                enemies = enemies.filter(e => e !== target);
+                addScore(100);
+            }
+            if (isPlayer && target.hp <= 0) {
+                document.getElementById('game-over-title').innerText = '패배했습니다!';
+                document.getElementById('game-over-overlay').style.display = 'flex';
+            }
+        }
+
+        function getNearestEnemy() {
+            let nearest = null, minDist = 999;
+            enemies.forEach(e => {
+                if (e.hp > 0) {
+                    let d = player.position.distanceTo(e.position);
+                    if (d < minDist) { minDist = d; nearest = e; }
+                }
+            });
+            return nearest;
+        }
+
+        function reduceCooldowns(sec) {
+            for (let k in cooldowns) if (cooldowns[k] > 0) cooldowns[k] = Math.max(0, cooldowns[k] - sec);
+        }
+
+        function updateEnemyAI() {
+            enemies.forEach(enemy => {
+                if (enemy.hp <= 0) return;
+
+                if (enemy.charmedTimer > 0) {
+                    enemy.charmedTimer -= 0.016;
+                    let charmDir = new THREE.Vector3().subVectors(player.position, enemy.position).normalize();
+                    enemy.position.add(charmDir.multiplyScalar(0.04));
+                    resolveCollisions(enemy.position);
+                    enemy.rotation.y = Math.atan2(charmDir.x, charmDir.z);
+                    return;
+                }
+
+                if (enemy.rootedTimer > 0) {
+                    enemy.rootedTimer -= 0.016;
+                    return;
+                }
+
+                let distToPlayer = enemy.position.distanceTo(player.position);
+                if (distToPlayer > 4.5) {
+                    let moveDir = new THREE.Vector3().subVectors(player.position, enemy.position).normalize();
+                    enemy.position.add(moveDir.multiplyScalar(0.045));
+                    resolveCollisions(enemy.position);
+                    enemy.rotation.y = Math.atan2(moveDir.x, moveDir.z);
+                }
+
+                enemy.skillTimer += 0.016;
+                if (enemy.skillTimer > 2.5) {
+                    enemy.skillTimer = 0;
+                    if (!player || player.hp <= 0) return;
+                    let targetDir = new THREE.Vector3().subVectors(player.position, enemy.position).normalize();
+
+                    // 적 공격 수정: 크기를 훨씬 크게(0.85) 하고 속도도 훨씬 빠르게(0.58) 변경
+                    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.85, 16, 16), new THREE.MeshBasicMaterial({ color: 0xff1111 }));
+                    ball.position.copy(enemy.position).add(new THREE.Vector3(0, 1.2, 0));
+                    ball.add(createGlowSprite(0xff0000, 2.5));
+                    projectiles.push({ mesh: ball, dir: targetDir, speed: 0.58, range: 35, dist: 0, damage: 60, isPlayer: false, type: 'ENEMY' });
+                    scene.add(ball);
+                }
+            });
+        }
+
+        function updateProjectiles() {
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                let p = projectiles[i];
+                if (!p || !p.mesh) continue;
+
+                let isHit = false;
+                if (p.spin) p.mesh.rotation.y += 0.2;
+
+                if (p.type === 'HOMING') {
+                    if (!p.target || p.target.hp <= 0) {
+                        scene.remove(p.mesh); projectiles.splice(i, 1); continue;
+                    }
+                    let dir = new THREE.Vector3().subVectors(p.target.position, p.mesh.position).normalize();
+                    p.mesh.position.add(dir.multiplyScalar(p.speed));
+                    
+                    if (Math.hypot(p.mesh.position.x - p.target.position.x, p.mesh.position.z - p.target.position.z) < 1.4) {
+                        applyDamage(p.target, p.damage, p.color || 0x00ffff);
+                        if (p.onHit) p.onHit(p.target);
+                        scene.remove(p.mesh); projectiles.splice(i, 1);
+                    }
+                    continue;
+                }
+
+                if (p.type === 'AHRI_Q') {
+                    if (p.state === 'FORWARD') {
+                        p.mesh.position.add(p.dir.clone().multiplyScalar(p.speed));
+                        if (p.mesh.position.distanceTo(p.origin) > p.maxDist) {
+                            p.state = 'RETURN';
+                            if (p.glow) p.glow.color.setHex(0xff00aa);
+                        }
+                    } else {
+                        let returnDir = new THREE.Vector3().subVectors(player.position, p.mesh.position).normalize();
+                        p.mesh.position.add(returnDir.multiplyScalar(p.speed * 1.2));
+                        if (Math.hypot(p.mesh.position.x - player.position.x, p.mesh.position.z - player.position.z) < 1.3) {
+                            scene.remove(p.mesh); projectiles.splice(i, 1);
+                            continue;
+                        }
+                    }
+                } else if (p.type === 'LUX_W') {
+                    if (p.state === 'FORWARD') {
+                        p.mesh.position.add(p.dir.clone().multiplyScalar(p.speed));
+                        if (p.mesh.position.distanceTo(p.origin) > p.maxDist) {
+                            p.state = 'RETURN';
+                        }
+                    } else {
+                        let returnDir = new THREE.Vector3().subVectors(player.position, p.mesh.position).normalize();
+                        p.mesh.position.add(returnDir.multiplyScalar(p.speed * 1.2));
+                        if (Math.hypot(p.mesh.position.x - player.position.x, p.mesh.position.z - player.position.z) < 1.5) {
+                            addShield(player, 120);
+                            scene.remove(p.mesh); projectiles.splice(i, 1);
+                            continue;
+                        }
+                    }
+                } else {
+                    p.mesh.position.add(p.dir.clone().multiplyScalar(p.speed));
+                    p.dist += p.speed;
+                }
+
+                if (p.isPlayer && p.type !== 'LUX_W') {
+                    for (let e of enemies) {
+                        if (e.hp <= 0) continue;
+                        if (Math.hypot(p.mesh.position.x - e.position.x, p.mesh.position.z - e.position.z) < 1.6) {
+                            applyDamage(e, p.damage, p.color || 0xffff00);
+                            if (p.onHit) p.onHit(e);
+                            if (!p.isPenetrating && p.type !== 'AHRI_Q') {
+                                isHit = true; break;
+                            }
+                        }
+                    }
+                } else if (!p.isPlayer) {
+                    if (player && player.hp > 0) {
+                        // 크게 변경된 적 투사체 판정 범위 확장(2.0)
+                        if (Math.hypot(p.mesh.position.x - player.position.x, p.mesh.position.z - player.position.z) < 2.0) {
+                            applyDamage(player, p.damage, 0xff0000);
+                            isHit = true;
+                        }
+                    }
+                }
+
+                if (isHit) {
+                    scene.remove(p.mesh);
+                    projectiles.splice(i, 1);
+                    continue;
+                }
+
+                if (p.dist && p.dist >= p.range) {
+                    scene.remove(p.mesh);
+                    projectiles.splice(i, 1);
+                }
+            }
+        }
+
+        function updateUI() {
+            ['Q', 'W', 'E', 'R'].forEach(k => {
+                const el = document.getElementById(`cd-${k}`);
+                if (cooldowns[k] > 0) {
+                    el.style.display = 'flex';
+                    el.innerText = cooldowns[k].toFixed(1);
+                } else el.style.display = 'none';
+            });
+
+            const rBadge = document.getElementById('badge-R');
+            if (selectedChampName === 'Ahri' && ahriRCharges > 0) {
+                rBadge.style.display = 'block';
+                rBadge.innerText = ahriRCharges;
+            } else {
+                rBadge.style.display = 'none';
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            for (let k in cooldowns) {
+                if (cooldowns[k] > 0) cooldowns[k] = Math.max(0, cooldowns[k] - 0.016);
+            }
+
+            if (player && player.hp > 0 && playerTarget) {
+                let dir = new THREE.Vector3().subVectors(playerTarget, player.position);
+                dir.y = 0;
+                let dist = dir.length();
+
+                if (dist > MOVE_SPEED) {
+                    dir.normalize();
+                    player.position.addScaledVector(dir, MOVE_SPEED);
+
+                    let targetAngle = Math.atan2(dir.x, dir.z);
+                    let diff = targetAngle - player.rotation.y;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+                    player.rotation.y += diff * 0.25;
+                } else {
+                    player.position.x = playerTarget.x;
+                    player.position.z = playerTarget.z;
+                    playerTarget = null;
+                }
+            }
+
+            if (player) {
+                // 플레이어 이동 시 실시간 맵 경계/장애물 충돌 처리
+                resolveCollisions(player.position);
+
+                camera.position.x = player.position.x;
+                camera.position.z = player.position.z + 24;
+                camera.lookAt(player.position.x, 0, player.position.z - 4);
+            }
+
+            updateEnemyAI();
+            updateProjectiles();
+            updateUI();
+
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        window.onload = () => {
+            init();
+            animate();
+        };
+    </script>
+</body>
+</html>
