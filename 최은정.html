@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>폐병원의 원혼 - 3D 공포 탈출 게임</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Noto+Sans+KR:wght@300;400;700&display=swap');
+body{margin:0;overflow:hidden;font-family:'Noto Sans KR',sans-serif;user-select:none;background:#020202;color:#e2e8f0;touch-action:none;}
+.serif{font-family:'Gowun Batang',serif;}
+#frost-overlay{pointer-events:none;transition:opacity .3s ease;background:radial-gradient(circle,transparent 20%,rgba(10,30,45,.8) 70%,rgba(0,210,255,.6) 100%);}
+#damage-overlay{pointer-events:none;transition:opacity .15s ease-out;background:radial-gradient(circle,transparent 15%,rgba(180,0,0,.85) 75%,rgba(255,0,0,.98) 100%);}
+#glitch-overlay{pointer-events:none;transition:opacity .07s linear;}
+::-webkit-scrollbar{width:6px;} ::-webkit-scrollbar-track{background:rgba(0,0,0,.6);} ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.25);border-radius:3px;}
+#toast{transition:opacity .3s ease, transform .3s ease;}
+</style>
+</head>
+<body class="w-screen h-screen overflow-hidden bg-black text-gray-200">
+
+<div id="canvas-container" class="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing"></div>
+
+<div id="frost-overlay" class="absolute inset-0 opacity-0 z-10 border-[24px] border-cyan-900/50 blur-md"></div>
+<div id="damage-overlay" class="absolute inset-0 opacity-0 z-10"></div>
+<div id="glitch-overlay" class="absolute inset-0 opacity-0 pointer-events-none z-40 bg-red-900/40 mix-blend-color-dodge"></div>
+
+<div id="toast" class="absolute top-24 left-1/2 -translate-x-1/2 z-20 bg-black/90 border border-amber-600/60 text-amber-200 text-xs md:text-sm px-4 py-2 rounded-xl opacity-0 pointer-events-none shadow-2xl"></div>
+
+<!-- HUD -->
+<div id="hud" class="absolute inset-0 pointer-events-none z-10 flex flex-col justify-between p-4 md:p-6 hidden">
+  <div class="flex justify-between items-start gap-2">
+    <div class="bg-black/85 border border-neutral-800 p-3 md:p-4 rounded-xl backdrop-blur-md w-56 md:w-72 shadow-2xl">
+      <div class="flex justify-between items-center mb-1 text-xs text-neutral-400 font-bold uppercase tracking-wider">
+        <span>체온 상태</span>
+        <span id="temp-value" class="text-emerald-400 font-mono text-xs md:text-sm">36.5°C</span>
+      </div>
+      <div class="w-full bg-neutral-900 rounded-full h-3 overflow-hidden border border-neutral-800 p-0.5">
+        <div id="temp-bar" class="bg-gradient-to-r from-emerald-600 to-teal-400 h-2 rounded-full" style="width:100%"></div>
+      </div>
+      <div id="temp-warning" class="text-[10px] text-emerald-300 mt-1 h-3 font-semibold">체온 안정</div>
+    </div>
+
+    <div id="hiding-indicator" class="hidden pointer-events-auto bg-emerald-950/90 border border-emerald-500 text-emerald-200 px-3 py-2 rounded-xl backdrop-blur-md text-xs md:text-sm font-bold flex items-center gap-2 shadow-lg">
+      <span>은신 중</span>
+      <button onclick="toggleHiding(false)" class="ml-1 px-2 py-1 bg-emerald-800 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold border border-emerald-400 cursor-pointer">[E] 나가기</button>
+    </div>
+
+    <div class="bg-black/85 border border-neutral-800 p-3 md:p-4 rounded-xl backdrop-blur-md max-w-[11rem] md:max-w-xs text-right shadow-2xl space-y-1">
+      <div class="flex justify-between items-center text-xs font-bold border-b border-neutral-800 pb-1 mb-1 gap-2">
+        <span id="floor-indicator" class="text-cyan-400 font-mono text-xs">지상</span>
+        <span class="text-amber-500 uppercase tracking-widest text-[10px]">탐색 목표</span>
+      </div>
+      <div id="objective-text" class="text-[11px] md:text-sm text-neutral-100 serif font-medium">병원 곳곳에서 귀신과 관련된 유품을 찾으세요.</div>
+    </div>
+  </div>
+
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
+    <div id="crosshair" class="w-2.5 h-2.5 bg-white/80 rounded-full mx-auto shadow-[0_0_10px_rgba(255,255,255,.9)] border border-black/40"></div>
+    <div id="interaction-prompt" class="mt-4 bg-black/90 text-amber-300 border border-amber-500/60 px-4 py-2 rounded-xl text-xs font-semibold backdrop-blur-md hidden shadow-2xl pointer-events-auto cursor-pointer" onclick="handleTouchInteraction()">[E / 클릭] 조사하기</div>
+  </div>
+
+  <div class="flex flex-col md:flex-row justify-between items-end gap-2">
+    <div class="bg-black/80 border border-neutral-800/90 px-3 py-2 rounded-xl text-[10px] md:text-[11px] text-neutral-300 space-y-0.5 backdrop-blur-md shadow-lg">
+      <div><span class="text-white font-bold bg-neutral-800 px-1 rounded">WASD</span> 이동 <span class="text-amber-400 font-bold bg-neutral-800 px-1 rounded">Shift</span> 달리기 <span class="text-amber-400 font-bold bg-neutral-800 px-1 rounded">F</span> 손전등</div>
+      <div><span class="text-amber-400 font-bold bg-neutral-800 px-1 rounded">E</span> 조사/숨기 <span class="text-emerald-400 font-bold bg-neutral-800 px-1 rounded">C</span> 은신 <span class="text-amber-400 font-bold bg-neutral-800 px-1 rounded">B</span> 소지품 <span class="text-white font-bold bg-neutral-800 px-1 rounded">ESC</span> 메뉴</div>
+    </div>
+    <div class="bg-black/85 border border-neutral-800 p-2.5 rounded-2xl backdrop-blur-md flex gap-2 shadow-2xl pointer-events-auto cursor-pointer" onclick="toggleInventoryModal()">
+      <div class="text-[10px] text-neutral-400 flex flex-col justify-center pr-2 border-r border-neutral-800 font-bold"><span>소지품</span><span class="text-amber-400 text-[9px]">[B] 열기</span></div>
+      <div id="quick-inventory" class="flex gap-1.5 min-w-[90px] items-center"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Story modal -->
+<div id="story-modal" class="absolute inset-0 z-30 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 hidden">
+  <div class="bg-neutral-900/95 border border-neutral-700 max-w-xl w-full p-5 md:p-6 rounded-2xl shadow-2xl space-y-4">
+    <div class="flex justify-between items-center border-b border-neutral-800 pb-3">
+      <h2 id="story-title" class="text-lg md:text-xl font-bold text-amber-400 serif">발견된 단서</h2>
+      <span class="text-xs text-neutral-500">[E / 닫기]</span>
+    </div>
+    <div id="story-content" class="text-neutral-300 text-xs md:text-sm leading-relaxed space-y-3 max-h-72 overflow-y-auto pr-2 serif"></div>
+    <button id="btn-close-story" class="w-full py-2.5 bg-neutral-800 hover:bg-neutral-700 text-amber-200 rounded-xl text-xs md:text-sm font-bold border border-neutral-600 cursor-pointer">확인 및 닫기</button>
+  </div>
+</div>
+
+<!-- Dangerous item choice modal -->
+<div id="choice-modal" class="absolute inset-0 z-30 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 hidden">
+  <div class="bg-neutral-950 border border-red-900 max-w-md w-full p-6 rounded-2xl shadow-2xl space-y-4 text-center">
+    <h2 class="text-lg font-bold text-red-500 serif">...이걸 손에 쥔 순간</h2>
+    <p id="choice-text" class="text-neutral-300 text-xs md:text-sm leading-relaxed serif"></p>
+    <div class="flex gap-3">
+      <button id="btn-choice-no" class="flex-1 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl text-xs font-bold border border-neutral-600 cursor-pointer">내려놓는다</button>
+      <button id="btn-choice-yes" class="flex-1 py-2.5 bg-red-900 hover:bg-red-800 text-white rounded-xl text-xs font-bold border border-red-700 cursor-pointer">...</button>
+    </div>
+  </div>
+</div>
+
+<!-- Inventory / ritual modal -->
+<div id="inventory-modal" class="absolute inset-0 z-30 bg-black/90 backdrop-blur-xl flex items-center justify-center p-4 hidden">
+  <div class="bg-neutral-900 border border-neutral-700 max-w-3xl w-full p-5 md:p-6 rounded-2xl shadow-2xl grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 max-h-[90vh] overflow-y-auto">
+    <div class="md:col-span-2 space-y-3">
+      <h2 class="text-base md:text-lg font-bold text-amber-400 border-b border-neutral-800 pb-2 flex justify-between items-center">
+        <span>수집한 물건</span><span class="text-xs text-neutral-400 font-normal">유품 3개를 순서대로 제단에 바치세요</span>
+      </h2>
+      <div id="inventory-list" class="grid grid-cols-2 gap-2.5 max-h-64 overflow-y-auto pr-1"></div>
+    </div>
+    <div class="bg-neutral-950 border border-neutral-800 p-4 rounded-xl flex flex-col justify-between space-y-3">
+      <div>
+        <h3 class="text-xs md:text-sm font-bold text-neutral-300 border-b border-neutral-800 pb-2 mb-3">승천 의식 조합</h3>
+        <div class="space-y-2">
+          <div id="slot-1" class="border border-dashed border-neutral-700 p-2 rounded-lg text-xs text-neutral-500 text-center">1순위 유품</div>
+          <div id="slot-2" class="border border-dashed border-neutral-700 p-2 rounded-lg text-xs text-neutral-500 text-center">2순위 유품</div>
+          <div id="slot-3" class="border border-dashed border-neutral-700 p-2 rounded-lg text-xs text-neutral-500 text-center">3순위 유품</div>
+        </div>
+      </div>
+      <div class="space-y-2 pt-2">
+        <button id="btn-reset-combo" class="w-full py-1.5 bg-neutral-800 hover:bg-neutral-700 text-xs text-neutral-300 rounded-lg border border-neutral-700 cursor-pointer">초기화</button>
+        <button id="btn-perform-ritual" class="w-full py-2.5 bg-amber-700 hover:bg-amber-600 disabled:bg-neutral-800 text-white rounded-xl text-xs font-bold shadow-lg border border-amber-500 disabled:border-neutral-700 disabled:text-neutral-600 cursor-pointer">한풀이 의식 진행</button>
+        <button id="btn-close-inv" class="w-full py-1.5 bg-transparent hover:bg-neutral-800 text-xs text-neutral-400 rounded-lg cursor-pointer">닫기</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Start screen -->
+<div id="start-screen" class="absolute inset-0 z-40 bg-gradient-to-b from-neutral-950 via-neutral-900 to-black flex flex-col items-center justify-center p-6 text-center">
+  <div class="max-w-2xl space-y-5">
+    <h1 class="text-4xl md:text-6xl font-black text-red-700 tracking-widest serif drop-shadow-[0_5px_25px_rgba(225,29,22,.8)]">폐병원의 원혼</h1>
+    <p class="text-neutral-300 text-xs md:text-base leading-relaxed serif">당신은 귀신에게 홀려 오래전 폐쇄된 병원에 갇혔습니다.<br>지하시설의 진실을 밝혀내고 억울한 원혼의 한을 풀어 살아서 탈출하세요.</p>
+    <div class="bg-neutral-900/90 border border-neutral-800 p-3.5 rounded-2xl text-left text-xs text-neutral-300 space-y-1.5 shadow-2xl max-h-56 overflow-y-auto">
+      <div class="text-amber-500 font-bold border-b border-neutral-800 pb-1">⚠️ 조작 방법</div>
+      <ul class="list-disc list-inside space-y-1 text-neutral-400">
+        <li><span class="text-amber-400 font-bold">이동/시야</span>: <span class="text-white font-bold">WASD</span> 이동, <span class="text-white font-bold">마우스</span> 시점, <span class="text-white font-bold">Shift</span> 달리기</li>
+        <li><span class="text-amber-400 font-bold">상호작용 [E]</span>: 단서/열쇠 조사 및 획득, 문 열기</li>
+        <li><span class="text-emerald-400 font-bold">은신 [C]</span>: 침대나 사물함에 숨어 위기를 넘기세요</li>
+        <li><span class="text-cyan-400 font-bold">체온</span>: 귀신이 가까울수록 몸이 차가워집니다. 조심하세요</li>
+        <li><span class="text-red-400 font-bold">승천 의식</span>: 지하 제단에서 유품 3개를 올바른 순서로 바치세요</li>
+      </ul>
+    </div>
+    <button id="btn-start" class="px-8 md:px-10 py-3.5 md:py-4 bg-red-800 hover:bg-red-700 text-white font-bold rounded-2xl shadow-2xl transition-all text-base md:text-lg tracking-wider border border-red-500 cursor-pointer">폐병원 탐색 시작하기</button>
+  </div>
+</div>
+
+<!-- Pause -->
+<div id="pause-screen" class="absolute inset-0 z-40 bg-black/85 backdrop-blur-md flex-col items-center justify-center hidden space-y-4" style="display:none;">
+  <h2 class="text-2xl md:text-3xl font-bold text-neutral-200 serif">일시 정지</h2>
+  <div class="space-y-3 w-60 md:w-64">
+    <button id="btn-resume" class="w-full py-3 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl text-xs md:text-sm font-semibold border border-neutral-700 cursor-pointer">게임 재개</button>
+    <button id="btn-restart" class="w-full py-3 bg-red-900/80 hover:bg-red-800 text-white rounded-xl text-xs md:text-sm font-semibold border border-red-700 cursor-pointer">처음부터 다시하기</button>
+  </div>
+</div>
+
+<!-- Ending -->
+<div id="ending-screen" class="absolute inset-0 z-50 bg-black flex-col items-center justify-center p-6 text-center hidden" style="display:none;">
+  <div class="max-w-2xl space-y-6">
+    <div id="ending-badge" class="inline-block px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest border"></div>
+    <h1 id="ending-title" class="text-3xl md:text-5xl font-black text-white serif tracking-wider"></h1>
+    <p id="ending-desc" class="text-neutral-300 text-xs md:text-base leading-relaxed serif whitespace-pre-line"></p>
+    <button id="btn-ending-restart" class="px-8 py-3 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl text-xs md:text-sm font-bold border border-neutral-600 cursor-pointer">다시 시도하기</button>
+  </div>
+</div>
+
+<script>
+/* ===================== CONFIG ===================== */
+const CONFIG = {
+  PLAYER: { HEIGHT: 1.65, WALK_SPEED: 4.6, RUN_SPEED: 7.6, INTERACT_DIST: 4.2, RADIUS: 0.4 },
+  GHOST: { NORMAL_SPEED: 2.6, RAGE_SPEED: 4.6, DETECT_RADIUS: 11, RAGE_DETECT_RADIUS: 18, ATTACK_RANGE: 1.7, INVESTIGATE_TIME: 6 },
+  TEMPERATURE: { NORMAL: 36.5, MIN: 5, DROP_RATE: 6.5, RECOVER_RATE: 2.2, COLD_RANGE: 13 },
+  DAMAGE: { SPEED_BUFF_DURATION: 2.2, SPEED_BUFF_MULT: 1.3, HIT_COOLDOWN: 1.8, MAX_HITS: 3 },
+  FLOOR_Y: { GROUND: 0, BASEMENT: -8 }
+};
+
+/* ===================== STATE ===================== */
+const STATE = {
+  isStarted: false, isPaused: false, isEnding: false,
+  isHiding: false, hidingType: '',
+  flashlightOn: true,
+  currentFloor: 'GROUND',
+  hasKey: false,
+  ritualCompleted: false,
+  isGhostRage: false,
+  ghostVanished: false,
+  playerTemp: 36.5,
+  hitCount: 0,
+  hitCooldown: 0,
+  speedBuffTimer: 0,
+  labUnlocked: false,
+  stairsUnlocked: false,
+  inventory: [],
+  comboSelection: [],
+  ghostState: 'PATROL',
+  investigateTimer: 0,
+  ambientTimer: 6
+};
+
+/* ===================== MAP DATA (collision rects) ===================== */
+const RECT = (name, minX, maxX, minZ, maxZ) => ({ name, minX, maxX, minZ, maxZ });
+
+const GROUND_RECTS = [
+  RECT('로비', -30, -18, -6, 6),
+  RECT('복도', -18, 12, -1.8, 1.8),
+  RECT('병실A', -20, -16, -6.8, -1.8),
+  RECT('간호사실', -20, -16, 1.8, 6.8),
+  RECT('진료실', -14, -10, -6.8, -1.8),
+  RECT('병실B', -14, -10, 1.8, 6.8),
+  RECT('수술실', -8, -4, -6.8, -1.8),
+  RECT('응급실', -8, -4, 1.8, 6.8),
+  RECT('약품보관실', -2, 2, -6.8, -1.8),
+  RECT('창고', -2, 2, 1.8, 6.8),
+  RECT('욕실', 4, 8, -6.8, -1.8)
+];
+const LAB_RECT = RECT('폐쇄된 연구실', 4, 8, 1.8, 6.8);
+const STAIRS_RECT = RECT('지하 계단실', 12, 20, -1.8, 1.8);
+
+const BASEMENT_RECTS = [
+  RECT('지하시설', -10, 10, -6, 6),
+  RECT('영안실', -4, 4, 6, 12)
+];
+
+function isPositionAllowed(x, z, floor) {
+  const margin = CONFIG.PLAYER.RADIUS;
+  let rects;
+  if (floor === 'GROUND') {
+    rects = GROUND_RECTS.slice();
+    if (STATE.labUnlocked) rects.push(LAB_RECT);
+    if (STATE.stairsUnlocked) rects.push(STAIRS_RECT);
+  } else {
+    rects = BASEMENT_RECTS;
+  }
+  for (const r of rects) {
+    if (x >= r.minX + margin && x <= r.maxX - margin && z >= r.minZ + margin && z <= r.maxZ - margin) return true;
+  }
+  return false;
+}
+
+/* ===================== ITEMS ===================== */
+const ITEMS = {
+  PATIENT_RECORD: { id: 'PATIENT_RECORD', name: '오래된 환자 기록', icon: '📋', storyTitle: '오래된 환자 기록', storyText: '빛바랜 종이에는 이름 대신 번호만 적힌 환자 목록이 빼곡하다. 대부분의 이름 옆에 “퇴원”이 아닌 “이관”이라는 글자가 붉게 찍혀 있다.' },
+  HOSPITAL_PHOTO: { id: 'HOSPITAL_PHOTO', name: '병원 사진', icon: '🖼️', storyTitle: '빛바랜 병원 사진', storyText: '의료진이 환하게 웃고 있는 단체 사진. 그러나 사진 구석, 지하로 향하는 철문 앞에 겁에 질린 눈빛의 환자복 차림 인영이 흐릿하게 찍혀 있다.' },
+  STAFF_EVIDENCE: { id: 'STAFF_EVIDENCE', name: '의료진 관련 증거', icon: '🩺', storyTitle: '숨겨진 진료 기록', storyText: '“지하 건은 원장님 지시대로 외부에 절대 알리지 말 것.” 서명란에는 여러 명의 의료진 이름이 적혀 있다. 모두가 알고 있었다.' },
+  RESEARCH_LOG: { id: 'RESEARCH_LOG', name: '의사의 연구 기록', icon: '📕', storyTitle: '의사의 연구 기록', storyText: '“피험체의 반응이 예상보다 더디다. 고통에 대한 내성 실험을 반복한다.” 글씨는 갈수록 광기에 차 흔들려 있다.' },
+  BASEMENT_LOG: { id: 'BASEMENT_LOG', name: '지하시설의 기록', icon: '📖', storyTitle: '지하시설 관리 일지', storyText: '“오늘도 한 명이 도움을 요청하려 했다. 소용없었다. 이곳의 존재를 아는 자 중 누구도 신고하지 않았다.” 마지막 장은 불에 그을려 있다.' },
+  TEDDY_BEAR: { id: 'TEDDY_BEAR', name: '피 묻은 곰인형', icon: '🧸', isRitualItem: true, ritualOrder: 1, storyTitle: '소중한 추억', storyText: '실험실 구석에서 발견된 낡은 곰인형. 그 아이는 마지막 순간까지도 이것을 놓지 않았다. 승천 의식의 첫 번째로 바쳐야 할 순수했던 기억.' },
+  GHOST_HAIR: { id: 'GHOST_HAIR', name: '원혼의 머리카락 뭉치', icon: '💇', isRitualItem: true, ritualOrder: 2, storyTitle: '잘려나간 머리카락', storyText: '수술대 위에 엉켜 붙은 검은 머리카락 뭉치. 생전에 강제로 빼앗긴 신체의 일부이자 영혼을 잇는 두 번째 고리.' },
+  GHOST_BLOOD: { id: 'GHOST_BLOOD', name: '귀신의 피가 담긴 병', icon: '🩸', isRitualItem: true, ritualOrder: 3, storyTitle: '핏빛 기록', storyText: '지하 화재 당시 바닥에 흘렀던 핏자국을 담은 병. 맺힌 한을 씻어낼 마지막 세 번째 제물.' },
+  KEY_MASTER: { id: 'KEY_MASTER', name: '녹슨 만능 열쇠', icon: '🔑', isKeyItem: true, storyTitle: '녹슨 열쇠', storyText: '창고 선반 깊숙이 숨겨져 있던 열쇠. 연구실과 지하로 통하는 문에 맞을 것 같다.' },
+  SCALPEL: { id: 'SCALPEL', name: '녹슨 메스', icon: '🔪', isDangerous: true, choiceText: '차갑고 녹슨 메스가 손에 닿는 순간, 이 모든 고통에서 벗어나고 싶다는 낯선 충동이 스친다. 이 감정은 당신의 것이 아니다 — 귀신의 절망이 스며든 것이다.' },
+  ROPE: { id: 'ROPE', name: '낡은 밧줄', icon: '🪢', isDangerous: true, choiceText: '천장 배관에 걸쳐진 낡은 밧줄을 만지자, 숨이 턱 막히는 듯한 절망감이 밀려온다. 누군가 이곳에서 같은 감정을 느꼈을 것이다.' }
+};
+
+const WORLD_ITEMS = [
+  { item: 'PATIENT_RECORD', x: -18, z: -4.5, floor: 'GROUND' },
+  { item: 'TEDDY_BEAR', x: -12, z: 4.5, floor: 'GROUND' },
+  { item: 'HOSPITAL_PHOTO', x: -18, z: 4.2, floor: 'GROUND' },
+  { item: 'STAFF_EVIDENCE', x: -12, z: -4.5, floor: 'GROUND' },
+  { item: 'GHOST_HAIR', x: -6, z: -4.8, floor: 'GROUND' },
+  { item: 'SCALPEL', x: -6, z: 4.5, floor: 'GROUND' },
+  { item: 'KEY_MASTER', x: 0, z: 4.8, floor: 'GROUND' },
+  { item: 'RESEARCH_LOG', x: 6, z: 4.5, floor: 'GROUND' },
+  { item: 'BASEMENT_LOG', x: -6, z: 0, floor: 'BASEMENT' },
+  { item: 'GHOST_BLOOD', x: 0, z: 9, floor: 'BASEMENT' },
+  { item: 'ROPE', x: 2, z: 10, floor: 'BASEMENT' }
+];
+
+const RITUAL_ORDER = ['TEDDY_BEAR', 'GHOST_HAIR', 'GHOST_BLOOD'];
+const ALTAR_POS = new THREE.Vector3(0, CONFIG.FLOOR_Y.BASEMENT, -3);
+
+/* ===================== GLOBALS ===================== */
+let scene, camera, renderer, flashlight;
+let interactiveObjects = [];
+let doorMeshes = {};
+let ghostGroup, ghostEyeL, ghostEyeR;
+const ghostPos = new THREE.Vector3(-15, CONFIG.FLOOR_Y.GROUND, 0);
+let ghostFloor = 'GROUND';
+let ghostWaypointIdx = 0;
+const GROUND_WAYPOINTS = [
+  new THREE.Vector3(-15, 0, -3), new THREE.Vector3(-15, 0, 3), new THREE.Vector3(-7, 0, -3),
+  new THREE.Vector3(-7, 0, 3), new THREE.Vector3(0, 0, -3), new THREE.Vector3(6, 0, 3),
+  new THREE.Vector3(10, 0, 0), new THREE.Vector3(-24, 0, 0)
+];
+const BASEMENT_WAYPOINTS = [
+  new THREE.Vector3(-6, -8, -3), new THREE.Vector3(6, -8, -3), new THREE.Vector3(0, -8, 4), new THREE.Vector3(-3, -8, 8)
+];
+
+const playerPos = new THREE.Vector3(-24, 0, 0);
+let yaw = 0, pitch = 0;
+const keys = { w: false, a: false, s: false, d: false, shift: false };
+let pointerLocked = false;
+let isTouchDragging = false;
+let lastTouch = { x: 0, y: 0 };
+let lastTime = performance.now();
+let toastTimer = null;
+let choicePendingItem = null;
+
+const audio = {
+  ctx: null,
+  init() {
+    if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+  },
+  tone(freq1, freq2, dur, type, gainVal) {
+    if (!this.ctx) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = type || 'sine';
+      osc.frequency.setValueAtTime(freq1, now);
+      osc.frequency.exponentialRampToValueAtTime(Math.max(freq2, 1), now + dur);
+      gain.gain.setValueAtTime(gainVal || 0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+      osc.connect(gain); gain.connect(this.ctx.destination);
+      osc.start(now); osc.stop(now + dur);
+    } catch (e) {}
+  },
+  bang() { this.tone(180, 30, 0.4, 'triangle', 0.9); },
+  whisper() { this.tone(320 + Math.random() * 200, 140, 0.8, 'sine', 0.22); },
+  bell() { this.tone(880, 440, 0.6, 'sine', 0.3); },
+  scream() { this.tone(900, 90, 1.3, 'sawtooth', 0.8); }
+};
+
+/* ===================== THREE SETUP ===================== */
+function initThree() {
+  scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x000000, 0.045);
+
+  camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 200);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+  const ambient = new THREE.AmbientLight(0x1a1a22, 0.55);
+  scene.add(ambient);
+
+  flashlight = new THREE.SpotLight(0xfff2d0, 2.2, 22, Math.PI / 6.5, 0.5, 1.4);
+  flashlight.castShadow = false;
+  camera.add(flashlight);
+  flashlight.position.set(0, 0, 0);
+  flashlight.target.position.set(0, 0, -1);
+  camera.add(flashlight.target);
+  scene.add(camera);
+
+  buildGround();
+  buildBasement();
+  buildGhost();
+  spawnItems();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+}
+
+function wallMat(color) { return new THREE.MeshStandardMaterial({ color: color || 0x3a3a3a, roughness: 0.95 }); }
+function floorMat(color) { return new THREE.MeshStandardMaterial({ color: color || 0x22201d, roughness: 1 }); }
+
+function addBox(w, h, d, x, y, z, mat) {
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, y, z);
+  scene.add(mesh);
+  return mesh;
+}
+
+function addRoomShell(rect, floorY, opts) {
+  opts = opts || {};
+  const w = rect.maxX - rect.minX, d = rect.maxZ - rect.minZ;
+  const cx = (rect.minX + rect.maxX) / 2, cz = (rect.minZ + rect.maxZ) / 2;
+  const fMat = floorMat(opts.floorColor);
+  addBox(w, 0.2, d, cx, floorY - 0.1, cz, fMat);
+  const ceil = addBox(w, 0.2, d, cx, floorY + 4, cz, wallMat(0x0d0d10));
+  const skip = opts.skip || [];
+  const t = 0.25, h = 4;
+  if (!skip.includes('north')) addBox(w, h, t, cx, floorY + h / 2, rect.minZ, wallMat(opts.wallColor));
+  if (!skip.includes('south')) addBox(w, h, t, cx, floorY + h / 2, rect.maxZ, wallMat(opts.wallColor));
+  if (!skip.includes('west')) addBox(t, h, d, rect.minX, floorY + h / 2, cz, wallMat(opts.wallColor));
+  if (!skip.includes('east')) addBox(t, h, d, rect.maxX, floorY + h / 2, cz, wallMat(opts.wallColor));
+
+  // dim flickering point light per room
+  const light = new THREE.PointLight(0x8899aa, 0.4, 12);
+  light.position.set(cx, floorY + 3.4, cz);
+  scene.add(light);
+  flickerLights.push(light);
+}
+
+const flickerLights = [];
+
+function buildGround() {
+  const G = CONFIG.FLOOR_Y.GROUND;
+  addRoomShell(GROUND_RECTS[0], G, { skip: ['east'], wallColor: 0x33302c }); // 로비
+  addRoomShell(RECT('복도', -18, 12, -1.8, 1.8), G, { skip: ['east', 'west'] });
+  addRoomShell(GROUND_RECTS[2], G, { skip: ['south'] }); // 병실A
+  addRoomShell(GROUND_RECTS[3], G, { skip: ['north'] }); // 간호사실
+  addRoomShell(GROUND_RECTS[4], G, { skip: ['south'] }); // 진료실
+  addRoomShell(GROUND_RECTS[5], G, { skip: ['north'] }); // 병실B
+  addRoomShell(GROUND_RECTS[6], G, { skip: ['south'] }); // 수술실
+  addRoomShell(GROUND_RECTS[7], G, { skip: ['north'] }); // 응급실
+  addRoomShell(GROUND_RECTS[8], G, { skip: ['south'] }); // 약품보관실
+  addRoomShell(GROUND_RECTS[9], G, { skip: ['north'] }); // 창고
+  addRoomShell(RECT('욕실', 4, 8, -6.8, -1.8), G, { skip: ['south'] });
+  addRoomShell(LAB_RECT, G, { skip: [] }); // 폐쇄된 연구실 - full wall + door
+  addRoomShell(STAIRS_RECT, G, { skip: ['west'] }); // 지하 계단실
+
+  // exit door (west wall of lobby)
+  const exitDoor = addBox(0.3, 3.6, 3, -30, G + 1.8, 0, new THREE.MeshStandardMaterial({ color: 0x552222, roughness: 0.8 }));
+  doorMeshes.EXIT = exitDoor;
+  registerInteractive(exitDoor, { type: 'EXIT' });
+
+  // lab door
+  const labDoor = addBox(3.6, 3.6, 0.3, 6, G + 1.8, 1.8, new THREE.MeshStandardMaterial({ color: 0x3a3f47, roughness: 0.8 }));
+  doorMeshes.LAB = labDoor;
+  registerInteractive(labDoor, { type: 'DOOR', doorId: 'LAB' });
+
+  // stairs gate
+  const stairsDoor = addBox(0.3, 3.6, 3.4, 12, G + 1.8, 0, new THREE.MeshStandardMaterial({ color: 0x3a3f47, roughness: 0.8 }));
+  doorMeshes.STAIRS = stairsDoor;
+  registerInteractive(stairsDoor, { type: 'DOOR', doorId: 'STAIRS' });
+
+  // stairs-down trigger marker
+  addBox(2, 0.15, 2, 17, G - 0.02, 0, new THREE.MeshStandardMaterial({ color: 0x111111 }));
+
+  // hiding spots
+  addHidingSpot(-18, G, -3.5, 'BED', GROUND_RECTS[2].name);
+  addHidingSpot(-12, G, 3.5, 'BED', GROUND_RECTS[5].name);
+  addHidingSpot(0, G, 4.8, 'LOCKER', GROUND_RECTS[9].name);
+
+  // altar hint sign not needed on ground
+}
+
+function buildBasement() {
+  const B = CONFIG.FLOOR_Y.BASEMENT;
+  addRoomShell(BASEMENT_RECTS[0], B, { skip: ['south'], wallColor: 0x1c1a1f, floorColor: 0x14100f });
+  addRoomShell(BASEMENT_RECTS[1], B, { skip: ['north'], wallColor: 0x1c1a1f, floorColor: 0x1a0f0f });
+
+  // stairs-up trigger marker
+  addBox(2, 0.15, 2, -3, B + 0.02, -5.6, new THREE.MeshStandardMaterial({ color: 0x111111 }));
+
+  // altar
+  const altar = addBox(1.4, 1.1, 1.4, ALTAR_POS.x, B + 0.55, ALTAR_POS.z, new THREE.MeshStandardMaterial({ color: 0x2a2420, roughness: 0.9 }));
+  const candleLight = new THREE.PointLight(0xff7733, 1.1, 8);
+  candleLight.position.set(ALTAR_POS.x, B + 1.4, ALTAR_POS.z);
+  scene.add(candleLight);
+  registerInteractive(altar, { type: 'ALTAR' });
+
+  addHidingSpot(-8, B, -4, 'LOCKER', '지하시설');
+}
+
+function addHidingSpot(x, floorY, z, kind, roomName) {
+  const color = kind === 'BED' ? 0x3d4a52 : 0x2c2c2c;
+  const mesh = addBox(1.6, kind === 'BED' ? 0.9 : 1.9, 1, x, floorY + (kind === 'BED' ? 0.45 : 0.95), z, new THREE.MeshStandardMaterial({ color }));
+  registerInteractive(mesh, { type: kind === 'BED' ? 'HIDING_BED' : 'HIDING_LOCKER', room: roomName });
+}
+
+function spawnItems() {
+  WORLD_ITEMS.forEach((w, idx) => {
+    const def = ITEMS[w.item];
+    const floorY = CONFIG.FLOOR_Y[w.floor];
+    const color = def.isRitualItem ? 0xd4a63a : def.isKeyItem ? 0xdccb4a : def.isDangerous ? 0x8a1f1f : 0x6b7280;
+    const geo = new THREE.OctahedronGeometry(0.25, 0);
+    const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.35, roughness: 0.5 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(w.x, floorY + 0.9, w.z);
+    scene.add(mesh);
+    const light = new THREE.PointLight(color, 0.5, 3);
+    light.position.copy(mesh.position);
+    scene.add(light);
+    registerInteractive(mesh, { type: 'ITEM', itemId: w.item, spinLight: light });
+  });
+}
+
+function registerInteractive(mesh, data) {
+  interactiveObjects.push(Object.assign({ mesh }, data));
+}
+
+function buildGhost() {
+  ghostGroup = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x0e1013, roughness: 1, transparent: true, opacity: 0.88 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.55, 1.5, 10), bodyMat);
+  body.position.y = 0.9;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 10), bodyMat);
+  head.position.y = 1.75;
+  ghostGroup.add(body, head);
+
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff3333 });
+  ghostEyeL = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 6), eyeMat);
+  ghostEyeR = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 6), eyeMat);
+  ghostEyeL.position.set(-0.11, 1.78, 0.27);
+  ghostEyeR.position.set(0.11, 1.78, 0.27);
+  ghostGroup.add(ghostEyeL, ghostEyeR);
+
+  ghostGroup.position.copy(ghostPos);
+  ghostGroup.visible = false;
+  scene.add(ghostGroup);
+}
+
+/* ===================== INPUT ===================== */
+function setupInputs() {
+  const container = document.getElementById('canvas-container');
+
+  container.addEventListener('click', () => {
+    if (STATE.isStarted && !STATE.isPaused && !STATE.isEnding) {
+      container.requestPointerLock = container.requestPointerLock || container.mozRequestPointerLock;
+      if (container.requestPointerLock) container.requestPointerLock();
+    }
+  });
+
+  document.addEventListener('pointerlockchange', () => {
+    pointerLocked = document.pointerLockElement === container;
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!pointerLocked || !STATE.isStarted || STATE.isPaused || STATE.isEnding) return;
+    yaw -= e.movementX * 0.0022;
+    pitch -= e.movementY * 0.0022;
+    pitch = Math.max(-1.3, Math.min(1.3, pitch));
+  });
+
+  // touch drag fallback
+  container.addEventListener('touchstart', (e) => {
+    isTouchDragging = true;
+    lastTouch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }, { passive: true });
+  container.addEventListener('touchmove', (e) => {
+    if (!isTouchDragging || !STATE.isStarted || STATE.isPaused || STATE.isEnding) return;
+    const dx = e.touches[0].clientX - lastTouch.x;
+    const dy = e.touches[0].clientY - lastTouch.y;
+    yaw -= dx * 0.004;
+    pitch -= dy * 0.004;
+    pitch = Math.max(-1.3, Math.min(1.3, pitch));
+    lastTouch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }, { passive: true });
+  container.addEventListener('touchend', () => { isTouchDragging = false; });
+
+  window.addEventListener('keydown', (e) => {
+    if (!STATE.isStarted || STATE.isEnding) return;
+    const code = e.code;
+    if (code === 'KeyW') keys.w = true;
+    if (code === 'KeyS') keys.s = true;
+    if (code === 'KeyA') keys.a = true;
+    if (code === 'KeyD') keys.d = true;
+    if (code === 'ShiftLeft' || code === 'ShiftRight') keys.shift = true;
+    if (STATE.isPaused) { if (code === 'Escape') togglePause(); return; }
+
+    if (code === 'KeyF') {
+      STATE.flashlightOn = !STATE.flashlightOn;
+      flashlight.visible = STATE.flashlightOn;
+      showToast(STATE.flashlightOn ? '손전등 켜짐' : '손전등 꺼짐');
+    }
+    if (code === 'KeyE') handleInteraction();
+    if (code === 'KeyC') {
+      if (STATE.isHiding) toggleHiding(false);
+    }
+    if (code === 'KeyB') { e.preventDefault(); toggleInventoryModal(); }
+    if (code === 'Escape') togglePause();
+  });
+
+  window.addEventListener('keyup', (e) => {
+    const code = e.code;
+    if (code === 'KeyW') keys.w = false;
+    if (code === 'KeyS') keys.s = false;
+    if (code === 'KeyA') keys.a = false;
+    if (code === 'KeyD') keys.d = false;
+    if (code === 'ShiftLeft' || code === 'ShiftRight') keys.shift = false;
+  });
+
+  document.getElementById('btn-start').addEventListener('click', () => {
+    audio.init();
+    document.getElementById('start-screen').classList.add('hidden');
+    document.getElementById('hud').classList.remove('hidden');
+    STATE.isStarted = true;
+    STATE.isPaused = false;
+    const container2 = document.getElementById('canvas-container');
+    if (container2.requestPointerLock) {
+      try { container2.requestPointerLock(); } catch (err) {}
+    }
+  });
+
+  document.getElementById('btn-resume').addEventListener('click', togglePause);
+  document.getElementById('btn-restart').addEventListener('click', () => location.reload());
+  document.getElementById('btn-ending-restart').addEventListener('click', () => location.reload());
+  document.getElementById('btn-close-story').addEventListener('click', closeStoryModal);
+  document.getElementById('btn-close-inv').addEventListener('click', toggleInventoryModal);
+  document.getElementById('btn-reset-combo').addEventListener('click', resetComboSelection);
+  document.getElementById('btn-perform-ritual').addEventListener('click', performRitual);
+  document.getElementById('btn-choice-yes').addEventListener('click', () => resolveChoice(true));
+  document.getElementById('btn-choice-no').addEventListener('click', () => resolveChoice(false));
+}
+
+function togglePause() {
+  if (!STATE.isStarted || STATE.isEnding) return;
+  STATE.isPaused = !STATE.isPaused;
+  const pauseScreen = document.getElementById('pause-screen');
+  if (STATE.isPaused) {
+    pauseScreen.style.display = 'flex';
+    if (document.pointerLockElement) document.exitPointerLock();
+  } else {
+    pauseScreen.style.display = 'none';
+    const container = document.getElementById('canvas-container');
+    if (container.requestPointerLock) { try { container.requestPointerLock(); } catch (e) {} }
+  }
+}
+
+/* ===================== INTERACTION ===================== */
+function getLookedAtObject() {
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+  const meshes = interactiveObjects.map(o => o.mesh);
+  const intersects = raycaster.intersectObjects(meshes);
+  if (intersects.length > 0 && intersects[0].distance <= CONFIG.PLAYER.INTERACT_DIST) {
+    return interactiveObjects.find(o => o.mesh === intersects[0].object);
+  }
+  return null;
+}
+
+function handleTouchInteraction() { handleInteraction(); }
+
+function handleInteraction() {
+  if (STATE.isPaused || STATE.isEnding || !STATE.isStarted) return;
+  if (document.getElementById('story-modal').classList.contains('hidden') === false) { closeStoryModal(); return; }
+  if (document.getElementById('choice-modal').classList.contains('hidden') === false) return;
+
+  if (STATE.isHiding) { toggleHiding(false); return; }
+
+  const obj = getLookedAtObject();
+  if (!obj) return;
+
+  switch (obj.type) {
+    case 'ITEM': pickupItem(obj); break;
+    case 'HIDING_BED': case 'HIDING_LOCKER': toggleHiding(true, obj.type); break;
+    case 'DOOR': interactDoor(obj); break;
+    case 'EXIT': interactExit(); break;
+    case 'ALTAR': toggleInventoryModal(); break;
+  }
+}
+
+function pickupItem(obj) {
+  const def = ITEMS[obj.itemId];
+  if (def.isDangerous) {
+    choicePendingItem = obj;
+    document.getElementById('choice-text').textContent = def.choiceText;
+    document.getElementById('btn-choice-yes').textContent = '충동을 따른다';
+    document.getElementById('choice-modal').classList.remove('hidden');
+    return;
+  }
+  STATE.inventory.push(obj.itemId);
+  scene.remove(obj.mesh);
+  if (obj.spinLight) scene.remove(obj.spinLight);
+  interactiveObjects = interactiveObjects.filter(o => o !== obj);
+  updateQuickInventory();
+  if (def.isKeyItem) { STATE.hasKey = true; showToast(def.name + ' 획득'); }
+  if (def.storyText) openStoryModal(def.storyTitle, def.storyText);
+  else showToast(def.name + ' 획득');
+}
+
+function resolveChoice(accepted) {
+  document.getElementById('choice-modal').classList.add('hidden');
+  if (!choicePendingItem) return;
+  if (accepted) {
+    triggerEnding('tragic');
+  } else {
+    const obj = choicePendingItem;
+    const def = ITEMS[obj.itemId];
+    STATE.inventory.push(obj.itemId);
+    scene.remove(obj.mesh);
+    if (obj.spinLight) scene.remove(obj.spinLight);
+    interactiveObjects = interactiveObjects.filter(o => o !== obj);
+    updateQuickInventory();
+    showToast(def.name + ' 을(를) 내려놓았다');
+  }
+  choicePendingItem = null;
+}
+
+function interactDoor(obj) {
+  const alreadyUnlocked = obj.doorId === 'LAB' ? STATE.labUnlocked : STATE.stairsUnlocked;
+  if (alreadyUnlocked) return;
+  if (!STATE.hasKey) { showToast('문이 잠겨 있다. 열쇠가 필요하다.'); return; }
+  if (obj.doorId === 'LAB') { STATE.labUnlocked = true; }
+  if (obj.doorId === 'STAIRS') { STATE.stairsUnlocked = true; }
+  obj.mesh.visible = false;
+  interactiveObjects = interactiveObjects.filter(o => o !== obj);
+  audio.bell();
+  showToast('문이 열렸다.');
+}
+
+function interactExit() {
+  if (STATE.ritualCompleted) {
+    triggerEnding('good');
+  } else {
+    showToast('출구는 굳게 잠겨 있다. 귀신의 한을 풀어야만 열릴 것 같다.');
+  }
+}
+
+/* ===================== HIDING ===================== */
+function toggleHiding(state) {
+  STATE.isHiding = state;
+  document.getElementById('hiding-indicator').classList.toggle('hidden', !state);
+  showToast(state ? '숨었다...' : '숨은 곳에서 나왔다');
+}
+
+/* ===================== INVENTORY / STORY / TOAST UI ===================== */
+function openStoryModal(title, text) {
+  document.getElementById('story-title').textContent = title;
+  document.getElementById('story-content').innerHTML = '<p>' + text + '</p>';
+  document.getElementById('story-modal').classList.remove('hidden');
+}
+function closeStoryModal() { document.getElementById('story-modal').classList.add('hidden'); }
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.opacity = '1';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.style.opacity = '0'; }, 2200);
+}
+
+function updateQuickInventory() {
+  const q = document.getElementById('quick-inventory');
+  q.innerHTML = '';
+  STATE.inventory.forEach(id => {
+    const def = ITEMS[id];
+    const span = document.createElement('span');
+    span.className = 'text-lg';
+    span.title = def.name;
+    span.textContent = def.icon;
+    q.appendChild(span);
+  });
+}
+
+function toggleInventoryModal() {
+  const modal = document.getElementById('inventory-modal');
+  const willOpen = modal.classList.contains('hidden');
+  modal.classList.toggle('hidden');
+  if (willOpen) renderInventoryModal();
+}
+
+function renderInventoryModal() {
+  const list = document.getElementById('inventory-list');
+  list.innerHTML = '';
+  STATE.inventory.forEach(id => {
+    const def = ITEMS[id];
+    const card = document.createElement('div');
+    card.className = 'bg-neutral-800 border border-neutral-700 rounded-xl p-2.5 flex items-center gap-2 cursor-pointer hover:border-amber-500 text-xs';
+    card.innerHTML = '<span class="text-xl">' + def.icon + '</span><span class="text-neutral-200">' + def.name + '</span>';
+    if (def.isRitualItem) {
+      card.addEventListener('click', () => addToCombo(id));
+    } else {
+      card.classList.add('opacity-60');
+    }
+    list.appendChild(card);
+  });
+  renderComboSlots();
+}
+
+function addToCombo(id) {
+  if (STATE.comboSelection.length >= 3) return;
+  if (STATE.comboSelection.includes(id)) return;
+  STATE.comboSelection.push(id);
+  renderComboSlots();
+}
+
+function renderComboSlots() {
+  for (let i = 0; i < 3; i++) {
+    const slot = document.getElementById('slot-' + (i + 1));
+    const id = STATE.comboSelection[i];
+    if (id) {
+      slot.textContent = ITEMS[id].icon + ' ' + ITEMS[id].name;
+      slot.classList.remove('text-neutral-500', 'border-dashed');
+      slot.classList.add('text-amber-300', 'border-amber-700');
+    } else {
+      slot.textContent = (i + 1) + '순위 유품';
+      slot.classList.add('text-neutral-500', 'border-dashed');
+      slot.classList.remove('text-amber-300', 'border-amber-700');
+    }
+  }
+  document.getElementById('btn-perform-ritual').disabled = STATE.comboSelection.length !== 3;
+}
+
+function resetComboSelection() { STATE.comboSelection = []; renderComboSlots(); }
+
+function performRitual() {
+  if (STATE.comboSelection.length !== 3) return;
+  const distToAltar = Math.hypot(playerPos.x - ALTAR_POS.x, playerPos.z - ALTAR_POS.z);
+  if (STATE.currentFloor !== 'BASEMENT' || distToAltar > 5) {
+    showToast('제단 근처에서만 의식을 진행할 수 있다.');
+    return;
+  }
+  const correct = STATE.comboSelection.every((id, i) => id === RITUAL_ORDER[i]);
+  toggleInventoryModal();
+  if (correct) {
+    STATE.ritualCompleted = true;
+    STATE.isGhostRage = false;
+    STATE.ghostVanished = true;
+    ghostGroup.visible = false;
+    document.getElementById('objective-text').textContent = '귀신이 승천했다. 1층 로비의 출구로 탈출하세요.';
+    audio.bell();
+    openStoryModal('승천', '오랜 원한이 서서히 흩어진다. 병원을 짓누르던 어둠이 걷히고, 굳게 닫혀 있던 정문이 흔들리며 열린다.');
+  } else {
+    STATE.isGhostRage = true;
+    resetComboSelection();
+    showToast('잘못된 조합이다... 귀신의 분노가 거세진다.');
+    audio.scream();
+  }
+}
+
+/* ===================== FLOOR TRANSITIONS ===================== */
+function goToBasement() {
+  STATE.currentFloor = 'BASEMENT';
+  playerPos.set(0, 0, -5);
+  document.getElementById('floor-indicator').textContent = '지하';
+  showToast('지하시설로 내려왔다.');
+}
+function goToGround() {
+  STATE.currentFloor = 'GROUND';
+  playerPos.set(16, 0, 0);
+  document.getElementById('floor-indicator').textContent = '지상';
+  showToast('지상으로 올라왔다.');
+}
+
+/* ===================== GHOST AI ===================== */
+function updateGhost(delta) {
+  if (STATE.ghostVanished) return;
+  ghostFloor = STATE.currentFloor;
+  ghostGroup.position.y = CONFIG.FLOOR_Y[ghostFloor] + 0.05;
+  ghostGroup.visible = true;
+
+  const speed = STATE.isGhostRage ? CONFIG.GHOST.RAGE_SPEED : CONFIG.GHOST.NORMAL_SPEED;
+  const detectRadius = STATE.isGhostRage ? CONFIG.GHOST.RAGE_DETECT_RADIUS : CONFIG.GHOST.DETECT_RADIUS;
+
+  const dx = playerPos.x - ghostPos.x, dz = playerPos.z - ghostPos.z;
+  const distToPlayer = Math.hypot(dx, dz);
+  const sameFloor = ghostFloor === STATE.currentFloor;
+
+  if (sameFloor && !STATE.isHiding && distToPlayer < detectRadius) {
+    STATE.ghostState = 'CHASE';
+    STATE.investigateTimer = CONFIG.GHOST.INVESTIGATE_TIME;
+  } else if (STATE.ghostState === 'CHASE') {
+    STATE.ghostState = 'INVESTIGATE';
+  }
+
+  let target;
+  if (STATE.ghostState === 'CHASE') {
+    target = playerPos;
+  } else if (STATE.ghostState === 'INVESTIGATE') {
+    STATE.investigateTimer -= delta;
+    target = playerPos;
+    if (STATE.investigateTimer <= 0) STATE.ghostState = 'PATROL';
+  } else {
+    const wps = ghostFloor === 'GROUND' ? GROUND_WAYPOINTS : BASEMENT_WAYPOINTS;
+    target = wps[ghostWaypointIdx % wps.length];
+    if (Math.hypot(target.x - ghostPos.x, target.z - ghostPos.z) < 0.6) ghostWaypointIdx++;
+  }
+
+  const mx = target.x - ghostPos.x, mz = target.z - ghostPos.z;
+  const mlen = Math.hypot(mx, mz);
+  if (mlen > 0.15) {
+    ghostPos.x += (mx / mlen) * speed * delta;
+    ghostPos.z += (mz / mlen) * speed * delta;
+    ghostGroup.rotation.y = Math.atan2(mx, mz);
+  }
+  ghostGroup.position.x = ghostPos.x;
+  ghostGroup.position.z = ghostPos.z;
+
+  // subtle bob + eye flicker
+  const t = performance.now() * 0.002;
+  ghostGroup.children[0].position.y = 0.9 + Math.sin(t * 2) * 0.03;
+  const eyeOn = Math.sin(t * 6) > -0.5;
+  ghostEyeL.visible = eyeOn; ghostEyeR.visible = eyeOn;
+
+  if (STATE.ghostState === 'CHASE' && sameFloor && distToPlayer < CONFIG.GHOST.ATTACK_RANGE && STATE.hitCooldown <= 0 && !STATE.isHiding) {
+    triggerHit();
+  }
+}
+
+function triggerHit() {
+  STATE.hitCount++;
+  STATE.hitCooldown = CONFIG.DAMAGE.HIT_COOLDOWN;
+  STATE.speedBuffTimer = CONFIG.DAMAGE.SPEED_BUFF_DURATION;
+  audio.bang();
+  const dmg = document.getElementById('damage-overlay');
+  dmg.style.opacity = '1';
+  setTimeout(() => { dmg.style.opacity = '0'; }, 220);
+  if (STATE.hitCount >= CONFIG.DAMAGE.MAX_HITS) {
+    triggerEnding('caught');
+  }
+}
+
+/* ===================== TEMPERATURE ===================== */
+function updateTemperature(delta) {
+  const sameFloor = ghostFloor === STATE.currentFloor && !STATE.ghostVanished;
+  const dist = sameFloor ? Math.hypot(playerPos.x - ghostPos.x, playerPos.z - ghostPos.z) : 999;
+  if (dist < CONFIG.TEMPERATURE.COLD_RANGE) {
+    const factor = 1 - dist / CONFIG.TEMPERATURE.COLD_RANGE;
+    STATE.playerTemp -= CONFIG.TEMPERATURE.DROP_RATE * factor * delta;
+  } else {
+    STATE.playerTemp += CONFIG.TEMPERATURE.RECOVER_RATE * delta;
+  }
+  STATE.playerTemp = Math.max(CONFIG.TEMPERATURE.MIN, Math.min(CONFIG.TEMPERATURE.NORMAL, STATE.playerTemp));
+
+  const pct = (STATE.playerTemp - CONFIG.TEMPERATURE.MIN) / (CONFIG.TEMPERATURE.NORMAL - CONFIG.TEMPERATURE.MIN);
+  document.getElementById('temp-bar').style.width = (pct * 100) + '%';
+  const tempValue = document.getElementById('temp-value');
+  const tempWarning = document.getElementById('temp-warning');
+  tempValue.textContent = STATE.playerTemp.toFixed(1) + '°C';
+  const frost = document.getElementById('frost-overlay');
+  frost.style.opacity = Math.max(0, 1 - pct * 1.15).toFixed(2);
+
+  if (pct > 0.7) {
+    tempValue.className = 'text-emerald-400 font-mono text-xs md:text-sm';
+    tempWarning.textContent = '체온 안정';
+    tempWarning.className = 'text-[10px] text-emerald-300 mt-1 h-3 font-semibold';
+  } else if (pct > 0.35) {
+    tempValue.className = 'text-amber-400 font-mono text-xs md:text-sm';
+    tempWarning.textContent = '한기가 느껴진다... 귀신이 가까이 있다';
+    tempWarning.className = 'text-[10px] text-amber-300 mt-1 h-3 font-semibold';
+  } else {
+    tempValue.className = 'text-red-500 font-mono text-xs md:text-sm';
+    tempWarning.textContent = '위험! 극도의 냉기가 느껴진다';
+    tempWarning.className = 'text-[10px] text-red-400 mt-1 h-3 font-semibold animate-pulse';
+    if (Math.random() < 0.06) flashlight.intensity = Math.random() < 0.5 ? 0.4 : 2.2;
+    else flashlight.intensity = 2.2;
+  }
+}
+
+/* ===================== AMBIENT EFFECTS ===================== */
+function updateAmbient(delta) {
+  STATE.ambientTimer -= delta;
+  if (STATE.ambientTimer <= 0) {
+    STATE.ambientTimer = 7 + Math.random() * 9;
+    if (Math.random() < 0.5) audio.whisper();
+    if (STATE.isGhostRage) {
+      const glitch = document.getElementById('glitch-overlay');
+      glitch.style.opacity = '0.6';
+      setTimeout(() => { glitch.style.opacity = '0'; }, 90);
+    }
+  }
+  flickerLights.forEach((l, i) => {
+    l.intensity = 0.3 + Math.abs(Math.sin(performance.now() * 0.001 + i * 3)) * 0.25;
+  });
+}
+
+/* ===================== PLAYER MOVEMENT ===================== */
+function updatePlayer(delta) {
+  if (STATE.isHiding) return;
+  let speed = keys.shift ? CONFIG.PLAYER.RUN_SPEED : CONFIG.PLAYER.WALK_SPEED;
+  if (STATE.speedBuffTimer > 0) { speed *= CONFIG.DAMAGE.SPEED_BUFF_MULT; STATE.speedBuffTimer -= delta; }
+
+  let dx = 0, dz = 0;
+  const sinY = Math.sin(yaw), cosY = Math.cos(yaw);
+  if (keys.w) { dx -= sinY; dz -= cosY; }
+  if (keys.s) { dx += sinY; dz += cosY; }
+  if (keys.a) { dx -= cosY; dz += sinY; }
+  if (keys.d) { dx += cosY; dz -= sinY; }
+  const len = Math.hypot(dx, dz);
+  if (len > 0) {
+    dx = (dx / len) * speed * delta;
+    dz = (dz / len) * speed * delta;
+    const tryX = playerPos.x + dx;
+    if (isPositionAllowed(tryX, playerPos.z, STATE.currentFloor)) playerPos.x = tryX;
+    const tryZ = playerPos.z + dz;
+    if (isPositionAllowed(playerPos.x, tryZ, STATE.currentFloor)) playerPos.z = tryZ;
+  }
+
+  // floor transition triggers
+  if (STATE.currentFloor === 'GROUND' && STATE.stairsUnlocked && playerPos.x > 18.5) goToBasement();
+  if (STATE.currentFloor === 'BASEMENT' && playerPos.z < -5.4 && playerPos.x > -4 && playerPos.x < 0) goToGround();
+
+  camera.position.set(playerPos.x, CONFIG.FLOOR_Y[STATE.currentFloor] + CONFIG.PLAYER.HEIGHT, playerPos.z);
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = yaw;
+  camera.rotation.x = pitch;
+}
+
+/* ===================== INTERACTION PROMPT ===================== */
+function updatePrompt() {
+  const prompt = document.getElementById('interaction-prompt');
+  if (STATE.isHiding) { prompt.classList.add('hidden'); return; }
+  const obj = getLookedAtObject();
+  if (obj) {
+    let label = '[E / 클릭] 조사하기';
+    if (obj.type === 'HIDING_BED' || obj.type === 'HIDING_LOCKER') label = '[E / 클릭] 숨기';
+    if (obj.type === 'DOOR') label = '[E / 클릭] 문 열기';
+    if (obj.type === 'EXIT') label = '[E / 클릭] 문 열기';
+    if (obj.type === 'ALTAR') label = '[E / 클릭] 소지품 열기';
+    prompt.textContent = label;
+    prompt.classList.remove('hidden');
+  } else {
+    prompt.classList.add('hidden');
+  }
+}
+
+/* ===================== ENDINGS ===================== */
+function triggerEnding(kind) {
+  if (STATE.isEnding) return;
+  STATE.isEnding = true;
+  if (document.pointerLockElement) document.exitPointerLock();
+  document.getElementById('hud').classList.add('hidden');
+  const screen = document.getElementById('ending-screen');
+  const badge = document.getElementById('ending-badge');
+  const title = document.getElementById('ending-title');
+  const desc = document.getElementById('ending-desc');
+
+  if (kind === 'good') {
+    badge.textContent = '진엔딩';
+    badge.className = 'inline-block px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest border border-emerald-500 text-emerald-400 bg-emerald-950/50';
+    title.textContent = '살아서 나가다';
+    desc.textContent = '차가운 밤공기가 폐를 채운다.\n뒤돌아본 병원은 그저 낡고 조용한 건물일 뿐이었다.\n그녀는 마침내, 쉴 곳을 찾았다.';
+  } else if (kind === 'caught') {
+    badge.textContent = '악귀 배드엔딩';
+    badge.className = 'inline-block px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest border border-red-600 text-red-500 bg-red-950/50';
+    title.textContent = '벗어날 수 없다';
+    desc.textContent = '차가운 손이 목덜미를 움켜쥔다.\n비명은 낡은 벽 속으로 흡수되어 사라진다.\n병원은 또 한 명의 영혼을 삼켰다.';
+  } else {
+    badge.textContent = '비극적 선택';
+    badge.className = 'inline-block px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest border border-neutral-600 text-neutral-400 bg-neutral-900/60';
+    title.textContent = '...';
+    desc.textContent = '화면이 어두워진다.\n짧은 정적 끝에, 아주 작은 숨소리만이 남았다.\n병원은 다시 침묵에 잠긴다.';
+  }
+  screen.style.display = 'flex';
+}
+
+/* ===================== GAME LOOP ===================== */
+function update(delta) {
+  if (STATE.isPaused || STATE.isEnding || !STATE.isStarted) return;
+  if (STATE.hitCooldown > 0) STATE.hitCooldown -= delta;
+  updatePlayer(delta);
+  updateGhost(delta);
+  updateTemperature(delta);
+  updateAmbient(delta);
+  updatePrompt();
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  const delta = Math.min((now - lastTime) / 1000, 0.1);
+  lastTime = now;
+  update(delta);
+  if (renderer && scene && camera) renderer.render(scene, camera);
+}
+
+window.onload = function () {
+  try {
+    initThree();
+    setupInputs();
+    animate();
+  } catch (err) {
+    console.error('Game init failed:', err);
+    alert('게임 초기화 중 오류가 발생했습니다: ' + err.message);
+  }
+};
+</script>
+</body>
+</html>

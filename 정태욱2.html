@@ -1,0 +1,1351 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>노가다 리듬 마스터</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0d1117;
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+            color: #ffffff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            max-width: 1280px;
+            max-height: 720px;
+            aspect-ratio: 16 / 9;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
+            background-color: #1a1e24;
+            overflow: hidden;
+            border-radius: 8px;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        #audio-prompt {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(245, 158, 11, 0.9);
+            color: #000;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 14px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+
+        #audio-prompt.visible {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="1280" height="720"></canvas>
+        <div id="audio-prompt" class="visible">🔊 화면 또는 아무 키(Press Any Key)를 눌러 오디오 활성화</div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. GAME CONFIGURATION
+        // ==========================================
+        const CONFIG = {
+            SCREEN_WIDTH: 1280,
+            SCREEN_HEIGHT: 720,
+            JUDGE: {
+                PERFECT: 65,  // ms offset tolerance
+                GOOD: 130,    // ms offset tolerance
+                MISS: 175     // ms offset tolerance (기존 210ms -> 175ms로 미스 판정 허용 범위 축소)
+            },
+            SCORE: {
+                PERFECT: 1000,
+                GOOD: 500,
+                MISS_PENALTY: -200,
+                COMBO_MULTIPLIER_STEP: 5,
+                MAX_MULTIPLIER: 2.5
+            },
+            STAGES: [
+                {
+                    name: "STAGE 1: 기초 공사 (Foundation)",
+                    bpm: 115,
+                    targetSpeed: 450,
+                    materialType: 'RAW_BRICK',
+                    // 속도는 안정적이나 점8분음표(0.75)+16분음표(0.25) 중심 엇박 강화
+                    rhythmPattern: [
+                        1, 0.5, 0.5, 0.75, 0.25, 1, 0.5, 0.5, 0.75, 0.25,
+                        0.5, 0.75, 0.25, 0.5, 1, 0.75, 0.25, 0.5, 0.5, 0.75, 0.25,
+                        1, 0.5, 0.75, 0.25, 0.5, 0.5, 1, 0.75, 0.25, 1
+                    ]
+                },
+                {
+                    name: "STAGE 2: 골조 공사 (Framing)",
+                    bpm: 120,
+                    targetSpeed: 480,
+                    materialType: 'CEMENTED_BRICK',
+                    // 다채로운 싱코페이션(당김음)과 지속적인 엇박 리듬배치
+                    rhythmPattern: [
+                        0.75, 0.25, 0.5, 0.75, 0.25, 0.5, 0.5, 0.75, 0.25, 1,
+                        0.5, 0.25, 0.75, 0.5, 0.25, 0.75, 0.5, 0.5, 0.75, 0.25,
+                        0.75, 0.25, 0.5, 0.75, 0.25, 0.5, 0.25, 0.75, 0.5, 1,
+                        0.5, 0.75, 0.25, 0.5, 0.75, 0.25, 1
+                    ]
+                },
+                {
+                    name: "STAGE 3: 마감 공사 (Finishing - EXPERT)",
+                    bpm: 125,
+                    targetSpeed: 500,
+                    materialType: 'PAINT_ROLLER',
+                    // 속도 부담은 유지하되, 연속 엇박(16분음표-8분음표-16분음표) 및 극한의 싱코페이션 비중 대폭 강화
+                    rhythmPattern: [
+                        0.25, 0.5, 0.25, 0.75, 0.25, 0.25, 0.5, 0.25, 0.75, 0.25,
+                        0.5, 0.25, 0.25, 0.75, 0.25, 0.5, 0.25, 0.75, 0.25, 0.25,
+                        0.5, 0.25, 0.75, 0.25, 0.25, 0.5, 0.25, 0.75, 0.25, 0.5,
+                        0.25, 0.25, 0.75, 0.25, 0.5, 0.25, 0.75, 0.25, 0.25, 0.5, 0.25, 0.75
+                    ]
+                },
+                {
+                    name: "STAGE 4: 준공 검사 (Final Inspection - MASTER)",
+                    bpm: 130,
+                    targetSpeed: 540,
+                    materialType: 'GLASS_PANEL',
+                    // 상향된 빠른 속도 + 긴 패턴 & 16분음표 변칙 엇박
+                    rhythmPattern: [
+                        0.25, 0.25, 0.5, 0.25, 0.75, 0.25, 0.5, 0.25, 0.25, 0.75,
+                        0.25, 0.5, 0.25, 0.25, 0.75, 0.5, 0.25, 0.25, 0.75, 0.25,
+                        0.5, 0.25, 0.75, 0.25, 0.25, 0.5, 0.25, 0.25, 0.75, 0.25,
+                        0.5, 0.25, 0.25, 0.75, 0.25, 0.5, 0.25, 0.75, 0.25, 0.25,
+                        0.5, 0.25, 0.75, 0.25, 0.25, 0.5, 0.25, 0.75, 0.25, 0.25,
+                        0.5, 0.25, 0.25, 0.75, 0.25, 0.5, 0.25, 0.75, 0.25, 0.5
+                    ]
+                }
+            ]
+        };
+
+        // ==========================================
+        // 2. AUDIO ENGINE (Web Audio Synthesizer)
+        // ==========================================
+        class AudioEngine {
+            constructor() {
+                this.ctx = null;
+                this.promptEl = document.getElementById('audio-prompt');
+            }
+
+            ensureContext() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (AudioCtx) {
+                        this.ctx = new AudioCtx();
+                    }
+                }
+                if (this.ctx && this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+                if (this.promptEl) {
+                    this.promptEl.classList.remove('visible');
+                }
+            }
+
+            playDrum(type) {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                if (type === 'kick') {
+                    osc.frequency.setValueAtTime(150, now);
+                    osc.frequency.exponentialRampToValueAtTime(0.01, now + 0.15);
+                    gain.gain.setValueAtTime(1, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                    osc.start(now);
+                    osc.stop(now + 0.15);
+                } else if (type === 'snare') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(250, now);
+                    osc.frequency.exponentialRampToValueAtTime(40, now + 0.1);
+                    gain.gain.setValueAtTime(0.6, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                    osc.start(now);
+                    osc.stop(now + 0.1);
+                }
+            }
+
+            playHitSFX(quality) {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                if (quality === 'PERFECT') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(523.25, now);
+                    osc.frequency.setValueAtTime(659.25, now + 0.08);
+                    osc.frequency.setValueAtTime(783.99, now + 0.16);
+                    gain.gain.setValueAtTime(0.4, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.28);
+                    osc.start(now);
+                    osc.stop(now + 0.28);
+                } else if (quality === 'GOOD') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(440, now);
+                    osc.frequency.setValueAtTime(554.37, now + 0.08);
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+                    osc.start(now);
+                    osc.stop(now + 0.2);
+                } else if (quality === 'MISS') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(160, now);
+                    osc.frequency.linearRampToValueAtTime(80, now + 0.2);
+                    gain.gain.setValueAtTime(0.25, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+                    osc.start(now);
+                    osc.stop(now + 0.2);
+                }
+            }
+        }
+
+        // ==========================================
+        // 3. INPUT MANAGER
+        // ==========================================
+        class InputManager {
+            constructor(game) {
+                this.game = game;
+
+                window.addEventListener('keydown', (e) => {
+                    this.game.audio.ensureContext();
+
+                    if (e.code === 'Escape') {
+                        e.preventDefault();
+                        this.game.togglePause();
+                        return;
+                    }
+
+                    if (['F5', 'F12', 'Tab', 'Control', 'Alt', 'Meta'].includes(e.key)) {
+                        return;
+                    }
+
+                    e.preventDefault();
+
+                    if (!e.repeat) {
+                        this.onAnyKeyDown();
+                    }
+                });
+
+                const container = document.getElementById('game-container');
+                container.addEventListener('pointerdown', (e) => {
+                    this.game.audio.ensureContext();
+                    this.onAnyKeyDown();
+                });
+            }
+
+            onAnyKeyDown() {
+                if (this.game.state === 'TITLE' || this.game.state === 'RESULT' || this.game.state === 'STAGE_CLEAR' || this.game.state === 'GAME_OVER') {
+                    this.game.handleMenuClick();
+                } else if (this.game.state === 'PLAYING') {
+                    this.game.processHitInput();
+                }
+            }
+        }
+
+        // ==========================================
+        // 4. VISUAL EFFECTS
+        // ==========================================
+        class ParticleSystem {
+            constructor() {
+                this.particles = [];
+                this.judgments = [];
+            }
+
+            addSparks(x, y, color = '#f39c12', count = 15) {
+                for (let i = 0; i < count; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = 2 + Math.random() * 8;
+                    this.particles.push({
+                        x: x,
+                        y: y,
+                        vx: Math.cos(angle) * speed,
+                        vy: Math.sin(angle) * speed - 2,
+                        size: 2 + Math.random() * 4,
+                        color: color,
+                        alpha: 1,
+                        decay: 0.02 + Math.random() * 0.03,
+                        gravity: 0.2
+                    });
+                }
+            }
+
+            addDust(x, y, count = 10) {
+                for (let i = 0; i < count; i++) {
+                    this.particles.push({
+                        x: x + (Math.random() - 0.5) * 40,
+                        y: y + (Math.random() - 0.5) * 20,
+                        vx: (Math.random() - 0.5) * 2,
+                        vy: -Math.random() * 2 - 0.5,
+                        size: 4 + Math.random() * 8,
+                        color: '#bdc3c7',
+                        alpha: 0.6,
+                        decay: 0.015,
+                        gravity: -0.02
+                    });
+                }
+            }
+
+            addJudgmentText(text, color, x, y) {
+                this.judgments.push({
+                    text: text,
+                    color: color,
+                    x: x,
+                    y: y,
+                    vy: -2,
+                    alpha: 1,
+                    scale: 1.4
+                });
+            }
+
+            update() {
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    const p = this.particles[i];
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.vy += p.gravity;
+                    p.alpha -= p.decay;
+                    if (p.alpha <= 0) {
+                        this.particles.splice(i, 1);
+                    }
+                }
+
+                for (let i = this.judgments.length - 1; i >= 0; i--) {
+                    const j = this.judgments[i];
+                    j.y += j.vy;
+                    if (j.scale > 1.0) j.scale -= 0.05;
+                    j.alpha -= 0.02;
+                    if (j.alpha <= 0) {
+                        this.judgments.splice(i, 1);
+                    }
+                }
+            }
+
+            draw(ctx) {
+                ctx.save();
+                for (const p of this.particles) {
+                    ctx.globalAlpha = Math.max(0, p.alpha);
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                for (const j of this.judgments) {
+                    ctx.globalAlpha = Math.max(0, j.alpha);
+                    ctx.fillStyle = j.color;
+                    ctx.font = `900 ${Math.floor(28 * j.scale)}px 'Segoe UI', sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.shadowColor = 'black';
+                    ctx.shadowBlur = 8;
+                    ctx.fillText(j.text, j.x, j.y);
+                }
+                ctx.restore();
+            }
+
+            clear() {
+                this.particles = [];
+                this.judgments = [];
+            }
+        }
+
+        // ==========================================
+        // 5. BUILDING & ENVIRONMENT
+        // ==========================================
+        class Environment {
+            constructor() {
+                this.craneAngle = 0;
+            }
+
+            drawBackground(ctx, currentStageIdx, buildingProgress) {
+                const skyGrad = ctx.createLinearGradient(0, 0, 0, CONFIG.SCREEN_HEIGHT);
+                skyGrad.addColorStop(0, '#111827');
+                skyGrad.addColorStop(0.5, '#1f2937');
+                skyGrad.addColorStop(0.8, '#374151');
+                skyGrad.addColorStop(1, '#111827');
+                ctx.fillStyle = skyGrad;
+                ctx.fillRect(0, 0, CONFIG.SCREEN_WIDTH, CONFIG.SCREEN_HEIGHT);
+
+                ctx.fillStyle = '#1e293b';
+                ctx.fillRect(50, 420, 80, 200);
+                ctx.fillRect(160, 380, 110, 240);
+                ctx.fillRect(300, 450, 90, 170);
+                ctx.fillRect(950, 390, 120, 230);
+                ctx.fillRect(1100, 440, 100, 180);
+
+                this.craneAngle += 0.005;
+                const craneX = 1050;
+                ctx.strokeStyle = '#d97706';
+                ctx.lineWidth = 6;
+                ctx.beginPath();
+                ctx.moveTo(craneX, 600);
+                ctx.lineTo(craneX, 150);
+                ctx.stroke();
+
+                ctx.lineWidth = 2;
+                for (let y = 150; y < 600; y += 30) {
+                    ctx.beginPath();
+                    ctx.moveTo(craneX - 12, y);
+                    ctx.lineTo(craneX + 12, y + 30);
+                    ctx.stroke();
+                }
+
+                ctx.lineWidth = 5;
+                ctx.beginPath();
+                ctx.moveTo(craneX - 120, 170);
+                ctx.lineTo(craneX + 180, 170);
+                ctx.stroke();
+
+                const hookX = craneX - 60 + Math.sin(this.craneAngle) * 40;
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = '#9ca3af';
+                ctx.beginPath();
+                ctx.moveTo(hookX, 170);
+                ctx.lineTo(hookX, 320);
+                ctx.stroke();
+
+                const groundGrad = ctx.createLinearGradient(0, 580, 0, 720);
+                groundGrad.addColorStop(0, '#334155');
+                groundGrad.addColorStop(1, '#0f172a');
+                ctx.fillStyle = groundGrad;
+                ctx.fillRect(0, 580, CONFIG.SCREEN_WIDTH, 140);
+
+                ctx.fillStyle = '#f59e0b';
+                ctx.fillRect(0, 580, CONFIG.SCREEN_WIDTH, 12);
+                ctx.fillStyle = '#000000';
+                for (let x = 0; x < CONFIG.SCREEN_WIDTH; x += 40) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, 580);
+                    ctx.lineTo(x + 20, 580);
+                    ctx.lineTo(x + 10, 592);
+                    ctx.lineTo(x - 10, 592);
+                    ctx.fill();
+                }
+
+                this.drawBuildingWall(ctx, currentStageIdx, buildingProgress);
+            }
+
+            drawBuildingWall(ctx, stageIdx, progress) {
+                const wallX = 720;
+                const wallY = 220;
+                const wallW = 380;
+                const wallH = 360;
+
+                ctx.strokeStyle = '#64748b';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(wallX - 20, 180); ctx.lineTo(wallX - 20, 580);
+                ctx.moveTo(wallX + wallW / 2, 180); ctx.lineTo(wallX + wallW / 2, 580);
+                ctx.moveTo(wallX + wallW + 20, 180); ctx.lineTo(wallX + wallW + 20, 580);
+                for (let y = 200; y <= 580; y += 95) {
+                    ctx.moveTo(wallX - 30, y);
+                    ctx.lineTo(wallX + wallW + 30, y);
+                }
+                ctx.stroke();
+
+                ctx.fillStyle = '#1e293b';
+                ctx.fillRect(wallX, wallY, wallW, wallH);
+
+                const totalRows = 10;
+                const totalCols = 8;
+                const brickW = wallW / totalCols;
+                const brickH = wallH / totalRows;
+
+                const builtBricksCount = Math.floor((stageIdx * 0.25 + progress * 0.25) * (totalRows * totalCols));
+
+                let count = 0;
+                for (let r = totalRows - 1; r >= 0; r--) {
+                    for (let c = 0; c < totalCols; c++) {
+                        count++;
+                        const bx = wallX + c * brickW;
+                        const by = wallY + r * brickH;
+
+                        if (stageIdx === 0) {
+                            ctx.fillStyle = '#334155';
+                            ctx.fillRect(bx + 1, by + 1, brickW - 2, brickH - 2);
+                            if (count <= builtBricksCount) {
+                                ctx.fillStyle = '#78350f';
+                                ctx.fillRect(bx + 1, by + 1, brickW - 2, brickH - 2);
+                            }
+                        } else if (stageIdx === 1) {
+                            if (count <= builtBricksCount) {
+                                ctx.fillStyle = '#64748b';
+                                ctx.fillRect(bx + 1, by + 1, brickW - 2, brickH - 2);
+                                ctx.strokeStyle = '#475569';
+                                ctx.strokeRect(bx + 1, by + 1, brickW - 2, brickH - 2);
+                            }
+                        } else if (stageIdx === 2) {
+                            ctx.fillStyle = '#64748b';
+                            ctx.fillRect(bx + 1, by + 1, brickW - 2, brickH - 2);
+
+                            if (r >= totalRows - Math.floor(progress * totalRows)) {
+                                ctx.fillStyle = '#ea580c';
+                                ctx.fillRect(bx + 1, by + 1, brickW - 2, brickH - 2);
+                            }
+                        } else {
+                            // Stage 4: Glass facade installation
+                            ctx.fillStyle = '#ea580c';
+                            ctx.fillRect(bx + 1, by + 1, brickW - 2, brickH - 2);
+
+                            if (count <= builtBricksCount) {
+                                ctx.fillStyle = '#0891b2';
+                                ctx.fillRect(bx + 1, by + 1, brickW - 2, brickH - 2);
+                                ctx.fillStyle = 'rgba(207, 250, 254, 0.4)';
+                                ctx.fillRect(bx + 3, by + 3, brickW - 6, brickH - 6);
+                            }
+                        }
+                    }
+                }
+
+                ctx.fillStyle = '#fef08a';
+                ctx.font = 'bold 12px sans-serif';
+                ctx.fillText("안전 제일 (SAFETY FIRST)", wallX + 20, 570);
+            }
+        }
+
+        // ==========================================
+        // 6. WORKER CHARACTER
+        // ==========================================
+        class WorkerPlayer {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.actionTimer = 0;
+                this.currentTool = 'TROWEL';
+            }
+
+            triggerAction(stageIdx) {
+                this.actionTimer = 12;
+                if (stageIdx === 0) this.currentTool = 'TROWEL';
+                else if (stageIdx === 1) this.currentTool = 'BRICK';
+                else if (stageIdx === 2) this.currentTool = 'ROLLER';
+                else this.currentTool = 'GLASS';
+            }
+
+            update() {
+                if (this.actionTimer > 0) {
+                    this.actionTimer--;
+                }
+            }
+
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                const isActing = this.actionTimer > 0;
+                const armAngle = isActing ? -Math.PI / 4 : 0;
+
+                ctx.fillStyle = 'rgba(0,0,0,0.4)';
+                ctx.beginPath();
+                ctx.ellipse(0, 10, 35, 10, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.strokeStyle = '#1e3a8a';
+                ctx.lineWidth = 14;
+                ctx.beginPath();
+                ctx.moveTo(-12, -20); ctx.lineTo(-12, 0);
+                ctx.moveTo(12, -20); ctx.lineTo(12, 0);
+                ctx.stroke();
+
+                ctx.fillStyle = '#451a03';
+                ctx.fillRect(-18, -4, 16, 8);
+                ctx.fillRect(6, -4, 16, 8);
+
+                ctx.fillStyle = '#ea580c';
+                ctx.fillRect(-20, -75, 40, 55);
+
+                ctx.fillStyle = '#e2e8f0';
+                ctx.fillRect(-20, -60, 40, 8);
+                ctx.fillRect(-20, -45, 40, 8);
+
+                ctx.fillStyle = '#fbcfe8';
+                ctx.beginPath();
+                ctx.arc(0, -90, 16, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#facc15';
+                ctx.beginPath();
+                ctx.arc(0, -96, 20, Math.PI, 0);
+                ctx.fill();
+                ctx.fillRect(-24, -96, 48, 6);
+
+                ctx.save();
+                ctx.translate(10, -65);
+                ctx.rotate(armAngle);
+
+                ctx.strokeStyle = '#ea580c';
+                ctx.lineWidth = 10;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(25, isActing ? -15 : 15);
+                ctx.stroke();
+
+                ctx.fillStyle = '#94a3b8';
+                if (this.currentTool === 'TROWEL') {
+                    ctx.fillRect(25, isActing ? -25 : 5, 20, 10);
+                    ctx.fillStyle = '#64748b';
+                    ctx.fillRect(20, isActing ? -20 : 10, 8, 4);
+                } else if (this.currentTool === 'BRICK') {
+                    ctx.fillStyle = '#b45309';
+                    ctx.fillRect(22, isActing ? -30 : 0, 24, 14);
+                } else if (this.currentTool === 'ROLLER') {
+                    ctx.fillStyle = '#475569';
+                    ctx.fillRect(25, isActing ? -35 : -10, 4, 30);
+                    ctx.fillStyle = '#ea580c';
+                    ctx.fillRect(20, isActing ? -40 : -15, 22, 10);
+                } else if (this.currentTool === 'GLASS') {
+                    ctx.fillStyle = '#06b6d4';
+                    ctx.fillRect(22, isActing ? -32 : -2, 22, 22);
+                    ctx.strokeStyle = '#cff4fc';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(22, isActing ? -32 : -2, 22, 22);
+                }
+
+                ctx.restore();
+                ctx.restore();
+            }
+        }
+
+        // ==========================================
+        // 7. RHYTHM & NOTE MANAGER
+        // ==========================================
+        class RhythmManager {
+            constructor(game) {
+                this.game = game;
+                this.notes = [];
+                this.targetY = 520;
+                this.spawnX = 380;
+                this.startTime = 0;
+                this.oneBeatMs = 0;
+                this.patternIndex = 0;
+                this.nextBeatTime = 0;
+                this.totalSpawned = 0;
+                this.totalBeats = 0;
+            }
+
+            startStage(stageConfig) {
+                this.notes = [];
+                this.oneBeatMs = (60 / stageConfig.bpm) * 1000;
+                this.startTime = performance.now();
+                this.nextBeatTime = this.startTime + 1200;
+                this.patternIndex = 0;
+                this.totalSpawned = 0;
+                this.totalBeats = stageConfig.rhythmPattern.length;
+            }
+
+            update(now, currentStageConfig) {
+                if (this.patternIndex < this.totalBeats && now >= this.nextBeatTime) {
+                    const travelTime = (this.targetY - 50) / (currentStageConfig.targetSpeed / 1000);
+                    const targetHitTime = now + travelTime;
+
+                    this.notes.push({
+                        id: this.totalSpawned++,
+                        x: this.spawnX,
+                        y: 50,
+                        targetHitTime: targetHitTime,
+                        hitHandled: false,
+                        type: currentStageConfig.materialType
+                    });
+
+                    if (this.totalSpawned % 2 === 0) {
+                        this.game.audio.playDrum('kick');
+                    } else {
+                        this.game.audio.playDrum('snare');
+                    }
+
+                    const beatOffset = currentStageConfig.rhythmPattern[this.patternIndex];
+                    this.nextBeatTime += beatOffset * this.oneBeatMs;
+                    this.patternIndex++;
+                }
+
+                const speed = currentStageConfig.targetSpeed;
+
+                for (let i = this.notes.length - 1; i >= 0; i--) {
+                    const note = this.notes[i];
+                    const timeDiff = note.targetHitTime - now;
+                    note.y = this.targetY - (timeDiff / 1000) * speed;
+
+                    if (!note.hitHandled && now - note.targetHitTime > CONFIG.JUDGE.MISS) {
+                        note.hitHandled = true;
+                        this.game.registerHit('MISS', note);
+                    }
+
+                    if (note.y > CONFIG.SCREEN_HEIGHT + 50) {
+                        this.notes.splice(i, 1);
+                    }
+                }
+            }
+
+            draw(ctx) {
+                ctx.save();
+
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+                ctx.lineWidth = 4;
+                ctx.setLineDash([8, 8]);
+                ctx.beginPath();
+                ctx.moveTo(this.spawnX, 50);
+                ctx.lineTo(this.spawnX, 580);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                ctx.lineWidth = 4;
+                ctx.strokeStyle = '#f59e0b';
+                ctx.fillStyle = 'rgba(245, 158, 11, 0.15)';
+                
+                ctx.beginPath();
+                ctx.arc(this.spawnX, this.targetY, 36, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(this.spawnX - 15, this.targetY); ctx.lineTo(this.spawnX + 15, this.targetY);
+                ctx.moveTo(this.spawnX, this.targetY - 15); ctx.lineTo(this.spawnX, this.targetY + 15);
+                ctx.stroke();
+
+                for (const note of this.notes) {
+                    if (note.hitHandled) continue;
+
+                    ctx.save();
+                    ctx.translate(note.x, note.y);
+
+                    if (note.type === 'RAW_BRICK') {
+                        ctx.fillStyle = '#b45309';
+                        ctx.fillRect(-24, -14, 48, 28);
+                        ctx.strokeStyle = '#78350f';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(-24, -14, 48, 28);
+                    } else if (note.type === 'CEMENTED_BRICK') {
+                        ctx.fillStyle = '#64748b';
+                        ctx.fillRect(-24, -14, 48, 28);
+                        ctx.fillStyle = '#94a3b8';
+                        ctx.fillRect(-20, -10, 40, 5);
+                        ctx.strokeStyle = '#334155';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(-24, -14, 48, 28);
+                    } else if (note.type === 'PAINT_ROLLER') {
+                        ctx.fillStyle = '#ea580c';
+                        ctx.beginPath();
+                        ctx.arc(0, 0, 18, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 3;
+                        ctx.stroke();
+                    } else if (note.type === 'GLASS_PANEL') {
+                        ctx.fillStyle = '#06b6d4';
+                        ctx.fillRect(-24, -14, 48, 28);
+                        ctx.strokeStyle = '#cff4fc';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(-24, -14, 48, 28);
+                        ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+                        ctx.beginPath();
+                        ctx.moveTo(-12, 8);
+                        ctx.lineTo(12, -8);
+                        ctx.stroke();
+                    }
+
+                    ctx.restore();
+                }
+
+                ctx.restore();
+            }
+        }
+
+        // ==========================================
+        // 8. SCORE & PROGRESS SYSTEM
+        // ==========================================
+        class ScoreTracker {
+            constructor() {
+                this.highScore = parseInt(localStorage.getItem('beat_construction_highscore') || '0', 10);
+                this.isNewRecord = false;
+                this.resetAll();
+            }
+
+            resetAll() {
+                this.score = 0;
+                this.combo = 0;
+                this.maxCombo = 0;
+                this.perfectCount = 0;
+                this.goodCount = 0;
+                this.missCount = 0;
+                this.totalHits = 0;
+                this.isNewRecord = false;
+            }
+
+            register(quality) {
+                this.totalHits++;
+                if (quality === 'PERFECT') {
+                    this.perfectCount++;
+                    this.combo++;
+                    const multiplier = Math.min(CONFIG.SCORE.MAX_MULTIPLIER, 1.0 + Math.floor(this.combo / CONFIG.SCORE.COMBO_MULTIPLIER_STEP) * 0.2);
+                    this.score += Math.floor(CONFIG.SCORE.PERFECT * multiplier);
+                } else if (quality === 'GOOD') {
+                    this.goodCount++;
+                    this.combo++;
+                    const multiplier = Math.min(CONFIG.SCORE.MAX_MULTIPLIER, 1.0 + Math.floor(this.combo / CONFIG.SCORE.COMBO_MULTIPLIER_STEP) * 0.2);
+                    this.score += Math.floor(CONFIG.SCORE.GOOD * multiplier);
+                } else {
+                    this.missCount++;
+                    this.combo = 0;
+                    this.score = Math.max(0, this.score + CONFIG.SCORE.MISS_PENALTY);
+                }
+
+                if (this.combo > this.maxCombo) {
+                    this.maxCombo = this.combo;
+                }
+
+                this.checkHighScore();
+            }
+
+            checkHighScore() {
+                if (this.score > this.highScore) {
+                    this.highScore = this.score;
+                    this.isNewRecord = true;
+                    try {
+                        localStorage.setItem('beat_construction_highscore', this.highScore.toString());
+                    } catch (e) {
+                        console.error("LocalStorage save error", e);
+                    }
+                }
+            }
+
+            getAccuracy() {
+                if (this.totalHits === 0) return "100.0";
+                const points = (this.perfectCount * 1.0) + (this.goodCount * 0.5);
+                return Math.max(0, ((points / this.totalHits) * 100)).toFixed(1);
+            }
+
+            getRankGrade() {
+                const acc = parseFloat(this.getAccuracy());
+                if (acc >= 98 && this.missCount === 0) return { grade: 'S+', color: '#f59e0b' };
+                if (acc >= 93) return { grade: 'S', color: '#eab308' };
+                if (acc >= 85) return { grade: 'A', color: '#22c55e' };
+                if (acc >= 75) return { grade: 'B', color: '#3b82f6' };
+                if (acc >= 60) return { grade: 'C', color: '#a855f7' };
+                return { grade: 'F', color: '#ef4444' };
+            }
+        }
+
+        // ==========================================
+        // 9. GAME ENGINE & MAIN LOOP
+        // ==========================================
+        class RhythmConstructionGame {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+
+                this.audio = new AudioEngine();
+                this.input = new InputManager(this);
+                this.particles = new ParticleSystem();
+                this.environment = new Environment();
+                this.worker = new WorkerPlayer(260, 570);
+                this.rhythm = new RhythmManager(this);
+                this.scoreTracker = new ScoreTracker();
+
+                this.state = 'TITLE';
+                this.currentStageIdx = 0;
+                this.stageClearing = false;
+
+                requestAnimationFrame((time) => this.loop(time));
+            }
+
+            startNewGame() {
+                this.currentStageIdx = 0;
+                this.scoreTracker.resetAll();
+                this.startStage(0);
+            }
+
+            startStage(stageIdx) {
+                this.currentStageIdx = stageIdx;
+                this.state = 'PLAYING';
+                this.stageClearing = false;
+                this.particles.clear();
+                this.rhythm.startStage(CONFIG.STAGES[this.currentStageIdx]);
+            }
+
+            togglePause() {
+                if (this.state === 'PLAYING') {
+                    this.state = 'PAUSED';
+                } else if (this.state === 'PAUSED') {
+                    this.state = 'PLAYING';
+                }
+            }
+
+            processHitInput() {
+                if (this.state !== 'PLAYING') return;
+
+                const now = performance.now();
+                const notes = this.rhythm.notes;
+                let closestNote = null;
+                let minDiff = Infinity;
+
+                for (const note of notes) {
+                    if (note.hitHandled) continue;
+                    const diff = Math.abs(now - note.targetHitTime);
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        closestNote = note;
+                    }
+                }
+
+                this.worker.triggerAction(this.currentStageIdx);
+
+                if (closestNote && minDiff <= CONFIG.JUDGE.MISS) {
+                    closestNote.hitHandled = true;
+
+                    if (minDiff <= CONFIG.JUDGE.PERFECT) {
+                        this.registerHit('PERFECT', closestNote);
+                    } else if (minDiff <= CONFIG.JUDGE.GOOD) {
+                        this.registerHit('GOOD', closestNote);
+                    } else {
+                        this.registerHit('MISS', closestNote);
+                    }
+                } else {
+                    this.registerHit('MISS', null);
+                }
+            }
+
+            registerHit(quality, note) {
+                this.scoreTracker.register(quality);
+                this.audio.playHitSFX(quality);
+
+                const px = this.rhythm.spawnX;
+                const py = this.rhythm.targetY;
+
+                if (quality === 'PERFECT') {
+                    this.particles.addJudgmentText('PERFECT!!', '#facc15', px, py - 40);
+                    this.particles.addSparks(px, py, '#f43f5e', 20);
+                } else if (quality === 'GOOD') {
+                    this.particles.addJudgmentText('GOOD', '#38bdf8', px, py - 30);
+                    this.particles.addSparks(px, py, '#38bdf8', 10);
+                } else {
+                    this.particles.addJudgmentText('MISS', '#ef4444', px, py - 30);
+                    this.particles.addDust(px, py, 8);
+                }
+
+                if (this.scoreTracker.missCount >= 15) {
+                    this.scoreTracker.checkHighScore(); // 게임 오버 시에도 최고 점수 판정 및 저장
+                    this.state = 'GAME_OVER';
+                }
+            }
+
+            handleMenuClick() {
+                if (this.state === 'TITLE' || this.state === 'GAME_OVER') {
+                    this.startNewGame();
+                } else if (this.state === 'STAGE_CLEAR') {
+                    if (this.currentStageIdx + 1 < CONFIG.STAGES.length) {
+                        this.startStage(this.currentStageIdx + 1);
+                    } else {
+                        this.state = 'RESULT';
+                    }
+                } else if (this.state === 'RESULT') {
+                    this.startNewGame();
+                }
+            }
+
+            update(now) {
+                if (this.state === 'PLAYING') {
+                    const currentStageConfig = CONFIG.STAGES[this.currentStageIdx];
+                    this.rhythm.update(now, currentStageConfig);
+                    this.worker.update();
+                    this.particles.update();
+
+                    if (this.scoreTracker.missCount >= 15) {
+                        this.scoreTracker.checkHighScore(); // 게임 오버 순간 최고 점수 갱신 확인
+                        this.state = 'GAME_OVER';
+                        return;
+                    }
+
+                    if (!this.stageClearing && this.rhythm.patternIndex >= this.rhythm.totalBeats) {
+                        const remainingNotes = this.rhythm.notes.filter(n => !n.hitHandled);
+                        if (remainingNotes.length === 0) {
+                            this.stageClearing = true;
+                            setTimeout(() => {
+                                if (this.state === 'PLAYING') {
+                                    if (this.currentStageIdx + 1 < CONFIG.STAGES.length) {
+                                        this.state = 'STAGE_CLEAR';
+                                    } else {
+                                        this.state = 'RESULT';
+                                    }
+                                }
+                            }, 600);
+                        }
+                    }
+                }
+            }
+
+            draw() {
+                this.ctx.clearRect(0, 0, CONFIG.SCREEN_WIDTH, CONFIG.SCREEN_HEIGHT);
+
+                const stageProgress = this.rhythm.totalBeats > 0 ? (this.rhythm.totalSpawned / this.rhythm.totalBeats) : 0;
+
+                this.environment.drawBackground(this.ctx, this.currentStageIdx, stageProgress);
+
+                this.worker.draw(this.ctx);
+                if (this.state === 'PLAYING' || this.state === 'PAUSED') {
+                    this.rhythm.draw(this.ctx);
+                }
+                this.particles.draw(this.ctx);
+
+                this.drawHUD();
+
+                if (this.state === 'TITLE') this.drawTitleScreen();
+                else if (this.state === 'PAUSED') this.drawPauseOverlay();
+                else if (this.state === 'STAGE_CLEAR') this.drawStageClearScreen();
+                else if (this.state === 'RESULT') this.drawResultScreen();
+                else if (this.state === 'GAME_OVER') this.drawGameOverScreen();
+            }
+
+            drawHUD() {
+                if (this.state !== 'PLAYING' && this.state !== 'PAUSED') return;
+
+                const stageConfig = CONFIG.STAGES[this.currentStageIdx];
+
+                this.ctx.save();
+                this.ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+                this.ctx.fillRect(20, 20, 470, 95);
+                this.ctx.strokeStyle = '#334155';
+                this.ctx.lineWidth = 2;
+                this.ctx.strokeRect(20, 20, 470, 95);
+
+                this.ctx.fillStyle = '#f59e0b';
+                this.ctx.font = 'bold 17px sans-serif';
+                this.ctx.fillText(stageConfig.name, 35, 46);
+
+                this.ctx.fillStyle = '#ffffff';
+                this.ctx.font = '15px sans-serif';
+                this.ctx.fillText(`SCORE: ${this.scoreTracker.score.toLocaleString()}`, 35, 74);
+                this.ctx.fillText(`ACC: ${this.scoreTracker.getAccuracy()}%`, 180, 74);
+
+                this.ctx.fillStyle = this.scoreTracker.missCount >= 10 ? '#ef4444' : '#f87171';
+                this.ctx.fillText(`MISS: ${this.scoreTracker.missCount}/15`, 280, 74);
+
+                this.ctx.fillStyle = '#facc15';
+                this.ctx.font = '13px sans-serif';
+                this.ctx.fillText(`BEST: ${this.scoreTracker.highScore.toLocaleString()}`, 375, 74);
+
+                if (this.scoreTracker.combo > 1) {
+                    this.ctx.fillStyle = '#facc15';
+                    this.ctx.font = '900 36px sans-serif';
+                    this.ctx.textAlign = 'right';
+                    this.ctx.fillText(`${this.scoreTracker.combo} COMBO!`, CONFIG.SCREEN_WIDTH - 40, 60);
+                }
+
+                const progressRatio = this.rhythm.totalBeats > 0 ? (this.rhythm.totalSpawned / this.rhythm.totalBeats) : 0;
+                this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                this.ctx.fillRect(510, 20, 310, 16);
+                this.ctx.fillStyle = '#f59e0b';
+                this.ctx.fillRect(510, 20, 310 * progressRatio, 16);
+                this.ctx.strokeStyle = '#ffffff';
+                this.ctx.strokeRect(510, 20, 310, 16);
+
+                this.ctx.restore();
+            }
+
+            drawTitleScreen() {
+                this.ctx.save();
+                this.ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+                this.ctx.fillRect(0, 0, CONFIG.SCREEN_WIDTH, CONFIG.SCREEN_HEIGHT);
+
+                this.ctx.textAlign = 'center';
+
+                this.ctx.fillStyle = '#f59e0b';
+                this.ctx.font = '900 50px sans-serif';
+                this.ctx.shadowColor = '#d97706';
+                this.ctx.shadowBlur = 15;
+                this.ctx.fillText("노가다 리듬 마스터", CONFIG.SCREEN_WIDTH / 2, 115);
+
+                this.ctx.shadowBlur = 0;
+                this.ctx.fillStyle = '#e2e8f0';
+                this.ctx.font = '17px sans-serif';
+                this.ctx.fillText("안정적인 속도 속 밀당 넘치는 변칙 엇박을 이겨내고 최고 기록을 달성하세요!", CONFIG.SCREEN_WIDTH / 2, 155);
+
+                // High Score Badge
+                this.ctx.fillStyle = 'rgba(250, 204, 21, 0.15)';
+                this.ctx.fillRect(CONFIG.SCREEN_WIDTH / 2 - 160, 175, 320, 38);
+                this.ctx.strokeStyle = '#facc15';
+                this.ctx.lineWidth = 1.5;
+                this.ctx.strokeRect(CONFIG.SCREEN_WIDTH / 2 - 160, 175, 320, 38);
+                this.ctx.fillStyle = '#facc15';
+                this.ctx.font = 'bold 16px sans-serif';
+                this.ctx.fillText(`🏆 최고 기록 (HIGH SCORE): ${this.scoreTracker.highScore.toLocaleString()}점`, CONFIG.SCREEN_WIDTH / 2, 200);
+
+                this.ctx.fillStyle = 'rgba(30, 41, 59, 0.9)';
+                this.ctx.fillRect(CONFIG.SCREEN_WIDTH / 2 - 320, 225, 640, 310);
+                this.ctx.strokeStyle = '#475569';
+                this.ctx.strokeRect(CONFIG.SCREEN_WIDTH / 2 - 320, 225, 640, 310);
+
+                this.ctx.fillStyle = '#facc15';
+                this.ctx.font = 'bold 18px sans-serif';
+                this.ctx.fillText("🔥 스테이지별 난이도 & 엇박 안내", CONFIG.SCREEN_WIDTH / 2, 250);
+                
+                this.ctx.fillStyle = '#ffffff';
+                this.ctx.font = '14px sans-serif';
+                this.ctx.textAlign = 'left';
+                const guideX = CONFIG.SCREEN_WIDTH / 2 - 290;
+                this.ctx.fillText("• 1단계 (기초 공사) : BPM 115 + 기초 점8분음표 엇박자", guideX, 280);
+                this.ctx.fillText("• 2단계 (골조 공사) : BPM 120 + 연속 싱코페이션(당김음) 리듬", guideX, 315);
+                this.ctx.fillText("• 3단계 (마감 공사) : BPM 125 + 16분음표 변칙 엇박 폭풍", guideX, 350);
+                this.ctx.fillText("• 4단계 (준공 검사) : BPM 130 + 빠른 속도 및 고난도 변칙 엇박자", guideX, 385);
+                this.ctx.fillText("• 스코어링 시스템 : 연속 성공(Combo) 시 점수 배율 상승 (최대 2.5배)", guideX, 420);
+                this.ctx.fillText("• 탈락하더라도 현재 기록된 점수는 최고 점수 전당에 저장됩니다.", guideX, 455);
+                this.ctx.fillText("• [ 조작법 ] : 노트 도착 시 아무 키 (PRESS ANY KEY) 또는 화면 터치", guideX, 490);
+
+                this.ctx.textAlign = 'center';
+                const blink = Math.floor(Date.now() / 500) % 2 === 0;
+                if (blink) {
+                    this.ctx.fillStyle = '#f59e0b';
+                    this.ctx.font = 'bold 25px sans-serif';
+                    this.ctx.fillText("[ 아무 키 (PRESS ANY KEY) ] 또는 화면을 터치하여 시작!", CONFIG.SCREEN_WIDTH / 2, 575);
+                }
+
+                this.ctx.restore();
+            }
+
+            drawPauseOverlay() {
+                this.ctx.save();
+                this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                this.ctx.fillRect(0, 0, CONFIG.SCREEN_WIDTH, CONFIG.SCREEN_HEIGHT);
+
+                this.ctx.textAlign = 'center';
+                this.ctx.fillStyle = '#f59e0b';
+                this.ctx.font = 'bold 48px sans-serif';
+                this.ctx.fillText("일시 정지 (PAUSED)", CONFIG.SCREEN_WIDTH / 2, 320);
+
+                this.ctx.fillStyle = '#ffffff';
+                this.ctx.font = '20px sans-serif';
+                this.ctx.fillText("ESC 키를 눌러 게임을 재개하세요.", CONFIG.SCREEN_WIDTH / 2, 380);
+                this.ctx.restore();
+            }
+
+            drawStageClearScreen() {
+                this.ctx.save();
+                this.ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+                this.ctx.fillRect(0, 0, CONFIG.SCREEN_WIDTH, CONFIG.SCREEN_HEIGHT);
+
+                const clearedStage = CONFIG.STAGES[this.currentStageIdx];
+
+                this.ctx.textAlign = 'center';
+                this.ctx.fillStyle = '#22c55e';
+                this.ctx.font = 'bold 48px sans-serif';
+                this.ctx.fillText(`${clearedStage.name} 완료!`, CONFIG.SCREEN_WIDTH / 2, 240);
+
+                this.ctx.fillStyle = '#ffffff';
+                this.ctx.font = '22px sans-serif';
+                this.ctx.fillText(`현재까지 점수: ${this.scoreTracker.score.toLocaleString()} 점`, CONFIG.SCREEN_WIDTH / 2, 320);
+                this.ctx.fillText(`현재 정확도: ${this.scoreTracker.getAccuracy()} %`, CONFIG.SCREEN_WIDTH / 2, 360);
+
+                const blink = Math.floor(Date.now() / 500) % 2 === 0;
+                if (blink) {
+                    this.ctx.fillStyle = '#f59e0b';
+                    this.ctx.font = 'bold 24px sans-serif';
+                    this.ctx.fillText("[ 아무 키 (PRESS ANY KEY) ]를 눌러 다음 단계로 이동", CONFIG.SCREEN_WIDTH / 2, 480);
+                }
+
+                this.ctx.restore();
+            }
+
+            drawResultScreen() {
+                this.ctx.save();
+                this.ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+                this.ctx.fillRect(0, 0, CONFIG.SCREEN_WIDTH, CONFIG.SCREEN_HEIGHT);
+
+                this.ctx.textAlign = 'center';
+
+                this.ctx.fillStyle = '#f59e0b';
+                this.ctx.font = 'bold 46px sans-serif';
+                this.ctx.fillText("🏗️ 전 스테이지 완공 성공! 🏗️", CONFIG.SCREEN_WIDTH / 2, 110);
+
+                if (this.scoreTracker.isNewRecord) {
+                    this.ctx.fillStyle = '#ef4444';
+                    this.ctx.font = 'bold 20px sans-serif';
+                    this.ctx.fillText("🎉 NEW HIGH SCORE RECORD! 🎉", CONFIG.SCREEN_WIDTH / 2, 142);
+                }
+
+                const rankInfo = this.scoreTracker.getRankGrade();
+
+                // Leaderboard / Scorecard Box
+                this.ctx.fillStyle = 'rgba(30, 41, 59, 0.95)';
+                this.ctx.fillRect(CONFIG.SCREEN_WIDTH / 2 - 280, 160, 560, 360);
+                this.ctx.strokeStyle = rankInfo.color;
+                this.ctx.lineWidth = 3;
+                this.ctx.strokeRect(CONFIG.SCREEN_WIDTH / 2 - 280, 160, 560, 360);
+
+                // Rank Grade Stamp
+                this.ctx.fillStyle = rankInfo.color;
+                this.ctx.font = '900 80px sans-serif';
+                this.ctx.fillText(rankInfo.grade, CONFIG.SCREEN_WIDTH / 2 + 180, 260);
+                this.ctx.font = 'bold 16px sans-serif';
+                this.ctx.fillText("FINAL RANK", CONFIG.SCREEN_WIDTH / 2 + 180, 290);
+
+                this.ctx.fillStyle = '#ffffff';
+                this.ctx.font = '18px sans-serif';
+                this.ctx.textAlign = 'left';
+                const startX = CONFIG.SCREEN_WIDTH / 2 - 240;
+
+                this.ctx.fillText(`최종 점수 (Score): ${this.scoreTracker.score.toLocaleString()} 점`, startX, 220);
+                this.ctx.fillText(`최고 기록 (Best): ${this.scoreTracker.highScore.toLocaleString()} 점`, startX, 255);
+                this.ctx.fillText(`최종 정확도 (Accuracy): ${this.scoreTracker.getAccuracy()}%`, startX, 290);
+                this.ctx.fillText(`최대 콤보 (Max Combo): ${this.scoreTracker.maxCombo}`, startX, 325);
+
+                this.ctx.strokeStyle = '#475569';
+                this.ctx.lineWidth = 1;
+                this.ctx.beginPath();
+                this.ctx.moveTo(startX, 350);
+                this.ctx.lineTo(CONFIG.SCREEN_WIDTH / 2 + 240, 350);
+                this.ctx.stroke();
+
+                this.ctx.fillStyle = '#facc15';
+                this.ctx.fillText(`PERFECT : ${this.scoreTracker.perfectCount}`, startX, 390);
+                this.ctx.fillStyle = '#38bdf8';
+                this.ctx.fillText(`GOOD    : ${this.scoreTracker.goodCount}`, startX, 425);
+                this.ctx.fillStyle = '#ef4444';
+                this.ctx.fillText(`MISS    : ${this.scoreTracker.missCount}`, startX, 460);
+
+                this.ctx.textAlign = 'center';
+                const blink = Math.floor(Date.now() / 500) % 2 === 0;
+                if (blink) {
+                    this.ctx.fillStyle = '#f59e0b';
+                    this.ctx.font = 'bold 24px sans-serif';
+                    this.ctx.fillText("[ 아무 키 (PRESS ANY KEY) ] 또는 터치하여 메인으로", CONFIG.SCREEN_WIDTH / 2, 570);
+                }
+
+                this.ctx.restore();
+            }
+
+            drawGameOverScreen() {
+                this.ctx.save();
+                this.ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+                this.ctx.fillRect(0, 0, CONFIG.SCREEN_WIDTH, CONFIG.SCREEN_HEIGHT);
+
+                this.ctx.textAlign = 'center';
+
+                this.ctx.fillStyle = '#ef4444';
+                this.ctx.font = 'bold 44px sans-serif';
+                this.ctx.shadowColor = '#991b1b';
+                this.ctx.shadowBlur = 15;
+                this.ctx.fillText("⚠️ 공사 중단 (GAME OVER) ⚠️", CONFIG.SCREEN_WIDTH / 2, 90);
+
+                this.ctx.shadowBlur = 0;
+                if (this.scoreTracker.isNewRecord) {
+                    this.ctx.fillStyle = '#facc15';
+                    this.ctx.font = 'bold 20px sans-serif';
+                    this.ctx.fillText("🎉 NEW HIGH SCORE RECORD! 🎉", CONFIG.SCREEN_WIDTH / 2, 125);
+                } else {
+                    this.ctx.fillStyle = '#f87171';
+                    this.ctx.font = '17px sans-serif';
+                    this.ctx.fillText("누적 MISS가 15회 발생하여 공사가 중단되었습니다!", CONFIG.SCREEN_WIDTH / 2, 125);
+                }
+
+                const rankInfo = this.scoreTracker.getRankGrade();
+
+                // Game Over Leaderboard Box
+                this.ctx.fillStyle = 'rgba(30, 41, 59, 0.95)';
+                this.ctx.fillRect(CONFIG.SCREEN_WIDTH / 2 - 280, 150, 560, 360);
+                this.ctx.strokeStyle = rankInfo.color;
+                this.ctx.lineWidth = 3;
+                this.ctx.strokeRect(CONFIG.SCREEN_WIDTH / 2 - 280, 150, 560, 360);
+
+                // Rank Grade Stamp
+                this.ctx.fillStyle = rankInfo.color;
+                this.ctx.font = '900 80px sans-serif';
+                this.ctx.fillText(rankInfo.grade, CONFIG.SCREEN_WIDTH / 2 + 180, 250);
+                this.ctx.font = 'bold 16px sans-serif';
+                this.ctx.fillText("FINAL RANK", CONFIG.SCREEN_WIDTH / 2 + 180, 280);
+
+                this.ctx.fillStyle = '#ffffff';
+                this.ctx.font = '17px sans-serif';
+                this.ctx.textAlign = 'left';
+                const startX = CONFIG.SCREEN_WIDTH / 2 - 240;
+
+                this.ctx.fillText(`도달 단계 (Stage): ${CONFIG.STAGES[this.currentStageIdx].name}`, startX, 195);
+                this.ctx.fillText(`획득 점수 (Score): ${this.scoreTracker.score.toLocaleString()} 점`, startX, 230);
+                this.ctx.fillText(`최고 기록 (Best): ${this.scoreTracker.highScore.toLocaleString()} 점`, startX, 265);
+                this.ctx.fillText(`최종 정확도 (Accuracy): ${this.scoreTracker.getAccuracy()}%`, startX, 300);
+                this.ctx.fillText(`최대 콤보 (Max Combo): ${this.scoreTracker.maxCombo}`, startX, 335);
+
+                this.ctx.strokeStyle = '#475569';
+                this.ctx.lineWidth = 1;
+                this.ctx.beginPath();
+                this.ctx.moveTo(startX, 355);
+                this.ctx.lineTo(CONFIG.SCREEN_WIDTH / 2 + 240, 355);
+                this.ctx.stroke();
+
+                this.ctx.fillStyle = '#facc15';
+                this.ctx.fillText(`PERFECT : ${this.scoreTracker.perfectCount}`, startX, 390);
+                this.ctx.fillStyle = '#38bdf8';
+                this.ctx.fillText(`GOOD    : ${this.scoreTracker.goodCount}`, startX, 420);
+                this.ctx.fillStyle = '#ef4444';
+                this.ctx.fillText(`MISS    : ${this.scoreTracker.missCount}`, startX, 450);
+
+                this.ctx.textAlign = 'center';
+                const blink = Math.floor(Date.now() / 500) % 2 === 0;
+                if (blink) {
+                    this.ctx.fillStyle = '#f59e0b';
+                    this.ctx.font = 'bold 24px sans-serif';
+                    this.ctx.fillText("[ 아무 키 (PRESS ANY KEY) ] 또는 터치하여 다시 도전!", CONFIG.SCREEN_WIDTH / 2, 560);
+                }
+
+                this.ctx.restore();
+            }
+
+            loop(now) {
+                this.update(now);
+                this.draw();
+                requestAnimationFrame((time) => this.loop(time));
+            }
+        }
+
+        // ==========================================
+        // 10. INITIALIZATION
+        // ==========================================
+        window.addEventListener('load', () => {
+            const game = new RhythmConstructionGame();
+            
+            document.body.addEventListener('pointerdown', () => {
+                game.audio.ensureContext();
+            }, { once: true });
+        });
+    </script>
+</body>
+</html>
