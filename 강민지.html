@@ -1,0 +1,1327 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>자각몽: 범호 (Lucid Nightmare)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Creepster&family=Noto+Sans+KR:wght@300;400;700;900&display=swap');
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #020202;
+            font-family: 'Noto Sans KR', sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+
+        .font-horror {
+            font-family: 'Creepster', cursive;
+        }
+
+        #gameCanvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            image-rendering: pixelated;
+        }
+
+        /* 공포 비네트 & 심리 오버레이 */
+        .vignette {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background: radial-gradient(circle, transparent 30%, rgba(0, 0, 0, 0.85) 75%, rgba(0,0,0,0.98) 100%);
+            box-shadow: inset 0 0 100px #000;
+        }
+
+        .fear-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background: radial-gradient(circle, transparent 20%, rgba(180, 0, 0, var(--fear-alpha, 0)) 85%);
+            transition: background 0.15s ease-out;
+        }
+
+        .crt-scanlines {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+            background-size: 100% 4px;
+            z-index: 5;
+            opacity: 0.6;
+        }
+
+        .glitch-flash {
+            animation: flashGlitch 0.1s infinite alternate;
+        }
+
+        @keyframes jumpscareZoom {
+            0% { transform: scale(0.3) rotate(-12deg); filter: brightness(3) contrast(250%); }
+            15% { transform: scale(1.7) rotate(10deg); filter: brightness(0.4) contrast(300%) invert(0.9); }
+            35% { transform: scale(1.3) rotate(-6deg); filter: brightness(2) hue-rotate(90deg); }
+            55% { transform: scale(1.9) rotate(5deg); filter: brightness(0.6) contrast(200%); }
+            75% { transform: scale(1.5) rotate(-3deg); filter: brightness(1.8) invert(0.5); }
+            100% { transform: scale(1.6) rotate(0deg); filter: brightness(1); }
+        }
+
+        .animate-jumpscare {
+            animation: jumpscareZoom 0.12s infinite alternate ease-in-out;
+        }
+
+        @keyframes bloodStrobe {
+            0% { background-color: #000000; }
+            20% { background-color: #5d0000; }
+            40% { background-color: #110000; }
+            60% { background-color: #990000; }
+            80% { background-color: #220000; }
+            100% { background-color: #000000; }
+        }
+
+        .jumpscare-bg-strobe {
+            animation: bloodStrobe 0.06s infinite;
+        }
+
+        @keyframes flashGlitch {
+            0% { opacity: 0.95; transform: translate(4px, -3px) scale(1.02); filter: hue-rotate(90deg) invert(0.2); }
+            50% { opacity: 0.4; transform: translate(-3px, 3px); }
+            100% { opacity: 1; transform: translate(0px, 0px); filter: contrast(220%); }
+        }
+
+        /* 조준 크로스헤어 */
+        .crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 6px;
+            height: 6px;
+            background-color: rgba(255, 255, 255, 0.7);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            box-shadow: 0 0 8px rgba(255, 255, 255, 0.9);
+            z-index: 10;
+        }
+
+        .touch-zone {
+            touch-action: none;
+        }
+    </style>
+</head>
+<body class="bg-black text-white select-none">
+
+    <div id="game-container" class="relative w-full h-full overflow-hidden">
+        <!-- 2.5D 메인 Canvas -->
+        <canvas id="gameCanvas"></canvas>
+
+        <!-- 필터 레이어 -->
+        <div class="vignette"></div>
+        <div id="fearOverlay" class="fear-overlay"></div>
+        <div class="crt-scanlines"></div>
+
+        <!-- 크로스헤어 -->
+        <div class="crosshair"></div>
+
+        <!-- HUD UI -->
+        <div id="hud" class="absolute top-5 left-5 z-20 flex flex-col gap-3 pointer-events-none max-w-sm sm:max-w-md">
+            <!-- 단서 수집 바 -->
+            <div class="flex items-center justify-between bg-black/80 border border-red-900/60 px-4 py-2.5 rounded-xl backdrop-blur-md shadow-2xl">
+                <div class="flex items-center space-x-2.5">
+                    <span class="w-3 h-3 rounded-full bg-red-600 animate-pulse"></span>
+                    <span class="text-red-400 font-bold tracking-wider text-xs sm:text-sm">트라우마 단서</span>
+                </div>
+                <span id="clueCounter" class="text-lg font-black text-red-200">0 / 4</span>
+            </div>
+
+            <!-- 스태미나 게이지 -->
+            <div class="w-full bg-black/80 border border-amber-900/40 p-2 rounded-xl backdrop-blur-md space-y-1">
+                <div class="flex justify-between text-[10px] text-amber-200/80 font-semibold px-1">
+                    <span>지구력 (SHIFT 달려가기 - 소음 발생)</span>
+                    <span id="staminaPercent">100%</span>
+                </div>
+                <div class="w-full bg-stone-900 h-2 rounded-full overflow-hidden border border-stone-800">
+                    <div id="staminaBar" class="bg-gradient-to-r from-amber-700 to-amber-500 h-full w-full transition-all duration-75"></div>
+                </div>
+            </div>
+
+            <!-- 상태 안내 메시지 -->
+            <div id="statusMessage" class="text-xs text-stone-300 bg-black/80 px-4 py-2.5 rounded-xl border border-stone-800 transition-all duration-300 shadow-xl leading-relaxed">
+                거대한 자각몽 속 집을 탐색하세요. 범호의 발소리를 주의하십시오. (포기하려면 <strong class="text-red-400">K키</strong>)
+            </div>
+        </div>
+
+        <!-- 우측 상단 무기 HUD 및 즉시 사망 버튼 -->
+        <div class="absolute top-5 right-5 z-20 flex flex-col items-end gap-2">
+            <div id="weaponHud" class="hidden flex items-center gap-3 bg-red-950/90 border border-red-500 px-4 py-2.5 rounded-xl backdrop-blur-md animate-pulse shadow-2xl">
+                <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span>
+                <span class="text-red-200 font-bold text-xs sm:text-sm">무기 장착: 쇠파이프 (근접 시 자동 공격)</span>
+            </div>
+            
+            <button id="suicideBtn" class="pointer-events-auto bg-red-950/80 hover:bg-red-900 border border-red-700/80 text-red-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-lg backdrop-blur-sm flex items-center gap-1.5 active:scale-95">
+                <span>☠️ 즉시 사망 (포기/K키)</span>
+            </button>
+        </div>
+
+        <!-- 단서 수집 팝업 노트 모달 -->
+        <div id="noteModal" class="absolute inset-0 z-30 hidden bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div class="max-w-md w-full bg-stone-950 border border-amber-900/80 p-6 rounded-2xl shadow-2xl space-y-4 text-stone-200">
+                <div class="flex items-center justify-between border-b border-amber-900/50 pb-2">
+                    <h3 id="noteTitle" class="text-amber-400 font-bold text-base">단서 획득</h3>
+                    <span class="text-xs text-stone-500">기억의 파편</span>
+                </div>
+                <p id="noteContent" class="text-sm leading-relaxed text-stone-300 italic bg-black/50 p-3.5 rounded-xl border border-stone-800">
+                    ...
+                </p>
+                <button id="closeNoteBtn" class="w-full py-2.5 bg-amber-950 hover:bg-amber-900 border border-amber-700/60 rounded-xl text-amber-200 font-bold text-xs transition">
+                    계속 탐색하기 (클릭 또는 ESC)
+                </button>
+            </div>
+        </div>
+
+        <!-- 포인터 해제 경고 안내 -->
+        <div id="pointerLockNotice" class="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 hidden bg-black/90 border border-red-800/80 px-6 py-2.5 rounded-full backdrop-blur-md text-xs text-red-300 pointer-events-none shadow-2xl">
+            화면을 클릭하면 마우스 시점이 고정됩니다.
+        </div>
+
+        <!-- 터치 조작부 (모바일 대응) -->
+        <div id="mobileControls" class="absolute inset-0 z-10 pointer-events-none sm:hidden flex justify-between p-6 items-end">
+            <div id="touchJoystick" class="w-28 h-28 bg-white/10 border border-white/20 rounded-full pointer-events-auto touch-zone relative flex items-center justify-center">
+                <div id="joystickKnob" class="w-12 h-12 bg-red-600/60 rounded-full"></div>
+            </div>
+            <button id="touchSprintBtn" class="w-16 h-16 bg-amber-900/60 border border-amber-500/50 rounded-full text-xs font-bold pointer-events-auto active:scale-95 flex items-center justify-center">
+                달리기
+            </button>
+        </div>
+
+        <!-- 점프스케어 오버레이 -->
+        <div id="jumpscareOverlay" class="absolute inset-0 bg-black z-50 hidden flex items-center justify-center overflow-hidden jumpscare-bg-strobe">
+            <div id="jumpscareFace" class="w-full h-full flex items-center justify-center flex-col text-center p-4 animate-jumpscare select-none">
+                <svg class="w-80 h-80 sm:w-96 sm:h-96 text-red-600 drop-shadow-[0_0_50px_rgba(255,0,0,1)] mb-2" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M100 10C50 10 20 50 20 100C20 150 50 190 100 190C150 190 180 150 180 100C180 50 150 10 100 10Z" fill="#120000" stroke="#ff0000" stroke-width="4"/>
+                    <circle cx="65" cy="75" r="16" fill="#ff0000"/>
+                    <circle cx="65" cy="75" r="5" fill="#ffffff"/>
+                    <circle cx="135" cy="75" r="16" fill="#ff0000"/>
+                    <circle cx="135" cy="75" r="5" fill="#ffffff"/>
+                    <circle cx="100" cy="50" r="10" fill="#ff0000"/>
+                    <circle cx="100" cy="50" r="3" fill="#ffffff"/>
+                    <path d="M65 91L60 125M135 91L140 125" stroke="#aa0000" stroke-width="3"/>
+                    <path d="M40 125Q100 185 160 125Q100 140 40 125Z" fill="#300000" stroke="#ff0000" stroke-width="3"/>
+                    <path d="M50 127L58 142L66 129L74 145L82 130L90 148L98 131L106 148L114 131L122 146L130 129L138 143L146 128" stroke="#ffffff" stroke-width="3" fill="none"/>
+                </svg>
+                <h1 class="text-6xl sm:text-8xl font-black text-red-600 font-horror tracking-widest uppercase drop-shadow-[0_0_30px_rgba(255,0,0,1)] animate-bounce">
+                    범호에게 붙잡혔다!
+                </h1>
+                <p class="text-red-400 font-mono text-sm sm:text-base mt-2 tracking-widest bg-black/80 px-4 py-1 rounded border border-red-800">
+                    악몽이 당신의 정신을 산산조각 냈습니다
+                </p>
+            </div>
+        </div>
+
+        <!-- 시작 / 게임오버 / 승리 메인 모달 -->
+        <div id="modalOverlay" class="absolute inset-0 bg-black/95 backdrop-blur-xl z-40 flex items-center justify-center p-4 overflow-y-auto">
+            <div id="modalContent" class="max-w-lg w-full bg-stone-950 border border-red-900/70 p-6 sm:p-8 rounded-2xl shadow-2xl text-center space-y-6 my-auto">
+                <div class="space-y-2">
+                    <h1 id="modalTitle" class="text-4xl sm:text-5xl font-horror text-red-600 tracking-wider">자각몽: 범호</h1>
+                    <p class="text-xs text-red-400 font-mono tracking-widest uppercase">2.5D Psychological Survival Horror</p>
+                </div>
+
+                <div id="modalDescription" class="text-stone-300 text-xs sm:text-sm leading-relaxed text-left space-y-3 bg-black/60 p-4 rounded-xl border border-stone-800">
+                    <p>당신은 연쇄살인 사건의 생존자입니다. 공황장애와 대인공포증 속에서 트라우마가 형상화된 악몽의 공간에 갇혔습니다.</p>
+                    <p class="text-amber-200/90 font-medium">백룸처럼 기괴하게 반복되는 거대한 집을 탐색하십시오. 연쇄살인범 <strong class="text-red-400">범호</strong>와 천장의 <strong class="text-red-400">눈알들</strong>이 당신을 노리고 있습니다.</p>
+                    <div class="border-t border-stone-800 pt-3 text-stone-400 space-y-1 text-[11px] sm:text-xs">
+                        <div>• <strong class="text-white">WASD / 방향키</strong>: 플레이어 이동</div>
+                        <div>• <strong class="text-white">Q / E / 마우스</strong>: 시점 회전</div>
+                        <div>• <strong class="text-white">SHIFT</strong>: 달려가기 (지구력 소모, 큰 발소리로 범호 자극)</div>
+                        <div>• <strong class="text-white">K 키</strong>: 즉시 사망 (포기)</div>
+                        <div>• <strong class="text-white">목표</strong>: 단서 4개 수집 → 숨겨진 방에서 무기 획득 → 범호 처치</div>
+                    </div>
+                </div>
+
+                <button id="startBtn" class="w-full py-4 bg-red-900 hover:bg-red-800 active:scale-98 text-white font-bold rounded-xl transition duration-200 border border-red-500 shadow-xl tracking-widest text-sm sm:text-base">
+                    꿈속으로 들어가지 (시작)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function requestPointerLockSafe(element) {
+            if (!element || document.pointerLockElement === element) return;
+            try {
+                const promise = element.requestPointerLock();
+                if (promise && typeof promise.catch === 'function') {
+                    promise.catch(() => {});
+                }
+            } catch (e) {}
+        }
+
+        const CONFIG = {
+            MAP_WIDTH: 24,
+            MAP_HEIGHT: 24,
+            FOV: Math.PI / 3,
+            RAY_COUNT: 320,
+            MAX_DEPTH: 20,
+
+            PLAYER_SPEED: 3.2,
+            PLAYER_SPRINT_SPEED: 5.2,
+            PLAYER_ROT_SPEED: 2.2,
+            MOUSE_SENSITIVITY: 0.0022,
+            MAX_STAMINA: 100,
+
+            // 범호 난이도 및 추격 설정 개선
+            BUMHO_SPEED_PATROL: 1.5,
+            BUMHO_SPEED_CHASE: 2.8,
+            BUMHO_SPEED_FINAL: 3.4,
+            BUMHO_DETECTION_RADIUS: 8.5,
+            BUMHO_SPRINT_DETECTION_RADIUS: 14.0,
+            BUMHO_ATTACK_RADIUS: 0.85,
+
+            TOTAL_CLUES: 4,
+            JUMPSCARE_DURATION: 1200,
+
+            WALL_TYPES: {
+                EMPTY: 0,
+                WALL_YELLOW: 1,     // 백룸 황색 벽
+                WALL_BLOOD: 2,      // 피묻은 벽
+                WALL_SECRET: 3,     // 숨겨진 방 잠긴 벽
+                WALL_SECRET_OPEN: 4 // 숨겨진 방 열린 벽
+            }
+        };
+
+        const GAME_STATE = {
+            current: 'START',
+            set(newState) { this.current = newState; },
+            is(state) { return this.current === state; }
+        };
+
+        const AUDIO = {
+            ctx: null,
+            heartbeatTimer: 0,
+
+            init() {
+                if (!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    if (AudioContext) {
+                        this.ctx = new AudioContext();
+                    }
+                }
+                if (this.ctx && this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            },
+
+            playTone(freq, duration, type = 'sine', vol = 0.1) {
+                if (!this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                    gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + duration);
+                } catch (e) {}
+            },
+
+            playFootstep(isSprint) {
+                this.playTone(isSprint ? 120 : 80, 0.08, 'triangle', 0.15);
+            },
+
+            playHeartbeat(rate) {
+                this.playTone(55, 0.12, 'sine', 0.25);
+                setTimeout(() => {
+                    this.playTone(45, 0.12, 'sine', 0.2);
+                }, 180 / rate);
+            },
+
+            playPickupSound() {
+                this.playTone(440, 0.1, 'sine', 0.2);
+                setTimeout(() => this.playTone(880, 0.25, 'triangle', 0.25), 100);
+            },
+
+            playAttackSound() {
+                this.playTone(150, 0.3, 'sawtooth', 0.3);
+            },
+
+            playJumpscare() {
+                if (!this.ctx) return;
+                try {
+                    const now = this.ctx.currentTime;
+                    
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(800, now);
+                    osc.frequency.exponentialRampToValueAtTime(180, now + 0.9);
+                    gain.gain.setValueAtTime(0.9, now);
+                    gain.gain.linearRampToValueAtTime(0.001, now + 1.0);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 1.0);
+
+                    const subOsc = this.ctx.createOscillator();
+                    const subGain = this.ctx.createGain();
+                    subOsc.type = 'triangle';
+                    subOsc.frequency.setValueAtTime(160, now);
+                    subOsc.frequency.exponentialRampToValueAtTime(30, now + 0.8);
+                    subGain.gain.setValueAtTime(1.0, now);
+                    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+                    subOsc.connect(subGain);
+                    subGain.connect(this.ctx.destination);
+                    subOsc.start(now);
+                    subOsc.stop(now + 0.8);
+
+                    const bufferSize = this.ctx.sampleRate * 0.5;
+                    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                    const output = buffer.getChannelData(0);
+                    for (let i = 0; i < bufferSize; i++) {
+                        output[i] = Math.random() * 2 - 1;
+                    }
+                    const noise = this.ctx.createBufferSource();
+                    noise.buffer = buffer;
+                    const noiseGain = this.ctx.createGain();
+                    noiseGain.gain.setValueAtTime(0.6, now);
+                    noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+                    noise.connect(noiseGain);
+                    noiseGain.connect(this.ctx.destination);
+                    noise.start(now);
+                } catch(e) {}
+            }
+        };
+
+        const MAP = {
+            grid: [
+                1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+                1,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,1,
+                1,0,1,0,1,0,1,1,1,0,1,0,1,1,1,0,1,0,1,1,1,1,0,1,
+                1,0,1,0,0,0,0,0,1,0,0,0,1,0,0,0,1,0,1,0,0,0,0,1,
+                1,0,1,1,1,1,1,0,1,1,1,0,1,0,1,1,1,0,1,0,1,1,1,1,
+                1,0,0,0,0,0,1,0,0,0,0,0,1,0,1,0,0,0,1,0,0,0,0,1,
+                1,1,1,1,1,0,1,1,1,1,1,0,1,0,1,0,1,1,1,1,1,1,0,1,
+                1,0,0,0,1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,1,0,1,
+                1,0,1,0,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,0,1,0,1,
+                1,0,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,
+                1,0,1,1,1,1,1,0,1,0,3,3,3,3,0,1,1,1,0,1,1,1,0,1,
+                1,0,0,0,0,0,1,0,1,0,3,0,0,3,0,1,0,0,0,0,0,1,0,1,
+                1,1,1,1,1,0,1,0,1,0,3,0,0,3,0,1,0,1,1,1,1,1,0,1,
+                1,0,0,0,1,0,1,0,1,0,3,3,3,3,0,1,0,1,0,0,0,0,0,1,
+                1,0,1,0,1,0,0,0,1,0,0,0,0,0,0,1,0,1,0,1,1,1,1,1,
+                1,0,1,0,1,1,1,1,1,1,1,0,1,1,1,1,0,1,0,0,0,0,0,1,
+                1,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,1,1,1,1,0,1,
+                1,0,1,1,1,1,1,1,1,0,1,1,1,1,1,1,0,0,0,0,0,1,0,1,
+                1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,1,1,1,1,0,1,0,1,
+                1,1,1,1,1,1,1,0,1,1,1,1,1,1,0,1,0,0,0,1,0,1,0,1,
+                1,0,0,0,0,0,1,0,0,0,0,0,0,1,0,1,0,1,0,1,0,0,0,1,
+                1,0,1,1,1,0,1,1,1,1,1,1,0,1,0,1,0,1,0,1,1,1,0,1,
+                1,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,1,
+                1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+            ],
+
+            get(x, y) {
+                const mapX = Math.floor(x);
+                const mapY = Math.floor(y);
+                if (mapX < 0 || mapX >= CONFIG.MAP_WIDTH || mapY < 0 || mapY >= CONFIG.MAP_HEIGHT) return 1;
+                return this.grid[mapY * CONFIG.MAP_WIDTH + mapX];
+            },
+
+            set(x, y, val) {
+                const mapX = Math.floor(x);
+                const mapY = Math.floor(y);
+                if (mapX >= 0 && mapX < CONFIG.MAP_WIDTH && mapY >= 0 && mapY < CONFIG.MAP_HEIGHT) {
+                    this.grid[mapY * CONFIG.MAP_WIDTH + mapX] = val;
+                }
+            },
+
+            isSolid(x, y) {
+                const cell = this.get(x, y);
+                return cell !== CONFIG.WALL_TYPES.EMPTY && cell !== CONFIG.WALL_TYPES.WALL_SECRET_OPEN;
+            },
+
+            // BFS 미로 경로 탐색 함수 (범호 길찾기 전용)
+            findNextStep(startX, startY, targetX, targetY) {
+                const sx = Math.floor(startX);
+                const sy = Math.floor(startY);
+                const tx = Math.floor(targetX);
+                const ty = Math.floor(targetY);
+
+                if (sx === tx && sy === ty) return { x: targetX, y: targetY };
+
+                const queue = [[sx, sy]];
+                const visited = new Set([`${sx},${sy}`]);
+                const parent = {};
+
+                const dirs = [[0,1], [1,0], [0,-1], [-1,0]];
+                let found = false;
+
+                while (queue.length > 0) {
+                    const [cx, cy] = queue.shift();
+                    if (cx === tx && cy === ty) {
+                        found = true;
+                        break;
+                    }
+
+                    for (const [dx, dy] of dirs) {
+                        const nx = cx + dx;
+                        const ny = cy + dy;
+                        const key = `${nx},${ny}`;
+
+                        if (nx >= 0 && nx < CONFIG.MAP_WIDTH && ny >= 0 && ny < CONFIG.MAP_HEIGHT) {
+                            if (!visited.has(key) && !this.isSolid(nx + 0.5, ny + 0.5)) {
+                                visited.add(key);
+                                parent[key] = [cx, cy];
+                                queue.push([nx, ny]);
+                            }
+                        }
+                    }
+                }
+
+                if (!found) return { x: targetX, y: targetY };
+
+                let curr = [tx, ty];
+                let prev = null;
+                while (curr[0] !== sx || curr[1] !== sy) {
+                    prev = curr;
+                    const pKey = `${curr[0]},${curr[1]}`;
+                    curr = parent[pKey];
+                    if (!curr) break;
+                }
+
+                if (prev) {
+                    return { x: prev[0] + 0.5, y: prev[1] + 0.5 };
+                }
+                return { x: targetX, y: targetY };
+            }
+        };
+
+        const INPUT = {
+            moveForward: false,
+            moveBackward: false,
+            strafeLeft: false,
+            strafeRight: false,
+            turnLeft: false,
+            turnRight: false,
+            isSprinting: false,
+            mouseDeltaX: 0,
+            isPointerLocked: false,
+
+            touchJoystickDir: { x: 0, y: 0 },
+
+            init() {
+                window.addEventListener('keydown', (e) => this.handleKey(e, true));
+                window.addEventListener('keyup', (e) => this.handleKey(e, false));
+
+                const canvas = document.getElementById('gameCanvas');
+                let isMouseDown = false;
+                let lastMouseX = 0;
+
+                canvas.addEventListener('mousedown', (e) => {
+                    isMouseDown = true;
+                    lastMouseX = e.clientX;
+                    if (!GAME_STATE.is('START') && !GAME_STATE.is('GAME_OVER') && !GAME_STATE.is('VICTORY')) {
+                        requestPointerLockSafe(canvas);
+                    }
+                });
+
+                window.addEventListener('mouseup', () => { isMouseDown = false; });
+
+                document.addEventListener('pointerlockchange', () => {
+                    this.isPointerLocked = (document.pointerLockElement === canvas);
+                    const notice = document.getElementById('pointerLockNotice');
+                    if (!this.isPointerLocked && !GAME_STATE.is('START') && !GAME_STATE.is('GAME_OVER') && !GAME_STATE.is('VICTORY')) {
+                        notice.classList.remove('hidden');
+                    } else {
+                        notice.classList.add('hidden');
+                    }
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    if (this.isPointerLocked) {
+                        this.mouseDeltaX += e.movementX;
+                    } else if (isMouseDown) {
+                        const deltaX = e.clientX - lastMouseX;
+                        this.mouseDeltaX += deltaX;
+                        lastMouseX = e.clientX;
+                    }
+                });
+
+                this.initTouchControls();
+            },
+
+            clearMouse() {
+                this.mouseDeltaX = 0;
+            },
+
+            handleKey(e, isPressed) {
+                const code = e.code;
+                const key = e.key ? e.key.toLowerCase() : '';
+
+                if (code === 'KeyW' || code === 'ArrowUp' || key === 'w') this.moveForward = isPressed;
+                if (code === 'KeyS' || code === 'ArrowDown' || key === 's') this.moveBackward = isPressed;
+                if (code === 'KeyA' || key === 'a') this.strafeLeft = isPressed;
+                if (code === 'KeyD' || key === 'd') this.strafeRight = isPressed;
+                if (code === 'KeyQ' || code === 'ArrowLeft' || key === 'q') this.turnLeft = isPressed;
+                if (code === 'KeyE' || code === 'ArrowRight' || key === 'e') this.turnRight = isPressed;
+                if (code === 'ShiftLeft' || code === 'ShiftRight' || key === 'shift') this.isSprinting = isPressed;
+                
+                // K키 누르면 즉시 사망
+                if ((code === 'KeyK' || key === 'k') && isPressed) {
+                    if (!GAME_STATE.is('GAME_OVER') && !GAME_STATE.is('VICTORY') && !GAME_STATE.is('START')) {
+                        triggerJumpscareAndGameOver();
+                    }
+                }
+
+                if (code === 'Escape' && isPressed) UI.closeNote();
+            },
+
+            initTouchControls() {
+                const joystick = document.getElementById('touchJoystick');
+                const knob = document.getElementById('joystickKnob');
+                const sprintBtn = document.getElementById('touchSprintBtn');
+
+                if (!joystick || !knob) return;
+
+                let touchId = null;
+                let startX = 0, startY = 0;
+
+                joystick.addEventListener('touchstart', (e) => {
+                    if (touchId !== null) return;
+                    const touch = e.changedTouches[0];
+                    touchId = touch.identifier;
+                    const rect = joystick.getBoundingClientRect();
+                    startX = rect.left + rect.width / 2;
+                    startY = rect.top + rect.height / 2;
+                });
+
+                window.addEventListener('touchmove', (e) => {
+                    if (touchId === null) return;
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        if (e.changedTouches[i].identifier === touchId) {
+                            const touch = e.changedTouches[i];
+                            let dx = touch.clientX - startX;
+                            let dy = touch.clientY - startY;
+                            const dist = Math.hypot(dx, dy);
+                            const maxDist = 40;
+
+                            if (dist > maxDist) {
+                                dx = (dx / dist) * maxDist;
+                                dy = (dy / dist) * maxDist;
+                            }
+
+                            knob.style.transform = `translate(${dx}px, ${dy}px)`;
+                            this.touchJoystickDir.x = dx / maxDist;
+                            this.touchJoystickDir.y = dy / maxDist;
+                        }
+                    }
+                });
+
+                const endTouch = (e) => {
+                    if (touchId === null) return;
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        if (e.changedTouches[i].identifier === touchId) {
+                            touchId = null;
+                            knob.style.transform = 'translate(0px, 0px)';
+                            this.touchJoystickDir.x = 0;
+                            this.touchJoystickDir.y = 0;
+                        }
+                    }
+                };
+
+                window.addEventListener('touchend', endTouch);
+                window.addEventListener('touchcancel', endTouch);
+
+                if (sprintBtn) {
+                    sprintBtn.addEventListener('touchstart', () => this.isSprinting = true);
+                    sprintBtn.addEventListener('touchend', () => this.isSprinting = false);
+                }
+            }
+        };
+
+        const PLAYER = {
+            x: 1.5,
+            y: 1.5,
+            stamina: CONFIG.MAX_STAMINA,
+            hasWeapon: false,
+            cluesCollected: 0,
+            stepTimer: 0,
+            bobbingTimer: 0,
+            isMoving: false,
+
+            reset() {
+                this.x = 1.5;
+                this.y = 1.5;
+                this.stamina = CONFIG.MAX_STAMINA;
+                this.hasWeapon = false;
+                this.cluesCollected = 0;
+                this.stepTimer = 0;
+                this.bobbingTimer = 0;
+                this.isMoving = false;
+                CAMERA.angle = 0;
+            },
+
+            update(dt) {
+                if (GAME_STATE.is('GAME_OVER') || GAME_STATE.is('VICTORY') || GAME_STATE.is('START')) return;
+
+                if (INPUT.mouseDeltaX !== 0) {
+                    CAMERA.angle += INPUT.mouseDeltaX * CONFIG.MOUSE_SENSITIVITY;
+                    INPUT.clearMouse();
+                }
+                if (INPUT.turnLeft) CAMERA.angle -= CONFIG.PLAYER_ROT_SPEED * dt;
+                if (INPUT.turnRight) CAMERA.angle += CONFIG.PLAYER_ROT_SPEED * dt;
+
+                let moveX = 0;
+                let moveY = 0;
+                const dirX = Math.cos(CAMERA.angle);
+                const dirY = Math.sin(CAMERA.angle);
+                const sideX = -Math.sin(CAMERA.angle);
+                const sideY = Math.cos(CAMERA.angle);
+
+                if (INPUT.moveForward) { moveX += dirX; moveY += dirY; }
+                if (INPUT.moveBackward) { moveX -= dirX; moveY -= dirY; }
+                if (INPUT.strafeLeft) { moveX -= sideX; moveY -= sideY; }
+                if (INPUT.strafeRight) { moveX += sideX; moveY += sideY; }
+
+                if (INPUT.touchJoystickDir.x !== 0 || INPUT.touchJoystickDir.y !== 0) {
+                    moveX += dirX * (-INPUT.touchJoystickDir.y) + sideX * INPUT.touchJoystickDir.x;
+                    moveY += dirY * (-INPUT.touchJoystickDir.y) + sideY * INPUT.touchJoystickDir.x;
+                }
+
+                let speed = CONFIG.PLAYER_SPEED;
+                this.isMoving = Math.hypot(moveX, moveY) > 0.1;
+
+                if (INPUT.isSprinting && this.isMoving && this.stamina > 5) {
+                    speed = CONFIG.PLAYER_SPRINT_SPEED;
+                    this.stamina = Math.max(0, this.stamina - dt * 18);
+                } else {
+                    this.stamina = Math.min(CONFIG.MAX_STAMINA, this.stamina + dt * 35);
+                }
+                UI.updateStamina(this.stamina, CONFIG.MAX_STAMINA);
+
+                const len = Math.hypot(moveX, moveY);
+                if (len > 0) {
+                    moveX = (moveX / len) * speed * dt;
+                    moveY = (moveY / len) * speed * dt;
+
+                    const margin = 0.25;
+                    const nextX = this.x + moveX;
+                    const nextY = this.y + moveY;
+
+                    if (!MAP.isSolid(nextX + Math.sign(moveX) * margin, this.y - margin) &&
+                        !MAP.isSolid(nextX + Math.sign(moveX) * margin, this.y + margin)) {
+                        this.x = nextX;
+                    }
+                    if (!MAP.isSolid(this.x - margin, nextY + Math.sign(moveY) * margin) &&
+                        !MAP.isSolid(this.x + margin, nextY + Math.sign(moveY) * margin)) {
+                        this.y = nextY;
+                    }
+
+                    this.bobbingTimer += dt * (speed / CONFIG.PLAYER_SPEED) * 10;
+                    this.stepTimer += dt;
+                    const stepInterval = (speed === CONFIG.PLAYER_SPRINT_SPEED) ? 0.26 : 0.42;
+
+                    if (this.stepTimer > stepInterval) {
+                        AUDIO.playFootstep(speed === CONFIG.PLAYER_SPRINT_SPEED);
+                        this.stepTimer = 0;
+                    }
+                }
+            }
+        };
+
+        const CAMERA = { angle: 0 };
+
+        const ENEMY_BUMHO = {
+            x: 18.5,
+            y: 18.5,
+            hp: 2,
+            state: 'PATROL',
+            patrolTargets: [{x: 18.5, y: 18.5}, {x: 18.5, y: 3.5}, {x: 3.5, y: 18.5}, {x: 12.5, y: 12.5}],
+            currentTargetIdx: 0,
+            attackCooldown: 0,
+            pathRecalcTimer: 0,
+            eyeballAlertTimer: 0,
+            nextWaypoint: { x: 18.5, y: 18.5 },
+
+            reset() {
+                this.x = 18.5;
+                this.y = 18.5;
+                this.hp = 2;
+                this.state = 'PATROL';
+                this.currentTargetIdx = 0;
+                this.attackCooldown = 0;
+                this.pathRecalcTimer = 0;
+                this.eyeballAlertTimer = 0;
+                this.nextWaypoint = { x: 18.5, y: 18.5 };
+            },
+
+            update(dt) {
+                if (GAME_STATE.is('GAME_OVER') || GAME_STATE.is('VICTORY') || GAME_STATE.is('START')) return;
+
+                if (this.eyeballAlertTimer > 0) {
+                    this.eyeballAlertTimer -= dt;
+                }
+
+                const distToPlayer = Math.hypot(PLAYER.x - this.x, PLAYER.y - this.y);
+
+                // 감지 로직: 플레이어가 달리면 더 멀리서 감지
+                let activeDetectionRadius = CONFIG.BUMHO_DETECTION_RADIUS;
+                if (PLAYER.isMoving && INPUT.isSprinting && PLAYER.stamina > 5) {
+                    activeDetectionRadius = CONFIG.BUMHO_SPRINT_DETECTION_RADIUS;
+                }
+
+                if (GAME_STATE.is('FINAL_CHASE') || this.eyeballAlertTimer > 0 || distToPlayer < activeDetectionRadius) {
+                    if (this.state !== 'CHASE') {
+                        this.state = 'CHASE';
+                        if (GAME_STATE.is('EXPLORE')) {
+                            GAME_STATE.set('HUNTED');
+                            UI.updateStatus('범호가 당신을 발견하고 기괴하게 추격하기 시작했습니다! (포기: K키)');
+                        }
+                    }
+                } else if (this.state === 'CHASE' && distToPlayer > activeDetectionRadius + 4.0 && !GAME_STATE.is('FINAL_CHASE') && this.eyeballAlertTimer <= 0) {
+                    this.state = 'PATROL';
+                    GAME_STATE.set('EXPLORE');
+                    UI.updateStatus('범호를 따돌렸습니다. 조심해서 탐색을 계속하십시오. (포기: K키)');
+                }
+
+                let speed = CONFIG.BUMHO_SPEED_PATROL;
+                if (GAME_STATE.is('FINAL_CHASE')) speed = CONFIG.BUMHO_SPEED_FINAL;
+                else if (this.state === 'CHASE') speed = CONFIG.BUMHO_SPEED_CHASE;
+
+                // 목표 좌표 설정
+                let finalTargetX, finalTargetY;
+                if (this.state === 'CHASE') {
+                    finalTargetX = PLAYER.x;
+                    finalTargetY = PLAYER.y;
+                } else {
+                    const target = this.patrolTargets[this.currentTargetIdx];
+                    finalTargetX = target.x;
+                    finalTargetY = target.y;
+                    if (Math.hypot(finalTargetX - this.x, finalTargetY - this.y) < 1.0) {
+                        this.currentTargetIdx = (this.currentTargetIdx + 1) % this.patrolTargets.length;
+                    }
+                }
+
+                // 주기적 경로 재계산 (0.25초마다 BFS 탐색)
+                this.pathRecalcTimer += dt;
+                if (this.pathRecalcTimer > 0.25) {
+                    this.pathRecalcTimer = 0;
+                    this.nextWaypoint = MAP.findNextStep(this.x, this.y, finalTargetX, finalTargetY);
+                }
+
+                // 다음 경유지(Waypoint)를 향해 이동
+                const angle = Math.atan2(this.nextWaypoint.y - this.y, this.nextWaypoint.x - this.x);
+                const moveX = Math.cos(angle) * speed * dt;
+                const moveY = Math.sin(angle) * speed * dt;
+
+                const margin = 0.2;
+                if (!MAP.isSolid(this.x + moveX + Math.sign(moveX) * margin, this.y)) {
+                    this.x += moveX;
+                }
+                if (!MAP.isSolid(this.x, this.y + moveY + Math.sign(moveY) * margin)) {
+                    this.y += moveY;
+                }
+
+                COMBAT.checkProximity(distToPlayer, dt);
+            }
+        };
+
+        const EYEBALLS = [
+            { x: 5.5, y: 7.5, size: 0.7, lookAngle: 0 },
+            { x: 14.5, y: 3.5, size: 0.85, lookAngle: 0 },
+            { x: 9.5, y: 15.5, size: 0.75, lookAngle: 0 },
+            { x: 21.5, y: 9.5, size: 0.9, lookAngle: 0 },
+            { x: 3.5, y: 21.5, size: 0.7, lookAngle: 0 }
+        ];
+
+        function updateEyeballs(dt) {
+            EYEBALLS.forEach(eye => {
+                eye.lookAngle = Math.atan2(PLAYER.y - eye.y, PLAYER.x - eye.x);
+
+                const distToPlayer = Math.hypot(PLAYER.x - eye.x, PLAYER.y - eye.y);
+                if (distToPlayer < 0.9) {
+                    if (ENEMY_BUMHO.eyeballAlertTimer <= 0 && !GAME_STATE.is('GAME_OVER') && !GAME_STATE.is('VICTORY')) {
+                        ENEMY_BUMHO.state = 'CHASE';
+                        ENEMY_BUMHO.eyeballAlertTimer = 10; // 10초간 강제 추격
+                        if (GAME_STATE.is('EXPLORE')) {
+                            GAME_STATE.set('HUNTED');
+                        }
+                        UI.updateStatus('기괴한 눈알과 접촉했습니다! 비명을 들은 범호가 10초간 플레이어 위치를 추격해 다가옵니다!');
+                        AUDIO.playAttackSound();
+                        EFFECTS.triggerScreenShake(15);
+                    }
+                }
+            });
+        }
+
+        const CLUES = [
+            { 
+                id: 1, x: 1.5, y: 22.5, collected: false, name: '피묻은 치료 기록지',
+                text: '"환자는 사건 이후 심각한 공황발작과 환각에 시달리고 있음. 범호의 얼굴이 끊임없이 잔상으로 나타난다고 호소함..."' 
+            },
+            { 
+                id: 2, x: 22.5, y: 1.5, collected: false, name: '오래된 신문 기사 스크랩',
+                text: '"[단독] 연쇄살인범 범호, 범행 장소로 쓰인 외딴 대저택의 구조를 계속해서 개조... 피해자들의 탈출을 차단하려는 목적이었나."' 
+            },
+            { 
+                id: 3, x: 22.5, y: 22.5, collected: false, name: '부서진 열쇠와 찢어진 일기',
+                text: '"탈출구는 막혔다. 하지만 복도 중앙의 비밀 방에 유일하게 자신을 지킬 무기를 숨겨두었다. 열쇠를 모아야 해..."' 
+            },
+            { 
+                id: 4, x: 7.5, y: 11.5, collected: false, name: '피해자들의 마지막 서명',
+                text: '"더 이상 도망치지 않을 것이다. 마침내 악몽 속의 범호와 마주할 무기를 손에 쥐겠다!"' 
+            }
+        ];
+
+        const WEAPON = {
+            x: 11.5,
+            y: 11.5,
+            obtained: false,
+            swingTimer: 0
+        };
+
+        function checkInteractions() {
+            if (GAME_STATE.is('GAME_OVER') || GAME_STATE.is('VICTORY')) return;
+
+            CLUES.forEach(clue => {
+                if (!clue.collected && Math.hypot(PLAYER.x - clue.x, PLAYER.y - clue.y) < 0.9) {
+                    clue.collected = true;
+                    PLAYER.cluesCollected++;
+                    AUDIO.playPickupSound();
+                    UI.updateClues(PLAYER.cluesCollected, CONFIG.TOTAL_CLUES);
+                    UI.showNote(clue.name, clue.text);
+
+                    if (PLAYER.cluesCollected >= CONFIG.TOTAL_CLUES) {
+                        unlockSecretRoom();
+                    }
+                }
+            });
+
+            if (GAME_STATE.is('WEAPON_UNLOCKED') && !WEAPON.obtained) {
+                if (Math.hypot(PLAYER.x - WEAPON.x, PLAYER.y - WEAPON.y) < 1.0) {
+                    WEAPON.obtained = true;
+                    PLAYER.hasWeapon = true;
+                    GAME_STATE.set('FINAL_CHASE');
+                    AUDIO.playPickupSound();
+
+                    UI.showWeaponHud();
+                    UI.updateStatus('유일한 무기 [쇠파이프]를 획득했습니다! 범호에게 다가가 처치하십시오!');
+                }
+            }
+        }
+
+        function unlockSecretRoom() {
+            GAME_STATE.set('WEAPON_UNLOCKED');
+            MAP.set(10, 10, CONFIG.WALL_TYPES.WALL_SECRET_OPEN);
+            MAP.set(11, 10, CONFIG.WALL_TYPES.WALL_SECRET_OPEN);
+            MAP.set(12, 10, CONFIG.WALL_TYPES.WALL_SECRET_OPEN);
+            MAP.set(13, 10, CONFIG.WALL_TYPES.WALL_SECRET_OPEN);
+            UI.updateStatus('모든 단서를 모았습니다! 복도 중앙의 숨겨진 방 문이 열렸습니다!');
+            AUDIO.playPickupSound();
+            EFFECTS.triggerScreenShake(10);
+        }
+
+        const COMBAT = {
+            checkProximity(distToPlayer, dt) {
+                if (distToPlayer < CONFIG.BUMHO_ATTACK_RADIUS) {
+                    if (PLAYER.hasWeapon) {
+                        if (ENEMY_BUMHO.attackCooldown <= 0) {
+                            ENEMY_BUMHO.hp--;
+                            ENEMY_BUMHO.attackCooldown = 0.85;
+                            WEAPON.swingTimer = 0.4;
+                            
+                            AUDIO.playAttackSound();
+                            EFFECTS.triggerScreenShake(18);
+                            UI.updateStatus(`범호를 타격했습니다! (남은 체력: ${ENEMY_BUMHO.hp})`);
+
+                            if (ENEMY_BUMHO.hp <= 0) {
+                                triggerVictory();
+                            }
+                        }
+                    } else {
+                        triggerJumpscareAndGameOver();
+                    }
+                }
+
+                if (ENEMY_BUMHO.attackCooldown > 0) ENEMY_BUMHO.attackCooldown -= dt;
+                if (WEAPON.swingTimer > 0) WEAPON.swingTimer -= dt;
+            }
+        };
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let zBuffer = new Array(CONFIG.RAY_COUNT);
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function renderRaycaster() {
+            const w = canvas.width;
+            const h = canvas.height;
+
+            const bobbingOffset = Math.sin(PLAYER.bobbingTimer) * 6;
+
+            const ceilingGrad = ctx.createLinearGradient(0, 0, 0, h / 2);
+            ceilingGrad.addColorStop(0, '#040402');
+            ceilingGrad.addColorStop(1, '#18150c');
+            ctx.fillStyle = ceilingGrad;
+            ctx.fillRect(0, 0, w, h / 2 + bobbingOffset);
+
+            const floorGrad = ctx.createLinearGradient(0, h / 2, 0, h);
+            floorGrad.addColorStop(0, '#100e0a');
+            floorGrad.addColorStop(1, '#020201');
+            ctx.fillStyle = floorGrad;
+            ctx.fillRect(0, h / 2 + bobbingOffset, w, h / 2 - bobbingOffset);
+
+            const stripWidth = w / CONFIG.RAY_COUNT;
+
+            for (let i = 0; i < CONFIG.RAY_COUNT; i++) {
+                const rayAngle = (CAMERA.angle - CONFIG.FOV / 2) + (i / CONFIG.RAY_COUNT) * CONFIG.FOV;
+                let distance = 0;
+                let hitWall = false;
+                let wallType = 1;
+
+                const cos = Math.cos(rayAngle);
+                const sin = Math.sin(rayAngle);
+
+                let x = PLAYER.x;
+                let y = PLAYER.y;
+
+                while (!hitWall && distance < CONFIG.MAX_DEPTH) {
+                    distance += 0.04;
+                    x = PLAYER.x + cos * distance;
+                    y = PLAYER.y + sin * distance;
+
+                    const cell = MAP.get(x, y);
+                    if (cell !== CONFIG.WALL_TYPES.EMPTY && cell !== CONFIG.WALL_TYPES.WALL_SECRET_OPEN) {
+                        hitWall = true;
+                        wallType = cell;
+                    }
+                }
+
+                const correctedDist = distance * Math.cos(rayAngle - CAMERA.angle);
+                zBuffer[i] = correctedDist;
+
+                const wallHeight = (h / correctedDist) * 0.82;
+                const wallTop = (h - wallHeight) / 2 + bobbingOffset;
+
+                const flashlightFactor = Math.max(0.08, Math.pow(Math.cos(rayAngle - CAMERA.angle), 8));
+                let shade = Math.max(0, (1 - correctedDist / CONFIG.MAX_DEPTH)) * flashlightFactor;
+
+                let baseColor = '#7a6f43';
+                if (wallType === CONFIG.WALL_TYPES.WALL_BLOOD) baseColor = '#661212';
+                else if (wallType === CONFIG.WALL_TYPES.WALL_SECRET) baseColor = '#423321';
+
+                ctx.fillStyle = applyShade(baseColor, shade);
+                ctx.fillRect(i * stripWidth, wallTop, stripWidth + 1, wallHeight);
+            }
+
+            renderSprites(w, h, bobbingOffset);
+
+            if (PLAYER.hasWeapon) {
+                renderHandWeapon(w, h, bobbingOffset);
+            }
+
+            EFFECTS.applyEffects(ctx, w, h);
+        }
+
+        function applyShade(hexColor, factor) {
+            let r = parseInt(hexColor.slice(1,3), 16);
+            let g = parseInt(hexColor.slice(3,5), 16);
+            let b = parseInt(hexColor.slice(5,7), 16);
+
+            r = Math.floor(r * factor);
+            g = Math.floor(g * factor);
+            b = Math.floor(b * factor);
+
+            return `rgb(${r},${g},${b})`;
+        }
+
+        function renderSprites(w, h, bobbingOffset) {
+            const sprites = [];
+
+            CLUES.forEach(c => {
+                if (!c.collected) sprites.push({ x: c.x, y: c.y, type: 'CLUE' });
+            });
+
+            if (GAME_STATE.is('WEAPON_UNLOCKED') && !WEAPON.obtained) {
+                sprites.push({ x: WEAPON.x, y: WEAPON.y, type: 'WEAPON' });
+            }
+
+            EYEBALLS.forEach(eye => {
+                sprites.push({ x: eye.x, y: eye.y, type: 'EYEBALL', size: eye.size, lookAngle: eye.lookAngle });
+            });
+
+            sprites.push({ x: ENEMY_BUMHO.x, y: ENEMY_BUMHO.y, type: 'BUMHO' });
+
+            sprites.forEach(s => {
+                s.dist = Math.hypot(PLAYER.x - s.x, PLAYER.y - s.y);
+            });
+            sprites.sort((a, b) => b.dist - a.dist);
+
+            sprites.forEach(s => {
+                if (s.dist < 0.2) return;
+
+                let dx = s.x - PLAYER.x;
+                let dy = s.y - PLAYER.y;
+
+                let spriteAngle = Math.atan2(dy, dx) - CAMERA.angle;
+
+                while (spriteAngle < -Math.PI) spriteAngle += Math.PI * 2;
+                while (spriteAngle > Math.PI) spriteAngle -= Math.PI * 2;
+
+                if (Math.abs(spriteAngle) < CONFIG.FOV) {
+                    const screenX = (w / 2) + Math.tan(spriteAngle) * (w / 2);
+                    const size = (h / s.dist) * 0.75;
+                    const screenY = (h - size) / 2 + bobbingOffset;
+
+                    const rayIdx = Math.floor((screenX / w) * CONFIG.RAY_COUNT);
+                    if (rayIdx >= 0 && rayIdx < CONFIG.RAY_COUNT && zBuffer[rayIdx] > s.dist) {
+                        ctx.save();
+                        ctx.translate(screenX, screenY + size / 2);
+
+                        if (s.type === 'CLUE') {
+                            ctx.fillStyle = '#ffea75';
+                            ctx.shadowColor = '#fff5b8';
+                            ctx.shadowBlur = 18;
+                            ctx.fillRect(-size * 0.12, -size * 0.15, size * 0.24, size * 0.3);
+                        } else if (s.type === 'WEAPON') {
+                            ctx.fillStyle = '#ff4444';
+                            ctx.shadowColor = '#ff0000';
+                            ctx.shadowBlur = 24;
+                            ctx.fillRect(-size * 0.08, -size * 0.35, size * 0.16, size * 0.7);
+                        } else if (s.type === 'EYEBALL') {
+                            const r = size * 0.22;
+                            ctx.beginPath();
+                            ctx.arc(0, -size * 0.1, r, 0, Math.PI * 2);
+                            ctx.fillStyle = '#e0e0e0';
+                            ctx.fill();
+                            ctx.strokeStyle = '#800';
+                            ctx.lineWidth = 2;
+                            ctx.stroke();
+
+                            const pupilX = Math.cos(s.lookAngle - CAMERA.angle) * (r * 0.4);
+                            const pupilY = Math.sin(s.lookAngle - CAMERA.angle) * (r * 0.4);
+                            ctx.beginPath();
+                            ctx.arc(pupilX, -size * 0.1 + pupilY, r * 0.35, 0, Math.PI * 2);
+                            ctx.fillStyle = '#aa0000';
+                            ctx.fill();
+                        } else if (s.type === 'BUMHO') {
+                            const bhWidth = size * 0.6;
+                            const bhHeight = size * 1.2;
+
+                            ctx.fillStyle = '#0a0303';
+                            ctx.fillRect(-bhWidth / 2, -bhHeight / 2, bhWidth, bhHeight);
+
+                            ctx.fillStyle = '#ff0000';
+                            ctx.shadowColor = '#ff0000';
+                            ctx.shadowBlur = 14;
+                            ctx.fillRect(-bhWidth * 0.22, -bhHeight * 0.36, 8, 8);
+                            ctx.fillRect(bhWidth * 0.08, -bhHeight * 0.36, 8, 8);
+
+                            ctx.fillStyle = '#c0c0c0';
+                            ctx.fillRect(bhWidth * 0.26, -bhHeight * 0.1, 6, bhHeight * 0.45);
+                        }
+
+                        ctx.restore();
+                    }
+                }
+            });
+        }
+
+        function renderHandWeapon(w, h, bobbingOffset) {
+            ctx.save();
+            let swingOffset = 0;
+            if (WEAPON.swingTimer > 0) {
+                swingOffset = Math.sin(WEAPON.swingTimer * 15) * 50;
+            }
+
+            const pipeX = w * 0.7 - swingOffset;
+            const pipeY = h * 0.58 + swingOffset * 0.5 + bobbingOffset;
+
+            ctx.fillStyle = '#888888';
+            ctx.shadowColor = '#111111';
+            ctx.shadowBlur = 10;
+            ctx.translate(pipeX, pipeY);
+            ctx.rotate(-0.45);
+            ctx.fillRect(0, 0, 26, h * 0.52);
+            ctx.restore();
+        }
+
+        const EFFECTS = {
+            shakeTime: 0,
+            shakeIntensity: 0,
+
+            triggerScreenShake(intensity = 12) {
+                this.shakeTime = 0.3;
+                this.shakeIntensity = intensity;
+            },
+
+            applyEffects(ctx, w, h) {
+                if (this.shakeTime > 0) {
+                    this.shakeTime -= 0.016;
+                    const offsetX = (Math.random() - 0.5) * this.shakeIntensity;
+                    const offsetY = (Math.random() - 0.5) * this.shakeIntensity;
+                    ctx.drawImage(canvas, offsetX, offsetY);
+                }
+
+                const distToBumho = Math.hypot(PLAYER.x - ENEMY_BUMHO.x, PLAYER.y - ENEMY_BUMHO.y);
+                const fearAlpha = Math.max(0, 1 - (distToBumho / 8.5));
+                
+                const fearOverlay = document.getElementById('fearOverlay');
+                fearOverlay.style.setProperty('--fear-alpha', fearAlpha.toFixed(2));
+
+                if (fearAlpha > 0.2 && performance.now() - AUDIO.heartbeatTimer > (1000 - fearAlpha * 700)) {
+                    AUDIO.playHeartbeat(1.0 + fearAlpha * 0.6);
+                    AUDIO.heartbeatTimer = performance.now();
+                }
+            }
+        };
+
+        const UI = {
+            updateClues(count, total) {
+                document.getElementById('clueCounter').innerText = `${count} / ${total}`;
+            },
+            updateStamina(val, max) {
+                const pct = Math.floor((val / max) * 100);
+                document.getElementById('staminaPercent').innerText = `${pct}%`;
+                document.getElementById('staminaBar').style.width = `${pct}%`;
+            },
+            updateStatus(msg) {
+                document.getElementById('statusMessage').innerHTML = msg;
+            },
+            showNote(title, text) {
+                document.getElementById('noteTitle').innerText = title;
+                document.getElementById('noteContent').innerText = text;
+                document.getElementById('noteModal').classList.remove('hidden');
+                document.exitPointerLock();
+            },
+            closeNote() {
+                document.getElementById('noteModal').classList.add('hidden');
+                if (!GAME_STATE.is('START') && !GAME_STATE.is('GAME_OVER') && !GAME_STATE.is('VICTORY')) {
+                    setTimeout(() => {
+                        requestPointerLockSafe(document.getElementById('gameCanvas'));
+                    }, 100);
+                }
+            },
+            showWeaponHud() {
+                document.getElementById('weaponHud').classList.remove('hidden');
+            },
+            hideWeaponHud() {
+                document.getElementById('weaponHud').classList.add('hidden');
+            }
+        };
+
+        document.getElementById('closeNoteBtn').addEventListener('click', () => UI.closeNote());
+        
+        // 즉시 사망 버튼 클릭 이벤트
+        document.getElementById('suicideBtn').addEventListener('click', () => {
+            if (!GAME_STATE.is('GAME_OVER') && !GAME_STATE.is('VICTORY') && !GAME_STATE.is('START')) {
+                triggerJumpscareAndGameOver();
+            }
+        });
+
+        function triggerJumpscareAndGameOver() {
+            GAME_STATE.set('GAME_OVER');
+            AUDIO.playJumpscare();
+            EFFECTS.triggerScreenShake(30);
+
+            const jsOverlay = document.getElementById('jumpscareOverlay');
+            jsOverlay.classList.remove('hidden');
+
+            setTimeout(() => {
+                jsOverlay.classList.add('hidden');
+                showGameOverModal();
+            }, CONFIG.JUMPSCARE_DURATION + 300);
+        }
+
+        function showGameOverModal() {
+            document.exitPointerLock();
+            const modal = document.getElementById('modalOverlay');
+            const title = document.getElementById('modalTitle');
+            const desc = document.getElementById('modalDescription');
+            const btn = document.getElementById('startBtn');
+
+            title.innerText = '게임 오버';
+            title.className = 'text-4xl sm:text-5xl font-horror text-red-600 tracking-wider';
+            desc.innerHTML = '<p class="text-stone-300">범호에게 붙잡혔습니다. 당신의 자각몽은 잔혹한 악몽으로 끝났습니다...</p><p class="text-amber-200/90 font-medium mt-2">포기하지 마십시오. 악몽의 단서를 찾아 트라우마를 극복하십시오.</p>';
+            btn.innerText = '다시 시도하기 (재시작)';
+
+            modal.classList.remove('hidden');
+        }
+
+        function triggerVictory() {
+            GAME_STATE.set('VICTORY');
+            document.exitPointerLock();
+
+            const modal = document.getElementById('modalOverlay');
+            const title = document.getElementById('modalTitle');
+            const desc = document.getElementById('modalDescription');
+            const btn = document.getElementById('startBtn');
+
+            title.innerText = '꿈에서 깨어남 (승리)';
+            title.className = 'text-4xl sm:text-5xl font-black text-emerald-500 tracking-wider';
+            desc.innerHTML = '<p class="text-stone-200">쇠파이프로 범호를 제압했습니다! 트라우마의 환영이 무너지며 마침내 잔혹했던 악몽에서 깨어납니다.</p><p class="text-emerald-300 font-semibold mt-2">당신은 과거의 공포를 스스로 극복해냈습니다.</p>';
+            btn.innerText = '처음부터 다시 하기';
+
+            modal.classList.remove('hidden');
+        }
+
+        function resetAndStartGame() {
+            PLAYER.reset();
+            ENEMY_BUMHO.reset();
+            CLUES.forEach(c => c.collected = false);
+            WEAPON.obtained = false;
+            MAP.set(10, 10, CONFIG.WALL_TYPES.WALL_SECRET);
+            MAP.set(11, 10, CONFIG.WALL_TYPES.WALL_SECRET);
+            MAP.set(12, 10, CONFIG.WALL_TYPES.WALL_SECRET);
+            MAP.set(13, 10, CONFIG.WALL_TYPES.WALL_SECRET);
+
+            UI.updateClues(0, CONFIG.TOTAL_CLUES);
+            UI.updateStatus('거대한 자각몽 속 집을 탐색하여 단서를 찾으세요. 범호를 피하십시오. (포기: <strong class="text-red-400">K키</strong>)');
+            UI.hideWeaponHud();
+            document.getElementById('modalOverlay').classList.add('hidden');
+
+            GAME_STATE.set('EXPLORE');
+            AUDIO.init();
+            
+            setTimeout(() => {
+                requestPointerLockSafe(document.getElementById('gameCanvas'));
+            }, 100);
+        }
+
+        document.getElementById('startBtn').addEventListener('click', resetAndStartGame);
+
+        let lastTime = performance.now();
+
+        function gameLoop(now) {
+            const dt = Math.min((now - lastTime) / 1000, 0.1);
+            lastTime = now;
+
+            PLAYER.update(dt);
+            ENEMY_BUMHO.update(dt);
+            updateEyeballs(dt);
+            checkInteractions();
+
+            renderRaycaster();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        INPUT.init();
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>

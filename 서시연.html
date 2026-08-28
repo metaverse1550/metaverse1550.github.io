@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>무인도 생존 타자 퍼즐</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
+
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            box-sizing: border-box;
+            touch-action: manipulation;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0f172a;
+            font-family: 'Noto Sans KR', sans-serif;
+            font-weight: 400;
+        }
+
+        #gameContainer {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #0284c7;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Hidden or Styled Native Input for Flawless Korean IME Typing */
+        #typingInput {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 500px;
+            height: 54px;
+            font-family: 'Noto Sans KR', sans-serif;
+            font-weight: 300;
+            font-size: 20px;
+            text-align: center;
+            color: #0f172a;
+            background: rgba(255, 255, 255, 0.92);
+            border: 3px solid #f59e0b;
+            border-radius: 28px;
+            outline: none;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3), inset 0 2px 5px rgba(0, 0, 0, 0.1);
+            transition: all 0.2s ease;
+            z-index: 20;
+        }
+
+        #typingInput:focus {
+            border-color: #ef4444;
+            background: #ffffff;
+            box-shadow: 0 0 20px rgba(245, 158, 11, 0.6), inset 0 2px 5px rgba(0, 0, 0, 0.05);
+        }
+
+        /* Screen Shake Animation on Damage */
+        .shake {
+            animation: shakeAnim 0.35s cubic-bezier(.36,.07,.19,.97) both;
+        }
+
+        @keyframes shakeAnim {
+            10%, 90% { transform: translate3d(-4px, 0, 0); }
+            20%, 80% { transform: translate3d(6px, 0, 0); }
+            30%, 50%, 70% { transform: translate3d(-8px, 0, 0); }
+            40%, 60% { transform: translate3d(8px, 0, 0); }
+        }
+
+        /* Stage Overlay Animation */
+        .stage-up-banner {
+            position: absolute;
+            top: 40%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.5);
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 30;
+        }
+
+        .stage-up-banner.active {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+    </style>
+</head>
+<body>
+
+<div id="gameContainer">
+    <!-- Canvas standard render -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- Typing Input Box -->
+    <input type="text" id="typingInput" placeholder="단어를 입력하고 Enter 또는 Space를 누르세요!" autocomplete="off" spellcheck="false">
+
+    <!-- Stage Up Banner Popup -->
+    <div id="stageBanner" class="stage-up-banner text-center">
+        <div class="bg-amber-400 text-amber-950 font-medium text-3xl sm:text-5xl px-8 py-4 rounded-3xl border-4 border-amber-100 shadow-2xl transform -rotate-2">
+            STAGE CLEAR!
+            <div id="stageBannerSub" class="text-xl sm:text-2xl mt-2 text-red-600 font-normal">보너스 목숨 +1 획득!</div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ==========================================
+// 1. CONFIG: 게임 글로벌 설정 수치
+// ==========================================
+const CONFIG = {
+    INITIAL_LIVES: 3,
+    MAX_LIVES: 5,
+    START_TARGET_SCORE: 150,
+    STAGE_TARGET_INCREMENT: 100,
+    SCORE_NORMAL: 5,
+    SCORE_PENALTY_WRONG: 0,
+    TIMEOUT_PENALTY_LIFE: 0.5,
+    BASE_FALL_SPEED: 53,
+    SPEED_INC_PER_STAGE: 13,
+    BASE_SPAWN_INTERVAL: 1700,
+    SPAWN_INTERVAL_DEC_PER_STAGE: 100,
+    MIN_SPAWN_INTERVAL: 800,
+    MAX_CONCURRENT_WORDS_BASE: 3,
+    STAGES_PER_MAX_WORD_INC: 2
+};
+
+// ==========================================
+// 2. GAME_STATE: 실시간 게임 상태 데이터
+// ==========================================
+const GAME_STATE = {
+    score: 0,
+    highScore: parseInt(localStorage.getItem('island_typo_highscore')) || 0,
+    lives: CONFIG.INITIAL_LIVES,
+    stage: 1,
+    stageTarget: CONFIG.START_TARGET_SCORE,
+    activeWords: [],
+    gameStatus: 'START', // 'START', 'PLAYING', 'GAMEOVER'
+    lastSpawnTime: 0,
+    redFlashOpacity: 0
+};
+
+// ==========================================
+// 3. PUZZLE: 단어 및 문장 데이터 풀 & 생성기 (1~3글자 제한)
+// ==========================================
+const PUZZLE = {
+    words: [
+        "해", "달", "별", "물", "불", "산", "집", "밥", "꽃", "새",
+        "바다", "하늘", "구름", "사과", "나비", "아이", "나무", "우산", "모자", "가방"
+    ],
+    sentences: [
+        "안녕", "좋아", "반가워", "화이팅", "사랑해", "고마워", "웃어요", "힘내요", "최고"
+    ],
+    lastUsedText: "",
+
+    getRandomItem() {
+        // 현재 화면에 내려오고 있는 단어들 추출 (동시 중복 등장 방지)
+        const activeTexts = GAME_STATE.activeWords.map(w => w.text);
+
+        // 현재 화면에 나타나지 않은 항목만 필터링
+        let availableWords = this.words.filter(w => !activeTexts.includes(w));
+        let availableSentences = this.sentences.filter(s => !activeTexts.includes(s));
+
+        // 예외 처리: 모든 단어가 화면에 떠있는 경우 원본 배열 사용
+        if (availableWords.length === 0) availableWords = this.words;
+        if (availableSentences.length === 0) availableSentences = this.sentences;
+
+        // 단어 70%, 문장 30% 확률로 풀 선택
+        const pool = (Math.random() < 0.7 && availableWords.length > 0) ? availableWords : availableSentences;
+        
+        let selectedItem = "";
+        let attempts = 0;
+        
+        // 직전에 바로 사용된 단어 및 현재 화면의 단어와 중복되지 않도록 뽑기
+        do {
+            const randomIndex = Math.floor(Math.random() * pool.length);
+            selectedItem = pool[randomIndex];
+            attempts++;
+        } while (pool.length > 1 && selectedItem === this.lastUsedText && attempts < 10);
+
+        this.lastUsedText = selectedItem;
+        return selectedItem;
+    }
+};
+
+// ==========================================
+// Canvas & UI Engine Setup
+// ==========================================
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const typingInput = document.getElementById('typingInput');
+const stageBanner = document.getElementById('stageBanner');
+const stageBannerSub = document.getElementById('stageBannerSub');
+
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ==========================================
+// 4. INPUT: 타이핑 및 조작 관리
+// ==========================================
+const INPUT = {
+    init() {
+        typingInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ' || e.code === 'Space') {
+                const text = typingInput.value.trim();
+                if (text.length > 0) {
+                    this.submitAnswer(text);
+                }
+                typingInput.value = '';
+                if (e.key === ' ' || e.code === 'Space') {
+                    e.preventDefault();
+                }
+            }
+        });
+
+        // 클릭 이벤트 (게임 시작 및 재시작)
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            if (GAME_STATE.gameStatus === 'START' || GAME_STATE.gameStatus === 'GAMEOVER') {
+                // 시작/재시작 버튼 클릭 범위 판정
+                const btnX = canvas.width / 2 - 110;
+                const btnY = canvas.height / 2 + 60;
+                if (x >= btnX && x <= btnX + 220 && y >= btnY && y <= btnY + 60) {
+                    GAME_LOOP.restartGame();
+                }
+            }
+        });
+    },
+
+    submitAnswer(inputText) {
+        if (GAME_STATE.gameStatus !== 'PLAYING') return;
+
+        // 현재 내려오는 단어들 중 matching 단어 검색
+        let matchedIndex = -1;
+        let lowestY = -1; // 화면 아래쪽에 더 가까운 단어 우선 매칭
+
+        GAME_STATE.activeWords.forEach((wordObj, idx) => {
+            if (wordObj.text === inputText) {
+                if (wordObj.y > lowestY) {
+                    lowestY = wordObj.y;
+                    matchedIndex = idx;
+                }
+            }
+        });
+
+        if (matchedIndex !== -1) {
+            // 정답 처리!
+            const matchedWord = GAME_STATE.activeWords[matchedIndex];
+
+            // 점수 계산 (+5점 고정)
+            SCORE.addScore(CONFIG.SCORE_NORMAL);
+
+            // 성공 이펙트 추가 (+5 팝업)
+            EFFECTS.addSuccessParticle(matchedWord.x, matchedWord.y, `+${CONFIG.SCORE_NORMAL}`);
+
+            // 해당 단어 제거
+            GAME_STATE.activeWords.splice(matchedIndex, 1);
+        } else {
+            // 오입력 처리! (점수 감점 없음, 피드백 문구 표시 안 함)
+            EFFECTS.triggerShake();
+        }
+    }
+};
+
+// ==========================================
+// 5. SCORE & SURVIVAL & STAGE
+// ==========================================
+const SCORE = {
+    addScore(points) {
+        GAME_STATE.score += points;
+        if (GAME_STATE.score > GAME_STATE.highScore) {
+            GAME_STATE.highScore = GAME_STATE.score;
+            localStorage.setItem('island_typo_highscore', GAME_STATE.highScore);
+        }
+        // 단계 달성 검사
+        STAGE.checkStageProgress();
+    },
+
+    deductScore(points) {
+        GAME_STATE.score = Math.max(0, GAME_STATE.score - points);
+    }
+};
+
+const SURVIVAL = {
+    decreaseLife(amount) {
+        GAME_STATE.lives = Math.max(0, GAME_STATE.lives - amount);
+        GAME_STATE.redFlashOpacity = 0.5; // 경고 피드백 플래시
+        EFFECTS.triggerShake();
+
+        if (GAME_STATE.lives <= 0) {
+            GAME_STATE.gameStatus = 'GAMEOVER';
+        }
+    },
+
+    addBonusLife(amount = 1) {
+        GAME_STATE.lives = Math.min(CONFIG.MAX_LIVES, GAME_STATE.lives + amount);
+    }
+};
+
+const STAGE = {
+    checkStageProgress() {
+        if (GAME_STATE.score >= GAME_STATE.stageTarget) {
+            this.nextStage();
+        }
+    },
+
+    nextStage() {
+        GAME_STATE.stage++;
+        GAME_STATE.stageTarget += CONFIG.STAGE_TARGET_INCREMENT;
+        SURVIVAL.addBonusLife(1);
+
+        // STAGE CLEAR 알림 오버레이
+        stageBannerSub.innerText = `단계 달성! 보너스 목숨 +1 (현재: ♥ ${GAME_STATE.lives})`;
+        stageBanner.classList.add('active');
+        setTimeout(() => {
+            stageBanner.classList.remove('active');
+        }, 2200);
+
+        EFFECTS.addFeedbackText(canvas.width / 2, canvas.height / 2, `STAGE ${GAME_STATE.stage} START!`, "#fbbf24", 50);
+    },
+
+    getFallSpeed() {
+        return CONFIG.BASE_FALL_SPEED + (GAME_STATE.stage - 1) * CONFIG.SPEED_INC_PER_STAGE;
+    },
+
+    getSpawnInterval() {
+        const interval = CONFIG.BASE_SPAWN_INTERVAL - (GAME_STATE.stage - 1) * CONFIG.SPAWN_INTERVAL_DEC_PER_STAGE;
+        return Math.max(CONFIG.MIN_SPAWN_INTERVAL, interval);
+    },
+
+    getMaxConcurrentWords() {
+        return CONFIG.MAX_CONCURRENT_WORDS_BASE + Math.floor((GAME_STATE.stage - 1) / CONFIG.STAGES_PER_MAX_WORD_INC);
+    }
+};
+
+// ==========================================
+// 6. FALLING_TEXT: 낙하 단어 객체 관리
+// ==========================================
+class FallingWord {
+    constructor(text) {
+        this.text = text;
+        ctx.font = '300 19px "Noto Sans KR", sans-serif';
+        this.width = ctx.measureText(text).width + 36;
+        this.height = 42;
+
+        // X 위치 안전 영역 배치
+        const margin = 50;
+        this.x = margin + Math.random() * (canvas.width - this.width - margin * 2);
+        this.y = 80; // 화면 상단 HUD 아래에서 출발
+        // 1단계 속도 53, 단계 상승마다 +13 속도 증가 (60fps 기준 환산 적용)
+        this.speed = (STAGE.getFallSpeed() / 60) * (0.85 + Math.random() * 0.3);
+        this.spawnTime = performance.now();
+        this.color = ['#fef08a', '#e0f2fe', '#dcfce7', '#fce7f3'][Math.floor(Math.random() * 4)];
+    }
+
+    update() {
+        this.y += this.speed;
+
+        // 타임아웃/바닥 도착 판정 (입력창 위 라인)
+        const deadlineY = canvas.height - 110;
+        if (this.y >= deadlineY) {
+            SURVIVAL.decreaseLife(CONFIG.TIMEOUT_PENALTY_LIFE);
+            EFFECTS.addFeedbackText(this.x, deadlineY, "-0.5 ♥", "#ef4444");
+            return true; // 삭제 요청
+        }
+        return false;
+    }
+
+    draw() {
+        const currentInput = typingInput.value.trim();
+        const isMatchedPrefix = currentInput.length > 0 && this.text.startsWith(currentInput);
+
+        ctx.save();
+        ctx.translate(this.x, this.y);
+
+        // 카드 배경 (야자열매/통나무 캐주얼 박스)
+        ctx.fillStyle = isMatchedPrefix ? '#f59e0b' : 'rgba(15, 23, 42, 0.75)';
+        ctx.strokeStyle = isMatchedPrefix ? '#ffffff' : '#fde047';
+        ctx.lineWidth = isMatchedPrefix ? 2 : 1.5;
+
+        ctx.beginPath();
+        ctx.roundRect(0, 0, this.width, this.height, 14);
+        ctx.fill();
+        ctx.stroke();
+
+        // 글로우 효과 (일치 중인 단어 강조)
+        if (isMatchedPrefix) {
+            ctx.shadowColor = '#f59e0b';
+            ctx.shadowBlur = 12;
+        }
+
+        // 텍스트 출력 (일치 부분 색상 다르게)
+        ctx.font = '300 19px "Noto Sans KR", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+
+        const textX = 18;
+        const textY = this.height / 2 + 1;
+
+        if (isMatchedPrefix) {
+            const matchedText = this.text.substring(0, currentInput.length);
+            const remainingText = this.text.substring(currentInput.length);
+
+            // 입력 완료 부분 (초록/황금색)
+            ctx.fillStyle = '#4ade80';
+            ctx.fillText(matchedText, textX, textY);
+
+            const matchedWidth = ctx.measureText(matchedText).width;
+            // 남은 부분 (흰색)
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(remainingText, textX + matchedWidth, textY);
+        } else {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(this.text, textX, textY);
+        }
+
+        ctx.restore();
+    }
+}
+
+// ==========================================
+// 7. EFFECTS: 파티클 및 화면 연출
+// ==========================================
+const EFFECTS = {
+    particles: [],
+    popups: [],
+
+    addSuccessParticle(x, y, label) {
+        for (let i = 0; i < 16; i++) {
+            this.particles.push({
+                x: x + 40,
+                y: y + 20,
+                vx: (Math.random() - 0.5) * 8,
+                vy: (Math.random() - 0.8) * 8,
+                color: ['#fde047', '#4ade80', '#38bdf8', '#f472b6'][Math.floor(Math.random() * 4)],
+                size: Math.random() * 6 + 4,
+                alpha: 1.0,
+                life: 0.03
+            });
+        }
+        this.addFeedbackText(x + 20, y - 10, label, "#4ade80", 22);
+    },
+
+    addFeedbackText(x, y, text, color = "#ffffff", fontSize = 20) {
+        this.popups.push({
+            x, y, text, color, fontSize,
+            alpha: 1.0,
+            vy: -1.5
+        });
+    },
+
+    triggerShake() {
+        const gameContainer = document.getElementById('gameContainer');
+        gameContainer.classList.remove('shake');
+        void gameContainer.offsetWidth; // trigger reflow
+        gameContainer.classList.add('shake');
+    },
+
+    updateAndDraw() {
+        // 파티클 업데이트
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            const p = this.particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += 0.2; // Gravity
+            p.alpha -= p.life;
+
+            if (p.alpha <= 0) {
+                this.particles.splice(i, 1);
+                continue;
+            }
+
+            ctx.save();
+            ctx.globalAlpha = p.alpha;
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // 팝업 텍스트 업데이트
+        for (let i = this.popups.length - 1; i >= 0; i--) {
+            const pop = this.popups[i];
+            pop.y += pop.vy;
+            pop.alpha -= 0.02;
+
+            if (pop.alpha <= 0) {
+                this.popups.splice(i, 1);
+                continue;
+            }
+
+            ctx.save();
+            ctx.globalAlpha = pop.alpha;
+            ctx.fillStyle = pop.color;
+            ctx.font = `500 ${pop.fontSize}px "Noto Sans KR", sans-serif`;
+            ctx.shadowColor = 'rgba(0,0,0,0.8)';
+            ctx.shadowBlur = 4;
+            ctx.fillText(pop.text, pop.x, pop.y);
+            ctx.restore();
+        }
+    }
+};
+
+// ==========================================
+// 8. UI & DRAW: 2D 1인칭 무인도 배경 및 HUD
+// ==========================================
+const DRAW = {
+    drawBackground() {
+        const w = canvas.width;
+        const h = canvas.height;
+
+        // 1. 하늘 그라디언트 (맑은 열대 하늘)
+        const skyGrad = ctx.createLinearGradient(0, 0, 0, h * 0.5);
+        skyGrad.addColorStop(0, '#0284c7');
+        skyGrad.addColorStop(0.6, '#38bdf8');
+        skyGrad.addColorStop(1, '#bae6fd');
+        ctx.fillStyle = skyGrad;
+        ctx.fillRect(0, 0, w, h * 0.5);
+
+        // 태양
+        ctx.fillStyle = '#fef08a';
+        ctx.beginPath();
+        ctx.arc(w * 0.8, h * 0.15, 45, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 2. 에메랄드 바다 (파도 애니메이션 효과)
+        const time = performance.now() * 0.002;
+        const seaGrad = ctx.createLinearGradient(0, h * 0.5, 0, h * 0.75);
+        seaGrad.addColorStop(0, '#0284c7');
+        seaGrad.addColorStop(0.5, '#06b6d4');
+        seaGrad.addColorStop(1, '#2dd4bf');
+        ctx.fillStyle = seaGrad;
+        ctx.fillRect(0, h * 0.5, w, h * 0.25);
+
+        // 파도 선
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        for (let x = 0; x < w; x += 20) {
+            const y = h * 0.52 + Math.sin(x * 0.02 + time) * 4;
+            if (x === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // 3. 모래사장 해변 (하단 1인칭 뷰)
+        const sandGrad = ctx.createLinearGradient(0, h * 0.7, 0, h);
+        sandGrad.addColorStop(0, '#fde047');
+        sandGrad.addColorStop(1, '#eab308');
+        ctx.fillStyle = sandGrad;
+
+        ctx.beginPath();
+        ctx.moveTo(0, h * 0.7);
+        ctx.quadraticCurveTo(w * 0.5, h * 0.65, w, h * 0.7);
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+        ctx.fill();
+
+        // 4. 좌우 야자수 및 1인칭 캠프파이어 오브젝트
+        this.drawPalmTree(30, h * 0.68, false);
+        this.drawPalmTree(w - 30, h * 0.68, true);
+        this.drawCampfire(w * 0.5, h * 0.82);
+    },
+
+    drawPalmTree(x, y, flip) {
+        ctx.save();
+        ctx.translate(x, y);
+        if (flip) ctx.scale(-1, 1);
+
+        // 줄기
+        ctx.strokeStyle = '#854d0e';
+        ctx.lineWidth = 18;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(-30, -100, -50, -220);
+        ctx.stroke();
+
+        // 잎사귀
+        ctx.fillStyle = '#15803d';
+        for (let i = 0; i < 5; i++) {
+            ctx.save();
+            ctx.translate(-50, -220);
+            ctx.rotate((i * 40 - 80) * Math.PI / 180);
+            ctx.beginPath();
+            ctx.ellipse(40, 0, 60, 15, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+        ctx.restore();
+    },
+
+    drawCampfire(x, y) {
+        ctx.save();
+        ctx.translate(x, y);
+
+        // 장작
+        ctx.strokeStyle = '#78350f';
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.moveTo(-25, 10); ctx.lineTo(25, -10);
+        ctx.moveTo(-25, -10); ctx.lineTo(25, 10);
+        ctx.stroke();
+
+        // 모닥불 불꽃 애니메이션
+        const flameHeight = 25 + Math.sin(performance.now() * 0.01) * 6;
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.arc(0, -5, 16, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#f59e0b';
+        ctx.beginPath();
+        ctx.arc(0, -10, 10, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#fef08a';
+        ctx.beginPath();
+        ctx.arc(0, -12, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+    },
+
+    drawHUD() {
+        const w = canvas.width;
+
+        // 상단 HUD 패널
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+        ctx.fillRect(0, 0, w, 70);
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(0, 0, w, 70);
+
+        ctx.font = '500 17px "Noto Sans KR", sans-serif';
+        ctx.textBaseline = 'middle';
+
+        // 1. 점수 & 최고점수
+        ctx.fillStyle = '#fde047';
+        ctx.textAlign = 'left';
+        ctx.fillText(`SCORE: ${GAME_STATE.score}`, 20, 25);
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText(`BEST: ${GAME_STATE.highScore}`, 20, 50);
+
+        // 2. 단계 & 목표 점수
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = '500 19px "Noto Sans KR", sans-serif';
+        ctx.fillText(`STAGE ${GAME_STATE.stage}`, w / 2, 25);
+        ctx.fillStyle = '#f472b6';
+        ctx.font = '400 14px "Noto Sans KR", sans-serif';
+        ctx.fillText(`목표 점수: ${GAME_STATE.stageTarget}점`, w / 2, 50);
+
+        // 3. 남은 목숨 (하트 그리기)
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#ef4444';
+        ctx.font = '500 17px "Noto Sans KR", sans-serif';
+        ctx.fillText(`생존 목숨: `, w - 160, 35);
+
+        this.drawHearts(w - 150, 35, GAME_STATE.lives);
+    },
+
+    drawHearts(startX, y, lives) {
+        let x = startX;
+        const fullHearts = Math.floor(lives);
+        const hasHalf = (lives % 1) >= 0.5;
+
+        for (let i = 0; i < CONFIG.MAX_LIVES; i++) {
+            ctx.font = '20px sans-serif';
+            if (i < fullHearts) {
+                ctx.fillStyle = '#ef4444';
+                ctx.fillText('♥', x, y);
+            } else if (i === fullHearts && hasHalf) {
+                ctx.fillStyle = '#f87171';
+                ctx.fillText('💔', x, y);
+            } else {
+                ctx.fillStyle = '#475569';
+                ctx.fillText('♡', x, y);
+            }
+            x += 28;
+        }
+    },
+
+    drawStartScreen() {
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#fde047';
+        ctx.font = '700 38px "Noto Sans KR", sans-serif';
+        ctx.fillText("무인도 생존 타자 퍼즐", canvas.width / 2, canvas.height / 2 - 100);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '400 17px "Noto Sans KR", sans-serif';
+        ctx.fillText("내려오는 단어를 빠르게 입력하여 무인도에서 생존하세요!", canvas.width / 2, canvas.height / 2 - 30);
+        ctx.fillText("제한시간 초과 시 목숨 -0.5 차감", canvas.width / 2, canvas.height / 2 + 10);
+
+        // 시작 버튼
+        const btnX = canvas.width / 2 - 110;
+        const btnY = canvas.height / 2 + 60;
+        ctx.fillStyle = '#f59e0b';
+        ctx.beginPath();
+        ctx.roundRect(btnX, btnY, 220, 60, 30);
+        ctx.fill();
+
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '500 22px "Noto Sans KR", sans-serif';
+        ctx.fillText("생존 시작하기", canvas.width / 2, btnY + 36);
+    },
+
+    drawGameOverScreen() {
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ef4444';
+        ctx.font = '700 44px "Noto Sans KR", sans-serif';
+        ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2 - 120);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '400 19px "Noto Sans KR", sans-serif';
+        ctx.fillText(`최종 도달 단계: STAGE ${GAME_STATE.stage}`, canvas.width / 2, canvas.height / 2 - 40);
+        ctx.fillText(`최종 점수: ${GAME_STATE.score} 점`, canvas.width / 2, canvas.height / 2 + 5);
+        ctx.fillStyle = '#fde047';
+        ctx.fillText(`최고 기록: ${GAME_STATE.highScore} 점`, canvas.width / 2, canvas.height / 2 + 50);
+
+        // 재시작 버튼
+        const btnX = canvas.width / 2 - 110;
+        const btnY = canvas.height / 2 + 90;
+        ctx.fillStyle = '#38bdf8';
+        ctx.beginPath();
+        ctx.roundRect(btnX, btnY, 220, 60, 30);
+        ctx.fill();
+
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '500 22px "Noto Sans KR", sans-serif';
+        ctx.fillText("다시 도전하기", canvas.width / 2, btnY + 36);
+    }
+};
+
+// ==========================================
+// 9. GAME LOOP: 메인 상태 업데이트 및 렌더링
+// ==========================================
+const GAME_LOOP = {
+    restartGame() {
+        GAME_STATE.score = 0;
+        GAME_STATE.lives = CONFIG.INITIAL_LIVES;
+        GAME_STATE.stage = 1;
+        GAME_STATE.stageTarget = CONFIG.START_TARGET_SCORE;
+        GAME_STATE.activeWords = [];
+        GAME_STATE.gameStatus = 'PLAYING';
+        GAME_STATE.lastSpawnTime = performance.now();
+        typingInput.value = '';
+        typingInput.focus();
+    },
+
+    update(now) {
+        if (GAME_STATE.gameStatus !== 'PLAYING') return;
+
+        // 1. 단어 생성 로직
+        const spawnInterval = STAGE.getSpawnInterval();
+        const maxWords = STAGE.getMaxConcurrentWords();
+
+        if (now - GAME_STATE.lastSpawnTime > spawnInterval && GAME_STATE.activeWords.length < maxWords) {
+            const wordText = PUZZLE.getRandomItem();
+            GAME_STATE.activeWords.push(new FallingWord(wordText));
+            GAME_STATE.lastSpawnTime = now;
+        }
+
+        // 2. 단어 낙하 및 탈락 검사
+        for (let i = GAME_STATE.activeWords.length - 1; i >= 0; i--) {
+            const isDead = GAME_STATE.activeWords[i].update();
+            if (isDead) {
+                GAME_STATE.activeWords.splice(i, 1);
+            }
+        }
+    },
+
+    render() {
+        // 배경 그리기
+        DRAW.drawBackground();
+
+        // 타이틀 / 게임오버 상태 처리
+        if (GAME_STATE.gameStatus === 'START') {
+            DRAW.drawStartScreen();
+            return;
+        }
+
+        // 낙하 단어 그리기
+        GAME_STATE.activeWords.forEach(word => word.draw());
+
+        // HUD 및 피드백 파티클
+        DRAW.drawHUD();
+        EFFECTS.updateAndDraw();
+
+        // 레드 경고 플래시 오버레이
+        if (GAME_STATE.redFlashOpacity > 0) {
+            ctx.fillStyle = `rgba(239, 68, 68, ${GAME_STATE.redFlashOpacity})`;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            GAME_STATE.redFlashOpacity -= 0.02;
+        }
+
+        if (GAME_STATE.gameStatus === 'GAMEOVER') {
+            DRAW.drawGameOverScreen();
+        }
+    },
+
+    loop(now) {
+        GAME_LOOP.update(now);
+        GAME_LOOP.render();
+        requestAnimationFrame((time) => GAME_LOOP.loop(time));
+    }
+};
+
+// ==========================================
+// 10. INITIALIZATION: 게임 초기화 실행
+// ==========================================
+window.onload = function() {
+    INPUT.init();
+    typingInput.focus();
+    requestAnimationFrame((now) => GAME_LOOP.loop(now));
+};
+</script>
+</body>
+</html>

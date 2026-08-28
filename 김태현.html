@@ -1,0 +1,1833 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>폐교: 실종된 기록 (Abandoned School: The Lost Record)</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- FontAwesome icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Inter:wght@300;400;600;800&display=swap');
+
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Inter', 'Gowun Batang', sans-serif;
+            user-select: none;
+            color: #e2e8f0;
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* Camera Viewfinder Effect */
+        .camera-overlay {
+            pointer-events: none;
+            box-shadow: inset 0 0 100px rgba(0,0,0,0.8);
+        }
+
+        .rec-dot {
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        /* Glitch & Horror Screen Effect */
+        .static-noise {
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 3px, 6px 100%;
+            pointer-events: none;
+        }
+
+        .vignette {
+            background: radial-gradient(circle, transparent 40%, rgba(0,0,0,0.92) 100%);
+            pointer-events: none;
+        }
+
+        .fear-flash {
+            transition: opacity 0.3s ease;
+        }
+
+        /* Custom Scrollbar for Journal */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #a855f7;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="bg-black text-gray-200 select-none overflow-hidden">
+
+    <!-- 3D Canvas -->
+    <div id="canvas-container"></div>
+
+    <!-- Screen FX Overlays -->
+    <div id="vignette" class="vignette absolute inset-0 z-10"></div>
+    <div id="static-overlay" class="static-noise absolute inset-0 z-10 opacity-30"></div>
+    <div id="fear-overlay" class="fear-flash absolute inset-0 z-15 bg-red-900/30 pointer-events-none opacity-0"></div>
+
+    <!-- HUD Overlay -->
+    <div id="hud" class="absolute inset-0 z-20 pointer-events-none flex flex-col justify-between p-6 hidden">
+        <!-- Top Bar: Location & Camera REC Status -->
+        <div class="flex justify-between items-start">
+            <div class="flex flex-col gap-1 bg-black/60 backdrop-blur border border-zinc-800 p-3 rounded-lg">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid font-bold fa-compass text-purple-400"></i>
+                    <span id="hud-location" class="font-bold tracking-wider text-sm text-zinc-200">1층 중앙 복도</span>
+                </div>
+                <div class="text-xs text-zinc-400 flex items-center gap-3 mt-1">
+                    <span>단서: <strong id="hud-clues" class="text-purple-300">0 / 6</strong></span>
+                    <span>공포도: <strong id="hud-fear" class="text-red-400">10%</strong></span>
+                </div>
+            </div>
+
+            <!-- Camcorder REC Indicator -->
+            <div id="cam-rec-ui" class="flex items-center gap-3 bg-black/70 border border-red-900/50 px-4 py-2 rounded-full">
+                <div class="w-3 h-3 rounded-full bg-red-600 rec-dot"></div>
+                <span class="text-red-500 font-mono font-bold tracking-widest text-sm">REC [CAM-1]</span>
+                <span id="cam-timestamp" class="text-zinc-400 font-mono text-xs ml-2">00:00:00</span>
+            </div>
+        </div>
+
+        <!-- Center Crosshair & Prompts -->
+        <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+            <div id="crosshair" class="w-2 h-2 rounded-full bg-white/70 border border-black transition-all duration-150"></div>
+            <div id="interaction-prompt" class="mt-4 bg-zinc-900/90 border border-zinc-700 text-zinc-100 text-sm font-semibold px-4 py-2 rounded-lg shadow-xl opacity-0 transition-opacity duration-200 flex items-center gap-2">
+                <kbd class="bg-purple-900/80 text-purple-200 px-2 py-0.5 rounded text-xs">E</kbd>
+                <span id="prompt-text">조사하기</span>
+            </div>
+            <!-- Y-Axis Invert Toggle Toast Notification -->
+            <div id="invert-toast" class="mt-2 bg-purple-950/90 border border-purple-500/60 text-purple-200 text-xs font-bold px-3 py-1.5 rounded-lg opacity-0 transition-opacity duration-300">
+                마우스 Y축 반전: OFF
+            </div>
+        </div>
+
+        <!-- Hiding Indicator -->
+        <div id="hiding-indicator" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-black/80 border border-purple-500/50 text-purple-300 px-6 py-3 rounded-xl flex items-center gap-3 opacity-0 transition-opacity duration-300">
+            <i class="fa-solid fa-eye text-xl animate-pulse text-purple-400"></i>
+            <span class="font-semibold text-sm">캐비닛 틈새로 밖을 엿보는 중입니다 (마우스로 시점 조절 / [E] 키로 나가기)</span>
+        </div>
+
+        <!-- Bottom Bar: Status Controls Tip -->
+        <div class="flex justify-between items-end text-xs text-zinc-400 bg-black/40 backdrop-blur p-2 px-4 rounded-lg border border-zinc-900">
+            <div class="flex gap-4">
+                <span><kbd class="text-zinc-200 font-bold">WASD</kbd> 이동</span>
+                <span><kbd class="text-zinc-200 font-bold">SHIFT</kbd> 달리기</span>
+                <span><kbd class="text-zinc-200 font-bold">E</kbd> 조사/은신</span>
+                <span><kbd class="text-zinc-200 font-bold">C</kbd> 카메라 셔터</span>
+                <span><kbd class="text-zinc-200 font-bold">I</kbd> 마우스 Y축 반전</span>
+                <span><kbd class="text-zinc-200 font-bold">TAB / J</kbd> 단서 저널</span>
+                <span><kbd class="text-zinc-200 font-bold">ESC</kbd> 메뉴</span>
+            </div>
+            <div id="ghost-warning" class="text-red-500 font-bold hidden animate-bounce flex items-center gap-1">
+                <i class="fa-solid fa-triangle-exclamation"></i> 무언가가 당신을 쫓고 있습니다!
+            </div>
+        </div>
+    </div>
+
+    <!-- Start Screen -->
+    <div id="start-screen" class="absolute inset-0 z-30 bg-zinc-950 flex flex-col items-center justify-center p-6 text-center">
+        <div class="max-w-2xl bg-zinc-900/80 border border-zinc-800 p-8 rounded-2xl shadow-2xl backdrop-blur-md">
+            <div class="inline-block px-3 py-1 bg-red-950 text-red-400 border border-red-800 rounded-full text-xs font-bold tracking-widest mb-4">
+                1인칭 미스터리 탐험 공포
+            </div>
+            <h1 class="text-4xl md:text-5xl font-extrabold text-zinc-100 mb-3 tracking-tight font-serif text-red-500">
+                폐교 : 실종된 기록
+            </h1>
+            <p class="text-zinc-400 text-sm md:text-base mb-6 leading-relaxed">
+                당신은 구독자들을 위해 10년 전 의문스러운 연쇄 실종 사건으로 폐쇄된 <strong>'자성고등학교'</strong>에 홀로 침입한 심령 탐사 유튜버입니다.<br>
+                손전등과 캠코더 하나에 의존해 실종자의 단서를 찾고, 폴터가이스트 현상과 기이한 귀신의 추격을 피해 폐교의 진실을 밝히고 탈출하세요.
+            </p>
+
+            <div class="grid grid-cols-2 gap-3 text-left bg-black/60 p-4 rounded-xl border border-zinc-800 mb-6 text-xs text-zinc-300">
+                <div>📌 <strong>조사 & 단서:</strong> 폐교 내 교실, 강당, 지하실 탐색</div>
+                <div>📷 <strong>카메라(C):</strong> 중요 장소/현상 촬영 및 기록</div>
+                <div>👻 <strong>위험 회피:</strong> 귀신 감지 시 달리기 또는 옷장/책상 뒤 은신</div>
+                <div>🚪 <strong>목표:</strong> 단서 6개 수집 후 정문으로 탈출</div>
+            </div>
+
+            <button id="btn-start" class="w-full py-4 bg-red-700 hover:bg-red-600 active:bg-red-800 text-white font-bold text-lg rounded-xl transition duration-200 shadow-lg shadow-red-950 flex items-center justify-center gap-2">
+                <i class="fa-solid fa-play"></i> 폐교 탐색 시작 (클릭하여 포인터 잠금)
+            </button>
+        </div>
+    </div>
+
+    <!-- Pause / Journal Screen (Modal) -->
+    <div id="journal-screen" class="absolute inset-0 z-30 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-6 hidden">
+        <div class="max-w-4xl w-full bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
+            <!-- Header -->
+            <div class="flex justify-between items-center p-5 border-b border-zinc-800 bg-zinc-950">
+                <div class="flex items-center gap-3">
+                    <i class="fa-solid fa-book-skull text-purple-500 text-xl"></i>
+                    <h2 class="text-xl font-bold text-zinc-100">탐사 저널 및 수집된 단서</h2>
+                </div>
+                <button id="btn-close-journal" class="text-zinc-400 hover:text-white px-3 py-1 bg-zinc-800 rounded-lg text-sm">닫기 (ESC / TAB)</button>
+            </div>
+
+            <!-- Content Area -->
+            <div class="flex-1 overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-2 gap-4" id="journal-list">
+                <!-- Clues populated dynamically -->
+            </div>
+
+            <!-- Story Summary / Escape Status -->
+            <div class="p-5 border-t border-zinc-800 bg-zinc-950/60 flex flex-col md:flex-row justify-between items-center gap-4">
+                <div class="text-xs text-zinc-400">
+                    진실 달성도: <span id="journal-progress" class="text-purple-400 font-bold">0 / 6 (0%)</span>
+                    <p id="journal-status-desc" class="text-zinc-500 mt-0.5">단서를 모아 실종자의 행방과 귀신의 정체를 파악해야 정문으로 탈출할 수 있습니다.</p>
+                </div>
+                <button id="btn-resume" class="px-6 py-2.5 bg-purple-700 hover:bg-purple-600 text-white text-sm font-bold rounded-lg shadow">
+                    게임으로 돌아가기
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="gameover-screen" class="absolute inset-0 z-40 bg-red-950/90 backdrop-blur-lg flex flex-col items-center justify-center p-6 text-center hidden">
+        <div class="max-w-md bg-black/80 border border-red-900 p-8 rounded-2xl shadow-2xl">
+            <i class="fa-solid fa-skull text-red-600 text-6xl mb-4 animate-pulse"></i>
+            <h2 class="text-3xl font-extrabold text-red-500 mb-2">신호가 중단되었습니다</h2>
+            <p class="text-zinc-400 text-sm mb-6">귀신에게 사로잡혀 카메라 비디오 테이프만 덩그러니 남겨졌습니다...</p>
+            <button id="btn-restart" class="w-full py-3 bg-red-700 hover:bg-red-600 text-white font-bold rounded-xl shadow-lg transition">
+                <i class="fa-solid fa-rotate-right mr-2"></i> 처음부터 다시 시도
+            </button>
+        </div>
+    </div>
+
+    <!-- Victory Escape Screen -->
+    <div id="victory-screen" class="absolute inset-0 z-40 bg-zinc-950/95 backdrop-blur-lg flex flex-col items-center justify-center p-6 text-center hidden">
+        <div class="max-w-lg bg-zinc-900 border border-purple-900 p-8 rounded-2xl shadow-2xl">
+            <i class="fa-solid fa-door-open text-purple-400 text-6xl mb-4"></i>
+            <h2 class="text-3xl font-extrabold text-purple-300 mb-2">폐교 탈출 성공!</h2>
+            <p class="text-zinc-300 text-sm mb-4 leading-relaxed">
+                모든 단서를 확보하고 실종자 강민우 학생의 비극적인 진실과 학교를 떠도는 원혼의 정체를 영상으로 기록한 채 무사히 정문을 빠져나왔습니다.
+            </p>
+            <div class="bg-black/60 p-4 rounded-xl border border-zinc-800 text-left text-xs text-zinc-400 mb-6 space-y-1">
+                <div>🎬 <strong>유튜브 업로드 완료:</strong> 조회수 1,200,000회 돌파</div>
+                <div>🔍 <strong>미제 사건 해결:</strong> 경찰에 단서 제출 완료</div>
+                <div>👻 <strong>귀신의 정체:</strong> 10년 전 억울하게 갇혔던 학생의 원혼</div>
+            </div>
+            <button id="btn-victory-restart" class="w-full py-3 bg-purple-700 hover:bg-purple-600 text-white font-bold rounded-xl shadow-lg transition">
+                메인 화면으로 돌아가기
+            </button>
+        </div>
+    </div>
+
+    <script>
+        /* ==========================================================================
+           1. CONFIG & GAME STATE
+           ========================================================================== */
+        const CONFIG = {
+            player: {
+                walkSpeed: 4.8,
+                runSpeed: 8.5,
+                height: 1.6,
+                radius: 0.5,
+            },
+            controls: {
+                invertY: false // 마우스 Y축 반전 설정 (false: 일반 시점, true: 반전 시점)
+            },
+            ghost: {
+                patrolSpeed: 2.2,
+                chaseSpeed: 5.6,
+                detectRadius: 11.0,
+                loseRadius: 18.0,
+            },
+            fear: {
+                clueIncrement: 15,
+                cameraIncrement: 5,
+                maxFear: 100
+            }
+        };
+
+        const GAME_STATE = {
+            isStarted: false,
+            isPaused: false,
+            isGameOver: false,
+            isWon: false,
+            isHiding: false,
+            isHidingAnimating: false,
+            currentHidingSpot: null,
+            fear: 10,
+            collectedClues: 0,
+            totalClues: 6,
+            ghostState: 'IDLE', // IDLE, PATROL, CHASE
+            currentZone: '1층 중앙 복도',
+            cameraRecording: true,
+            hasKeyToEscape: false
+        };
+
+        /* ==========================================================================
+           2. AUDIO SYNTHESIZER (Web Audio API)
+           ========================================================================== */
+        class SoundEngine {
+            constructor() {
+                this.ctx = null;
+                this.isInit = false;
+            }
+
+            init() {
+                if (this.isInit) return;
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                this.ctx = new AudioCtx();
+                this.isInit = true;
+                this.startAmbientDrone();
+            }
+
+            startAmbientDrone() {
+                if (!this.ctx) return;
+                // Low drone bass
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(45, this.ctx.currentTime);
+
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(120, this.ctx.currentTime);
+
+                gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+                osc.connect(filter);
+                filter.connect(this.ctx.destination);
+                osc.start();
+            }
+
+            playFootstep() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(80, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(20, this.ctx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.05, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.1);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.1);
+            }
+
+            playCabinetDoorSound() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(180, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(60, this.ctx.currentTime + 0.4);
+                gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.4);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.4);
+            }
+
+            playPoltergeistThud() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.3);
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.3);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.3);
+            }
+
+            playGhostScream() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(400, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(800, this.ctx.currentTime + 0.4);
+                osc.frequency.linearRampToValueAtTime(200, this.ctx.currentTime + 0.8);
+                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.8);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.8);
+            }
+
+            playCameraClick() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(1200, this.ctx.currentTime);
+                gain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.05);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.05);
+            }
+
+            playCluePickup() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(523.25, this.ctx.currentTime); // C5
+                osc.frequency.setValueAtTime(659.25, this.ctx.currentTime + 0.1); // E5
+                osc.frequency.setValueAtTime(783.99, this.ctx.currentTime + 0.2); // G5
+                gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.4);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.4);
+            }
+        }
+
+        const soundManager = new SoundEngine();
+
+        /* ==========================================================================
+           3. DATA: CLUES & MAP DEFINITIONS
+           ========================================================================== */
+        const CLUES_DATA = [
+            {
+                id: 'clue_1',
+                title: '버려진 학생증',
+                location: '1학년 1반 교실',
+                zone: '1층 교실',
+                pos: { x: -14, y: 0.8, z: -12 },
+                desc: '2016년 실종된 2학년 강민우의 학생증. 피묻은 자국이 남아있다.',
+                collected: false
+            },
+            {
+                id: 'clue_2',
+                title: '교무일지 조각',
+                location: '교무실 책상 위',
+                zone: '1층 교무실',
+                pos: { x: 14, y: 0.8, z: -12 },
+                desc: '"학생들이 밤마다 지하실에서 소음이 들린다고 호소함. 지하실 문을 즉시 봉인할 것."',
+                collected: false
+            },
+            {
+                id: 'clue_3',
+                title: '깨진 카메라 비디오 칩',
+                location: '중앙 복도 끝',
+                zone: '1층 중앙 복도',
+                pos: { x: 0, y: 0.5, z: -28 },
+                desc: '이전에 폐교를 탐사하던 방송팀이 떨어뜨린 메모리 카드. 기이한 형체가 찍혀있다.',
+                collected: false
+            },
+            {
+                id: 'clue_4',
+                title: '낡은 의식용 부적',
+                location: '체육관 무대 뒤',
+                zone: '체육관',
+                pos: { x: -18, y: 0.8, z: 18 },
+                desc: '붉은 글씨로 주술적 기호가 적힌 오래된 부적. 귀신의 집착을 달래던 물건 같다.',
+                collected: false
+            },
+            {
+                id: 'clue_5',
+                title: '얼룩진 일기장',
+                location: '특별실 창고',
+                zone: '창고',
+                pos: { x: 18, y: 0.8, z: 18 },
+                desc: '"누군가 계속 나를 지켜보고 있다. 밤이 되면 학교가 바뀐다. 탈출할 수 없다..."',
+                collected: false
+            },
+            {
+                id: 'clue_6',
+                title: '녹슨 지하실 열쇠',
+                location: '지하실 입구 앞',
+                zone: '지하실 계단',
+                pos: { x: 0, y: 0.5, z: 12 },
+                desc: '폐교의 정문을 완전히 해제할 수 있는 비상 마스터 열쇠. 이제 정문으로 탈출할 수 있다!',
+                collected: false
+            }
+        ];
+
+        /* ==========================================================================
+           4. THREE.JS SCENE, MAP & ENVIRONMENT CREATION
+           ========================================================================== */
+        let scene, camera, renderer, flashlight;
+        let colliders = [];
+        let interactiveObjects = [];
+        let hidingSpots = [];
+        let poltergeistObjects = [];
+
+        function initThreeScene() {
+            const container = document.getElementById('canvas-container');
+
+            // Scene & Fog
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x020204);
+            scene.fog = new THREE.FogExp2(0x020204, 0.08);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.rotation.order = 'YXZ'; // YXZ 순서 고정으로 화면 대각선 기울어짐 방지
+            camera.position.set(0, CONFIG.player.height, 28);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // Ambient Light (Very Dark)
+            const ambient = new THREE.AmbientLight(0x0f1525, 0.35);
+            scene.add(ambient);
+
+            // Player Flashlight (Enhanced Brightness & Range)
+            flashlight = new THREE.SpotLight(0xfff5ea, 7.5, 40, Math.PI / 5, 0.5, 1.0);
+            flashlight.castShadow = true;
+            flashlight.shadow.mapSize.width = 1024;
+            flashlight.shadow.mapSize.height = 1024;
+            scene.add(flashlight);
+            scene.add(flashlight.target);
+
+            // Build School Level Structure
+            buildSchoolLevel();
+
+            // Resize Event
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function createSpiderwebTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, 256, 256);
+
+            ctx.strokeStyle = 'rgba(230, 230, 240, 0.65)';
+            ctx.lineWidth = 1.5;
+
+            const cx = 128, cy = 128, numRays = 10, maxR = 110;
+            // Draw radial lines
+            for (let i = 0; i < numRays; i++) {
+                const angle = (i / numRays) * Math.PI * 2;
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(cx + Math.cos(angle) * maxR, cy + Math.sin(angle) * maxR);
+                ctx.stroke();
+            }
+
+            // Draw web spiral arcs
+            for (let r = 20; r <= maxR; r += 18) {
+                ctx.beginPath();
+                for (let i = 0; i <= numRays; i++) {
+                    const angle = (i / numRays) * Math.PI * 2;
+                    const x = cx + Math.cos(angle) * (r + (Math.random() * 4 - 2));
+                    const y = cy + Math.sin(angle) * (r + (Math.random() * 4 - 2));
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.needsUpdate = true;
+            return texture;
+        }
+
+        function createOldBrickTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+
+            // Dark mortar & grime base
+            ctx.fillStyle = '#141211';
+            ctx.fillRect(0, 0, 512, 512);
+
+            const rows = 32;
+            const cols = 8;
+            const brickH = 512 / rows;
+            const brickW = 512 / cols;
+            const mortar = 2.5;
+
+            for (let r = 0; r < rows; r++) {
+                const offset = (r % 2) * (brickW / 2);
+                for (let c = -1; c <= cols; c++) {
+                    const x = c * brickW + offset + mortar;
+                    const y = r * brickH + mortar;
+                    const w = brickW - mortar * 2;
+                    const h = brickH - mortar * 2;
+
+                    // Weathered brick base tone variation (red, brown, dark charcoal, mossy green)
+                    const rand = Math.random();
+                    let rVal = 65 + Math.random() * 45;
+                    let gVal = 30 + Math.random() * 25;
+                    let bVal = 22 + Math.random() * 20;
+
+                    if (rand < 0.22) {
+                        // Old burnt charcoal brick
+                        rVal *= 0.4; gVal *= 0.4; bVal *= 0.4;
+                    } else if (rand < 0.38) {
+                        // Damp/mossy stained brick
+                        gVal += 20; rVal -= 10;
+                    } else if (rand < 0.55) {
+                        // Discolored gray mortar brick
+                        rVal = 42 + Math.random() * 20;
+                        gVal = 40 + Math.random() * 20;
+                        bVal = 40 + Math.random() * 20;
+                    }
+
+                    ctx.fillStyle = `rgb(${Math.floor(rVal)}, ${Math.floor(gVal)}, ${Math.floor(bVal)})`;
+                    ctx.fillRect(x, y, w, h);
+
+                    // Surface noise & chipped specks
+                    for (let i = 0; i < 18; i++) {
+                        const nx = x + Math.random() * w;
+                        const ny = y + Math.random() * h;
+                        const nw = 1 + Math.random() * 5;
+                        const nh = 1 + Math.random() * 5;
+                        const alpha = 0.12 + Math.random() * 0.25;
+                        ctx.fillStyle = Math.random() > 0.5 ? `rgba(0,0,0,${alpha})` : `rgba(160,120,90,${alpha * 0.6})`;
+                        ctx.fillRect(nx, ny, nw, nh);
+                    }
+
+                    // Chipped edge outline
+                    ctx.strokeStyle = 'rgba(10, 8, 8, 0.55)';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x, y, w, h);
+                }
+            }
+
+            // Grime, moisture drips & mildew overlays
+            ctx.fillStyle = 'rgba(5, 5, 5, 0.35)';
+            for (let i = 0; i < 45; i++) {
+                const cx = Math.random() * 512;
+                const cy = Math.random() * 512;
+                const cr = 12 + Math.random() * 35;
+                ctx.beginPath();
+                ctx.arc(cx, cy, cr, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.needsUpdate = true;
+            return texture;
+        }
+
+        function createOldBrickBumpTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+
+            // Mortar gaps recessed (black)
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, 512, 512);
+
+            const rows = 32;
+            const cols = 8;
+            const brickH = 512 / rows;
+            const brickW = 512 / cols;
+            const mortar = 2.5;
+
+            for (let r = 0; r < rows; r++) {
+                const offset = (r % 2) * (brickW / 2);
+                for (let c = -1; c <= cols; c++) {
+                    const x = c * brickW + offset + mortar;
+                    const y = r * brickH + mortar;
+                    const w = brickW - mortar * 2;
+                    const h = brickH - mortar * 2;
+
+                    // Brick height profile
+                    ctx.fillStyle = '#d0d0d0';
+                    ctx.fillRect(x, y, w, h);
+
+                    // Rough bump noise
+                    for (let i = 0; i < 25; i++) {
+                        const nx = x + Math.random() * w;
+                        const ny = y + Math.random() * h;
+                        ctx.fillStyle = Math.random() > 0.5 ? '#ffffff' : '#666666';
+                        ctx.fillRect(nx, ny, 3, 3);
+                    }
+                }
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.needsUpdate = true;
+            return texture;
+        }
+
+        /* Modular Procedural School Map Generator */
+        function buildSchoolLevel() {
+            // Textures / Materials
+            const webTexture = createSpiderwebTexture();
+            const webMat = new THREE.MeshBasicMaterial({
+                map: webTexture,
+                transparent: true,
+                opacity: 0.75,
+                side: THREE.DoubleSide,
+                depthWrite: false
+            });
+
+            const brickTexture = createOldBrickTexture();
+            const brickBumpMap = createOldBrickBumpTexture();
+
+            const wallMat = new THREE.MeshStandardMaterial({
+                map: brickTexture,
+                bumpMap: brickBumpMap,
+                bumpScale: 0.14,
+                roughness: 0.88,
+                metalness: 0.08
+            });
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x0f1113, roughness: 0.85 });
+            const ceilingMat = new THREE.MeshStandardMaterial({ color: 0x0a0b0d, roughness: 0.95 });
+            const doorMat = new THREE.MeshStandardMaterial({ color: 0x2b1c15, roughness: 0.9 });
+            const metalMat = new THREE.MeshStandardMaterial({ color: 0x22262e, metalness: 0.6, roughness: 0.6 });
+            const debrisWoodMat = new THREE.MeshStandardMaterial({ color: 0x3d291a, roughness: 0.9 });
+            const paperMat = new THREE.MeshBasicMaterial({ color: 0xc8c3b4, side: THREE.DoubleSide });
+            const glassShardMat = new THREE.MeshStandardMaterial({ color: 0x99ccff, roughness: 0.1, metalness: 0.9, transparent: true, opacity: 0.6 });
+            const stainMat = new THREE.MeshBasicMaterial({ color: 0x050202, transparent: true, opacity: 0.7 });
+
+            // Floor & Ceiling (Main Area)
+            const floorGeo = new THREE.PlaneGeometry(60, 70);
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            const ceiling = new THREE.Mesh(floorGeo, ceilingMat);
+            ceiling.rotation.x = Math.PI / 2;
+            ceiling.position.y = 4;
+            scene.add(ceiling);
+
+            // Outer Boundary Walls
+            createWall(0, 2, -35, 60, 4, 0.5, wallMat); // North Wall
+            createWall(0, 2, 35, 60, 4, 0.5, wallMat);  // South Wall (Main Entrance)
+            createWall(-30, 2, 0, 0.5, 4, 70, wallMat); // West Wall
+            createWall(30, 2, 0, 0.5, 4, 70, wallMat);  // East Wall
+
+            // Inner Corridors & Room Partition Walls
+            // Central Corridor (North-South: X=-6 to 6)
+            createWall(-6, 2, -10, 0.4, 4, 40, wallMat);
+            createWall(6, 2, -10, 0.4, 4, 40, wallMat);
+
+            // Rooms West Side: Classroom (-18, -12), Gym (-18, 18)
+            createWall(-18, 2, 0, 24, 4, 0.4, wallMat);
+            // Rooms East Side: Faculty (-18, -12), Storage (18, 18)
+            createWall(18, 2, 0, 24, 4, 0.4, wallMat);
+
+            // Create Hiding Lockers & Furniture
+            createHidingLocker(-5, 0, 20, '1층 입구 캐비닛', 0);
+            createHidingLocker(-5, 0, 0, '중앙 복도 캐비닛', 0);
+            createHidingLocker(5, 0, -20, '북쪽 복도 캐비닛', Math.PI);
+            createHidingLocker(-16, 0, -18, '교실 옷장 캐비닛', 0);
+            createHidingLocker(16, 0, -12, '교무실 대형 캐비닛', Math.PI);
+            createHidingLocker(16, 0, 15, '창고 대형 캐비닛', Math.PI);
+            createHidingLocker(-18, 0, 15, '체육관 캐비닛', 0);
+
+            // Decorative Furniture & Poltergeist Items
+            createFurniture();
+
+            // Place Spiderwebs in Corners & Ceiling Corners
+            const webGeo = new THREE.PlaneGeometry(3.5, 3.5);
+            const webPositions = [
+                { pos: [-29.5, 3.2, -34.5], rot: [0, 0, Math.PI / 4] },
+                { pos: [29.5, 3.2, -34.5], rot: [0, Math.PI / 2, Math.PI / 4] },
+                { pos: [-5.8, 3.5, -29.5], rot: [Math.PI / 4, 0, 0] },
+                { pos: [5.8, 3.5, -29.5], rot: [Math.PI / 4, Math.PI / 2, 0] },
+                { pos: [-29.5, 3.2, 34.5], rot: [0, -Math.PI / 2, Math.PI / 4] },
+                { pos: [29.5, 3.2, 34.5], rot: [0, Math.PI, Math.PI / 4] },
+                { pos: [-17.5, 3.5, -17.5], rot: [Math.PI / 4, 0, 0] },
+                { pos: [17.5, 3.5, -17.5], rot: [Math.PI / 4, Math.PI / 2, 0] },
+                { pos: [-5.8, 3.2, 10.0], rot: [0, 0, Math.PI / 4] },
+                { pos: [5.8, 3.2, 10.0], rot: [0, Math.PI, Math.PI / 4] }
+            ];
+
+            webPositions.forEach(w => {
+                const web = new THREE.Mesh(webGeo, webMat);
+                web.position.set(w.pos[0], w.pos[1], w.pos[2]);
+                web.rotation.set(w.rot[0], w.rot[1], w.rot[2]);
+                scene.add(web);
+            });
+
+            // Floor Dirt & Blood Stains
+            const stainGeo = new THREE.PlaneGeometry(4, 4);
+            const stainLocs = [
+                [-14, 0.01, -12], [0, 0.01, -18], [12, 0.01, -10],
+                [-18, 0.01, 15], [0, 0.01, 5], [15, 0.01, 20]
+            ];
+            stainLocs.forEach(loc => {
+                const stain = new THREE.Mesh(stainGeo, stainMat);
+                stain.position.set(loc[0], loc[1], loc[2]);
+                stain.rotation.x = -Math.PI / 2;
+                stain.rotation.z = Math.random() * Math.PI;
+                stain.scale.set(0.8 + Math.random(), 0.8 + Math.random(), 1);
+                scene.add(stain);
+            });
+
+            // Broken Planks & Rubble Debris
+            const plankGeo = new THREE.BoxGeometry(1.5, 0.08, 0.3);
+            for (let i = 0; i < 35; i++) {
+                const plank = new THREE.Mesh(plankGeo, debrisWoodMat);
+                plank.position.set((Math.random() - 0.5) * 50, 0.04, (Math.random() - 0.5) * 60);
+                plank.rotation.y = Math.random() * Math.PI;
+                plank.rotation.z = (Math.random() - 0.5) * 0.2;
+                scene.add(plank);
+            }
+
+            // Scattered Paper Sheets
+            const paperGeo = new THREE.PlaneGeometry(0.3, 0.4);
+            for (let i = 0; i < 40; i++) {
+                const paper = new THREE.Mesh(paperGeo, paperMat);
+                paper.position.set((Math.random() - 0.5) * 52, 0.015, (Math.random() - 0.5) * 62);
+                paper.rotation.x = -Math.PI / 2;
+                paper.rotation.z = Math.random() * Math.PI;
+                scene.add(paper);
+            }
+
+            // Glass Shards on Floor
+            const glassGeo = new THREE.TetrahedronGeometry(0.08);
+            for (let i = 0; i < 50; i++) {
+                const glass = new THREE.Mesh(glassGeo, glassShardMat);
+                glass.position.set((Math.random() - 0.5) * 50, 0.04, (Math.random() - 0.5) * 60);
+                glass.rotation.set(Math.random(), Math.random(), Math.random());
+                scene.add(glass);
+            }
+
+            // Hanging Broken Wires from Ceiling
+            const wireMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+            for (let i = 0; i < 15; i++) {
+                const wireGeo = new THREE.CylinderGeometry(0.01, 0.01, 1.2 + Math.random() * 0.8);
+                const wire = new THREE.Mesh(wireGeo, wireMat);
+                wire.position.set((Math.random() - 0.5) * 45, 3.3, (Math.random() - 0.5) * 55);
+                wire.rotation.z = (Math.random() - 0.5) * 0.3;
+                scene.add(wire);
+            }
+
+            // Atmospheric Floating Dust Particles
+            const particleCount = 200;
+            const particleGeo = new THREE.BufferGeometry();
+            const particlePos = new Float32Array(particleCount * 3);
+
+            for (let i = 0; i < particleCount * 3; i += 3) {
+                particlePos[i] = (Math.random() - 0.5) * 55;
+                particlePos[i + 1] = Math.random() * 3.8;
+                particlePos[i + 2] = (Math.random() - 0.5) * 65;
+            }
+
+            particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePos, 3));
+            const particleMat = new THREE.PointsMaterial({
+                color: 0x8888aa,
+                size: 0.06,
+                transparent: true,
+                opacity: 0.4
+            });
+            const dustParticles = new THREE.Points(particleGeo, particleMat);
+            scene.add(dustParticles);
+
+            // Spawn Clues
+            spawnClues3D();
+
+            // Dim Flickering Corridor Lights
+            createFlickeringLight(0, 3.8, 10, 0xffa050);
+            createFlickeringLight(0, 3.8, -10, 0x5070ff);
+            createFlickeringLight(-18, 3.8, -15, 0xff3030);
+            createFlickeringLight(18, 3.8, 15, 0x40ff70);
+        }
+
+        function createWall(x, y, z, w, h, d, material) {
+            const geo = new THREE.BoxGeometry(w, h, d);
+
+            // Dynamically apply and scale weathered brick textures per wall dimensions
+            let customMat = material;
+            if (material.map) {
+                customMat = material.clone();
+                customMat.map = material.map.clone();
+                
+                if (material.bumpMap) {
+                    customMat.bumpMap = material.bumpMap.clone();
+                }
+
+                const repeatX = Math.max(w, d) / 2.8;
+                const repeatY = h / 2.2;
+                customMat.map.repeat.set(repeatX, repeatY);
+                customMat.map.needsUpdate = true;
+
+                if (customMat.bumpMap) {
+                    customMat.bumpMap.repeat.set(repeatX, repeatY);
+                    customMat.bumpMap.needsUpdate = true;
+                }
+            }
+
+            const wall = new THREE.Mesh(geo, customMat);
+            wall.position.set(x, y, z);
+            wall.receiveShadow = true;
+            wall.castShadow = true;
+            scene.add(wall);
+
+            // Add bounding box for collision
+            const box = new THREE.Box3().setFromObject(wall);
+            colliders.push(box);
+            return wall;
+        }
+
+        function createHidingLocker(x, y, z, name, rotationY = 0) {
+            const lockerGroup = new THREE.Group();
+            
+            // Outer Frame / Hollow Shell
+            const mat = new THREE.MeshStandardMaterial({ color: 0x222830, metalness: 0.6, roughness: 0.4, side: THREE.DoubleSide });
+            
+            // Back Wall
+            const backGeo = new THREE.BoxGeometry(1.4, 2.4, 0.08);
+            const back = new THREE.Mesh(backGeo, mat);
+            back.position.set(0, 1.2, -0.6);
+            lockerGroup.add(back);
+
+            // Left & Right Walls
+            const sideGeo = new THREE.BoxGeometry(0.08, 2.4, 1.2);
+            const sideL = new THREE.Mesh(sideGeo, mat);
+            sideL.position.set(-0.66, 1.2, 0);
+            lockerGroup.add(sideL);
+
+            const sideR = new THREE.Mesh(sideGeo, mat);
+            sideR.position.set(0.66, 1.2, 0);
+            lockerGroup.add(sideR);
+
+            // Top & Bottom Panels
+            const topGeo = new THREE.BoxGeometry(1.4, 0.08, 1.2);
+            const top = new THREE.Mesh(topGeo, mat);
+            top.position.set(0, 2.36, 0);
+            lockerGroup.add(top);
+
+            const bot = new THREE.Mesh(topGeo, mat);
+            bot.position.set(0, 0.04, 0);
+            lockerGroup.add(bot);
+
+            // Animated Double Doors with Eye-Level Louver Slits for Peeking Outside
+            const doorMat = new THREE.MeshStandardMaterial({ color: 0x1d222a, metalness: 0.7, roughness: 0.3 });
+            const handleMat = new THREE.MeshBasicMaterial({ color: 0x888888 });
+            const handleGeo = new THREE.BoxGeometry(0.04, 0.25, 0.08);
+
+            // Helper to build a door panel with peek slits at eye level
+            function buildDoorWithSlits(isLeft) {
+                const doorGroup = new THREE.Group();
+                const sign = isLeft ? 1 : -1;
+                const width = 0.64;
+
+                // Lower door section (up to y = 1.48)
+                const botGeo = new THREE.BoxGeometry(width, 1.48, 0.05);
+                const botMesh = new THREE.Mesh(botGeo, doorMat);
+                botMesh.position.set(sign * (width / 2), -0.38, 0);
+                doorGroup.add(botMesh);
+
+                // Upper door section (y = 1.72 and above)
+                const topGeo = new THREE.BoxGeometry(width, 0.62, 0.05);
+                const topMesh = new THREE.Mesh(topGeo, doorMat);
+                topMesh.position.set(sign * (width / 2), 0.81, 0);
+                doorGroup.add(topMesh);
+
+                // Eye-Level Viewing Slits (Eye level at ~1.6m, giving clear view of the outside)
+                const slatCount = 3;
+                const slatGeo = new THREE.BoxGeometry(width, 0.035, 0.05);
+                for (let s = 0; s < slatCount; s++) {
+                    const slat = new THREE.Mesh(slatGeo, doorMat);
+                    slat.position.set(sign * (width / 2), 0.32 + s * 0.07, 0);
+                    slat.rotation.x = 0.2; // Slight angle for realistic louver look
+                    doorGroup.add(slat);
+                }
+
+                // Door Handle
+                const handle = new THREE.Mesh(handleGeo, handleMat);
+                handle.position.set(sign * (width - 0.06), 0, 0.05);
+                doorGroup.add(handle);
+
+                return doorGroup;
+            }
+
+            // Left Door Assembly
+            const doorLPivot = new THREE.Group();
+            doorLPivot.position.set(-0.64, 1.2, 0.6); // Hinge location
+            doorLPivot.add(buildDoorWithSlits(true));
+            lockerGroup.add(doorLPivot);
+
+            // Right Door Assembly
+            const doorRPivot = new THREE.Group();
+            doorRPivot.position.set(0.64, 1.2, 0.6); // Hinge location
+            doorRPivot.add(buildDoorWithSlits(false));
+            lockerGroup.add(doorRPivot);
+
+            lockerGroup.position.set(x, y, z);
+            lockerGroup.rotation.y = rotationY;
+            scene.add(lockerGroup);
+
+            // Internal Position Calculation (Camera placed safely inside locker center, not sticking out into corridor)
+            const insideLocal = new THREE.Vector3(0, CONFIG.player.height, 0.0);
+            const insideWorld = insideLocal.clone().applyMatrix4(lockerGroup.matrixWorld);
+
+            const outsideLocal = new THREE.Vector3(0, CONFIG.player.height, 1.2);
+            const outsideWorld = outsideLocal.clone().applyMatrix4(lockerGroup.matrixWorld);
+
+            const hidingSpotData = {
+                type: 'HIDING',
+                name: name,
+                mesh: lockerGroup,
+                doorLPivot: doorLPivot,
+                doorRPivot: doorRPivot,
+                doorAngle: 0,
+                targetDoorAngle: 0,
+                pos: new THREE.Vector3(x, y, z),
+                insidePos: insideWorld,
+                outsidePos: outsideWorld,
+                rotationY: rotationY,
+                triggerRadius: 4.0
+            };
+
+            hidingSpots.push(hidingSpotData);
+            interactiveObjects.push(hidingSpotData);
+
+            // Add collider
+            const box = new THREE.Box3().setFromObject(lockerGroup);
+            colliders.push(box);
+        }
+
+        function createFurniture() {
+            const deskMat = new THREE.MeshStandardMaterial({ color: 0x3d281a, roughness: 0.9 });
+            const chairMat = new THREE.MeshStandardMaterial({ color: 0x181c22, roughness: 0.8 });
+
+            // Broken & Tilted Classroom Desks & Chairs
+            for (let i = -1; i <= 1; i++) {
+                for (let j = -1; j <= 1; j++) {
+                    const isBroken = Math.random() < 0.4;
+                    const desk = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 0.9), deskMat);
+                    desk.position.set(-18 + i * 3 + (Math.random() - 0.5), 0.4, -15 + j * 3 + (Math.random() - 0.5));
+                    
+                    if (isBroken) {
+                        desk.rotation.z = (Math.random() - 0.5) * 0.4;
+                        desk.rotation.y = Math.random() * Math.PI;
+                    }
+
+                    desk.castShadow = true;
+                    scene.add(desk);
+                    colliders.push(new THREE.Box3().setFromObject(desk));
+
+                    // Poltergeist registerable chairs (tilted & messy)
+                    const chair = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.9, 0.6), chairMat);
+                    chair.position.set(-18 + i * 3 + (Math.random() - 0.5) * 0.8, 0.45, -14.2 + j * 3 + (Math.random() - 0.5) * 0.8);
+                    chair.rotation.y = Math.random() * Math.PI;
+                    if (Math.random() < 0.3) {
+                        chair.rotation.z = Math.PI / 2.2; // Knocked over chair
+                        chair.position.y = 0.25;
+                    }
+                    scene.add(chair);
+                    poltergeistObjects.push({ mesh: chair, origPos: chair.position.clone() });
+                }
+            }
+
+            // Main Entrance Exit Door (South Wall: X=0, Z=34)
+            const exitDoorGeo = new THREE.BoxGeometry(3, 3.2, 0.3);
+            const exitDoorMat = new THREE.MeshStandardMaterial({ color: 0x6e1d1d, metalness: 0.3 });
+            const exitDoor = new THREE.Mesh(exitDoorGeo, exitDoorMat);
+            exitDoor.position.set(0, 1.6, 34.5);
+            scene.add(exitDoor);
+
+            interactiveObjects.push({
+                type: 'EXIT_DOOR',
+                name: '폐교 정문 (탈출 지점)',
+                mesh: exitDoor,
+                pos: new THREE.Vector3(0, 1.6, 33),
+                triggerRadius: 3.0
+            });
+        }
+
+        function createFlickeringLight(x, y, z, color) {
+            const light = new THREE.PointLight(color, 1.2, 14);
+            light.position.set(x, y, z);
+            scene.add(light);
+
+            // Light bulb mesh
+            const bulb = new THREE.Mesh(
+                new THREE.SphereGeometry(0.15, 8, 8),
+                new THREE.MeshBasicMaterial({ color: color })
+            );
+            bulb.position.set(x, y, z);
+            scene.add(bulb);
+
+            // Flicker logic state attached
+            light.userData = { origIntensity: 1.2, timer: Math.random() * 10 };
+            return light;
+        }
+
+        /* Spawn 3D Clue Pickup Objects */
+        function spawnClues3D() {
+            const clueGeo = new THREE.BoxGeometry(0.3, 0.05, 0.4);
+            const clueMat = new THREE.MeshStandardMaterial({ color: 0xe9d5ff, emissive: 0x581c87, emissiveIntensity: 0.6 });
+
+            CLUES_DATA.forEach(clue => {
+                const mesh = new THREE.Mesh(clueGeo, clueMat);
+                mesh.position.set(clue.pos.x, clue.pos.y, clue.pos.z);
+                mesh.rotation.y = Math.random() * Math.PI;
+                scene.add(mesh);
+
+                clue.mesh = mesh;
+
+                interactiveObjects.push({
+                    type: 'CLUE',
+                    clueId: clue.id,
+                    name: clue.title,
+                    mesh: mesh,
+                    pos: clue.pos,
+                    triggerRadius: 2.0
+                });
+            });
+        }
+
+        /* ==========================================================================
+           5. GHOST AI & POLTERGEIST ENGINE
+           ========================================================================== */
+        let ghostMesh, ghostLight, ghostHeadGroup;
+        const ghostAI = {
+            pos: new THREE.Vector3(0, 0, -20),
+            targetPos: new THREE.Vector3(0, 0, -20),
+            state: 'PATROL', // PATROL, CHASE
+            patrolTimer: 0,
+            active: false
+        };
+
+        function createGhostMesh() {
+            const ghostGroup = new THREE.Group();
+
+            // 1. Tattered Shroud / Dress (Ghost Body)
+            const bodyGeo = new THREE.CylinderGeometry(0.35, 0.75, 2.0, 16, 4);
+            const bodyMat = new THREE.MeshStandardMaterial({
+                color: 0x111318,
+                roughness: 0.9,
+                transparent: true,
+                opacity: 0.92
+            });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 1.0;
+            ghostGroup.add(body);
+
+            // Inner Shadow Core
+            const coreGeo = new THREE.CylinderGeometry(0.2, 0.5, 1.8, 8);
+            const coreMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+            const core = new THREE.Mesh(coreGeo, coreMat);
+            core.position.y = 0.9;
+            ghostGroup.add(core);
+
+            // 2. Ghost Head Group (for neck twitching animation)
+            ghostHeadGroup = new THREE.Group();
+            ghostHeadGroup.position.set(0, 1.9, 0);
+
+            // Pale Distorted Face
+            const headGeo = new THREE.SphereGeometry(0.3, 16, 16);
+            const headMat = new THREE.MeshStandardMaterial({
+                color: 0x909a9e, // Pale dead gray-blue
+                roughness: 0.6,
+                metalness: 0.1
+            });
+            const head = new THREE.Mesh(headGeo, headMat);
+            ghostHeadGroup.add(head);
+
+            // Hollow Sunken Eyes
+            const eyeSocketGeo = new THREE.SphereGeometry(0.08, 8, 8);
+            const socketMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+            const socketL = new THREE.Mesh(eyeSocketGeo, socketMat);
+            const socketR = new THREE.Mesh(eyeSocketGeo, socketMat);
+            socketL.position.set(-0.1, 0.05, 0.24);
+            socketR.position.set(0.1, 0.05, 0.24);
+            ghostHeadGroup.add(socketL);
+            ghostHeadGroup.add(socketR);
+
+            // Glowing Crimson Pupils
+            const pupilGeo = new THREE.SphereGeometry(0.035, 8, 8);
+            const pupilMat = new THREE.MeshBasicMaterial({ color: 0xff0022 });
+            const pupilL = new THREE.Mesh(pupilGeo, pupilMat);
+            const pupilR = new THREE.Mesh(pupilGeo, pupilMat);
+            pupilL.position.set(-0.1, 0.05, 0.27);
+            pupilR.position.set(0.1, 0.05, 0.27);
+            ghostHeadGroup.add(pupilL);
+            ghostHeadGroup.add(pupilR);
+
+            // Unnatural Wide Open Gaping Mouth
+            const mouthGeo = new THREE.CylinderGeometry(0.07, 0.05, 0.22, 12);
+            mouthGeo.rotateX(Math.PI / 2);
+            const mouthMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+            const mouth = new THREE.Mesh(mouthGeo, mouthMat);
+            mouth.position.set(0, -0.12, 0.25);
+            ghostHeadGroup.add(mouth);
+
+            // Creepy Messy Black Hair Strands (Korean School Ghost Style)
+            const hairMat = new THREE.MeshStandardMaterial({ color: 0x020202, roughness: 1.0 });
+            for (let i = 0; i < 16; i++) {
+                const angle = (i / 16) * Math.PI * 2;
+                const hairGeo = new THREE.ConeGeometry(0.04, 0.9 + Math.random() * 0.4, 4);
+                const hair = new THREE.Mesh(hairGeo, hairMat);
+
+                // Position around head draping downward
+                const x = Math.cos(angle) * 0.28;
+                const z = Math.sin(angle) * 0.28;
+                hair.position.set(x, -0.2, z);
+                hair.rotation.x = (Math.random() - 0.5) * 0.3;
+                hair.rotation.z = (Math.random() - 0.5) * 0.3;
+                ghostHeadGroup.add(hair);
+            }
+
+            ghostGroup.add(ghostHeadGroup);
+
+            // 3. Unnaturally Long Bent Arms Reaching Forward
+            const armMat = new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.8 });
+            const handMat = new THREE.MeshStandardMaterial({ color: 0x7a8388, roughness: 0.5 });
+
+            [-1, 1].forEach(side => {
+                const armGroup = new THREE.Group();
+                armGroup.position.set(side * 0.38, 1.5, 0);
+
+                // Upper Arm
+                const upperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.7), armMat);
+                upperArm.position.set(side * 0.1, -0.3, 0.2);
+                upperArm.rotation.z = side * -0.4;
+                upperArm.rotation.x = -0.6; // Reach forward
+                armGroup.add(upperArm);
+
+                // Bony Claws / Hand
+                const hand = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.25, 0.02), handMat);
+                hand.position.set(side * 0.2, -0.6, 0.45);
+                hand.rotation.x = -0.8;
+                armGroup.add(hand);
+
+                ghostGroup.add(armGroup);
+            });
+
+            // 4. Eerie Red/Purple Pulsating Aura Light
+            ghostLight = new THREE.PointLight(0xff0033, 3.5, 12);
+            ghostLight.position.set(0, 1.5, 0);
+            ghostGroup.add(ghostLight);
+
+            ghostGroup.position.copy(ghostAI.pos);
+            ghostGroup.visible = false;
+            scene.add(ghostGroup);
+            ghostMesh = ghostGroup;
+        }
+
+        function updateGhostAI(delta) {
+            if (!ghostAI.active || GAME_STATE.isGameOver || GAME_STATE.isWon) return;
+
+            const playerPos = camera.position.clone();
+            playerPos.y = 0;
+            const ghostPos = ghostMesh.position.clone();
+            ghostPos.y = 0;
+
+            const distToPlayer = ghostPos.distanceTo(playerPos);
+
+            // Dynamic Static Noise & Horror Flash based on ghost proximity
+            const staticEl = document.getElementById('static-overlay');
+            if (distToPlayer < 22) {
+                const intensity = 0.25 + (1 - distToPlayer / 22) * 0.7;
+                if (staticEl) staticEl.style.opacity = intensity.toString();
+            } else if (staticEl) {
+                staticEl.style.opacity = '0.3';
+            }
+
+            // Detection Check (If Hiding, player cannot be detected)
+            if (!GAME_STATE.isHiding && distToPlayer < CONFIG.ghost.detectRadius + (GAME_STATE.fear * 0.05)) {
+                if (ghostAI.state !== 'CHASE') {
+                    ghostAI.state = 'CHASE';
+                    soundManager.playGhostScream();
+                    showGhostWarning(true);
+                }
+            } else if (distToPlayer > CONFIG.ghost.loseRadius || GAME_STATE.isHiding) {
+                if (ghostAI.state === 'CHASE') {
+                    ghostAI.state = 'PATROL';
+                    showGhostWarning(false);
+                }
+            }
+
+            // AI Movement Behavior
+            if (ghostAI.state === 'CHASE') {
+                // Move towards player
+                const dir = new THREE.Vector3().subVectors(playerPos, ghostPos).normalize();
+                ghostMesh.position.addScaledVector(dir, CONFIG.ghost.chaseSpeed * delta);
+                ghostMesh.lookAt(playerPos.x, ghostMesh.position.y, playerPos.z);
+
+                // Creepy head twitching during chase
+                if (ghostHeadGroup) {
+                    ghostHeadGroup.rotation.z = (Math.random() - 0.5) * 0.45;
+                    ghostHeadGroup.rotation.x = (Math.random() - 0.5) * 0.25;
+                }
+
+                // Game Over Trigger
+                if (distToPlayer < 1.3) {
+                    triggerGameOver();
+                }
+            } else {
+                // Patrol random wandering
+                ghostAI.patrolTimer -= delta;
+                if (ghostAI.patrolTimer <= 0) {
+                    ghostAI.patrolTimer = 4 + Math.random() * 4;
+                    ghostAI.targetPos.set(
+                        (Math.random() - 0.5) * 40,
+                        0,
+                        (Math.random() - 0.5) * 50
+                    );
+                }
+
+                const dir = new THREE.Vector3().subVectors(ghostAI.targetPos, ghostPos).normalize();
+                ghostMesh.position.addScaledVector(dir, CONFIG.ghost.patrolSpeed * delta);
+                ghostMesh.lookAt(ghostAI.targetPos.x, ghostMesh.position.y, ghostAI.targetPos.z);
+
+                if (ghostHeadGroup) {
+                    ghostHeadGroup.rotation.set(0, 0, 0);
+                }
+            }
+
+            // Floating movement animation
+            ghostMesh.position.y = Math.sin(Date.now() * 0.003) * 0.2;
+        }
+
+        /* Trigger Poltergeist Events based on Fear Level */
+        function triggerPoltergeistEvent() {
+            if (poltergeistObjects.length === 0) return;
+
+            // Pick random object to fling or shake
+            const targetIndex = Math.floor(Math.random() * poltergeistObjects.length);
+            const item = poltergeistObjects[targetIndex];
+
+            soundManager.playPoltergeistThud();
+
+            // Sudden impulse jump animation
+            item.mesh.position.y += 0.8;
+            item.mesh.rotation.x += Math.PI * 0.5;
+
+            // Reset after delay
+            setTimeout(() => {
+                item.mesh.position.copy(item.origPos);
+                item.mesh.rotation.set(0, 0, 0);
+            }, 2500);
+
+            // Screen Horror Shake / Flash
+            const fearEl = document.getElementById('fear-overlay');
+            fearEl.style.opacity = '0.6';
+            setTimeout(() => { fearEl.style.opacity = '0'; }, 300);
+        }
+
+        /* ==========================================================================
+           6. CONTROLS, PLAYER MOVEMENT & CAMERA INTERACTION
+           ========================================================================== */
+        const keys = {};
+        let isPointerLocked = false;
+        let pitch = 0;
+        let yaw = 0;
+
+        function initControls() {
+            document.addEventListener('keydown', (e) => {
+                keys[e.code] = true;
+
+                if (e.code === 'KeyE') handleInteraction();
+                if (e.code === 'KeyC') captureCameraSnapshot();
+                if (e.code === 'KeyI') {
+                    CONFIG.controls.invertY = !CONFIG.controls.invertY;
+                    showInvertToast();
+                }
+                if (e.code === 'Tab' || e.code === 'KeyJ') {
+                    e.preventDefault();
+                    toggleJournal();
+                }
+                if (e.code === 'Escape') togglePauseMenu();
+            });
+
+            document.addEventListener('keyup', (e) => {
+                keys[e.code] = false;
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isPointerLocked || GAME_STATE.isPaused || GAME_STATE.isGameOver) return;
+
+                const sensitivity = 0.0022;
+
+                if (GAME_STATE.isHiding) {
+                    // While hiding inside cabinet, allow peeking camera rotation through cabinet slits
+                    const spot = GAME_STATE.currentHidingSpot;
+                    const baseYaw = spot ? spot.rotationY + Math.PI : yaw;
+                    yaw -= e.movementX * sensitivity;
+                    // Clamp yaw to peeking range around cabinet front (+/- 35 degrees)
+                    yaw = Math.max(baseYaw - 0.6, Math.min(baseYaw + 0.6, yaw));
+
+                    if (CONFIG.controls.invertY) {
+                        pitch += e.movementY * sensitivity;
+                    } else {
+                        pitch -= e.movementY * sensitivity;
+                    }
+                    pitch = Math.max(-0.35, Math.min(0.35, pitch));
+                } else {
+                    yaw -= e.movementX * sensitivity;
+
+                    if (CONFIG.controls.invertY) {
+                        pitch += e.movementY * sensitivity;
+                    } else {
+                        pitch -= e.movementY * sensitivity;
+                    }
+                    pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, pitch));
+                }
+
+                // Apply rotation with YXZ ordering to maintain stable horizon
+                camera.rotation.set(pitch, yaw, 0, 'YXZ');
+            });
+
+            // Pointer Lock Event
+            document.addEventListener('pointerlockchange', () => {
+                isPointerLocked = document.pointerLockElement === document.body;
+            });
+        }
+
+        /* Y축 반전 상태 알림 팝업 */
+        function showInvertToast() {
+            const toast = document.getElementById('invert-toast');
+            if (!toast) return;
+            toast.innerText = `마우스 Y축 반전: ${CONFIG.controls.invertY ? 'ON (반전)' : 'OFF (일반)'}`;
+            toast.style.opacity = '1';
+            clearTimeout(window.toastTimer);
+            window.toastTimer = setTimeout(() => {
+                toast.style.opacity = '0';
+            }, 1500);
+        }
+
+        function updatePlayerMovement(delta) {
+            if (!GAME_STATE.isStarted || GAME_STATE.isPaused || GAME_STATE.isGameOver || GAME_STATE.isHiding) return;
+
+            const speed = keys['ShiftLeft'] || keys['ShiftRight'] ? CONFIG.player.runSpeed : CONFIG.player.walkSpeed;
+            const moveVector = new THREE.Vector3();
+
+            if (keys['KeyW']) moveVector.z -= 1;
+            if (keys['KeyS']) moveVector.z += 1;
+            if (keys['KeyA']) moveVector.x -= 1;
+            if (keys['KeyD']) moveVector.x += 1;
+
+            if (moveVector.lengthSq() > 0) {
+                moveVector.normalize();
+                moveVector.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+
+                // Proposed next position
+                const nextPos = camera.position.clone().addScaledVector(moveVector, speed * delta);
+
+                // Collision Check
+                if (!checkCollision(nextPos)) {
+                    camera.position.x = nextPos.x;
+                    camera.position.z = nextPos.z;
+
+                    // Play Footstep sound
+                    if (Math.random() < 0.05) soundManager.playFootstep();
+                }
+            }
+
+            // Sync Flashlight position with camera
+            flashlight.position.copy(camera.position);
+            const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            flashlight.target.position.copy(camera.position).add(dir);
+
+            // Update Current Zone HUD
+            updateCurrentZoneName();
+            checkNearInteractions();
+        }
+
+        function checkCollision(pos) {
+            const playerBox = new THREE.Box3().setFromCenterAndSize(
+                pos,
+                new THREE.Vector3(CONFIG.player.radius * 2, CONFIG.player.height, CONFIG.player.radius * 2)
+            );
+
+            for (let box of colliders) {
+                if (playerBox.intersectsBox(box)) return true;
+            }
+            return false;
+        }
+
+        function checkNearInteractions() {
+            let foundPrompt = null;
+            const playerPos = camera.position;
+
+            for (let obj of interactiveObjects) {
+                const dist = playerPos.distanceTo(obj.pos);
+                if (dist <= obj.triggerRadius) {
+                    if (obj.type === 'CLUE') {
+                        foundPrompt = `[E] ${obj.name} 조사하기`;
+                    } else if (obj.type === 'HIDING') {
+                        foundPrompt = `[E] ${obj.name} 열고 숨기`;
+                    } else if (obj.type === 'EXIT_DOOR') {
+                        foundPrompt = GAME_STATE.collectedClues >= GAME_STATE.totalClues 
+                            ? `[E] 폐교 탈출하기!` 
+                            : `[E] 정문 (열쇠 필요: 단서 ${GAME_STATE.collectedClues}/${GAME_STATE.totalClues})`;
+                    }
+                    break;
+                }
+            }
+
+            const promptEl = document.getElementById('interaction-prompt');
+            const promptText = document.getElementById('prompt-text');
+
+            if (foundPrompt) {
+                promptText.innerText = foundPrompt;
+                promptEl.style.opacity = '1';
+            } else {
+                promptEl.style.opacity = '0';
+            }
+        }
+
+        function handleInteraction() {
+            if (GAME_STATE.isHidingAnimating) return; // Prevent double trigger during animation
+
+            if (GAME_STATE.isHiding) {
+                // Exit hiding sequence with animation
+                exitCabinetAnimation();
+                return;
+            }
+
+            const playerPos = camera.position;
+
+            for (let obj of interactiveObjects) {
+                const dist = playerPos.distanceTo(obj.pos);
+                if (dist <= obj.triggerRadius) {
+                    if (obj.type === 'CLUE') {
+                        collectClue(obj.clueId, obj);
+                    } else if (obj.type === 'HIDING') {
+                        enterCabinetAnimation(obj);
+                    } else if (obj.type === 'EXIT_DOOR') {
+                        if (GAME_STATE.collectedClues >= GAME_STATE.totalClues) {
+                            triggerVictory();
+                        } else {
+                            alert(`아직 탈출할 수 없습니다. 모든 단서를 수집해야 합니다! (${GAME_STATE.collectedClues}/${GAME_STATE.totalClues})`);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        /* Animated Cabinet Entry Sequence */
+        function enterCabinetAnimation(spot) {
+            GAME_STATE.isHidingAnimating = true;
+            GAME_STATE.currentHidingSpot = spot;
+
+            soundManager.playCabinetDoorSound();
+
+            // Step 1: Open Cabinet Doors
+            spot.targetDoorAngle = Math.PI * 0.65; // Open doors outward
+
+            // Step 2: Smooth Camera Transition inside
+            const startPos = camera.position.clone();
+            spot.entryPos = startPos.clone(); // Save original player position
+            const targetPos = spot.insidePos.clone();
+            
+            // Align camera view towards cabinet front door (looking outside)
+            yaw = spot.rotationY + Math.PI;
+            pitch = 0;
+            camera.rotation.set(pitch, yaw, 0, 'YXZ');
+
+            let progress = 0;
+            const animInterval = setInterval(() => {
+                progress += 0.05;
+                if (progress <= 1.0) {
+                    camera.position.lerpVectors(startPos, targetPos, progress);
+                } else {
+                    camera.position.copy(targetPos);
+                    clearInterval(animInterval);
+
+                    // Step 3: Close Cabinet Doors & Dim Flashlight for Stealth View
+                    spot.targetDoorAngle = 0;
+                    soundManager.playCabinetDoorSound();
+                    flashlight.intensity = 0.2; // Dim light so player can clearly see outside through slits
+
+                    setTimeout(() => {
+                        GAME_STATE.isHiding = true;
+                        GAME_STATE.isHidingAnimating = false;
+                        document.getElementById('hiding-indicator').style.opacity = '1';
+                    }, 400);
+                }
+            }, 16);
+        }
+
+        /* Animated Cabinet Exit Sequence */
+        function exitCabinetAnimation() {
+            const spot = GAME_STATE.currentHidingSpot;
+            if (!spot) return;
+
+            GAME_STATE.isHidingAnimating = true;
+            document.getElementById('hiding-indicator').style.opacity = '0';
+
+            soundManager.playCabinetDoorSound();
+
+            // Step 1: Open Cabinet Doors
+            spot.targetDoorAngle = Math.PI * 0.65;
+
+            // Step 2: Smooth Camera Transition outside to exact entry position
+            const startPos = camera.position.clone();
+            const targetPos = spot.entryPos ? spot.entryPos.clone() : spot.outsidePos.clone();
+
+            let progress = 0;
+            const animInterval = setInterval(() => {
+                progress += 0.05;
+                if (progress <= 1.0) {
+                    camera.position.lerpVectors(startPos, targetPos, progress);
+                } else {
+                    camera.position.copy(targetPos);
+                    clearInterval(animInterval);
+
+                    // Step 3: Close Cabinet Doors & Restore Flashlight Brightness
+                    spot.targetDoorAngle = 0;
+                    soundManager.playCabinetDoorSound();
+                    flashlight.intensity = 7.5; // Restore normal flashlight brightness
+
+                    setTimeout(() => {
+                        GAME_STATE.isHiding = false;
+                        GAME_STATE.isHidingAnimating = false;
+                        GAME_STATE.currentHidingSpot = null;
+                    }, 400);
+                }
+            }, 16);
+        }
+
+        /* Collect Clue */
+        function collectClue(clueId, obj) {
+            const clueData = CLUES_DATA.find(c => c.id === clueId);
+            if (!clueData || clueData.collected) return;
+
+            clueData.collected = true;
+            GAME_STATE.collectedClues++;
+            increaseFear(CONFIG.fear.clueIncrement);
+
+            // Remove object mesh from scene
+            scene.remove(obj.mesh);
+            interactiveObjects = interactiveObjects.filter(i => i !== obj);
+
+            soundManager.playCluePickup();
+            updateHUD();
+
+            // Spawn or activate Ghost when 2 Clues collected
+            if (GAME_STATE.collectedClues >= 2 && !ghostAI.active) {
+                ghostAI.active = true;
+                ghostMesh.visible = true;
+                soundManager.playGhostScream();
+            }
+
+            // Trigger random Poltergeist event
+            triggerPoltergeistEvent();
+        }
+
+        /* Camcorder Shutter Snapshot */
+        function captureCameraSnapshot() {
+            if (GAME_STATE.isPaused || GAME_STATE.isGameOver) return;
+
+            soundManager.playCameraClick();
+            increaseFear(CONFIG.fear.cameraIncrement);
+
+            // Camera flash effect
+            const fearEl = document.getElementById('fear-overlay');
+            fearEl.style.backgroundColor = '#ffffff';
+            fearEl.style.opacity = '0.8';
+            setTimeout(() => {
+                fearEl.style.backgroundColor = '#7f1d1d';
+                fearEl.style.opacity = '0';
+            }, 100);
+
+            // Random Chance to trigger Poltergeist when photographing
+            if (Math.random() < 0.4) {
+                triggerPoltergeistEvent();
+            }
+        }
+
+        function increaseFear(amount) {
+            GAME_STATE.fear = Math.min(CONFIG.fear.maxFear, GAME_STATE.fear + amount);
+            updateHUD();
+        }
+
+        /* Dynamic Zone Detection */
+        function updateCurrentZoneName() {
+            const x = camera.position.x;
+            const z = camera.position.z;
+
+            let zone = '1층 중앙 복도';
+            if (x < -10 && z < 0) zone = '1학년 교실 구역';
+            else if (x > 10 && z < 0) zone = '교무실 및 행정 구역';
+            else if (x < -10 && z > 0) zone = '체육관 및 강당';
+            else if (x > 10 && z > 0) zone = '특별실 및 창고';
+            else if (z > 25) zone = '폐교 정문 입구';
+
+            GAME_STATE.currentZone = zone;
+            document.getElementById('hud-location').innerText = zone;
+        }
+
+        /* ==========================================================================
+           7. UI, JOURNAL & GAME LOOP MANAGEMENT
+           ========================================================================== */
+        function updateHUD() {
+            document.getElementById('hud-clues').innerText = `${GAME_STATE.collectedClues} / ${GAME_STATE.totalClues}`;
+            document.getElementById('hud-fear').innerText = `${GAME_STATE.fear}%`;
+        }
+
+        function showGhostWarning(show) {
+            const warningEl = document.getElementById('ghost-warning');
+            if (show) warningEl.classList.remove('hidden');
+            else warningEl.classList.add('hidden');
+        }
+
+        function toggleJournal() {
+            if (GAME_STATE.isGameOver || GAME_STATE.isWon) return;
+
+            GAME_STATE.isPaused = !GAME_STATE.isPaused;
+            const journalEl = document.getElementById('journal-screen');
+
+            if (GAME_STATE.isPaused) {
+                renderJournalItems();
+                journalEl.classList.remove('hidden');
+                document.exitPointerLock();
+            } else {
+                journalEl.classList.add('hidden');
+                document.body.requestPointerLock();
+            }
+        }
+
+        function renderJournalItems() {
+            const listEl = document.getElementById('journal-list');
+            listEl.innerHTML = '';
+
+            CLUES_DATA.forEach(clue => {
+                const card = document.createElement('div');
+                card.className = `p-4 rounded-xl border ${clue.collected ? 'bg-purple-950/40 border-purple-800' : 'bg-zinc-950/40 border-zinc-800 opacity-50'} flex flex-col justify-between`;
+
+                card.innerHTML = `
+                    <div>
+                        <div class="flex justify-between items-start mb-2">
+                            <h3 class="font-bold text-sm ${clue.collected ? 'text-purple-300' : 'text-zinc-500'}">${clue.title}</h3>
+                            <span class="text-xs px-2 py-0.5 rounded ${clue.collected ? 'bg-purple-900 text-purple-200' : 'bg-zinc-800 text-zinc-600'}">${clue.collected ? '수집완료' : '미발견'}</span>
+                        </div>
+                        <p class="text-xs text-zinc-400 leading-relaxed">${clue.collected ? clue.desc : '위치: ' + clue.location + ' (아직 발견되지 않음)'}</p>
+                    </div>
+                    <div class="mt-3 pt-2 border-t border-zinc-800/60 text-[10px] text-zinc-500">
+                        구역: ${clue.zone}
+                    </div>
+                `;
+                listEl.appendChild(card);
+            });
+
+            const pct = Math.round((GAME_STATE.collectedClues / GAME_STATE.totalClues) * 100);
+            document.getElementById('journal-progress').innerText = `${GAME_STATE.collectedClues} / ${GAME_STATE.totalClues} (${pct}%)`;
+        }
+
+        function togglePauseMenu() {
+            toggleJournal();
+        }
+
+        function triggerGameOver() {
+            GAME_STATE.isGameOver = true;
+            document.exitPointerLock();
+            document.getElementById('gameover-screen').classList.remove('hidden');
+        }
+
+        function triggerVictory() {
+            GAME_STATE.isWon = true;
+            document.exitPointerLock();
+            document.getElementById('victory-screen').classList.remove('hidden');
+        }
+
+        /* Game Loop */
+        let clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+
+            if (GAME_STATE.isStarted && !GAME_STATE.isPaused) {
+                // Update Player Movement
+                updatePlayerMovement(delta);
+
+                // Update Ghost AI
+                updateGhostAI(delta);
+
+                // Smooth Animation of Cabinet Hiding Doors
+                hidingSpots.forEach(spot => {
+                    spot.doorAngle += (spot.targetDoorAngle - spot.doorAngle) * 0.12;
+                    if (spot.doorLPivot) spot.doorLPivot.rotation.y = -spot.doorAngle;
+                    if (spot.doorRPivot) spot.doorRPivot.rotation.y = spot.doorAngle;
+                });
+
+                // Light Flickering Effects
+                scene.traverse(obj => {
+                    if (obj.isPointLight && obj.userData.origIntensity) {
+                        obj.userData.timer += delta * 5;
+                        obj.intensity = obj.userData.origIntensity + Math.sin(obj.userData.timer) * 0.4;
+                    }
+                });
+
+                // Update REC Timestamp Timer UI
+                const elapsed = Math.floor(clock.getElapsedTime());
+                const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+                const s = String(elapsed % 60).padStart(2, '0');
+                const ms = String(Math.floor((clock.getElapsedTime() % 1) * 100)).padStart(2, '0');
+                document.getElementById('cam-timestamp').innerText = `${m}:${s}:${ms}`;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        /* Start Game & Reset Routines */
+        document.getElementById('btn-start').addEventListener('click', () => {
+            soundManager.init();
+            document.getElementById('start-screen').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+
+            GAME_STATE.isStarted = true;
+            document.body.requestPointerLock();
+        });
+
+        document.getElementById('btn-close-journal').addEventListener('click', toggleJournal);
+        document.getElementById('btn-resume').addEventListener('click', toggleJournal);
+
+        document.getElementById('btn-restart').addEventListener('click', () => {
+            location.reload();
+        });
+
+        document.getElementById('btn-victory-restart').addEventListener('click', () => {
+            location.reload();
+        });
+
+        // Initialize Three.js Application
+        window.onload = function() {
+            initThreeScene();
+            createGhostMesh();
+            initControls();
+            animate();
+        };
+    </script>
+</body>
+</html>
