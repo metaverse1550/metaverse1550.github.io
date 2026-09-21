@@ -1,0 +1,1431 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>퇴근길 지하철 생존기</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+
+    body {
+      background-color: #11141a;
+      color: #f1f5f9;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+      padding: 8px;
+    }
+
+    /* 게임 컨테이너: 모바일 비율 고정 및 PC 중앙 배치 */
+    #game-container {
+      position: relative;
+      width: 100%;
+      max-width: 440px;
+      height: 96vh;
+      max-height: 820px;
+      background: #1e293b;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 0 0 0 3px #334155;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* 캔버스 영역 */
+    #canvas-wrapper {
+      position: relative;
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #252e3e;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* 모바일 하단 터치 컨트롤 패널 */
+    #touch-controls {
+      display: flex;
+      gap: 12px;
+      padding: 12px 16px;
+      background: #0f172a;
+      border-top: 2px solid #334155;
+      z-index: 10;
+    }
+
+    .touch-btn {
+      flex: 1;
+      height: 64px;
+      border: none;
+      border-radius: 14px;
+      background: linear-gradient(180deg, #3b82f6 0%, #1d4ed8 100%);
+      color: #ffffff;
+      font-size: 24px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 5px 0 #172554, 0 10px 15px rgba(0, 0, 0, 0.4);
+      cursor: pointer;
+      transition: all 0.08s ease;
+    }
+
+    .touch-btn:active {
+      transform: translateY(4px);
+      box-shadow: 0 1px 0 #172554, 0 4px 6px rgba(0, 0, 0, 0.3);
+      background: linear-gradient(180deg, #2563eb 0%, #1e40af 100%);
+    }
+
+    .touch-btn span {
+      font-size: 14px;
+      opacity: 0.85;
+      font-weight: 500;
+    }
+
+    /* 음소거 토글 버튼 */
+    #audio-toggle-btn {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      z-index: 30;
+      background: rgba(15, 23, 42, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #fff;
+      font-size: 16px;
+      border-radius: 50%;
+      width: 38px;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      backdrop-filter: blur(4px);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 게임 메인 컨테이너 -->
+  <div id="game-container">
+    <button id="audio-toggle-btn" aria-label="사운드 토글">🔊</button>
+    
+    <div id="canvas-wrapper">
+      <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <!-- 모바일 터치 컨트롤러 -->
+    <div id="touch-controls">
+      <button class="touch-btn" id="btn-left">◀ <span>왼쪽(A)</span></button>
+      <button class="touch-btn" id="btn-right"><span>오른쪽(D)</span> ▶</button>
+    </div>
+  </div>
+
+  <script>
+    // ========================================================
+    // ⚙️ [게임 밸런스 설정값] - 난이도 및 밸런스 조정 구역
+    // ========================================================
+    const CONFIG = {
+      GAME_DURATION: 90,           // 승리 조건: 총 생존 시간(초)
+      MAX_STRESS: 100,             // 최대 스트레스 (100 도달 시 게임오버)
+      
+      // 플레이어 스펙
+      PLAYER_SPEED: 280,           // 플레이어 이동 속도 (px/s)
+      PLAYER_SPEED_BOOSTED: 420,   // 에너지드링크 섭취 시 속도
+      HIT_INVINCIBLE_TIME: 0.8,    // 피격 시 무적 시간(초)
+      
+      // 스폰 타이밍
+      INITIAL_SPAWN_INTERVAL: 1.15,// 초기 승객 생성 간격(초)
+      MIN_SPAWN_INTERVAL: 0.38,    // 90초 직전 최소 생성 간격(초)
+      ITEM_SPAWN_INTERVAL_MIN: 7,  // 아이템 생성 최소 주기(초)
+      ITEM_SPAWN_INTERVAL_MAX: 12, // 아이템 생성 최대 주기(초)
+      
+      // 승객별 속도 및 스트레스 증가치
+      PASSENGER_TYPES: {
+        NORMAL: {
+          name: '일반 승객',
+          color: '#38bdf8',
+          stress: 12,
+          speedMin: 140,
+          speedMax: 190,
+          size: { w: 38, h: 48 },
+          label: '직장인'
+        },
+        PHONE: {
+          name: '스마트폰 승객',
+          color: '#a855f7',
+          stress: 15,
+          speedMin: 120,
+          speedMax: 170,
+          size: { w: 38, h: 48 },
+          label: '유튜브 시청중'
+        },
+        RUSH: {
+          name: '급한 승객',
+          color: '#ef4444',
+          stress: 22,
+          speedMin: 290,
+          speedMax: 380,
+          size: { w: 36, h: 46 },
+          label: '칼퇴러'
+        },
+        BACKPACK: {
+          name: '백팩 승객',
+          color: '#f59e0b',
+          stress: 18,
+          speedMin: 110,
+          speedMax: 150,
+          size: { w: 58, h: 52 }, // 넓은 히트박스
+          label: '거북이등'
+        },
+        DRUNK: {
+          name: '취객',
+          color: '#ec4899',
+          stress: 25,
+          speedMin: 100,
+          speedMax: 160,
+          size: { w: 40, h: 48 },
+          label: '회식 3차'
+        }
+      },
+
+      // 아이템 효과
+      ITEMS: {
+        SEAT: {
+          name: '빈자리',
+          color: '#10b981',
+          stressRelief: 30,
+          scoreBonus: 100,
+          duration: 0,
+          desc: '스트레스 -30!'
+        },
+        DRINK: {
+          name: '에너지드링크',
+          color: '#06b6d4',
+          stressRelief: 15,
+          scoreBonus: 150,
+          duration: 3.5, // 속도 증가 지속시간
+          desc: '스트레스 -15 & 질주!'
+        },
+        EARPHONES: {
+          name: '노캔 이어폰',
+          color: '#eab308',
+          stressRelief: 10,
+          scoreBonus: 200,
+          duration: 4.0, // 완전 무적 지속시간
+          desc: '세상과의 단절! 무적 4초'
+        }
+      }
+    };
+
+    // ========================================================
+    // 🔊 [내장 사운드 합성기] 외부 파일 없이 효과음 생성
+    // ========================================================
+    class SoundFX {
+      constructor() {
+        this.ctx = null;
+        this.muted = false;
+      }
+
+      init() {
+        if (!this.ctx) {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          this.ctx = new AudioContextClass();
+        }
+        if (this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+
+      playTone(freq, type, duration, gainVal = 0.15) {
+        if (this.muted || !this.ctx) return;
+        try {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+          
+          gain.gain.setValueAtTime(gainVal, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+
+          osc.start();
+          osc.stop(this.ctx.currentTime + duration);
+        } catch (e) {
+          // 오디오 컨텍스트 오류 방지
+        }
+      }
+
+      // 부딪혔을 때 둔탁한 타격음
+      playHit() {
+        if (this.muted || !this.ctx) return;
+        this.playTone(130, 'sawtooth', 0.22, 0.25);
+        setTimeout(() => this.playTone(80, 'sine', 0.18, 0.2), 40);
+      }
+
+      // 아이템 획득 청량한 소리
+      playItem() {
+        if (this.muted || !this.ctx) return;
+        this.playTone(523.25, 'triangle', 0.12, 0.2); // C5
+        setTimeout(() => this.playTone(659.25, 'triangle', 0.15, 0.2), 80); // E5
+        setTimeout(() => this.playTone(783.99, 'triangle', 0.25, 0.2), 160); // G5
+      }
+
+      // 무적 발동 시
+      playShield() {
+        if (this.muted || !this.ctx) return;
+        this.playTone(440, 'sine', 0.1, 0.15);
+        setTimeout(() => this.playTone(880, 'sine', 0.35, 0.2), 80);
+      }
+
+      // 게임 오버
+      playGameOver() {
+        if (this.muted || !this.ctx) return;
+        [320, 290, 250, 180].forEach((f, idx) => {
+          setTimeout(() => this.playTone(f, 'sawtooth', 0.3, 0.22), idx * 140);
+        });
+      }
+
+      // 퇴근 클리어 팡파레
+      playClear() {
+        if (this.muted || !this.ctx) return;
+        const notes = [523.25, 659.25, 783.99, 1046.5];
+        notes.forEach((f, idx) => {
+          setTimeout(() => this.playTone(f, 'sine', 0.28, 0.22), idx * 130);
+        });
+      }
+    }
+
+    const sound = new SoundFX();
+
+    // ========================================================
+    // 🎮 [게임 상태 및 변수 선언]
+    // ========================================================
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const wrapper = document.getElementById('canvas-wrapper');
+
+    // 게임 상태 열거형
+    const STATE = {
+      INTRO: 'INTRO',
+      PLAYING: 'PLAYING',
+      GAMEOVER: 'GAMEOVER',
+      CLEAR: 'CLEAR'
+    };
+
+    let gameState = STATE.INTRO;
+    let lastTime = 0;
+    let logicalWidth = 400;
+    let logicalHeight = 650;
+    let scale = 1;
+
+    // 점수 및 시간 기록 (메모리 세션 저장)
+    let bestScore = 0;
+    let bestTime = 0;
+
+    // 플레이어 객체
+    let player = {
+      x: 200,
+      y: 560,
+      w: 42,
+      h: 54,
+      vx: 0,
+      stress: 0,
+      isInvincible: false,
+      invincibleTimer: 0,
+      isShielded: false,     // 이어폰 무적
+      shieldTimer: 0,
+      isBoosted: false,      // 음료 속도 증가
+      boostTimer: 0,
+      facing: 'right',
+      stepTick: 0
+    };
+
+    // 게임 루프 제어 변수
+    let elapsedTime = 0;
+    let score = 0;
+    let passengers = [];
+    let items = [];
+    let floatingTexts = [];
+    let particles = [];
+    
+    let spawnTimer = 0;
+    let itemTimer = 0;
+    let nextItemInterval = 8;
+    
+    // 화면 연출 효과
+    let screenShake = 0;
+    let flashRedAlpha = 0;
+
+    // 배경 지하철 손잡이 스윙 변수
+    let bgHandleSwing = 0;
+
+    // 입력 상태
+    const keys = {
+      left: false,
+      right: false
+    };
+
+    // ========================================================
+    // 📐 [반응형 캔버스 리사이징]
+    // ========================================================
+    function resizeCanvas() {
+      const rect = wrapper.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      
+      scale = canvas.width / logicalWidth;
+      // 세로 높이 비율 계산
+      logicalHeight = canvas.height / scale;
+
+      ctx.imageSmoothingEnabled = false; // 픽셀 아트 선명도 유지
+      
+      if (player) {
+        player.y = logicalHeight - 85;
+      }
+    }
+
+    window.addEventListener('resize', resizeCanvas);
+
+    // ========================================================
+    // 🕹️ [조작 이벤트 바인딩]
+    // ========================================================
+    window.addEventListener('keydown', (e) => {
+      sound.init();
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+        keys.left = true;
+      } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+        keys.right = true;
+      } else if (e.code === 'Space') {
+        e.preventDefault();
+        handleActionStart();
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = false;
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = false;
+    });
+
+    // 모바일 터치 버튼
+    const btnLeft = document.getElementById('btn-left');
+    const btnRight = document.getElementById('btn-right');
+
+    const handleTouchStart = (dir) => (e) => {
+      e.preventDefault();
+      sound.init();
+      if (gameState !== STATE.PLAYING) {
+        handleActionStart();
+        return;
+      }
+      if (dir === 'left') keys.left = true;
+      if (dir === 'right') keys.right = true;
+    };
+
+    const handleTouchEnd = (dir) => (e) => {
+      e.preventDefault();
+      if (dir === 'left') keys.left = false;
+      if (dir === 'right') keys.right = false;
+    };
+
+    btnLeft.addEventListener('touchstart', handleTouchStart('left'), { passive: false });
+    btnLeft.addEventListener('touchend', handleTouchEnd('left'), { passive: false });
+    btnLeft.addEventListener('mousedown', handleTouchStart('left'));
+    btnLeft.addEventListener('mouseup', handleTouchEnd('left'));
+
+    btnRight.addEventListener('touchstart', handleTouchStart('right'), { passive: false });
+    btnRight.addEventListener('touchend', handleTouchEnd('right'), { passive: false });
+    btnRight.addEventListener('mousedown', handleTouchStart('right'));
+    btnRight.addEventListener('mouseup', handleTouchEnd('right'));
+
+    // 캔버스 자체 클릭 시 시작/재시작
+    canvas.addEventListener('pointerdown', () => {
+      sound.init();
+      if (gameState !== STATE.PLAYING) {
+        handleActionStart();
+      }
+    });
+
+    // 음소거 버튼
+    const audioBtn = document.getElementById('audio-toggle-btn');
+    audioBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sound.init();
+      sound.muted = !sound.muted;
+      audioBtn.textContent = sound.muted ? '🔇' : '🔊';
+    });
+
+    function handleActionStart() {
+      if (gameState === STATE.INTRO || gameState === STATE.GAMEOVER || gameState === STATE.CLEAR) {
+        startGame();
+      }
+    }
+
+    // ========================================================
+    // 🚀 [게임 리셋 및 시작]
+    // ========================================================
+    function startGame() {
+      gameState = STATE.PLAYING;
+      elapsedTime = 0;
+      score = 0;
+      passengers = [];
+      items = [];
+      floatingTexts = [];
+      particles = [];
+      spawnTimer = 0;
+      itemTimer = 0;
+      screenShake = 0;
+      flashRedAlpha = 0;
+      nextItemInterval = CONFIG.ITEM_SPAWN_INTERVAL_MIN;
+
+      player.x = logicalWidth / 2 - player.w / 2;
+      player.y = logicalHeight - 85;
+      player.stress = 0;
+      player.isInvincible = false;
+      player.invincibleTimer = 0;
+      player.isShielded = false;
+      player.shieldTimer = 0;
+      player.isBoosted = false;
+      player.boostTimer = 0;
+
+      addFloatingText(logicalWidth / 2, player.y - 30, '출발! 90초만 버티자!', '#38bdf8');
+    }
+
+    // ========================================================
+    // ✨ [시각 효과: 텍스트 팝업 및 파티클]
+    // ========================================================
+    function addFloatingText(x, y, text, color = '#ffffff') {
+      floatingTexts.push({
+        x,
+        y,
+        text,
+        color,
+        life: 1.0,
+        maxLife: 1.0,
+        vy: -40
+      });
+    }
+
+    function addParticles(x, y, color, count = 6) {
+      for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = Math.random() * 80 + 30;
+        particles.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          color,
+          radius: Math.random() * 3 + 2,
+          life: 0.5,
+          maxLife: 0.5
+        });
+      }
+    }
+
+    // ========================================================
+    // 👥 [승객 및 아이템 스폰 시스템]
+    // ========================================================
+    function spawnPassenger() {
+      // 시간 경과에 따라 특수 승객 등장 확률 증가
+      const progress = Math.min(elapsedTime / CONFIG.GAME_DURATION, 1);
+      const rand = Math.random();
+      
+      let typeKey = 'NORMAL';
+      if (rand < 0.28) {
+        typeKey = 'NORMAL';
+      } else if (rand < 0.48) {
+        typeKey = 'PHONE';
+      } else if (rand < 0.68) {
+        typeKey = 'BACKPACK';
+      } else if (rand < 0.85) {
+        typeKey = 'RUSH';
+      } else {
+        typeKey = 'DRUNK';
+      }
+
+      const typeDef = CONFIG.PASSENGER_TYPES[typeKey];
+      
+      // 진행도에 따른 속도 보정
+      const speedScale = 1 + progress * 0.4;
+      const speed = (Math.random() * (typeDef.speedMax - typeDef.speedMin) + typeDef.speedMin) * speedScale;
+
+      // 좌우 배치 (승차 통로 내에서 생성)
+      const margin = 20;
+      const spawnX = margin + Math.random() * (logicalWidth - margin * 2 - typeDef.size.w);
+
+      passengers.push({
+        type: typeKey,
+        x: spawnX,
+        y: -60,
+        w: typeDef.size.w,
+        h: typeDef.size.h,
+        speed: speed,
+        color: typeDef.color,
+        stress: typeDef.stress,
+        name: typeDef.name,
+        label: typeDef.label,
+        // 고유 행동용 파라미터
+        seed: Math.random() * 100,
+        swaySpeed: Math.random() * 3 + 2,
+        drunkTimer: 0,
+        stumbleDx: 0
+      });
+    }
+
+    function spawnItem() {
+      const types = ['SEAT', 'DRINK', 'EARPHONES'];
+      const chosen = types[Math.floor(Math.random() * types.length)];
+      const itemDef = CONFIG.ITEMS[chosen];
+
+      const margin = 35;
+      const spawnX = margin + Math.random() * (logicalWidth - margin * 2 - 32);
+
+      items.push({
+        type: chosen,
+        x: spawnX,
+        y: -40,
+        w: 34,
+        h: 34,
+        speed: 130, // 승객들보다 천천히 흘러내림
+        def: itemDef,
+        bobTick: Math.random() * 10
+      });
+    }
+
+    // ========================================================
+    // 🔄 [게임 메인 업데이트 루프]
+    // ========================================================
+    function update(dt) {
+      if (gameState !== STATE.PLAYING) {
+        // 인트로/엔딩 화면에서도 손잡이 스윙은 부드럽게 유지
+        bgHandleSwing += dt * 2.5;
+        return;
+      }
+
+      elapsedTime += dt;
+      score += Math.floor(dt * 15);
+      bgHandleSwing += dt * 3.5;
+
+      // 90초 버텼을 시 승리 처리
+      if (elapsedTime >= CONFIG.GAME_DURATION) {
+        gameState = STATE.CLEAR;
+        sound.playClear();
+        score += 3000; // 클리어 대량 보너스
+        if (score > bestScore) bestScore = score;
+        if (elapsedTime > bestTime) bestTime = Math.floor(elapsedTime);
+        return;
+      }
+
+      // 플레이어 이동 제어
+      let currentSpeed = player.isBoosted ? CONFIG.PLAYER_SPEED_BOOSTED : CONFIG.PLAYER_SPEED;
+      let moveDir = 0;
+      if (keys.left) moveDir -= 1;
+      if (keys.right) moveDir += 1;
+
+      if (moveDir !== 0) {
+        player.x += moveDir * currentSpeed * dt;
+        player.facing = moveDir > 0 ? 'right' : 'left';
+        player.stepTick += dt * 12;
+      }
+
+      // 화면 좌우 경계 제한 (열차 벽면)
+      const leftWall = 18;
+      const rightWall = logicalWidth - 18 - player.w;
+      if (player.x < leftWall) player.x = leftWall;
+      if (player.x > rightWall) player.x = rightWall;
+
+      // 버프 및 무적 시간 차감
+      if (player.invincibleTimer > 0) {
+        player.invincibleTimer -= dt;
+        if (player.invincibleTimer <= 0) player.isInvincible = false;
+      }
+      if (player.shieldTimer > 0) {
+        player.shieldTimer -= dt;
+        if (player.shieldTimer <= 0) player.isShielded = false;
+      }
+      if (player.boostTimer > 0) {
+        player.boostTimer -= dt;
+        if (player.boostTimer <= 0) player.isBoosted = false;
+      }
+
+      // 점진적 난이도 증가: 스폰 주기 단축
+      const progress = elapsedTime / CONFIG.GAME_DURATION;
+      const currentSpawnInterval = CONFIG.INITIAL_SPAWN_INTERVAL - 
+        (CONFIG.INITIAL_SPAWN_INTERVAL - CONFIG.MIN_SPAWN_INTERVAL) * progress;
+
+      spawnTimer += dt;
+      if (spawnTimer >= currentSpawnInterval) {
+        spawnTimer = 0;
+        spawnPassenger();
+        // 후반부에는 가끔 한 번에 2명 동시 투하
+        if (progress > 0.65 && Math.random() < 0.35) {
+          spawnPassenger();
+        }
+      }
+
+      // 아이템 스폰 주기 관리
+      itemTimer += dt;
+      if (itemTimer >= nextItemInterval) {
+        itemTimer = 0;
+        nextItemInterval = Math.random() * (CONFIG.ITEM_SPAWN_INTERVAL_MAX - CONFIG.ITEM_SPAWN_INTERVAL_MIN) + CONFIG.ITEM_SPAWN_INTERVAL_MIN;
+        spawnItem();
+      }
+
+      // 화면 흔들림 및 빨간 플래시 감소
+      if (screenShake > 0) {
+        screenShake = Math.max(0, screenShake - dt * 25);
+      }
+      if (flashRedAlpha > 0) {
+        flashRedAlpha = Math.max(0, flashRedAlpha - dt * 2);
+      }
+
+      // 승객 업데이트 및 플레이어 충돌 검출
+      for (let i = passengers.length - 1; i >= 0; i--) {
+        const p = passengers[i];
+        p.y += p.speed * dt;
+
+        // 특수 승객 행동
+        if (p.type === 'PHONE') {
+          // 폰 보며 좌우로 건들건들
+          p.x += Math.sin(elapsedTime * p.swaySpeed + p.seed) * 1.8;
+        } else if (p.type === 'DRUNK') {
+          // 술 취해 지그재그 + 비틀거림
+          p.drunkTimer += dt;
+          if (p.drunkTimer > 0.4) {
+            p.drunkTimer = 0;
+            p.stumbleDx = (Math.random() - 0.5) * 4;
+          }
+          p.x += Math.sin(elapsedTime * 4 + p.seed) * 2.2 + p.stumbleDx;
+        }
+
+        // 승객 좌우 화면 벽 튕김
+        if (p.x < 18) p.x = 18;
+        if (p.x > logicalWidth - 18 - p.w) p.x = logicalWidth - 18 - p.w;
+
+        // 플레이어와 충돌 체크 (약간 여유 있는 히트박스)
+        const hitBoxPadding = 6;
+        const isColliding = 
+          player.x + hitBoxPadding < p.x + p.w - hitBoxPadding &&
+          player.x + player.w - hitBoxPadding > p.x + hitBoxPadding &&
+          player.y + hitBoxPadding < p.y + p.h - hitBoxPadding &&
+          player.y + player.h - hitBoxPadding > p.y + hitBoxPadding;
+
+        if (isColliding) {
+          // 이어폰 무적 상태일 때
+          if (player.isShielded) {
+            addFloatingText(p.x, p.y, '노캔 방어!', '#fbbf24');
+            addParticles(p.x + p.w/2, p.y + p.h/2, '#fbbf24', 5);
+            passengers.splice(i, 1);
+            continue;
+          }
+
+          // 피격 무적이 아닐 때만 스트레스 부여
+          if (!player.isInvincible) {
+            player.stress = Math.min(CONFIG.MAX_STRESS, player.stress + p.stress);
+            player.isInvincible = true;
+            player.invincibleTimer = CONFIG.HIT_INVINCIBLE_TIME;
+            screenShake = 12;
+            flashRedAlpha = 0.55;
+            sound.playHit();
+
+            addFloatingText(player.x, player.y - 10, `+${p.stress} 스트레스!`, '#ef4444');
+            addParticles(player.x + player.w / 2, player.y + player.h / 2, '#ef4444', 8);
+
+            // 스트레스 100 도달 시 게임오버
+            if (player.stress >= CONFIG.MAX_STRESS) {
+              gameState = STATE.GAMEOVER;
+              sound.playGameOver();
+              if (score > bestScore) bestScore = score;
+              if (elapsedTime > bestTime) bestTime = Math.floor(elapsedTime);
+              return;
+            }
+          }
+        }
+
+        // 화면 밖으로 벗어난 승객 제거
+        if (p.y > logicalHeight + 80) {
+          passengers.splice(i, 1);
+          score += 10;
+        }
+      }
+
+      // 아이템 업데이트 및 획득 검출
+      for (let i = items.length - 1; i >= 0; i--) {
+        const it = items[i];
+        it.y += it.speed * dt;
+        it.bobTick += dt * 4;
+
+        // 아이템 충돌 체크
+        const hit = 
+          player.x < it.x + it.w &&
+          player.x + player.w > it.x &&
+          player.y < it.y + it.h &&
+          player.y + player.h > it.y;
+
+        if (hit) {
+          sound.playItem();
+          player.stress = Math.max(0, player.stress - it.def.stressRelief);
+          score += it.def.scoreBonus;
+
+          if (it.type === 'EARPHONES') {
+            player.isShielded = true;
+            player.shieldTimer = it.def.duration;
+            sound.playShield();
+          } else if (it.type === 'DRINK') {
+            player.isBoosted = true;
+            player.boostTimer = it.def.duration;
+          }
+
+          addFloatingText(it.x - 10, it.y, it.def.desc, it.def.color);
+          addParticles(it.x + it.w / 2, it.y + it.h / 2, it.def.color, 10);
+          items.splice(i, 1);
+          continue;
+        }
+
+        if (it.y > logicalHeight + 50) {
+          items.splice(i, 1);
+        }
+      }
+
+      // 부유 텍스트 업데이트
+      for (let i = floatingTexts.length - 1; i >= 0; i--) {
+        const ft = floatingTexts[i];
+        ft.life -= dt;
+        ft.y += ft.vy * dt;
+        if (ft.life <= 0) {
+          floatingTexts.splice(i, 1);
+        }
+      }
+
+      // 파티클 업데이트
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const pt = particles[i];
+        pt.life -= dt;
+        pt.x += pt.vx * dt;
+        pt.y += pt.vy * dt;
+        if (pt.life <= 0) {
+          particles.splice(i, 1);
+        }
+      }
+    }
+
+    // ========================================================
+    // 🚇 [배경 렌더링: 디테일한 지하철 객차 내부]
+    // ========================================================
+    function drawSubwayBackground() {
+      // 바닥 타일
+      ctx.fillStyle = '#232b38';
+      ctx.fillRect(0, 0, logicalWidth, logicalHeight);
+
+      // 바닥 중앙 통로 패턴
+      ctx.fillStyle = '#1e2530';
+      ctx.fillRect(40, 0, logicalWidth - 80, logicalHeight);
+
+      // 바닥 타일 줄눈
+      ctx.strokeStyle = '#2d3748';
+      ctx.lineWidth = 1;
+      const tileOffset = (elapsedTime * 60) % 40;
+      for (let y = -40 + tileOffset; y < logicalHeight + 40; y += 40) {
+        ctx.beginPath();
+        ctx.moveTo(40, y);
+        ctx.lineTo(logicalWidth - 40, y);
+        ctx.stroke();
+      }
+
+      // 양쪽 벽면 및 출입문 레일
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(0, 0, 20, logicalHeight);
+      ctx.fillRect(logicalWidth - 20, 0, 20, logicalHeight);
+
+      // 안전선 노란색 점자블록 라인
+      ctx.fillStyle = '#eab308';
+      ctx.fillRect(20, 0, 4, logicalHeight);
+      ctx.fillRect(logicalWidth - 24, 0, 4, logicalHeight);
+
+      // 좌우 창문 및 어두운 터널 불빛 흘러감
+      const lightOffset = (elapsedTime * 350) % 300;
+      ctx.fillStyle = 'rgba(255, 255, 200, 0.08)';
+      ctx.fillRect(2, lightOffset, 16, 80);
+      ctx.fillRect(logicalWidth - 18, (lightOffset + 150) % 300, 16, 80);
+
+      // 천장 손잡이 봉
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(85, 0);
+      ctx.lineTo(85, logicalHeight);
+      ctx.moveTo(logicalWidth - 85, 0);
+      ctx.lineTo(logicalWidth - 85, logicalHeight);
+      ctx.stroke();
+
+      // 흔들리는 손잡이들 (물리 시뮬레이션 느낌)
+      const swingAngle = Math.sin(bgHandleSwing) * 0.18;
+      const handleYSpacing = 110;
+      for (let y = 60; y < logicalHeight - 40; y += handleYSpacing) {
+        drawHandStrap(85, y, swingAngle);
+        drawHandStrap(logicalWidth - 85, y, -swingAngle);
+      }
+    }
+
+    function drawHandStrap(baseX, baseY, angle) {
+      ctx.save();
+      ctx.translate(baseX, baseY);
+      ctx.rotate(angle);
+
+      // 손잡이 줄
+      ctx.strokeStyle = '#f8fafc';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, 24);
+      ctx.stroke();
+
+      // 고리 삼각형/원형 손잡이
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 3;
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.15)';
+      ctx.beginPath();
+      ctx.arc(0, 34, 10, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // ========================================================
+    // 🧍 [캐릭터 렌더링: 플레이어 & 승객 디자인]
+    // ========================================================
+    function drawPixelGuy(x, y, w, h, options) {
+      const {
+        bodyColor = '#3b82f6',
+        faceColor = '#ffd3b6',
+        hairColor = '#1e293b',
+        isPlayer = false,
+        facing = 'right',
+        type = 'NORMAL',
+        walkOffset = 0,
+        isInvincible = false
+      } = options;
+
+      // 무적 깜빡임 연출
+      if (isInvincible && Math.floor(Date.now() / 80) % 2 === 0) {
+        return;
+      }
+
+      ctx.save();
+      ctx.translate(x, y);
+
+      // 그림자
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+      ctx.beginPath();
+      ctx.ellipse(w / 2, h - 2, w * 0.42, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 백팩 승객 거대한 등가방 렌더링
+      if (type === 'BACKPACK') {
+        ctx.fillStyle = '#78350f';
+        ctx.beginPath();
+        ctx.roundRect(-4, 14, w + 8, 28, 8);
+        ctx.fill();
+        ctx.strokeStyle = '#92400e';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      // 몸통
+      ctx.fillStyle = bodyColor;
+      ctx.beginPath();
+      ctx.roundRect(6, 16, w - 12, h - 26, 6);
+      ctx.fill();
+
+      // 플레이어 넥타이 & 정장 깃
+      if (isPlayer) {
+        // 와이셔츠 목깃
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(w / 2 - 5, 16, 10, 6);
+        // 빨간 넥타이
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.moveTo(w / 2 - 2, 22);
+        ctx.lineTo(w / 2 + 2, 22);
+        ctx.lineTo(w / 2 + 4, 34);
+        ctx.lineTo(w / 2, 38);
+        ctx.lineTo(w / 2 - 4, 34);
+        ctx.closePath();
+        ctx.fill();
+
+        // 서류가방 쥐고 있음
+        ctx.fillStyle = '#451a03';
+        const bagX = facing === 'right' ? w - 4 : -4;
+        ctx.fillRect(bagX, 26, 8, 14);
+        ctx.strokeStyle = '#d97706';
+        ctx.strokeRect(bagX, 26, 8, 14);
+      }
+
+      // 머리
+      ctx.fillStyle = faceColor;
+      ctx.beginPath();
+      ctx.arc(w / 2, 12, 11, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 머리카락
+      ctx.fillStyle = hairColor;
+      ctx.beginPath();
+      ctx.arc(w / 2, 9, 11, Math.PI, Math.PI * 2);
+      ctx.fill();
+
+      // 눈과 얼굴 표정
+      const eyeDir = facing === 'right' ? 2 : -2;
+      ctx.fillStyle = '#0f172a';
+
+      if (isPlayer) {
+        // 퇴근길 피곤에 찌든 다크서클 눈
+        ctx.fillRect(w / 2 - 4 + eyeDir, 11, 2.5, 2.5);
+        ctx.fillRect(w / 2 + 2 + eyeDir, 11, 2.5, 2.5);
+        // 다크서클
+        ctx.fillStyle = '#64748b';
+        ctx.fillRect(w / 2 - 5 + eyeDir, 14, 4, 1.5);
+        ctx.fillRect(w / 2 + 1 + eyeDir, 14, 4, 1.5);
+        // 땀방울
+        ctx.fillStyle = '#38bdf8';
+        ctx.beginPath();
+        ctx.arc(w / 2 + (facing === 'right' ? -9 : 9), 8, 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (type === 'PHONE') {
+        // 고개 숙여 폰 보는 눈
+        ctx.fillRect(w / 2 - 3, 13, 2, 2);
+        ctx.fillRect(w / 2 + 2, 13, 2, 2);
+        // 스마트폰과 액정 발광 효과
+        ctx.fillStyle = '#334155';
+        ctx.fillRect(w / 2 - 5, 24, 10, 14);
+        ctx.fillStyle = '#67e8f9';
+        ctx.fillRect(w / 2 - 4, 25, 8, 11);
+      } else if (type === 'RUSH') {
+        // 날카로운 집중 눈매 + 흩날리는 머리
+        ctx.fillRect(w / 2 - 4 + eyeDir, 10, 3, 2);
+        ctx.fillRect(w / 2 + 2 + eyeDir, 10, 3, 2);
+        // 돌진 바람선
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.6)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(w / 2, -4);
+        ctx.lineTo(w / 2, -14);
+        ctx.stroke();
+      } else if (type === 'DRUNK') {
+        // 빙글빙글 취한 눈 & 붉은 뺨
+        ctx.fillStyle = '#f43f5e';
+        ctx.beginPath();
+        ctx.arc(w / 2 - 6, 14, 3, 0, Math.PI * 2);
+        ctx.arc(w / 2 + 6, 14, 3, 0, Math.PI * 2);
+        ctx.fill();
+        // 헤롱헤롱 표정
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(w / 2 - 3, 10, 2, 0, Math.PI * 2);
+        ctx.arc(w / 2 + 3, 10, 2, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        // 일반 승객 표정
+        ctx.fillRect(w / 2 - 3, 11, 2, 2);
+        ctx.fillRect(w / 2 + 2, 11, 2, 2);
+      }
+
+      // 다리 걸음걸이 애니메이션
+      const legBob = Math.sin(walkOffset) * 4;
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(w / 2 - 6, h - 11, 4, 9 + legBob);
+      ctx.fillRect(w / 2 + 2, h - 11, 4, 9 - legBob);
+
+      ctx.restore();
+    }
+
+    // ========================================================
+    // 🎁 [아이템 그래픽 렌더링]
+    // ========================================================
+    function drawItem(it) {
+      const bob = Math.sin(it.bobTick) * 3;
+      const x = it.x;
+      const y = it.y + bob;
+
+      ctx.save();
+      // 후광 빛 효과
+      ctx.shadowColor = it.def.color;
+      ctx.shadowBlur = 12;
+
+      if (it.type === 'SEAT') {
+        // 지하철 빈 좌석 아이콘
+        ctx.fillStyle = '#10b981';
+        ctx.beginPath();
+        ctx.roundRect(x, y + 6, it.w, it.h - 6, 6);
+        ctx.fill();
+        // 등받이
+        ctx.fillStyle = '#059669';
+        ctx.fillRect(x + 4, y, it.w - 8, 8);
+        // 좌석 엠블럼 '착석 가능'
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('빈자리', x + it.w / 2, y + 23);
+      } else if (it.type === 'DRINK') {
+        // 에너지 드링크 캔
+        ctx.fillStyle = '#06b6d4';
+        ctx.beginPath();
+        ctx.roundRect(x + 5, y, it.w - 10, it.h, 6);
+        ctx.fill();
+        // 번개 마크
+        ctx.fillStyle = '#fef08a';
+        ctx.beginPath();
+        ctx.moveTo(x + it.w / 2 + 1, y + 6);
+        ctx.lineTo(x + it.w / 2 - 5, y + 18);
+        ctx.lineTo(x + it.w / 2 + 1, y + 18);
+        ctx.lineTo(x + it.w / 2 - 2, y + 28);
+        ctx.lineTo(x + it.w / 2 + 5, y + 15);
+        ctx.lineTo(x + it.w / 2 - 1, y + 15);
+        ctx.closePath();
+        ctx.fill();
+      } else if (it.type === 'EARPHONES') {
+        // 노이즈 캔슬링 헤드폰
+        ctx.strokeStyle = '#eab308';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(x + it.w / 2, y + 14, 11, Math.PI, 0);
+        ctx.stroke();
+
+        ctx.fillStyle = '#ca8a04';
+        ctx.beginPath();
+        ctx.roundRect(x + 2, y + 12, 7, 14, 3);
+        ctx.roundRect(x + it.w - 9, y + 12, 7, 14, 3);
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('NOISE', x + it.w / 2, y + 30);
+      }
+
+      ctx.restore();
+    }
+
+    // ========================================================
+    // 📊 [상단 HUD: 스트레스 게이지, 타이머, 정차역 안내]
+    // ========================================================
+    function drawHUD() {
+      // 상단 어두운 배경 패널
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+      ctx.fillRect(0, 0, logicalWidth, 75);
+      ctx.strokeStyle = '#334155';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, 75);
+      ctx.lineTo(logicalWidth, 75);
+      ctx.stroke();
+
+      // 전광판: "이번 역: 내 방 침대역"
+      ctx.fillStyle = '#090d16';
+      ctx.fillRect(16, 8, logicalWidth - 32, 22);
+      ctx.fillStyle = '#22c55e';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'left';
+      
+      const remainingSec = Math.max(0, Math.ceil(CONFIG.GAME_DURATION - elapsedTime));
+      const stationProgress = Math.floor((elapsedTime / CONFIG.GAME_DURATION) * 100);
+      ctx.fillText(`[퇴근급행] 다음 역: 내 방 침대 (${stationProgress}%)`, 24, 23);
+
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillText(`도착까지 ${remainingSec}초`, logicalWidth - 24, 23);
+
+      // 스트레스 게이지 바
+      const barX = 16;
+      const barY = 38;
+      const barW = logicalWidth - 32;
+      const barH = 18;
+
+      ctx.fillStyle = '#1e293b';
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, barW, barH, 9);
+      ctx.fill();
+
+      // 스트레스 수치에 따른 그라데이션 색상 (초록 -> 주황 -> 붉은색)
+      const stressRatio = Math.min(player.stress / CONFIG.MAX_STRESS, 1);
+      const fillW = Math.max(0, barW * stressRatio);
+
+      if (fillW > 0) {
+        const grad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+        grad.addColorStop(0, '#22c55e');
+        grad.addColorStop(0.5, '#eab308');
+        grad.addColorStop(1, '#ef4444');
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.roundRect(barX, barY, fillW, barH, 9);
+        ctx.fill();
+      }
+
+      // 게이지 내부 텍스트
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = 'rgba(0,0,0,0.8)';
+      ctx.shadowBlur = 4;
+      ctx.fillText(`스트레스: ${Math.floor(player.stress)} / ${CONFIG.MAX_STRESS}`, logicalWidth / 2, barY + 13);
+      ctx.shadowBlur = 0;
+
+      // 하단 미니 정보 (점수 표시)
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillText(`퇴근 점수: ${score}점`, 18, 95);
+
+      if (bestScore > 0) {
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText(`최고 기록: ${bestScore}점`, logicalWidth - 18, 95);
+      }
+    }
+
+    // ========================================================
+    // 🎨 [오버레이 화면: 인트로, 게임오버, 클리어 연출]
+    // ========================================================
+    function drawOverlays() {
+      // 1) 피격 시 빨간 테두리 플래시
+      if (flashRedAlpha > 0) {
+        ctx.fillStyle = `rgba(239, 68, 68, ${flashRedAlpha})`;
+        ctx.fillRect(0, 0, logicalWidth, logicalHeight);
+      }
+
+      // 2) 부유 텍스트
+      for (const ft of floatingTexts) {
+        const alpha = Math.max(0, ft.life / ft.maxLife);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillStyle = ft.color;
+        ctx.textAlign = 'center';
+        ctx.shadowColor = 'rgba(0,0,0,0.8)';
+        ctx.shadowBlur = 5;
+        ctx.fillText(ft.text, ft.x, ft.y);
+        ctx.restore();
+      }
+
+      // 3) 파티클
+      for (const pt of particles) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, pt.life / pt.maxLife);
+        ctx.fillStyle = pt.color;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, pt.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // 4) 인트로 화면
+      if (gameState === STATE.INTRO) {
+        drawModalBox(
+          '퇴근길 지하철 생존기',
+          '“출근은 몰라도 퇴근은 살아남자”',
+          [
+            '🚇 위에서 끝없이 쏟아지는 승객들을 피하세요!',
+            '⚠️ 충돌 시 스트레스가 쌓이며 100이 되면 야근 확정!',
+            '🎒 승객마다 특성(급한 돌진, 백팩, 취객 등)이 다릅니다.',
+            '🪑 빈자리 / 음료 / 이어폰(무적) 아이템을 사수하세요.',
+            '⏱️ 90초 동안 버티면 무사 퇴근 성공!'
+          ],
+          '▶ 시작하기 (스페이스바 / 터치)',
+          '#3b82f6'
+        );
+      }
+
+      // 5) 게임오버 화면
+      if (gameState === STATE.GAMEOVER) {
+        drawModalBox(
+          '💀 퇴근 실패: 야근 당첨...',
+          '만신창이가 되어 회사로 회송되었습니다.',
+          [
+            `버틴 시간: ${Math.floor(elapsedTime)}초`,
+            `최종 점수: ${score}점`,
+            `최고 생존 기록: ${bestTime}초 (${bestScore}점)`,
+            '“내일은 꼭 칼퇴하고 만다...”'
+          ],
+          '🔄 다시 출근해서 퇴근하기 (Space / 탭)',
+          '#ef4444'
+        );
+      }
+
+      // 6) 무사 퇴근 클리어 화면
+      if (gameState === STATE.CLEAR) {
+        drawModalBox(
+          '🎉 무사 퇴근 성공!!',
+          '집 도착 완료! 침대 다이빙 성공!',
+          [
+            '90초의 지옥철을 완벽하게 탈출했습니다!',
+            `최종 퇴근 점수: ${score}점`,
+            `남은 스트레스: ${Math.floor(player.stress)}`,
+            '“오늘 하루도 고생 많으셨습니다!”'
+          ],
+          '🏆 다시 플레이하기 (Space / 탭)',
+          '#10b981'
+        );
+      }
+    }
+
+    // 모달 팝업 박스 헬퍼
+    function drawModalBox(title, subTitle, bulletList, buttonText, themeColor) {
+      ctx.fillStyle = 'rgba(10, 15, 26, 0.88)';
+      ctx.fillRect(0, 0, logicalWidth, logicalHeight);
+
+      const boxW = logicalWidth - 44;
+      const boxH = 430;
+      const boxX = 22;
+      const boxY = (logicalHeight - boxH) / 2;
+
+      ctx.fillStyle = '#1e293b';
+      ctx.strokeStyle = themeColor;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(boxX, boxY, boxW, boxH, 18);
+      ctx.fill();
+      ctx.stroke();
+
+      // 메인 타이틀
+      ctx.font = 'bold 23px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(title, logicalWidth / 2, boxY + 45);
+
+      // 서브 타이틀
+      ctx.font = 'italic 13px sans-serif';
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText(subTitle, logicalWidth / 2, boxY + 75);
+
+      // 설명 줄글
+      ctx.font = '13px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#e2e8f0';
+      const startTextY = boxY + 120;
+      bulletList.forEach((text, i) => {
+        ctx.fillText(text, boxX + 22, startTextY + i * 36);
+      });
+
+      // 하단 액션 버튼 형태
+      const btnW = boxW - 40;
+      const btnH = 50;
+      const btnX = boxX + 20;
+      const btnY = boxY + boxH - 74;
+
+      ctx.fillStyle = themeColor;
+      ctx.beginPath();
+      ctx.roundRect(btnX, btnY, btnW, btnH, 12);
+      ctx.fill();
+
+      ctx.font = 'bold 16px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(buttonText, logicalWidth / 2, btnY + 31);
+    }
+
+    // ========================================================
+    // 🎞️ [메인 렌더 및 애니메이션 루프]
+    // ========================================================
+    function render() {
+      ctx.save();
+
+      // 화면 흔들림(Screen Shake) 효과
+      if (screenShake > 0) {
+        const shakeX = (Math.random() - 0.5) * screenShake;
+        const shakeY = (Math.random() - 0.5) * screenShake;
+        ctx.translate(shakeX, shakeY);
+      }
+
+      // 논리 좌표계 스케일 적용
+      ctx.scale(scale, scale);
+
+      // 1. 배경
+      drawSubwayBackground();
+
+      // 2. 아이템 렌더링
+      items.forEach(drawItem);
+
+      // 3. 승객 렌더링
+      passengers.forEach(p => {
+        drawPixelGuy(p.x, p.y, p.w, p.h, {
+          bodyColor: p.color,
+          type: p.type,
+          walkOffset: elapsedTime * 8 + p.seed
+        });
+      });
+
+      // 4. 플레이어 렌더링
+      drawPixelGuy(player.x, player.y, player.w, player.h, {
+        bodyColor: '#1e40af',
+        isPlayer: true,
+        facing: player.facing,
+        walkOffset: player.stepTick,
+        isInvincible: player.isInvincible
+      });
+
+      // 플레이어 특수 상태 버프 오라
+      if (player.isShielded) {
+        // 이어폰 무적 방어막
+        ctx.strokeStyle = '#facc15';
+        ctx.lineWidth = 3;
+        ctx.fillStyle = 'rgba(250, 204, 21, 0.2)';
+        ctx.beginPath();
+        ctx.arc(player.x + player.w / 2, player.y + player.h / 2, player.w * 0.75, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fill();
+      }
+      if (player.isBoosted) {
+        // 속도 부스트 잔상 궤적
+        ctx.fillStyle = 'rgba(6, 182, 212, 0.4)';
+        ctx.fillRect(player.x + 2, player.y + 12, player.w - 4, player.h - 16);
+      }
+
+      // 5. 상단 HUD
+      drawHUD();
+
+      // 6. 상태별 오버레이 및 모달
+      drawOverlays();
+
+      ctx.restore();
+    }
+
+    function gameLoop(timestamp) {
+      if (!lastTime) lastTime = timestamp;
+      const dt = Math.min((timestamp - lastTime) / 1000, 0.1); // 델타 타임 상한선
+      lastTime = timestamp;
+
+      update(dt);
+      render();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    // 윈도우 로드 시 즉시 시작
+    window.onload = () => {
+      resizeCanvas();
+      requestAnimationFrame(gameLoop);
+    };
+  </script>
+</body>
+</html>
