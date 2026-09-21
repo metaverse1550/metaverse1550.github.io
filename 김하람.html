@@ -1,0 +1,1737 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>밀양 진로교육원 - 2D 공포 탈출</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Noto+Sans+KR:wght@300;400;700&display=swap');
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            touch-action: manipulation;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #090312;
+            font-family: 'Noto Sans KR', sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            color: #f3f4f6;
+        }
+
+        .font-batang {
+            font-family: 'Gowun Batang', serif;
+        }
+
+        /* Ambient Vignette & Dark Purple Horror Overlay */
+        .vignette-overlay {
+            pointer-events: none;
+            background: radial-gradient(ellipse at center, rgba(30, 11, 48, 0.05) 15%, rgba(13, 6, 20, 0.88) 65%, rgba(4, 1, 8, 0.98) 100%);
+        }
+
+        .scanlines {
+            pointer-events: none;
+            background: linear-gradient(
+                rgba(147, 51, 234, 0.03) 50%, 
+                rgba(0, 0, 0, 0.4) 50%
+            );
+            background-size: 100% 4px;
+        }
+
+        /* Danger Danger Pulse Effect */
+        @keyframes pulse-red {
+            0%, 100% { box-shadow: inset 0 0 30px rgba(220, 38, 38, 0.2); }
+            50% { box-shadow: inset 0 0 150px rgba(220, 38, 38, 0.85); }
+        }
+
+        .danger-pulse {
+            animation: pulse-red 0.75s infinite ease-in-out;
+        }
+
+        .glitch-text {
+            text-shadow: 2px 0 #ef4444, -2px 0 #3b82f6;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #111827;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #374151;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="relative flex items-center justify-center bg-gray-950 h-screen w-screen overflow-hidden select-none">
+
+    <!-- Main Game Canvas -->
+    <canvas id="gameCanvas" class="absolute inset-0 w-full h-full block cursor-crosshair z-0"></canvas>
+
+    <!-- Visual Horror FX Layer -->
+    <div id="vignette" class="absolute inset-0 vignette-overlay z-10 pointer-events-none"></div>
+    <div id="scanlines" class="absolute inset-0 scanlines z-10 opacity-30 pointer-events-none"></div>
+    <div id="dangerOverlay" class="absolute inset-0 z-10 pointer-events-none transition-opacity duration-300 opacity-0 danger-pulse"></div>
+
+    <!-- Top HUD Interface -->
+    <div id="hud" class="absolute top-0 left-0 right-0 p-3 sm:p-4 z-20 flex justify-between items-start pointer-events-none transition-opacity duration-300 opacity-0">
+        <!-- Location & Current Objective -->
+        <div class="bg-purple-950/90 border border-purple-800/80 backdrop-blur-md p-3 rounded-xl shadow-2xl max-w-xs pointer-events-auto">
+            <div class="flex items-center space-x-2 mb-1">
+                <span class="w-2.5 h-2.5 rounded-full bg-fuchsia-500 animate-ping"></span>
+                <h1 class="text-xs font-bold tracking-widest text-fuchsia-400 uppercase">밀양 진로교육원</h1>
+            </div>
+            <p id="currentRoomText" class="text-xs sm:text-sm font-semibold text-purple-200">구역: 학생 휴게실</p>
+            <p id="objectiveText" class="text-[11px] text-purple-300/80 mt-1">목표: 교육원 단서를 탐색하여 탈출 암호를 확보하라.</p>
+        </div>
+
+        <!-- Stamina, Clues & Actions -->
+        <div class="flex flex-col gap-2 items-end pointer-events-auto">
+            <!-- Audio Toggle & Minimap Button -->
+            <div class="flex gap-2">
+                <button id="toggleAudioBtn" class="bg-purple-950/90 border border-purple-700 hover:bg-purple-900 text-purple-200 px-2.5 py-1.5 rounded-lg text-xs flex items-center gap-1 backdrop-blur shadow transition">
+                    <span id="audioIcon">🔊</span>
+                </button>
+                <button id="openMapBtn" class="bg-purple-950/90 border border-purple-700 hover:bg-purple-900 text-purple-200 px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 backdrop-blur shadow transition">
+                    🗺️ <span class="hidden sm:inline">지도 [M]</span>
+                </button>
+            </div>
+
+            <!-- Stamina Gauge -->
+            <div class="bg-purple-950/90 border border-purple-800/80 backdrop-blur-md px-3 py-1.5 rounded-xl flex items-center gap-2">
+                <span class="text-[11px] text-purple-300 font-mono">스태미나</span>
+                <div class="w-24 sm:w-32 bg-purple-900/60 h-2 rounded-full overflow-hidden border border-purple-700">
+                    <div id="staminaBar" class="bg-teal-400 h-full w-full transition-all duration-75"></div>
+                </div>
+            </div>
+            
+            <!-- Clue Badge -->
+            <div class="bg-purple-950/90 border border-purple-800/80 backdrop-blur-md px-3 py-1.5 rounded-xl flex items-center gap-2">
+                <span class="text-[11px] text-purple-300 font-mono">단서</span>
+                <span id="clueCounter" class="text-xs font-bold text-fuchsia-300 font-mono">0 / 4</span>
+            </div>
+
+            <!-- Key Inventory Badge -->
+            <div class="bg-purple-950/90 border border-purple-800/80 backdrop-blur-md px-3 py-1 rounded-xl text-[10px] text-teal-300 font-mono max-w-[200px] truncate">
+                <span id="keyInventory">보유 열쇠 없음</span>
+            </div>
+
+            <!-- Hiding Badge -->
+            <div id="hidingBadge" class="hidden bg-emerald-950/90 border border-emerald-600/50 text-emerald-300 text-xs px-3 py-1.5 rounded-lg flex items-center gap-2 animate-pulse">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                <span>은신 중 (터치/클릭으로 나가기)</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Controls Overlay (Visible on Touch Devices / Small Screens) -->
+    <div id="mobileControls" class="absolute bottom-4 left-4 right-4 z-20 flex justify-between items-end pointer-events-none md:hidden">
+        <!-- Touch Virtual Joystick / Direction Touch Pad -->
+        <div id="touchPad" class="w-32 h-32 bg-purple-950/40 border border-purple-700/50 rounded-full relative pointer-events-auto flex items-center justify-center backdrop-blur-sm shadow-2xl">
+            <div id="touchKnob" class="w-12 h-12 bg-purple-600/60 border border-purple-400 rounded-full transition-transform duration-75"></div>
+        </div>
+
+        <!-- Touch Action Buttons -->
+        <div class="flex flex-col gap-3 pointer-events-auto items-end">
+            <button id="mobileSprintBtn" class="w-14 h-14 bg-amber-950/80 border border-amber-600 text-amber-300 active:bg-amber-800 rounded-full flex items-center justify-center font-bold text-xs shadow-xl border-2">
+                RUN
+            </button>
+            <button id="mobileInteractBtn" class="w-16 h-16 bg-purple-900/80 border border-fuchsia-500 text-fuchsia-200 active:bg-fuchsia-800 rounded-full flex items-center justify-center font-bold text-sm shadow-xl border-2">
+                조사
+            </button>
+        </div>
+    </div>
+
+    <!-- Floating Interaction Prompt -->
+    <div id="interactPrompt" class="absolute z-20 pointer-events-none hidden transform -translate-x-1/2 -translate-y-full mb-4">
+        <div class="bg-gray-900/95 border border-amber-500/60 text-amber-300 text-xs px-3 py-1.5 rounded-lg shadow-xl flex items-center gap-2 backdrop-blur">
+            <kbd class="bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border border-amber-500/40">클릭 / E</kbd>
+            <span id="interactText">조사하기</span>
+        </div>
+    </div>
+
+    <!-- Document Inspector Modal -->
+    <div id="noteModal" class="absolute inset-0 z-30 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden p-4">
+        <div class="bg-neutral-900 border border-amber-900/60 w-full max-w-lg rounded-2xl p-6 sm:p-8 shadow-2xl relative text-stone-300 font-batang border-l-4 border-l-amber-600">
+            <button id="closeNoteBtn" class="absolute top-4 right-4 text-stone-400 hover:text-stone-100 transition">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+            <div class="flex items-center gap-2 mb-3 text-amber-500 text-xs tracking-widest uppercase font-sans">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                <span id="noteCategory">발견한 단서</span>
+            </div>
+            <h2 id="noteTitle" class="text-xl sm:text-2xl font-bold text-stone-100 mb-4 border-b border-neutral-800 pb-2">기록된 메모</h2>
+            <div id="noteContent" class="text-sm sm:text-base leading-relaxed space-y-3 max-h-[55vh] overflow-y-auto pr-2 text-stone-300 font-batang">
+                <!-- Dynamic note body -->
+            </div>
+            <div class="mt-6 pt-4 border-t border-neutral-800 flex justify-end">
+                <button id="confirmNoteBtn" class="px-5 py-2 bg-amber-950/60 hover:bg-amber-900/80 border border-amber-700/50 text-amber-200 rounded-lg text-xs font-sans transition">
+                    닫기 [ESC]
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Keypad Lock Puzzle Modal -->
+    <div id="keypadModal" class="absolute inset-0 z-30 flex items-center justify-center bg-black/85 backdrop-blur-md hidden p-4">
+        <div class="bg-gray-900 border border-gray-700 w-full max-w-sm rounded-2xl p-6 shadow-2xl relative text-gray-200 flex flex-col items-center">
+            <button id="closeKeypadBtn" class="absolute top-4 right-4 text-gray-400 hover:text-gray-100 transition">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+            
+            <div class="text-xs font-mono text-red-400 tracking-wider mb-2">보안 도어락 시스템</div>
+            <h3 id="keypadTitle" class="text-lg font-bold mb-4 text-gray-100">비밀번호 4자리를 입력하십시오</h3>
+
+            <div class="w-full bg-gray-950 border border-gray-800 rounded-xl p-4 mb-6 text-center shadow-inner">
+                <div id="keypadDisplay" class="text-3xl font-mono tracking-widest text-emerald-400 h-9 flex items-center justify-center">----</div>
+                <div id="keypadStatus" class="text-[11px] text-gray-500 mt-1 font-sans">비밀번호 입력 대기 중</div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-3 w-full mb-2">
+                <button class="keypad-btn bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-gray-100 py-3 rounded-xl font-mono text-xl border border-gray-700 transition" data-val="1">1</button>
+                <button class="keypad-btn bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-gray-100 py-3 rounded-xl font-mono text-xl border border-gray-700 transition" data-val="2">2</button>
+                <button class="keypad-btn bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-gray-100 py-3 rounded-xl font-mono text-xl border border-gray-700 transition" data-val="3">3</button>
+                <button class="keypad-btn bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-gray-100 py-3 rounded-xl font-mono text-xl border border-gray-700 transition" data-val="4">4</button>
+                <button class="keypad-btn bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-gray-100 py-3 rounded-xl font-mono text-xl border border-gray-700 transition" data-val="5">5</button>
+                <button class="keypad-btn bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-gray-100 py-3 rounded-xl font-mono text-xl border border-gray-700 transition" data-val="6">6</button>
+                <button class="keypad-btn bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-gray-100 py-3 rounded-xl font-mono text-xl border border-gray-700 transition" data-val="7">7</button>
+                <button class="keypad-btn bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-gray-100 py-3 rounded-xl font-mono text-xl border border-gray-700 transition" data-val="8">8</button>
+                <button class="keypad-btn bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-gray-100 py-3 rounded-xl font-mono text-xl border border-gray-700 transition" data-val="9">9</button>
+                <button id="clearKeypadBtn" class="bg-red-950/60 hover:bg-red-900/80 text-red-300 py-3 rounded-xl font-sans text-xs border border-red-800/50 active:scale-95 transition">취소</button>
+                <button class="keypad-btn bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-gray-100 py-3 rounded-xl font-mono text-xl border border-gray-700 transition" data-val="0">0</button>
+                <button id="submitKeypadBtn" class="bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 py-3 rounded-xl font-sans text-xs border border-emerald-800/50 active:scale-95 transition">확인</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mini-map Modal -->
+    <div id="mapModal" class="absolute inset-0 z-30 flex items-center justify-center bg-black/85 backdrop-blur-md hidden p-4">
+        <div class="bg-gray-900 border border-purple-800/80 w-full max-w-lg rounded-2xl p-6 shadow-2xl relative text-gray-200">
+            <button id="closeMapBtn" class="absolute top-4 right-4 text-gray-400 hover:text-gray-100 transition">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+            <h3 class="text-lg font-bold text-fuchsia-300 mb-3 flex items-center gap-2">🗺️ 밀양 진로교육원 시설 안내도</h3>
+            <div id="mapContainer" class="w-full h-64 bg-gray-950 border border-purple-900/60 rounded-xl relative overflow-hidden flex items-center justify-center">
+                <canvas id="minimapCanvas" class="w-full h-full block"></canvas>
+            </div>
+            <div class="mt-4 text-xs text-purple-300/80 flex justify-between items-center">
+                <span>🔴 선생님 위치 경고</span>
+                <span>🟢 플레이어 (현재 위치)</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Start Screen Overlay -->
+    <div id="startScreen" class="absolute inset-0 z-40 flex flex-col items-center justify-center bg-gradient-to-br from-purple-950 via-slate-950 to-indigo-950 p-6 text-center">
+        <div class="max-w-md w-full bg-slate-900/90 border-2 border-purple-600/60 p-8 rounded-3xl shadow-[0_0_50px_rgba(147,51,234,0.35)] backdrop-blur-md relative overflow-hidden">
+            <!-- Decorative Witchy Ambient Glow -->
+            <div class="absolute -top-16 -left-16 w-32 h-32 bg-purple-600/20 rounded-full blur-2xl pointer-events-none"></div>
+            <div class="absolute -bottom-16 -right-16 w-32 h-32 bg-indigo-500/20 rounded-full blur-2xl pointer-events-none"></div>
+
+            <div class="inline-block px-3.5 py-1 bg-purple-950/80 text-fuchsia-400 border border-purple-500/50 rounded-full text-xs font-mono mb-4 tracking-widest shadow-inner">
+                🔮 TWISTED WITCH ESCAPE HORROR
+            </div>
+            <h1 class="text-3xl sm:text-4xl font-extrabold text-purple-100 mb-2 font-batang tracking-wider glitch-text drop-shadow-[0_0_12px_rgba(168,85,247,0.6)]">
+                밀양 진로교육원
+            </h1>
+            <p class="text-xs text-purple-200/80 mb-6 font-sans">
+                마녀의 기운이 감도는 어두운 복도를 순찰하는 선생님들을 피해 탈출하십시오.
+            </p>
+
+            <div class="bg-slate-950/80 p-4 rounded-xl text-left border border-purple-900/60 mb-6 space-y-2 text-xs text-purple-200 shadow-inner">
+                <div class="font-bold text-purple-300 border-b border-purple-800/60 pb-1 mb-2 flex justify-between items-center">
+                    <span>탐색 가이드</span>
+                    <span class="text-[10px] text-fuchsia-400">⚠️ 소리 주의 (금고 경보)</span>
+                </div>
+                <div class="flex justify-between items-center"><span class="text-amber-300 font-bold">터치 / 클릭 / 조이스틱</span><span class="font-mono text-amber-400">목적지 이동 & 조사</span></div>
+                <div class="flex justify-between"><span>키보드 이동</span><span class="font-mono text-purple-300">W A S D / 방향키</span></div>
+                <div class="flex justify-between"><span>달리기 (스태미나 소모)</span><span class="font-mono text-amber-400">Shift 키 또는 RUN</span></div>
+                <div class="flex justify-between"><span>조사 / 은신</span><span class="font-mono text-amber-400">E 키 또는 클릭</span></div>
+                <div class="flex justify-between"><span>지도 열기 / 일시정지</span><span class="font-mono text-amber-400">M / ESC</span></div>
+            </div>
+
+            <button id="startGameBtn" class="w-full py-4 bg-gradient-to-r from-purple-800 to-indigo-800 hover:from-purple-700 hover:to-indigo-700 text-purple-100 font-bold rounded-xl shadow-[0_0_20px_rgba(147,51,234,0.4)] border border-purple-400/40 transition transform hover:-translate-y-0.5 active:translate-y-0">
+                기묘한 밤의 탐색 시작하기
+            </button>
+        </div>
+    </div>
+
+    <!-- Pause Screen -->
+    <div id="pauseScreen" class="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md hidden">
+        <div class="bg-gray-900 border border-gray-800 p-8 rounded-2xl text-center max-w-sm w-full">
+            <h2 class="text-2xl font-bold text-gray-100 mb-4">일시 정지</h2>
+            <p class="text-xs text-gray-400 mb-6">숨을 고르세요. 그러나 조심하십시오...</p>
+            <div class="space-y-3">
+                <button id="resumeGameBtn" class="w-full py-3 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-xl font-medium border border-gray-700 transition">게임 재개</button>
+                <button id="restartPauseBtn" class="w-full py-3 bg-red-950/60 hover:bg-red-900/80 text-red-300 rounded-xl font-medium border border-red-800/40 transition">처음부터 재시작</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="gameOverScreen" class="absolute inset-0 z-40 flex flex-col items-center justify-center bg-red-950/90 backdrop-blur-md hidden p-6 text-center">
+        <div class="max-w-md w-full bg-gray-950 border border-red-900/60 p-8 rounded-3xl shadow-2xl">
+            <div class="text-red-500 font-mono text-4xl mb-2">☠</div>
+            <h2 class="text-3xl font-extrabold text-red-500 mb-2 font-batang tracking-wider">발견되었습니다</h2>
+            <p class="text-sm text-gray-300 mb-6">선생님에게 붙잡혔습니다. 정적 속으로 사라집니다...</p>
+            <button id="restartGameOverBtn" class="w-full py-4 bg-red-900 hover:bg-red-800 text-stone-100 font-bold rounded-xl shadow-xl transition">
+                다시 시도하기
+            </button>
+        </div>
+    </div>
+
+    <!-- Victory Screen -->
+    <div id="victoryScreen" class="absolute inset-0 z-40 flex flex-col items-center justify-center bg-gray-950/95 backdrop-blur-md hidden p-6 text-center">
+        <div class="max-w-md w-full bg-gray-900 border border-emerald-800/60 p-8 rounded-3xl shadow-2xl">
+            <div class="text-emerald-400 text-4xl mb-2">🚪</div>
+            <h2 class="text-3xl font-bold text-emerald-400 mb-2 font-batang">탈출 성공!</h2>
+            <p id="victoryDetails" class="text-sm text-gray-300 mb-6 leading-relaxed">
+                밀양 진로교육원의 모든 비밀 단서를 풀고 비상 정문을 열어 무사히 탈출했습니다. 어두웠던 복도 뒤로 날이 밝아옵니다.
+            </p>
+            <button id="restartVictoryBtn" class="w-full py-4 bg-emerald-900/80 hover:bg-emerald-800 text-emerald-100 font-bold rounded-xl shadow-xl transition">
+                메인 화면으로
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Game Constants
+        const CONFIG = {
+            TILE_SIZE: 64,
+            PLAYER_SPEED: 3.4,
+            PLAYER_RUN_SPEED: 5.5,
+            PLAYER_STAMINA_MAX: 100,
+            PLAYER_STAMINA_DRAIN: 22,
+            PLAYER_STAMINA_RECOVERY: 16,
+            ENEMY_PATROL_SPEED: 1.8,
+            ENEMY_CHASE_SPEED: 3.8,
+            ENEMY_FOV_ANGLE: Math.PI / 2.6,
+            ENEMY_VISION_RANGE: 330,
+            LIGHTER_RANGE: 480,
+            LIGHT_AMBIENT: 0.22
+        };
+
+        const STATES = {
+            START: 'START',
+            PLAYING: 'PLAYING',
+            PAUSED: 'PAUSED',
+            GAMEOVER: 'GAMEOVER',
+            VICTORY: 'VICTORY'
+        };
+
+        let gameState = STATES.START;
+        let isAudioMuted = false;
+
+        // Web Audio Synthesizer Controller
+        class AudioController {
+            constructor() {
+                this.ctx = null;
+                this.initialized = false;
+            }
+
+            init() {
+                if (this.initialized) return;
+                try {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContext();
+                    this.initialized = true;
+                } catch (e) {
+                    console.log("Web Audio API unavailable", e);
+                }
+            }
+
+            playBeep(freq = 600, duration = 0.1) {
+                if (!this.ctx || isAudioMuted) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.value = freq;
+                    gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + duration);
+                } catch (e) {}
+            }
+
+            playCreepyStinger() {
+                if (!this.ctx || isAudioMuted) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(140, this.ctx.currentTime);
+                    osc.frequency.exponentialRampToValueAtTime(35, this.ctx.currentTime + 0.7);
+                    
+                    gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.7);
+
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + 0.7);
+                } catch (e) {}
+            }
+
+            playHeartbeat(intensity = 1.0) {
+                if (!this.ctx || isAudioMuted) return;
+                try {
+                    const now = this.ctx.currentTime;
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(60, now);
+                    osc.frequency.exponentialRampToValueAtTime(30, now + 0.15);
+
+                    gain.gain.setValueAtTime(0.25 * intensity, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(now + 0.2);
+                } catch (e) {}
+            }
+        }
+
+        const audio = new AudioController();
+
+        // Mouse & Touch Input State
+        const keys = {};
+        const mouse = { 
+            x: window.innerWidth / 2, 
+            y: window.innerHeight / 2 - 200, 
+            worldX: 0, 
+            worldY: 0,
+            isPressed: false,
+            targetWorldX: null,
+            targetWorldY: null
+        };
+
+        let mobileSprintActive = false;
+
+        // Click Destination Visual Marker
+        const clickMarker = {
+            x: 0,
+            y: 0,
+            active: false,
+            radius: 0,
+            alpha: 1.0
+        };
+
+        function triggerClickMarker(wx, wy) {
+            clickMarker.x = wx;
+            clickMarker.y = wy;
+            clickMarker.active = true;
+            clickMarker.radius = 4;
+            clickMarker.alpha = 1.0;
+        }
+
+        window.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+
+            if (e.key === 'Escape') {
+                if (modalOpen) {
+                    closeAllModals();
+                } else if (gameState === STATES.PLAYING) {
+                    setGameState(STATES.PAUSED);
+                } else if (gameState === STATES.PAUSED) {
+                    setGameState(STATES.PLAYING);
+                }
+            }
+
+            if (e.key.toLowerCase() === 'm' && gameState === STATES.PLAYING) {
+                toggleMapModal();
+            }
+
+            if (e.key.toLowerCase() === 'e' && gameState === STATES.PLAYING && !modalOpen) {
+                checkInteraction();
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+
+        function handlePointerMove(clientX, clientY) {
+            mouse.x = clientX;
+            mouse.y = clientY;
+            mouse.worldX = mouse.x + camera.x;
+            mouse.worldY = mouse.y + camera.y;
+            if (mouse.isPressed) {
+                mouse.targetWorldX = mouse.worldX;
+                mouse.targetWorldY = mouse.worldY;
+            }
+        }
+
+        function handlePointerDown(clientX, clientY, target) {
+            if (target && (target.closest('#hud') || target.closest('#mobileControls') || target.closest('.z-30') || target.closest('.z-40'))) {
+                return;
+            }
+            mouse.isPressed = true;
+            mouse.x = clientX;
+            mouse.y = clientY;
+            mouse.worldX = mouse.x + camera.x;
+            mouse.worldY = mouse.y + camera.y;
+
+            if (gameState === STATES.PLAYING && !modalOpen) {
+                mouse.targetWorldX = mouse.worldX;
+                mouse.targetWorldY = mouse.worldY;
+                triggerClickMarker(mouse.worldX, mouse.worldY);
+                checkInteraction();
+            }
+        }
+
+        function handlePointerUp() {
+            mouse.isPressed = false;
+        }
+
+        window.addEventListener('mousemove', (e) => handlePointerMove(e.clientX, e.clientY));
+        window.addEventListener('mousedown', (e) => handlePointerDown(e.clientX, e.clientY, e.target));
+        window.addEventListener('mouseup', handlePointerUp);
+
+        // Touch Virtual Joystick Logic
+        const touchPad = document.getElementById('touchPad');
+        const touchKnob = document.getElementById('touchKnob');
+        let touchStickActive = false;
+        let touchStickVector = { x: 0, y: 0 };
+
+        touchPad.addEventListener('touchstart', (e) => {
+            touchStickActive = true;
+            e.preventDefault();
+        }, { passive: false });
+
+        window.addEventListener('touchmove', (e) => {
+            if (touchStickActive && e.touches.length > 0) {
+                const rect = touchPad.getBoundingClientRect();
+                const centerX = rect.left + rect.width / 2;
+                const centerY = rect.top + rect.height / 2;
+                const touch = e.touches[0];
+                let dx = touch.clientX - centerX;
+                let dy = touch.clientY - centerY;
+                const dist = Math.hypot(dx, dy);
+                const maxDist = rect.width / 2;
+
+                if (dist > maxDist) {
+                    dx = (dx / dist) * maxDist;
+                    dy = (dy / dist) * maxDist;
+                }
+
+                touchKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+                touchStickVector.x = dx / maxDist;
+                touchStickVector.y = dy / maxDist;
+            }
+        });
+
+        const resetTouchStick = () => {
+            touchStickActive = false;
+            touchStickVector = { x: 0, y: 0 };
+            touchKnob.style.transform = `translate(0px, 0px)`;
+        };
+
+        window.addEventListener('touchend', resetTouchStick);
+        window.addEventListener('touchcancel', resetTouchStick);
+
+        document.getElementById('mobileSprintBtn').addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            mobileSprintActive = !mobileSprintActive;
+            const btn = document.getElementById('mobileSprintBtn');
+            if (mobileSprintActive) {
+                btn.classList.add('bg-amber-600', 'text-white');
+            } else {
+                btn.classList.remove('bg-amber-600', 'text-white');
+            }
+        });
+
+        document.getElementById('mobileInteractBtn').addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            checkInteraction();
+        });
+
+        // Map Grid Layout (0: Floor, 1: Wall, 2: Locked Door, 3: Unlocked Door, 4: Cabinet)
+        const MAP_WIDTH = 26;
+        const MAP_HEIGHT = 20;
+
+        const mapGrid = [
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,1],
+            [1,0,4,0,0,1,0,0,0,0,0,0,1,0,0,4,0,0,1,0,0,0,4,0,0,1],
+            [1,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,1],
+            [1,1,2,1,1,1,1,1,2,1,1,1,1,1,1,2,1,1,1,1,1,2,1,1,1,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,1,1,2,1,1,1,1,1,1,1,0,0,0,0,1,1,1,1,1,1,2,1,1,1,1],
+            [1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+            [1,0,4,0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,4,0,1],
+            [1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+            [1,1,1,2,1,1,1,1,1,1,1,0,0,0,0,1,1,1,1,1,1,2,1,1,1,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,1,3,1,1,1,1,1,1,3,1,1,1,1,1,1,1,1,1,3,1,1,1,1,1,1],
+            [1,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,4,0,0,1,0,4,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,4,0,1],
+            [1,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+        ];
+
+        const ROOMS = [
+            { name: "101호 교실 (진로탐색실)", bounds: { minX: 1, maxX: 4, minY: 1, maxY: 3 } },
+            { name: "강의실", bounds: { minX: 6, maxX: 11, minY: 1, maxY: 3 } },
+            { name: "교무실 (선생님 집무실)", bounds: { minX: 13, maxX: 17, minY: 1, maxY: 3 } },
+            { name: "원장실 (통제실)", bounds: { minX: 19, maxX: 24, minY: 1, maxY: 3 } },
+            { name: "북측 메인 복도", bounds: { minX: 1, maxX: 24, minY: 5, maxY: 6 } },
+            { name: "동아리활동실", bounds: { minX: 1, maxX: 5, minY: 8, maxY: 10 } },
+            { name: "자료 보관실", bounds: { minX: 7, maxX: 11, minY: 8, maxY: 10 } },
+            { name: "상담실", bounds: { minX: 13, maxX: 17, minY: 8, maxY: 10 } },
+            { name: "중앙 통로 복도", bounds: { minX: 1, maxX: 24, minY: 12, maxY: 13 } },
+            { name: "학생 휴게실 (시작 지점)", bounds: { minX: 1, maxX: 4, minY: 15, maxY: 18 } },
+            { name: "남쪽 강당", bounds: { minX: 6, maxX: 11, minY: 15, maxY: 18 } },
+            { name: "출입통제구역 (정문 셔터)", bounds: { minX: 13, maxX: 24, minY: 15, maxY: 18 } }
+        ];
+
+        const DOORS = [
+            { x: 2, y: 4, reqKey: 'NONE', name: '101호 문' },
+            { x: 8, y: 4, reqKey: 'LECTURE', name: '강의실 문' },
+            { x: 15, y: 4, reqKey: 'OFFICE', name: '교무실 문' },
+            { x: 21, y: 4, reqKey: 'PRINCIPAL', name: '원장실 문' },
+            { x: 3, y: 7, reqKey: 'NONE', name: '동아리실 문' },
+            { x: 21, y: 7, reqKey: 'NONE', name: '상담실 문' },
+            { x: 15, y: 11, reqKey: 'NONE', name: '통로 문' },
+            { x: 9, y: 14, reqKey: 'NONE', name: '강당 문' },
+            { x: 22, y: 14, reqKey: 'NONE', name: '통제구역 문' }
+        ];
+
+        let interactables = [];
+        let collectedClues = 0;
+        let escapeCodeUnlocked = false;
+        let hasLectureKey = false;
+        let hasOfficeKeycard = false;
+        let hasPrincipalKeycard = false;
+
+        function initInteractables() {
+            collectedClues = 0;
+            escapeCodeUnlocked = false;
+            hasLectureKey = false;
+            hasOfficeKeycard = false;
+            hasPrincipalKeycard = false;
+
+            interactables = [
+                // Clue 1 (101호 교실)
+                {
+                    x: 2.5 * CONFIG.TILE_SIZE,
+                    y: 2 * CONFIG.TILE_SIZE,
+                    type: 'NOTE',
+                    title: '101호 교탁 서랍 속 메모',
+                    category: '단서 #1 / 4',
+                    text: '학생이 남긴 일기 메모:<br><br><span class="text-amber-400 font-bold">"강의실 문을 열 수 있는 [강의실 열쇠]를 구했다!"</span><br><br><span class="text-emerald-400 font-bold">📌 힌트: 강의실 금고 비밀번호는 [0912] 이다.</span>',
+                    action: () => {
+                        hasLectureKey = true;
+                        updateClueCount();
+                    }
+                },
+                // Clue 2 (강의실)
+                {
+                    x: 8.5 * CONFIG.TILE_SIZE,
+                    y: 2 * CONFIG.TILE_SIZE,
+                    type: 'PUZZLE',
+                    title: '강의실 보안 금고',
+                    category: '단서 #2 / 4',
+                    code: '0912',
+                    solved: false,
+                    text: '강의실 보관함에 잠긴 금고가 있다. 101호 메모에 적힌 비밀번호(0912)를 입력하십시오.',
+                    onSolve: () => {
+                        hasOfficeKeycard = true;
+                        updateClueCount();
+                        
+                        // 금고 개포 경보 - 모든 선생님들이 금고 위치로 추격 모드로 몰려듦
+                        const safeX = 8.5 * CONFIG.TILE_SIZE;
+                        const safeY = 2 * CONFIG.TILE_SIZE;
+                        teachers.forEach(t => {
+                            t.state = 'CHASE';
+                            t.chaseTimer = 14.0;
+                            t.alertPos = { x: safeX, y: safeY };
+                        });
+                        audio.playCreepyStinger();
+                        document.getElementById('dangerOverlay').style.opacity = '1';
+
+                        showNoteModal('🚨 금고 경보 발생!', '단서 #2 / 4', '<span class="text-red-400 font-bold">⚠️ 철제 금고가 열리며 큰 경보음이 울렸습니다! 소리를 들은 선생님들이 강의실 금고로 모여들고 있습니다! 빨리 숨으거나 피하십시오!</span><br><br>금고 내부에서 <span class="text-amber-300 font-bold">[교무실 키카드]</span>를 구했습니다.<br><br>종이쪽지 내용: <span class="text-emerald-400 font-mono font-bold">"비상 정문 암호 앞 2자리는 [ 4 8 ]"</span>');
+                    }
+                },
+                // Clue 3 (교무실)
+                {
+                    x: 15 * CONFIG.TILE_SIZE,
+                    y: 2 * CONFIG.TILE_SIZE,
+                    type: 'NOTE',
+                    title: '교무실 모니터 비상 보안 기록',
+                    category: '단서 #3 / 4',
+                    text: '교무실 메인 PC 화면:<br><br><span class="text-amber-300 font-bold">[원장실 키카드]</span> 보관함 승인 완료.<br><br>정문 비상 암호 뒤 2자리는 <span class="text-emerald-400 font-mono font-bold">[ 2 9 ]</span> 입니다.<br>📌 최종 조합된 정문 탈출 암호: <span class="text-emerald-400 font-mono font-bold">[ 4 8 2 9 ]</span>',
+                    action: () => {
+                        hasPrincipalKeycard = true;
+                        updateClueCount();
+                    }
+                },
+                // Clue 4 (원장실)
+                {
+                    x: 21.5 * CONFIG.TILE_SIZE,
+                    y: 2 * CONFIG.TILE_SIZE,
+                    type: 'NOTE',
+                    title: '원장실 중앙 통제 장치',
+                    category: '단서 #4 / 4',
+                    text: '원장실 메인 승인 완료!<br><br><span class="text-emerald-400 font-bold">"모든 비상 셔터 잠금이 해제되었습니다. 남동쪽 출입통제구역 정문으로 이동하여 암호 [4829]를 입력하십시오!"</span>',
+                    action: () => {
+                        escapeCodeUnlocked = true;
+                        updateClueCount();
+                    }
+                },
+                // Exit Gate Keypad
+                {
+                    x: 15 * CONFIG.TILE_SIZE,
+                    y: 16.5 * CONFIG.TILE_SIZE,
+                    type: 'EXIT_KEYPAD',
+                    title: '밀양 진로교육원 비상 정문 셔터',
+                    category: '최종 탈출 지점',
+                    code: '4829',
+                    solved: false,
+                    onSolve: () => {
+                        setGameState(STATES.VICTORY);
+                    }
+                }
+            ];
+            updateClueCount();
+        }
+
+        function updateClueCount() {
+            let count = 0;
+            if (hasLectureKey) count++;
+            if (hasOfficeKeycard) count++;
+            if (hasPrincipalKeycard) count++;
+            if (escapeCodeUnlocked) count++;
+            collectedClues = count;
+            const counterElem = document.getElementById('clueCounter');
+            if (counterElem) counterElem.innerText = `${collectedClues} / 4`;
+
+            const keyElem = document.getElementById('keyInventory');
+            if (keyElem) {
+                let items = [];
+                if (hasLectureKey) items.push('🔑 강의실');
+                if (hasOfficeKeycard) items.push('💳 교무실');
+                if (hasPrincipalKeycard) items.push('💳 원장실');
+                if (escapeCodeUnlocked) items.push('🔓 정문암호(4829)');
+                keyElem.innerHTML = items.length > 0 ? items.join(' | ') : '보유 열쇠 없음';
+            }
+        }
+
+        class Player {
+            constructor() {
+                this.reset();
+            }
+
+            reset() {
+                this.x = 2.5 * CONFIG.TILE_SIZE;
+                this.y = 16.5 * CONFIG.TILE_SIZE;
+                this.radius = 18;
+                this.angle = 0;
+                this.stamina = CONFIG.PLAYER_STAMINA_MAX;
+                this.isHiding = false;
+                this.walkCycle = 0;
+                this.flameFlicker = 0;
+            }
+
+            update(dt) {
+                if (this.isHiding) {
+                    document.getElementById('hidingBadge').classList.remove('hidden');
+                    return;
+                } else {
+                    document.getElementById('hidingBadge').classList.add('hidden');
+                }
+
+                this.flameFlicker += dt * 12;
+
+                let moveX = 0;
+                let moveY = 0;
+
+                // Touch Joystick input
+                if (touchStickActive) {
+                    moveX = touchStickVector.x;
+                    moveY = touchStickVector.y;
+                }
+
+                // Keyboard input
+                if (keys['w'] || keys['arrowup']) moveY -= 1;
+                if (keys['s'] || keys['arrowdown']) moveY += 1;
+                if (keys['a'] || keys['arrowleft']) moveX -= 1;
+                if (keys['d'] || keys['arrowright']) moveX += 1;
+
+                if (!touchStickActive && moveX === 0 && moveY === 0 && mouse.targetWorldX !== null && mouse.targetWorldY !== null) {
+                    const dx = mouse.targetWorldX - this.x;
+                    const dy = mouse.targetWorldY - this.y;
+                    const distToTarget = Math.hypot(dx, dy);
+
+                    if (distToTarget > 12) {
+                        moveX = dx / distToTarget;
+                        moveY = dy / distToTarget;
+                    } else {
+                        mouse.targetWorldX = null;
+                        mouse.targetWorldY = null;
+                    }
+                } else if (moveX !== 0 || moveY !== 0) {
+                    mouse.targetWorldX = null;
+                    mouse.targetWorldY = null;
+                }
+
+                let isSprinting = (keys['shift'] || mobileSprintActive) && (moveX !== 0 || moveY !== 0) && this.stamina > 5;
+                let currentSpeed = isSprinting ? CONFIG.PLAYER_RUN_SPEED : CONFIG.PLAYER_SPEED;
+
+                if (isSprinting) {
+                    this.stamina = Math.max(0, this.stamina - CONFIG.PLAYER_STAMINA_DRAIN * dt);
+                } else {
+                    this.stamina = Math.min(CONFIG.PLAYER_STAMINA_MAX, this.stamina + CONFIG.PLAYER_STAMINA_RECOVERY * dt);
+                }
+
+                const staminaBar = document.getElementById('staminaBar');
+                if (staminaBar) staminaBar.style.width = `${(this.stamina / CONFIG.PLAYER_STAMINA_MAX) * 100}%`;
+
+                const moveMag = Math.hypot(moveX, moveY);
+                if (moveMag > 1) {
+                    moveX /= moveMag;
+                    moveY /= moveMag;
+                }
+
+                let nextX = this.x + moveX * currentSpeed;
+                let nextY = this.y + moveY * currentSpeed;
+
+                if (!checkWallCollision(nextX, this.y, this.radius)) this.x = nextX;
+                if (!checkWallCollision(this.x, nextY, this.radius)) this.y = nextY;
+
+                if (moveX !== 0 || moveY !== 0) {
+                    this.walkCycle += dt * 10;
+                    this.angle = Math.atan2(moveY, moveX);
+                } else if (mouse.worldX && mouse.worldY) {
+                    this.angle = Math.atan2(mouse.worldY - this.y, mouse.worldX - this.x);
+                }
+            }
+
+            draw(ctx) {
+                if (this.isHiding) return;
+
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                // Player Cartoon Shadow
+                ctx.beginPath();
+                ctx.ellipse(-2, 6, 20, 12, 0, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(15, 5, 25, 0.6)';
+                ctx.fill();
+
+                ctx.rotate(this.angle);
+
+                // Extended Lighter Arm
+                ctx.fillStyle = '#227276';
+                ctx.strokeStyle = '#0a2327';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(14, 8, 4.5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                // Lighter Body
+                ctx.fillStyle = '#d97706';
+                ctx.fillRect(16, 5, 6, 9);
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(16, 5, 6, 9);
+
+                // Purple/Flame Glow
+                const flameSize = 5 + Math.sin(this.flameFlicker) * 1.5;
+                ctx.fillStyle = '#f472b6';
+                ctx.beginPath();
+                ctx.arc(19, 2, flameSize, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#c084fc';
+                ctx.beginPath();
+                ctx.arc(19, 2, flameSize * 0.5, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Character Head / Body
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = '#3ebab4';
+                ctx.fill();
+                ctx.strokeStyle = '#0d3839';
+                ctx.lineWidth = 4;
+                ctx.stroke();
+
+                // Hair / Face Details
+                ctx.fillStyle = '#227a76';
+                ctx.beginPath();
+                ctx.arc(-4, 0, this.radius - 2, Math.PI * 0.5, Math.PI * 1.5);
+                ctx.fill();
+
+                // Eyes
+                ctx.fillStyle = '#ffffff';
+                ctx.strokeStyle = '#0d3839';
+                ctx.lineWidth = 2;
+
+                ctx.beginPath();
+                ctx.arc(7, -6, 5, 0, Math.PI * 2);
+                ctx.arc(7, 6, 5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = '#0f172a';
+                ctx.beginPath();
+                ctx.arc(8.5, -6, 2.2, 0, Math.PI * 2);
+                ctx.arc(8.5, 6, 2.2, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.restore();
+            }
+        }
+
+        class TeacherEnemy {
+            constructor(type = 0) {
+                this.type = type;
+                this.reset();
+            }
+
+            reset() {
+                this.radius = 18;
+                this.angle = 0;
+                this.state = 'PATROL';
+                this.chaseTimer = 0;
+                this.heartbeatTimer = 0;
+                this.pulseAnim = 0;
+                this.alertPos = null;
+
+                if (this.type === 0) {
+                    this.x = 12.5 * CONFIG.TILE_SIZE;
+                    this.y = 5.5 * CONFIG.TILE_SIZE;
+                    this.waypoints = [
+                        { x: 2 * CONFIG.TILE_SIZE, y: 5.5 * CONFIG.TILE_SIZE },
+                        { x: 12.5 * CONFIG.TILE_SIZE, y: 5.5 * CONFIG.TILE_SIZE },
+                        { x: 22 * CONFIG.TILE_SIZE, y: 5.5 * CONFIG.TILE_SIZE },
+                        { x: 12.5 * CONFIG.TILE_SIZE, y: 9 * CONFIG.TILE_SIZE }
+                    ];
+                } else {
+                    this.x = 12.5 * CONFIG.TILE_SIZE;
+                    this.y = 12.5 * CONFIG.TILE_SIZE;
+                    this.waypoints = [
+                        { x: 22 * CONFIG.TILE_SIZE, y: 12.5 * CONFIG.TILE_SIZE },
+                        { x: 12.5 * CONFIG.TILE_SIZE, y: 12.5 * CONFIG.TILE_SIZE },
+                        { x: 2 * CONFIG.TILE_SIZE, y: 12.5 * CONFIG.TILE_SIZE },
+                        { x: 12.5 * CONFIG.TILE_SIZE, y: 9 * CONFIG.TILE_SIZE }
+                    ];
+                }
+                this.currentWaypt = 0;
+            }
+
+            update(dt, player) {
+                this.pulseAnim += dt * 5;
+                const distToPlayer = Math.hypot(player.x - this.x, player.y - this.y);
+
+                if (distToPlayer < 450 && gameState === STATES.PLAYING) {
+                    this.heartbeatTimer += dt;
+                    const pulseRate = Math.max(0.18, distToPlayer / 500);
+                    if (this.heartbeatTimer > pulseRate) {
+                        this.heartbeatTimer = 0;
+                        audio.playHeartbeat(1 - distToPlayer / 480);
+                    }
+                }
+
+                let canSeePlayer = false;
+                if (!player.isHiding && distToPlayer < CONFIG.ENEMY_VISION_RANGE) {
+                    const angleToPlayer = Math.atan2(player.y - this.y, player.x - this.x);
+                    let diffAngle = Math.abs(angleToPlayer - this.angle);
+                    while (diffAngle > Math.PI) diffAngle -= Math.PI * 2;
+                    diffAngle = Math.abs(diffAngle);
+
+                    if (diffAngle < CONFIG.ENEMY_FOV_ANGLE / 2) {
+                        if (hasLineOfSight(this.x, this.y, player.x, player.y)) {
+                            canSeePlayer = true;
+                        }
+                    }
+                }
+
+                if (canSeePlayer) {
+                    if (this.state !== 'CHASE') {
+                        audio.playCreepyStinger();
+                        document.getElementById('dangerOverlay').style.opacity = '1';
+                    }
+                    this.state = 'CHASE';
+                    this.chaseTimer = 4.0;
+                    this.alertPos = null; // 플레이어를 직접 발각하면 경보 지점 대신 플레이어를 추격
+                } else if (this.state === 'CHASE') {
+                    this.chaseTimer -= dt;
+                    if (this.chaseTimer <= 0) {
+                        this.state = 'PATROL';
+                        this.alertPos = null;
+                        const anyChasing = teachers.some(t => t.state === 'CHASE');
+                        if (!anyChasing) {
+                            document.getElementById('dangerOverlay').style.opacity = '0';
+                        }
+                    }
+                }
+
+                let targetX, targetY;
+                let moveSpeed = (this.state === 'CHASE') ? CONFIG.ENEMY_CHASE_SPEED : CONFIG.ENEMY_PATROL_SPEED;
+
+                if (this.state === 'CHASE') {
+                    if (this.alertPos) {
+                        targetX = this.alertPos.x;
+                        targetY = this.alertPos.y;
+                        if (Math.hypot(this.alertPos.x - this.x, this.alertPos.y - this.y) < 30) {
+                            this.alertPos = null; // 소리 지점 도달 후 플레이어 방향/수색으로 전환
+                        }
+                    } else {
+                        targetX = player.x;
+                        targetY = player.y;
+                    }
+
+                    if (distToPlayer < this.radius + player.radius) {
+                        setGameState(STATES.GAMEOVER);
+                    }
+                } else {
+                    const waypt = this.waypoints[this.currentWaypt];
+                    targetX = waypt.x;
+                    targetY = waypt.y;
+
+                    if (Math.hypot(targetX - this.x, targetY - this.y) < 20) {
+                        this.currentWaypt = (this.currentWaypt + 1) % this.waypoints.length;
+                    }
+                }
+
+                this.angle = Math.atan2(targetY - this.y, targetX - this.x);
+
+                let vx = Math.cos(this.angle) * moveSpeed;
+                let vy = Math.sin(this.angle) * moveSpeed;
+
+                if (!checkWallCollision(this.x + vx, this.y, this.radius)) this.x += vx;
+                if (!checkWallCollision(this.x, this.y + vy, this.radius)) this.y += vy;
+            }
+
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                ctx.rotate(this.angle);
+
+                // Magical Witch Vision Cone (Eerie Green/Purple & Red in Chase)
+                const coneGrad = ctx.createRadialGradient(0, 0, 10, 0, 0, CONFIG.ENEMY_VISION_RANGE);
+                if (this.state === 'CHASE') {
+                    coneGrad.addColorStop(0, 'rgba(220, 38, 38, 0.6)');
+                    coneGrad.addColorStop(0.7, 'rgba(185, 28, 28, 0.3)');
+                    coneGrad.addColorStop(1, 'rgba(127, 29, 29, 0)');
+                } else {
+                    coneGrad.addColorStop(0, 'rgba(168, 85, 247, 0.35)');
+                    coneGrad.addColorStop(0.6, 'rgba(147, 51, 234, 0.18)');
+                    coneGrad.addColorStop(1, 'rgba(88, 28, 135, 0)');
+                }
+
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.arc(0, 0, CONFIG.ENEMY_VISION_RANGE, -CONFIG.ENEMY_FOV_ANGLE / 2, CONFIG.ENEMY_FOV_ANGLE / 2);
+                ctx.closePath();
+                ctx.fillStyle = coneGrad;
+                ctx.fill();
+
+                // Witch Aura Glow
+                ctx.shadowColor = (this.state === 'CHASE') ? '#ef4444' : '#c084fc';
+                ctx.shadowBlur = 20 + Math.sin(this.pulseAnim) * 6;
+
+                // Witch Robe (Base Circle)
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = '#1e0b36';
+                ctx.fill();
+                ctx.strokeStyle = (this.state === 'CHASE') ? '#dc2626' : '#a855f7';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+
+                // Magic Broomstick
+                ctx.strokeStyle = '#78350f';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(-this.radius - 8, 12);
+                ctx.lineTo(this.radius + 12, 12);
+                ctx.stroke();
+
+                // Broom Straws
+                ctx.fillStyle = '#d97706';
+                ctx.beginPath();
+                ctx.moveTo(-this.radius - 8, 8);
+                ctx.lineTo(-this.radius - 22, 5);
+                ctx.lineTo(-this.radius - 22, 19);
+                ctx.lineTo(-this.radius - 8, 16);
+                ctx.closePath();
+                ctx.fill();
+
+                // Witch Hat - Wide Outer Brim
+                ctx.fillStyle = '#0f051d';
+                ctx.strokeStyle = '#7e22ce';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.ellipse(-2, 0, this.radius + 6, this.radius + 2, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                // Witch Hat Ribbon Band
+                ctx.fillStyle = (this.state === 'CHASE') ? '#ef4444' : '#e879f9';
+                ctx.beginPath();
+                ctx.arc(-2, 0, this.radius * 0.65, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Witch Hat Cone Peak (Pointed top view)
+                ctx.fillStyle = '#090214';
+                ctx.beginPath();
+                ctx.arc(-5, 0, this.radius * 0.45, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Golden Buckle on Hat
+                ctx.fillStyle = '#fbbf24';
+                ctx.fillRect(-2, -3, 4, 6);
+
+                // Evil Eyes (Eerie Green in Patrol / Crimson Red in Chase)
+                ctx.fillStyle = (this.state === 'CHASE') ? '#ff2222' : '#4ade80';
+                ctx.shadowColor = (this.state === 'CHASE') ? '#dc2626' : '#22c55e';
+                ctx.shadowBlur = 12;
+                ctx.beginPath();
+                ctx.arc(8, -6, 3.5, 0, Math.PI * 2);
+                ctx.arc(8, 6, 3.5, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.restore();
+            }
+        }
+
+        function checkWallCollision(x, y, radius) {
+            const tileX = Math.floor(x / CONFIG.TILE_SIZE);
+            const tileY = Math.floor(y / CONFIG.TILE_SIZE);
+
+            for (let ty = tileY - 1; ty <= tileY + 1; ty++) {
+                for (let tx = tileX - 1; tx <= tileX + 1; tx++) {
+                    if (tx < 0 || tx >= MAP_WIDTH || ty < 0 || ty >= MAP_HEIGHT) return true;
+
+                    const tileType = mapGrid[ty][tx];
+                    if (tileType === 1) {
+                        const wallBox = {
+                            left: tx * CONFIG.TILE_SIZE,
+                            right: (tx + 1) * CONFIG.TILE_SIZE,
+                            top: ty * CONFIG.TILE_SIZE,
+                            bottom: (ty + 1) * CONFIG.TILE_SIZE
+                        };
+                        const closestX = Math.max(wallBox.left, Math.min(x, wallBox.right));
+                        const closestY = Math.max(wallBox.top, Math.min(y, wallBox.bottom));
+                        const distX = x - closestX;
+                        const distY = y - closestY;
+                        if ((distX * distX + distY * distY) < (radius * radius)) return true;
+                    }
+
+                    if (tileType === 2) {
+                        const door = DOORS.find(d => d.x === tx && d.y === ty);
+                        if (door) {
+                            let locked = false;
+                            if (door.reqKey === 'LECTURE' && !hasLectureKey) locked = true;
+                            if (door.reqKey === 'OFFICE' && !hasOfficeKeycard) locked = true;
+                            if (door.reqKey === 'PRINCIPAL' && !hasPrincipalKeycard) locked = true;
+
+                            if (locked) {
+                                const wallBox = {
+                                    left: tx * CONFIG.TILE_SIZE,
+                                    right: (tx + 1) * CONFIG.TILE_SIZE,
+                                    top: ty * CONFIG.TILE_SIZE,
+                                    bottom: (ty + 1) * CONFIG.TILE_SIZE
+                                };
+                                const closestX = Math.max(wallBox.left, Math.min(x, wallBox.right));
+                                const closestY = Math.max(wallBox.top, Math.min(y, wallBox.bottom));
+                                const distX = x - closestX;
+                                const distY = y - closestY;
+                                if ((distX * distX + distY * distY) < (radius * radius)) return true;
+                            }
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        function hasLineOfSight(x1, y1, x2, y2) {
+            const steps = 30;
+            for (let i = 0; i <= steps; i++) {
+                const t = i / steps;
+                const rx = x1 + (x2 - x1) * t;
+                const ry = y1 + (y2 - y1) * t;
+                const tx = Math.floor(rx / CONFIG.TILE_SIZE);
+                const ty = Math.floor(ry / CONFIG.TILE_SIZE);
+
+                if (tx >= 0 && tx < MAP_WIDTH && ty >= 0 && ty < MAP_HEIGHT) {
+                    if (mapGrid[ty][tx] === 1) return false;
+                }
+            }
+            return true;
+        }
+
+        const player = new Player();
+        const teachers = [new TeacherEnemy(0), new TeacherEnemy(1)];
+
+        const camera = {
+            x: 0,
+            y: 0,
+            update() {
+                this.x = player.x - window.innerWidth / 2;
+                this.y = player.y - window.innerHeight / 2;
+            }
+        };
+
+        let modalOpen = false;
+
+        function checkInteraction() {
+            if (player.isHiding) {
+                player.isHiding = false;
+                audio.playBeep(400, 0.1);
+                return;
+            }
+
+            const playerTileX = Math.floor(player.x / CONFIG.TILE_SIZE);
+            const playerTileY = Math.floor(player.y / CONFIG.TILE_SIZE);
+
+            if (mapGrid[playerTileY][playerTileX] === 4) {
+                player.isHiding = true;
+                audio.playBeep(300, 0.1);
+                return;
+            }
+
+            for (let item of interactables) {
+                const dist = Math.hypot(player.x - item.x, player.y - item.y);
+                if (dist < 70) {
+                    if (item.type === 'NOTE') {
+                        showNoteModal(item.title, item.category, item.text);
+                        if (item.action) item.action();
+                    } else if (item.type === 'PUZZLE' || item.type === 'EXIT_KEYPAD') {
+                        showKeypadModal(item);
+                    }
+                    return;
+                }
+            }
+
+            for (let door of DOORS) {
+                const doorX = (door.x + 0.5) * CONFIG.TILE_SIZE;
+                const doorY = (door.y + 0.5) * CONFIG.TILE_SIZE;
+                if (Math.hypot(player.x - doorX, player.y - doorY) < 75) {
+                    if (door.reqKey === 'LECTURE' && !hasLectureKey) {
+                        showNoteModal('잠긴 강의실 문', '알림', '강의실 문이 잠겨 있습니다. 101호 교실 서랍을 조사하세요.');
+                    } else if (door.reqKey === 'OFFICE' && !hasOfficeKeycard) {
+                        showNoteModal('잠긴 교무실 문', '알림', '교무실 키카드가 필요합니다. 강의실 금고를 확인하세요.');
+                    } else if (door.reqKey === 'PRINCIPAL' && !hasPrincipalKeycard) {
+                        showNoteModal('잠긴 원장실 문', '알림', '원장실 인가 권한이 필요합니다. 교무실 PC를 확인하세요.');
+                    }
+                    return;
+                }
+            }
+        }
+
+        function updateRoomHUD() {
+            const tileX = Math.floor(player.x / CONFIG.TILE_SIZE);
+            const tileY = Math.floor(player.y / CONFIG.TILE_SIZE);
+
+            const room = ROOMS.find(r => 
+                tileX >= r.bounds.minX && tileX <= r.bounds.maxX &&
+                tileY >= r.bounds.minY && tileY <= r.bounds.maxY
+            );
+
+            const roomTextElem = document.getElementById('currentRoomText');
+            if (roomTextElem) {
+                roomTextElem.innerText = room ? `구역: ${room.name}` : `구역: 복도`;
+            }
+        }
+
+        function showNoteModal(title, category, text) {
+            modalOpen = true;
+            document.getElementById('noteTitle').innerText = title;
+            document.getElementById('noteCategory').innerText = category;
+            document.getElementById('noteContent').innerHTML = text;
+            document.getElementById('noteModal').classList.remove('hidden');
+            audio.playBeep(500, 0.08);
+        }
+
+        let currentKeypadInput = "";
+        let currentPuzzleItem = null;
+
+        function showKeypadModal(item) {
+            modalOpen = true;
+            currentPuzzleItem = item;
+            currentKeypadInput = "";
+            updateKeypadDisplay();
+            document.getElementById('keypadTitle').innerText = item.title;
+            document.getElementById('keypadStatus').innerText = "비밀번호 입력 대기 중";
+            document.getElementById('keypadModal').classList.remove('hidden');
+        }
+
+        function updateKeypadDisplay() {
+            document.getElementById('keypadDisplay').innerText = currentKeypadInput.padEnd(4, '-');
+        }
+
+        document.querySelectorAll('.keypad-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (currentKeypadInput.length < 4) {
+                    currentKeypadInput += btn.getAttribute('data-val');
+                    updateKeypadDisplay();
+                    audio.playBeep(700, 0.05);
+                }
+            });
+        });
+
+        document.getElementById('clearKeypadBtn').addEventListener('click', () => {
+            currentKeypadInput = "";
+            updateKeypadDisplay();
+            audio.playBeep(300, 0.05);
+        });
+
+        document.getElementById('submitKeypadBtn').addEventListener('click', () => {
+            if (!currentPuzzleItem) return;
+            if (currentKeypadInput === currentPuzzleItem.code) {
+                audio.playBeep(900, 0.2);
+                closeAllModals();
+                currentPuzzleItem.solved = true;
+                if (currentPuzzleItem.onSolve) currentPuzzleItem.onSolve();
+            } else {
+                audio.playBeep(200, 0.3);
+                document.getElementById('keypadStatus').innerText = "비밀번호 오류! 다시 시도하세요.";
+                currentKeypadInput = "";
+                updateKeypadDisplay();
+            }
+        });
+
+        function toggleMapModal() {
+            const mapModal = document.getElementById('mapModal');
+            if (mapModal.classList.contains('hidden')) {
+                modalOpen = true;
+                mapModal.classList.remove('hidden');
+                drawMinimap();
+            } else {
+                closeAllModals();
+            }
+        }
+
+        function drawMinimap() {
+            const mCanvas = document.getElementById('minimapCanvas');
+            if (!mCanvas || !mCanvas.parentElement) return;
+            const mCtx = mCanvas.getContext('2d');
+            mCanvas.width = mCanvas.parentElement.clientWidth;
+            mCanvas.height = mCanvas.parentElement.clientHeight;
+
+            mCtx.fillStyle = '#090312';
+            mCtx.fillRect(0, 0, mCanvas.width, mCanvas.height);
+
+            const scaleX = mCanvas.width / MAP_WIDTH;
+            const scaleY = mCanvas.height / MAP_HEIGHT;
+
+            for (let y = 0; y < MAP_HEIGHT; y++) {
+                for (let x = 0; x < MAP_WIDTH; x++) {
+                    const tile = mapGrid[y][x];
+                    if (tile === 1) {
+                        mCtx.fillStyle = '#3b1c60';
+                        mCtx.fillRect(x * scaleX, y * scaleY, scaleX, scaleY);
+                    } else {
+                        mCtx.fillStyle = '#180c29';
+                        mCtx.fillRect(x * scaleX, y * scaleY, scaleX, scaleY);
+                    }
+                }
+            }
+
+            // Draw Player dot
+            const pX = (player.x / CONFIG.TILE_SIZE) * scaleX;
+            const pY = (player.y / CONFIG.TILE_SIZE) * scaleY;
+            mCtx.fillStyle = '#34d399';
+            mCtx.beginPath();
+            mCtx.arc(pX, pY, 4, 0, Math.PI * 2);
+            mCtx.fill();
+
+            // Draw Enemy dots
+            teachers.forEach(t => {
+                const eX = (t.x / CONFIG.TILE_SIZE) * scaleX;
+                const eY = (t.y / CONFIG.TILE_SIZE) * scaleY;
+                mCtx.fillStyle = '#f43f5e';
+                mCtx.beginPath();
+                mCtx.arc(eX, eY, 4, 0, Math.PI * 2);
+                mCtx.fill();
+            });
+        }
+
+        function closeAllModals() {
+            modalOpen = false;
+            document.getElementById('noteModal').classList.add('hidden');
+            document.getElementById('keypadModal').classList.add('hidden');
+            document.getElementById('mapModal').classList.add('hidden');
+        }
+
+        document.getElementById('closeNoteBtn').addEventListener('click', closeAllModals);
+        document.getElementById('confirmNoteBtn').addEventListener('click', closeAllModals);
+        document.getElementById('closeKeypadBtn').addEventListener('click', closeAllModals);
+        document.getElementById('closeMapBtn').addEventListener('click', closeAllModals);
+        document.getElementById('openMapBtn').addEventListener('click', toggleMapModal);
+
+        document.getElementById('toggleAudioBtn').addEventListener('click', () => {
+            isAudioMuted = !isAudioMuted;
+            document.getElementById('audioIcon').innerText = isAudioMuted ? '🔇' : '🔊';
+        });
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const lightCanvas = document.createElement('canvas');
+        const lightCtx = lightCanvas.getContext('2d');
+
+        const dustParticles = [];
+        for (let i = 0; i < 60; i++) {
+            dustParticles.push({
+                x: Math.random() * window.innerWidth,
+                y: Math.random() * window.innerHeight,
+                size: Math.random() * 2 + 1,
+                vx: (Math.random() - 0.5) * 0.4,
+                vy: (Math.random() - 0.5) * 0.4,
+                alpha: Math.random() * 0.5 + 0.2
+            });
+        }
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            lightCanvas.width = window.innerWidth;
+            lightCanvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function renderMap() {
+            ctx.save();
+            ctx.translate(-camera.x, -camera.y);
+
+            for (let y = 0; y < MAP_HEIGHT; y++) {
+                for (let x = 0; x < MAP_WIDTH; x++) {
+                    const tileX = x * CONFIG.TILE_SIZE;
+                    const tileY = y * CONFIG.TILE_SIZE;
+                    const tileType = mapGrid[y][x];
+
+                    if (tileType === 1) { // Wall
+                        ctx.fillStyle = '#160a26';
+                        ctx.fillRect(tileX, tileY, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+
+                        ctx.fillStyle = '#261240';
+                        ctx.fillRect(tileX + 2, tileY + 2, CONFIG.TILE_SIZE - 4, CONFIG.TILE_SIZE - 4);
+
+                        ctx.strokeStyle = '#3d1c63';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(tileX + 4, tileY + 4, CONFIG.TILE_SIZE - 8, CONFIG.TILE_SIZE - 8);
+                    } else if (tileType === 4) { // Cabinet
+                        ctx.fillStyle = '#12091f';
+                        ctx.fillRect(tileX, tileY, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+
+                        ctx.fillStyle = '#2a1645';
+                        ctx.fillRect(tileX + 4, tileY + 4, CONFIG.TILE_SIZE - 8, CONFIG.TILE_SIZE - 8);
+
+                        ctx.strokeStyle = '#58218a';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(tileX + 4, tileY + 4, CONFIG.TILE_SIZE - 8, CONFIG.TILE_SIZE - 8);
+
+                        ctx.fillStyle = '#3ebab4';
+                        ctx.fillRect(tileX + CONFIG.TILE_SIZE - 12, tileY + 28, 4, 8);
+                    } else { // Floor
+                        const isAlt = (x + y) % 2 === 0;
+                        ctx.fillStyle = isAlt ? '#1d0f33' : '#23123d';
+                        ctx.fillRect(tileX, tileY, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+
+                        ctx.strokeStyle = 'rgba(76, 29, 135, 0.3)';
+                        ctx.lineWidth = 1;
+                        ctx.strokeRect(tileX, tileY, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+                    }
+                }
+            }
+
+            // Room Name Banners
+            const roomSigns = [
+                { name: "101호 교실", x: 2.5, y: 0.6, color: "#a855f7" },
+                { name: "📚 강의실 (열쇠 필요)", x: 8.5, y: 0.6, color: "#fbbf24" },
+                { name: "교무실 (키카드 필요)", x: 15, y: 0.6, color: "#38bdf8" },
+                { name: "원장실 (통제실)", x: 21.5, y: 0.6, color: "#f43f5e" },
+                { name: "동아리실", x: 3, y: 7.6, color: "#c084fc" },
+                { name: "상담실", x: 21, y: 7.6, color: "#c084fc" },
+                { name: "학생 휴게실", x: 2.5, y: 14.6, color: "#34d399" },
+                { name: "🚪 출입통제구역 (비상 정문)", x: 18.5, y: 14.6, color: "#f43f5e" }
+            ];
+
+            ctx.font = "bold 13px 'Noto Sans KR', sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+
+            roomSigns.forEach(sign => {
+                const sx = sign.x * CONFIG.TILE_SIZE;
+                const sy = sign.y * CONFIG.TILE_SIZE;
+
+                ctx.fillStyle = "rgba(10, 4, 20, 0.88)";
+                ctx.strokeStyle = sign.color;
+                ctx.lineWidth = 1.5;
+                ctx.shadowColor = sign.color;
+                ctx.shadowBlur = 8;
+
+                const textWidth = ctx.measureText(sign.name).width + 16;
+                ctx.fillRect(sx - textWidth / 2, sy - 10, textWidth, 20);
+                ctx.strokeRect(sx - textWidth / 2, sy - 10, textWidth, 20);
+
+                ctx.fillStyle = sign.color;
+                ctx.shadowBlur = 4;
+                ctx.fillText(sign.name, sx, sy);
+                ctx.shadowBlur = 0;
+            });
+
+            // Render Doors
+            DOORS.forEach(door => {
+                const doorX = door.x * CONFIG.TILE_SIZE;
+                const doorY = door.y * CONFIG.TILE_SIZE;
+
+                let isLocked = false;
+                if (door.reqKey === 'LECTURE' && !hasLectureKey) isLocked = true;
+                if (door.reqKey === 'OFFICE' && !hasOfficeKeycard) isLocked = true;
+                if (door.reqKey === 'PRINCIPAL' && !hasPrincipalKeycard) isLocked = true;
+
+                ctx.fillStyle = '#0f051c';
+                ctx.fillRect(doorX + 2, doorY + 16, CONFIG.TILE_SIZE - 4, 32);
+
+                ctx.fillStyle = isLocked ? '#581c87' : '#065f46';
+                ctx.fillRect(doorX + 6, doorY + 18, CONFIG.TILE_SIZE - 12, 28);
+                ctx.strokeStyle = isLocked ? '#c084fc' : '#34d399';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(doorX + 6, doorY + 18, CONFIG.TILE_SIZE - 12, 28);
+
+                ctx.fillStyle = isLocked ? '#f43f5e' : '#10b981';
+                ctx.beginPath();
+                ctx.arc(doorX + CONFIG.TILE_SIZE / 2, doorY + 24, 4, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Click Destination Marker
+            if (clickMarker.active) {
+                clickMarker.radius += 0.8;
+                clickMarker.alpha -= 0.03;
+                if (clickMarker.alpha <= 0) {
+                    clickMarker.active = false;
+                } else {
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.arc(clickMarker.x, clickMarker.y, clickMarker.radius, 0, Math.PI * 2);
+                    ctx.strokeStyle = `rgba(192, 132, 252, ${clickMarker.alpha})`;
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    ctx.restore();
+                }
+            }
+
+            ctx.restore();
+        }
+
+        function renderLightingMask() {
+            lightCtx.clearRect(0, 0, lightCanvas.width, lightCanvas.height);
+
+            lightCtx.fillStyle = `rgba(13, 6, 20, ${1 - CONFIG.LIGHT_AMBIENT})`;
+            lightCtx.fillRect(0, 0, lightCanvas.width, lightCanvas.height);
+
+            lightCtx.globalCompositeOperation = 'destination-out';
+
+            const playerCamX = player.x - camera.x;
+            const playerCamY = player.y - camera.y;
+
+            if (!player.isHiding) {
+                const flicker = (Math.random() - 0.5) * 10;
+                const range = CONFIG.LIGHTER_RANGE + flicker;
+
+                const beamGrad = lightCtx.createRadialGradient(
+                    playerCamX, playerCamY, 10,
+                    playerCamX, playerCamY, range
+                );
+                beamGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+                beamGrad.addColorStop(0.55, 'rgba(255, 255, 255, 0.85)');
+                beamGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+                lightCtx.fillStyle = beamGrad;
+                lightCtx.beginPath();
+                lightCtx.moveTo(playerCamX, playerCamY);
+                lightCtx.arc(
+                    playerCamX, 
+                    playerCamY, 
+                    range, 
+                    player.angle - CONFIG.ENEMY_FOV_ANGLE / 1.6, 
+                    player.angle + CONFIG.ENEMY_FOV_ANGLE / 1.6
+                );
+                lightCtx.closePath();
+                lightCtx.fill();
+
+                const playerGlow = lightCtx.createRadialGradient(
+                    playerCamX, playerCamY, 5,
+                    playerCamX, playerCamY, 150
+                );
+                playerGlow.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+                playerGlow.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                lightCtx.fillStyle = playerGlow;
+                lightCtx.beginPath();
+                lightCtx.arc(playerCamX, playerCamY, 150, 0, Math.PI * 2);
+                lightCtx.fill();
+            }
+
+            lightCtx.globalCompositeOperation = 'source-over';
+
+            ctx.drawImage(lightCanvas, 0, 0);
+
+            // Floating Particles
+            ctx.save();
+            dustParticles.forEach(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+
+                if (p.x < 0) p.x = window.innerWidth;
+                if (p.x > window.innerWidth) p.x = 0;
+                if (p.y < 0) p.y = window.innerHeight;
+                if (p.y > window.innerHeight) p.y = 0;
+
+                ctx.fillStyle = `rgba(192, 132, 252, ${p.alpha * 0.45})`;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.restore();
+        }
+
+        function updateUI() {
+            let promptShown = false;
+            const promptElem = document.getElementById('interactPrompt');
+
+            if (player.isHiding) {
+                promptElem.classList.remove('hidden');
+                promptElem.style.left = `${player.x - camera.x}px`;
+                promptElem.style.top = `${player.y - camera.y - 30}px`;
+                document.getElementById('interactText').innerText = "캐비닛에서 나가기";
+                return;
+            }
+
+            for (let item of interactables) {
+                const dist = Math.hypot(player.x - item.x, player.y - item.y);
+                if (dist < 70) {
+                    promptElem.classList.remove('hidden');
+                    promptElem.style.left = `${item.x - camera.x}px`;
+                    promptElem.style.top = `${item.y - camera.y - 30}px`;
+                    document.getElementById('interactText').innerText = `${item.title} 조사하기`;
+                    promptShown = true;
+                    break;
+                }
+            }
+
+            if (!promptShown) {
+                const playerTileX = Math.floor(player.x / CONFIG.TILE_SIZE);
+                const playerTileY = Math.floor(player.y / CONFIG.TILE_SIZE);
+                if (mapGrid[playerTileY][playerTileX] === 4) {
+                    promptElem.classList.remove('hidden');
+                    promptElem.style.left = `${player.x - camera.x}px`;
+                    promptElem.style.top = `${player.y - camera.y - 30}px`;
+                    document.getElementById('interactText').innerText = "캐비닛에 은신하기";
+                    promptShown = true;
+                }
+            }
+
+            if (!promptShown) {
+                promptElem.classList.add('hidden');
+            }
+
+            updateRoomHUD();
+        }
+
+        function setGameState(newState) {
+            gameState = newState;
+
+            document.getElementById('startScreen').classList.add('hidden');
+            document.getElementById('pauseScreen').classList.add('hidden');
+            document.getElementById('gameOverScreen').classList.add('hidden');
+            document.getElementById('victoryScreen').classList.add('hidden');
+            document.getElementById('hud').style.opacity = '0';
+
+            if (gameState === STATES.START) {
+                document.getElementById('startScreen').classList.remove('hidden');
+            } else if (gameState === STATES.PLAYING) {
+                document.getElementById('hud').style.opacity = '1';
+                audio.init();
+            } else if (gameState === STATES.PAUSED) {
+                document.getElementById('pauseScreen').classList.remove('hidden');
+            } else if (gameState === STATES.GAMEOVER) {
+                audio.playCreepyStinger();
+                document.getElementById('gameOverScreen').classList.remove('hidden');
+            } else if (gameState === STATES.VICTORY) {
+                document.getElementById('victoryScreen').classList.remove('hidden');
+            }
+        }
+
+        function restartGame() {
+            player.reset();
+            teachers.forEach(t => t.reset());
+            initInteractables();
+            mouse.x = window.innerWidth / 2;
+            mouse.y = window.innerHeight / 2 - 200;
+            mouse.targetWorldX = null;
+            mouse.targetWorldY = null;
+            setGameState(STATES.PLAYING);
+        }
+
+        // Screen Button Controls
+        document.getElementById('startGameBtn').addEventListener('click', () => restartGame());
+        document.getElementById('resumeGameBtn').addEventListener('click', () => setGameState(STATES.PLAYING));
+        document.getElementById('restartPauseBtn').addEventListener('click', () => restartGame());
+        document.getElementById('restartGameOverBtn').addEventListener('click', () => restartGame());
+        document.getElementById('restartVictoryBtn').addEventListener('click', () => setGameState(STATES.START));
+
+        let lastTime = performance.now();
+
+        function gameLoop(currentTime) {
+            const dt = Math.min(0.1, (currentTime - lastTime) / 1000);
+            lastTime = currentTime;
+
+            mouse.worldX = mouse.x + camera.x;
+            mouse.worldY = mouse.y + camera.y;
+
+            if (gameState === STATES.PLAYING && !modalOpen) {
+                player.update(dt);
+                teachers.forEach(t => t.update(dt, player));
+                camera.update();
+                updateUI();
+            }
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            renderMap();
+
+            ctx.save();
+            ctx.translate(-camera.x, -camera.y);
+            player.draw(ctx);
+            teachers.forEach(t => t.draw(ctx));
+            ctx.restore();
+
+            renderLightingMask();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        window.onload = function () {
+            initInteractables();
+            setGameState(STATES.START);
+            requestAnimationFrame(gameLoop);
+        };
+    </script>
+</body>
+</html>
