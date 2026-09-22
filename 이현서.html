@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>폐공장 탈출 (Abandoned Factory Escape 2.5D)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=Noto+Sans+KR:wght@400;600;700&display=swap');
+        
+        body {
+            font-family: 'Noto Sans KR', 'Chakra Petch', sans-serif;
+            background-color: #050508;
+            color: #e2e8f0;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        #game-canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            background: #020203;
+        }
+
+        /* Horror CRT & Vignette Overlays */
+        .scanlines {
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.25) 50%
+            ), linear-gradient(
+                90deg,
+                rgba(255, 0, 0, 0.03),
+                rgba(0, 255, 0, 0.01),
+                rgba(0, 0, 255, 0.03)
+            );
+            background-size: 100% 4px, 6px 100%;
+            pointer-events: none;
+        }
+
+        .vignette {
+            box-shadow: inset 0 0 120px rgba(0, 0, 0, 0.95);
+            pointer-events: none;
+        }
+
+        .chase-vignette {
+            box-shadow: inset 0 0 150px rgba(220, 38, 38, 0.7);
+            animation: pulse-danger 0.8s infinite alternate ease-in-out;
+            pointer-events: none;
+        }
+
+        @keyframes pulse-danger {
+            0% { box-shadow: inset 0 0 100px rgba(220, 38, 38, 0.4); }
+            100% { box-shadow: inset 0 0 180px rgba(220, 38, 38, 0.85); }
+        }
+
+        .faint-overlay {
+            background: black;
+            opacity: 0;
+            transition: opacity 1.2s ease-in-out;
+            pointer-events: none;
+        }
+
+        .faint-active {
+            opacity: 1;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    </style>
+</head>
+<body class="relative w-screen h-screen overflow-hidden bg-black text-slate-100">
+
+    <!-- Main Game Canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Visual Horror FX Layer -->
+    <div id="vignette-layer" class="absolute inset-0 vignette transition-all duration-500"></div>
+    <div class="absolute inset-0 scanlines"></div>
+    <div id="faint-layer" class="absolute inset-0 faint-overlay z-40 flex items-center justify-center">
+        <div class="text-center">
+            <h2 class="text-4xl font-extrabold text-red-600 tracking-widest mb-2 animate-pulse">시야가 어두워집니다...</h2>
+            <p class="text-slate-400 text-sm">마지막 체크포인트로 돌아갑니다.</p>
+        </div>
+    </div>
+
+    <!-- HUD Layer -->
+    <div id="hud" class="absolute inset-0 pointer-events-none p-6 flex flex-col justify-between z-10">
+        <!-- Top Bar: Status & Objectives -->
+        <div class="flex justify-between items-start">
+            <!-- Objective Box -->
+            <div class="bg-slate-900/80 border border-slate-700/80 backdrop-blur-md rounded-lg p-4 max-w-md shadow-2xl">
+                <div class="flex items-center space-x-2 text-amber-400 font-bold text-sm tracking-wider uppercase mb-1">
+                    <i class="fa-solid fa-compass"></i>
+                    <span>현재 임무</span>
+                </div>
+                <p id="objective-text" class="text-sm text-slate-200 font-medium">폐공장을 탐색하고 탈출 경로를 확보하세요.</p>
+                <div id="checkpoint-badge" class="mt-2 inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-700/50">
+                    <i class="fa-solid fa-bookmark mr-1.5"></i>
+                    <span id="checkpoint-text">체크포인트: 시작 보안실</span>
+                </div>
+            </div>
+
+            <!-- Chase Warning Alert -->
+            <div id="chase-warning" class="hidden flex items-center space-x-3 bg-red-950/90 border-2 border-red-600/90 text-red-200 px-5 py-3 rounded-lg shadow-2xl animate-bounce">
+                <i class="fa-solid fa-triangle-exclamation text-2xl text-red-500 animate-pulse"></i>
+                <div>
+                    <div class="font-extrabold text-lg text-red-400 tracking-wider">경고: 추격 시작!</div>
+                    <div class="text-xs text-red-300">괴물이 접근하고 있습니다. 장애물을 이용해 도망치세요!</div>
+                </div>
+            </div>
+
+            <!-- Controls Quick Info -->
+            <div class="bg-slate-900/60 border border-slate-800 backdrop-blur-sm rounded-lg p-3 text-xs text-slate-400 flex flex-col gap-1">
+                <div><span class="text-amber-400 font-bold">WASD</span> : 이동</div>
+                <div><span class="text-amber-400 font-bold">SHIFT</span> : 달리기 (스태미나 소비)</div>
+                <div><span class="text-amber-400 font-bold">E</span> : 상호작용 (아이템/문/체크포인트)</div>
+                <div><span class="text-amber-400 font-bold">ESC</span> : 일시정지</div>
+            </div>
+        </div>
+
+        <!-- Center Prompt Overlay -->
+        <div class="self-center">
+            <div id="interaction-prompt" class="hidden bg-slate-900/90 border-2 border-amber-500/80 text-amber-300 px-6 py-2.5 rounded-full font-bold text-sm tracking-wide shadow-2xl flex items-center gap-2 animate-pulse">
+                <span id="prompt-key" class="bg-amber-500 text-slate-950 px-2 py-0.5 rounded font-black text-xs">E</span>
+                <span id="prompt-text">상호작용</span>
+            </div>
+        </div>
+
+        <!-- Bottom Bar: Stamina & Inventory -->
+        <div class="flex justify-between items-end">
+            <!-- Stamina Bar -->
+            <div class="bg-slate-900/80 border border-slate-700/80 backdrop-blur-md rounded-lg p-4 w-72 shadow-2xl">
+                <div class="flex justify-between text-xs text-slate-300 font-semibold mb-1.5">
+                    <span class="flex items-center gap-1.5"><i class="fa-solid fa-person-running text-amber-400"></i> 체력/스태미나</span>
+                    <span id="stamina-percent" class="text-amber-400">100%</span>
+                </div>
+                <div class="w-full bg-slate-950 rounded-full h-3 p-0.5 border border-slate-800 overflow-hidden">
+                    <div id="stamina-bar" class="bg-gradient-to-r from-amber-500 to-yellow-400 h-full rounded-full transition-all duration-75" style="width: 100%;"></div>
+                </div>
+            </div>
+
+            <!-- Inventory Panel -->
+            <div class="bg-slate-900/80 border border-slate-700/80 backdrop-blur-md rounded-lg p-4 shadow-2xl">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <i class="fa-solid fa-briefcase text-amber-400"></i> 소지품
+                </div>
+                <div class="flex gap-3">
+                    <!-- Keys -->
+                    <div id="inv-key-warehouse" class="w-12 h-12 rounded-lg border border-slate-800 bg-slate-950/60 flex flex-col items-center justify-center text-slate-600 relative group transition-all">
+                        <i class="fa-solid fa-key text-lg"></i>
+                        <span class="text-[9px] mt-0.5">창고 열쇠</span>
+                    </div>
+                    <div id="inv-key-machine" class="w-12 h-12 rounded-lg border border-slate-800 bg-slate-950/60 flex flex-col items-center justify-center text-slate-600 relative group transition-all">
+                        <i class="fa-solid fa-key text-lg"></i>
+                        <span class="text-[9px] mt-0.5">기계실 열쇠</span>
+                    </div>
+                    <!-- Parts Counter -->
+                    <div id="inv-parts-box" class="h-12 px-3 rounded-lg border border-slate-800 bg-slate-950/60 flex items-center gap-2 text-slate-600 transition-all">
+                        <i class="fa-solid fa-gears text-lg"></i>
+                        <div class="flex flex-col">
+                            <span class="text-[9px] text-slate-400">발전기 부품</span>
+                            <span id="parts-count-text" class="text-xs font-bold text-slate-500">0 / 4</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Title Screen -->
+    <div id="modal-title" class="absolute inset-0 bg-slate-950/95 z-50 flex flex-col items-center justify-center p-6 text-center">
+        <div class="max-w-xl bg-slate-900/80 border border-slate-800 p-8 rounded-2xl shadow-2xl backdrop-blur-xl">
+            <div class="text-amber-500 text-xs font-bold uppercase tracking-widest mb-2"><i class="fa-solid fa-biohazard"></i> 2.5D Horror Escape</div>
+            <h1 class="text-5xl font-black text-slate-100 tracking-tight mb-4 drop-shadow-md">폐공장 탈출</h1>
+            <p class="text-slate-300 text-sm leading-relaxed mb-6">
+                당신은 버려진 어두운 폐공장에 갇힌 탐험가입니다.<br>
+                공장 안에 흩어진 <span class="text-amber-400 font-semibold">열쇠</span>와 <span class="text-amber-400 font-semibold">발전기 부품 4개</span>를 찾아 탈출문을 작동시키세요.<br>
+                어둠 속에서 배회하는 <span class="text-red-500 font-bold">괴물</span>을 주의하고 추격 시 숨거나 도망치세요!
+            </p>
+            <div class="grid grid-cols-2 gap-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800 text-left text-xs mb-8 text-slate-400">
+                <div><b class="text-slate-200">WASD</b> : 이동</div>
+                <div><b class="text-slate-200">Shift</b> : 달리기</div>
+                <div><b class="text-slate-200">E Key</b> : 상호작용 (아이템/체크포인트)</div>
+                <div><b class="text-slate-200">ESC</b> : 일시정지</div>
+            </div>
+            <button id="btn-start" class="w-full py-4 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-black text-lg rounded-xl shadow-lg hover:shadow-amber-500/20 transition-all duration-200">
+                탐색 시작하기
+            </button>
+        </div>
+    </div>
+
+    <!-- Modal: Pause -->
+    <div id="modal-pause" class="hidden absolute inset-0 bg-slate-950/80 z-50 flex flex-col items-center justify-center p-6 text-center backdrop-blur-md">
+        <div class="max-w-md bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl">
+            <h2 class="text-3xl font-bold text-slate-100 mb-6"><i class="fa-solid fa-pause text-amber-500 mr-2"></i>일시정지</h2>
+            <div class="space-y-3">
+                <button id="btn-resume" class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold rounded-lg transition-all">게임 계속하기</button>
+                <button id="btn-restart" class="w-full py-3 bg-red-900/60 hover:bg-red-800/80 text-red-200 font-bold rounded-lg transition-all border border-red-700/50">마지막 체크포인트 재시작</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Clear / Win -->
+    <div id="modal-clear" class="hidden absolute inset-0 bg-slate-950/95 z-50 flex flex-col items-center justify-center p-6 text-center">
+        <div class="max-w-md bg-slate-900 border border-emerald-500/50 p-8 rounded-2xl shadow-2xl backdrop-blur-xl">
+            <div class="w-16 h-16 bg-emerald-950 border-2 border-emerald-500 rounded-full flex items-center justify-center text-emerald-400 text-3xl mx-auto mb-4 animate-bounce">
+                <i class="fa-solid fa-door-open"></i>
+            </div>
+            <h2 class="text-4xl font-extrabold text-emerald-400 mb-2">탈출 성공!</h2>
+            <p class="text-slate-300 text-sm mb-6">모든 부품을 모아 발전기를 복구하고 폐공장을 무사히 벗어났습니다!</p>
+            <button id="btn-win-restart" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black rounded-lg transition-all">처음부터 다시하기</button>
+        </div>
+    </div>
+
+    <script>
+        const CONFIG = {
+            TILE_SIZE: 64,
+            MAP_COLS: 28,
+            MAP_ROWS: 20,
+            PLAYER_SPEED: 2.8,
+            RUN_SPEED_MULT: 1.7,
+            STAMINA_MAX: 100,
+            STAMINA_DRAIN: 25, // per sec
+            STAMINA_RECOVERY: 15, // per sec
+            MONSTER_NORMAL_SPEED: 1.8,
+            MONSTER_CHASE_SPEED: 3.2,
+            CHASE_INTERVAL_MIN: 25000, // ms
+            CHASE_INTERVAL_MAX: 40000, // ms
+            CHASE_DURATION: 9000, // ms
+            INTERACT_RADIUS: 50,
+            LIGHT_RADIUS: 240,
+        };
+
+        class AudioEngine {
+            constructor() {
+                this.ctx = null;
+                this.isMuted = false;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioCtx();
+                }
+            }
+
+            playStep() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.08);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.08);
+            }
+
+            playPickup() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(523.25, now); // C5
+                osc.frequency.setValueAtTime(659.25, now + 0.1); // E5
+                osc.frequency.setValueAtTime(783.99, now + 0.2); // G5
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(now + 0.35);
+            }
+
+            playCheckpoint() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(440, now);
+                osc.frequency.exponentialRampToValueAtTime(880, now + 0.25);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(now + 0.3);
+            }
+
+            playScreech() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.linearRampToValueAtTime(700, now + 0.2);
+                osc.frequency.linearRampToValueAtTime(100, now + 0.5);
+                gain.gain.setValueAtTime(0.25, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(now + 0.5);
+            }
+
+            playDoorOpen() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(200, now);
+                osc.frequency.exponentialRampToValueAtTime(80, now + 0.3);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(now + 0.3);
+            }
+        }
+
+        const audio = new AudioEngine();
+
+        const STATE = {
+            TITLE: 'TITLE',
+            PLAYING: 'PLAYING',
+            PAUSED: 'PAUSED',
+            FAINTING: 'FAINTING',
+            CLEAR: 'CLEAR'
+        };
+
+        let currentState = STATE.TITLE;
+
+        // Input Controller
+        const keys = {};
+        window.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+
+            if (e.key === 'Escape') {
+                if (currentState === STATE.PLAYING) {
+                    setGameState(STATE.PAUSED);
+                } else if (currentState === STATE.PAUSED) {
+                    setGameState(STATE.PLAYING);
+                }
+            }
+
+            if ((e.key === 'e' || e.key === 'E' || e.key === 'ㄷ') && currentState === STATE.PLAYING) {
+                handleInteraction();
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+
+        // Tile types: 0: Floor, 1: Wall, 2: Locked Door (Warehouse), 3: Locked Door (Machine Room), 4: Steam Hazard
+        const MAP_GRID = [
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,0,0,1,0,1,1,1,0,1,0,1,1,1,0,1,0,1,1,1,1,1,1,1,1,0,1],
+            [1,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,1,0,1],
+            [1,1,1,2,1,1,1,0,1,1,1,1,1,0,1,1,1,3,1,0,1,1,1,1,0,1,0,1],
+            [1,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,1,0,1,0,0,1,0,1,0,1],
+            [1,0,1,1,1,1,1,0,1,0,0,0,1,1,1,1,1,0,1,0,1,0,0,1,0,1,0,1],
+            [1,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,1],
+            [1,0,1,0,0,0,1,1,1,0,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,0,1],
+            [1,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,1,1,1,1,0,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,0,1,1,1,1,1],
+            [1,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,1],
+            [1,0,1,0,1,0,1,0,1,1,1,1,1,1,1,1,1,1,1,0,0,1,0,1,0,1,0,1],
+            [1,0,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0,1],
+            [1,0,1,1,1,1,1,0,1,0,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1,0,1],
+            [1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,1,1,1,1,0,1,1,1,0,1,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,0,1],
+            [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+        ];
+
+        // Steam Hazard Areas
+        const HAZARDS = [
+            { x: 7 * CONFIG.TILE_SIZE + 32, y: 7 * CONFIG.TILE_SIZE + 32, active: true },
+            { x: 13 * CONFIG.TILE_SIZE + 32, y: 11 * CONFIG.TILE_SIZE + 32, active: true },
+            { x: 21 * CONFIG.TILE_SIZE + 32, y: 15 * CONFIG.TILE_SIZE + 32, active: true }
+        ];
+
+        const player = {
+            x: 2 * CONFIG.TILE_SIZE + 32,
+            y: 2 * CONFIG.TILE_SIZE + 32,
+            radius: 16,
+            angle: 0,
+            stamina: CONFIG.STAMINA_MAX,
+            isSprinting: false,
+            inventory: {
+                keyWarehouse: false,
+                keyMachine: false,
+                parts: 0
+            }
+        };
+
+        const monster = {
+            x: 24 * CONFIG.TILE_SIZE + 32,
+            y: 17 * CONFIG.TILE_SIZE + 32,
+            radius: 20,
+            speed: CONFIG.MONSTER_NORMAL_SPEED,
+            isChasing: false,
+            chaseTimer: 0,
+            nextChaseDelay: 15000,
+            patrolTarget: null
+        };
+
+        // Checkpoints
+        const checkpoints = [
+            { id: 1, name: "시작 보안실", x: 2 * CONFIG.TILE_SIZE + 32, y: 2 * CONFIG.TILE_SIZE + 32, active: true },
+            { id: 2, name: "중앙 창고구역", x: 11 * CONFIG.TILE_SIZE + 32, y: 1 * CONFIG.TILE_SIZE + 32, active: false },
+            { id: 3, name: "기계실 보관터미널", x: 23 * CONFIG.TILE_SIZE + 32, y: 11 * CONFIG.TILE_SIZE + 32, active: false }
+        ];
+        let lastCheckpoint = checkpoints[0];
+
+        // Interactive Items in Map
+        const items = [
+            { type: 'key_warehouse', name: '창고 열쇠', x: 2 * CONFIG.TILE_SIZE + 32, y: 17 * CONFIG.TILE_SIZE + 32, collected: false, icon: 'fa-key' },
+            { type: 'key_machine', name: '기계실 열쇠', x: 25 * CONFIG.TILE_SIZE + 32, y: 2 * CONFIG.TILE_SIZE + 32, collected: false, icon: 'fa-key' },
+            { type: 'part', name: '발전기 부품 A', x: 13 * CONFIG.TILE_SIZE + 32, y: 3 * CONFIG.TILE_SIZE + 32, collected: false, icon: 'fa-gear' },
+            { type: 'part', name: '발전기 부품 B', x: 3 * CONFIG.TILE_SIZE + 32, y: 11 * CONFIG.TILE_SIZE + 32, collected: false, icon: 'fa-gear' },
+            { type: 'part', name: '발전기 부품 C', x: 25 * CONFIG.TILE_SIZE + 32, y: 17 * CONFIG.TILE_SIZE + 32, collected: false, icon: 'fa-gear' },
+            { type: 'part', name: '발전기 부품 D', x: 13 * CONFIG.TILE_SIZE + 32, y: 17 * CONFIG.TILE_SIZE + 32, collected: false, icon: 'fa-gear' }
+        ];
+
+        // Exit Gate
+        const exitGate = {
+            x: 26 * CONFIG.TILE_SIZE + 32,
+            y: 9 * CONFIG.TILE_SIZE + 32,
+            unlocked: false
+        };
+
+        // Camera System
+        const camera = {
+            x: player.x,
+            y: player.y,
+            shake: 0
+        };
+
+        let activePrompt = null;
+
+        function checkInteractions() {
+            activePrompt = null;
+
+            // Check Item Pickup
+            for (let item of items) {
+                if (!item.collected && dist(player.x, player.y, item.x, item.y) < CONFIG.INTERACT_RADIUS) {
+                    activePrompt = {
+                        text: `${item.name} 획득하기`,
+                        action: () => {
+                            item.collected = true;
+                            if (item.type === 'key_warehouse') player.inventory.keyWarehouse = true;
+                            if (item.type === 'key_machine') player.inventory.keyMachine = true;
+                            if (item.type === 'part') player.inventory.parts++;
+                            audio.playPickup();
+                            updateHUD();
+                            updateObjective();
+                            triggerRandomChaseChance();
+                        }
+                    };
+                    return;
+                }
+            }
+
+            // Check Checkpoints
+            for (let cp of checkpoints) {
+                if (dist(player.x, player.y, cp.x, cp.y) < CONFIG.INTERACT_RADIUS) {
+                    if (!cp.active) {
+                        activePrompt = {
+                            text: `체크포인트 활성화 [${cp.name}]`,
+                            action: () => {
+                                checkpoints.forEach(c => c.active = false);
+                                cp.active = true;
+                                lastCheckpoint = cp;
+                                audio.playCheckpoint();
+                                updateHUD();
+                            }
+                        };
+                    } else {
+                        activePrompt = { text: `체크포인트: ${cp.name} (저장됨)`, action: null };
+                    }
+                    return;
+                }
+            }
+
+            // Check Locked Doors
+            const playerGridX = Math.floor(player.x / CONFIG.TILE_SIZE);
+            const playerGridY = Math.floor(player.y / CONFIG.TILE_SIZE);
+
+            // Adjacent tiles check
+            const adj = [
+                {x: playerGridX+1, y: playerGridY}, {x: playerGridX-1, y: playerGridY},
+                {x: playerGridX, y: playerGridY+1}, {x: playerGridX, y: playerGridY-1}
+            ];
+
+            for (let pos of adj) {
+                if (pos.x >= 0 && pos.x < CONFIG.MAP_COLS && pos.y >= 0 && pos.y < CONFIG.MAP_ROWS) {
+                    const tile = MAP_GRID[pos.y][pos.x];
+                    if (tile === 2) { // Warehouse Door
+                        if (player.inventory.keyWarehouse) {
+                            activePrompt = {
+                                text: "창고 문 열기",
+                                action: () => {
+                                    MAP_GRID[pos.y][pos.x] = 0;
+                                    audio.playDoorOpen();
+                                    updateObjective();
+                                }
+                            };
+                            return;
+                        } else {
+                            activePrompt = { text: "창고 문이 잠겨있습니다 (창고 열쇠 필요)", action: null };
+                            return;
+                        }
+                    } else if (tile === 3) { // Machine Room Door
+                        if (player.inventory.keyMachine) {
+                            activePrompt = {
+                                text: "기계실 문 열기",
+                                action: () => {
+                                    MAP_GRID[pos.y][pos.x] = 0;
+                                    audio.playDoorOpen();
+                                    updateObjective();
+                                }
+                            };
+                            return;
+                        } else {
+                            activePrompt = { text: "기계실 문이 잠겨있습니다 (기계실 열쇠 필요)", action: null };
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // Check Exit Gate
+            if (dist(player.x, player.y, exitGate.x, exitGate.y) < CONFIG.INTERACT_RADIUS + 20) {
+                if (player.inventory.parts >= 4) {
+                    activePrompt = {
+                        text: "발전기 수리 및 탈출문 작동!",
+                        action: () => {
+                            exitGate.unlocked = true;
+                            audio.playDoorOpen();
+                            setGameState(STATE.CLEAR);
+                        }
+                    };
+                } else {
+                    activePrompt = {
+                        text: `탈출 게이트 전원 차단됨 (부품 ${player.inventory.parts}/4개 수집됨)`,
+                        action: null
+                    };
+                }
+            }
+        }
+
+        function handleInteraction() {
+            if (activePrompt && activePrompt.action) {
+                activePrompt.action();
+            }
+        }
+
+        function updatePlayer(dt) {
+            let dx = 0;
+            let dy = 0;
+
+            if (keys['w'] || keys['arrowup']) dy -= 1;
+            if (keys['s'] || keys['arrowdown']) dy += 1;
+            if (keys['a'] || keys['arrowleft']) dx -= 1;
+            if (keys['d'] || keys['arrowright']) dx += 1;
+
+            // Normalize diagonal movement
+            if (dx !== 0 && dy !== 0) {
+                dx *= 0.7071;
+                dy *= 0.7071;
+            }
+
+            // Sprint mechanic
+            const isMoving = dx !== 0 || dy !== 0;
+            const wantSprint = keys['shift'] && isMoving && player.stamina > 5;
+            
+            player.isSprinting = wantSprint;
+            let currentSpeed = CONFIG.PLAYER_SPEED;
+
+            if (wantSprint) {
+                currentSpeed *= CONFIG.RUN_SPEED_MULT;
+                player.stamina = Math.max(0, player.stamina - CONFIG.STAMINA_DRAIN * dt);
+            } else {
+                player.stamina = Math.min(CONFIG.STAMINA_MAX, player.stamina + CONFIG.STAMINA_RECOVERY * dt);
+            }
+
+            if (isMoving) {
+                player.angle = Math.atan2(dy, dx);
+                
+                // Audio footsteps
+                if (Math.random() < (wantSprint ? 0.25 : 0.12)) {
+                    audio.playStep();
+                }
+
+                // Move with collision checking
+                moveWithCollision(player, dx * currentSpeed, dy * currentSpeed);
+            }
+
+            // Camera follow smoothly
+            camera.x += (player.x - camera.x) * 0.1;
+            camera.y += (player.y - camera.y) * 0.1;
+
+            if (monster.isChasing) {
+                camera.shake = Math.sin(Date.now() * 0.02) * 3;
+            } else {
+                camera.shake = 0;
+            }
+
+            // Check Hazard Collisions
+            for (let h of HAZARDS) {
+                if (dist(player.x, player.y, h.x, h.y) < player.radius + 18) {
+                    triggerFaint();
+                    break;
+                }
+            }
+        }
+
+        function updateMonster(dt) {
+            const dToPlayer = dist(monster.x, monster.y, player.x, player.y);
+
+            // Monster Chase Trigger Logic
+            monster.chaseTimer += dt * 1000;
+            if (!monster.isChasing && monster.chaseTimer > monster.nextChaseDelay) {
+                startChase();
+            }
+
+            if (monster.isChasing) {
+                // Chase towards player
+                const angle = Math.atan2(player.y - monster.y, player.x - monster.x);
+                monster.x += Math.cos(angle) * CONFIG.MONSTER_CHASE_SPEED;
+                monster.y += Math.sin(angle) * CONFIG.MONSTER_CHASE_SPEED;
+
+                // Stop chase after duration
+                if (monster.chaseTimer > CONFIG.CHASE_DURATION) {
+                    endChase();
+                }
+
+                // Catch Player
+                if (dToPlayer < player.radius + monster.radius) {
+                    triggerFaint();
+                }
+            } else {
+                // Patrol random walk
+                if (!monster.patrolTarget || dist(monster.x, monster.y, monster.patrolTarget.x, monster.patrolTarget.y) < 20) {
+                    monster.patrolTarget = {
+                        x: (Math.floor(Math.random() * (CONFIG.MAP_COLS - 2)) + 1) * CONFIG.TILE_SIZE,
+                        y: (Math.floor(Math.random() * (CONFIG.MAP_ROWS - 2)) + 1) * CONFIG.TILE_SIZE
+                    };
+                }
+                const angle = Math.atan2(monster.patrolTarget.y - monster.y, monster.patrolTarget.x - monster.x);
+                monster.x += Math.cos(angle) * CONFIG.MONSTER_NORMAL_SPEED * 0.6;
+                monster.y += Math.sin(angle) * CONFIG.MONSTER_NORMAL_SPEED * 0.6;
+            }
+        }
+
+        function startChase() {
+            monster.isChasing = true;
+            monster.chaseTimer = 0;
+            audio.playScreech();
+            
+            document.getElementById('vignette-layer').className = "absolute inset-0 chase-vignette transition-all duration-500";
+            document.getElementById('chase-warning').classList.remove('hidden');
+        }
+
+        function endChase() {
+            monster.isChasing = false;
+            monster.chaseTimer = 0;
+            monster.nextChaseDelay = Math.random() * (CONFIG.CHASE_INTERVAL_MAX - CONFIG.CHASE_INTERVAL_MIN) + CONFIG.CHASE_INTERVAL_MIN;
+            
+            document.getElementById('vignette-layer').className = "absolute inset-0 vignette transition-all duration-500";
+            document.getElementById('chase-warning').classList.add('hidden');
+        }
+
+        function triggerRandomChaseChance() {
+            if (!monster.isChasing && Math.random() < 0.6) {
+                startChase();
+            }
+        }
+
+        function triggerFaint() {
+            if (currentState === STATE.FAINTING) return;
+            setGameState(STATE.FAINTING);
+            
+            const faintLayer = document.getElementById('faint-layer');
+            faintLayer.classList.add('faint-active');
+
+            setTimeout(() => {
+                // Respawn player at last checkpoint
+                player.x = lastCheckpoint.x;
+                player.y = lastCheckpoint.y;
+                player.stamina = CONFIG.STAMINA_MAX;
+                
+                // Reposition monster away
+                monster.x = 24 * CONFIG.TILE_SIZE + 32;
+                monster.y = 17 * CONFIG.TILE_SIZE + 32;
+                endChase();
+
+                faintLayer.classList.remove('faint-active');
+                setGameState(STATE.PLAYING);
+            }, 2000);
+        }
+
+        function moveWithCollision(entity, vx, vy) {
+            let newX = entity.x + vx;
+            let newY = entity.y + vy;
+
+            // Check Wall Collisions
+            if (!checkWallCollision(newX, entity.y, entity.radius)) {
+                entity.x = newX;
+            }
+            if (!checkWallCollision(entity.x, newY, entity.radius)) {
+                entity.y = newY;
+            }
+        }
+
+        function checkWallCollision(x, y, radius) {
+            const minTileX = Math.floor((x - radius) / CONFIG.TILE_SIZE);
+            const maxTileX = Math.floor((x + radius) / CONFIG.TILE_SIZE);
+            const minTileY = Math.floor((y - radius) / CONFIG.TILE_SIZE);
+            const maxTileY = Math.floor((y + radius) / CONFIG.TILE_SIZE);
+
+            for (let ty = minTileY; ty <= maxTileY; ty++) {
+                for (let tx = minTileX; tx <= maxTileX; tx++) {
+                    if (tx < 0 || tx >= CONFIG.MAP_COLS || ty < 0 || ty >= CONFIG.MAP_ROWS) return true;
+                    const tile = MAP_GRID[ty][tx];
+                    if (tile === 1 || tile === 2 || tile === 3) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        function dist(x1, y1, x2, y2) {
+            return Math.hypot(x2 - x1, y2 - y1);
+        }
+
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            ctx.save();
+            // Center camera on player
+            const offsetX = canvas.width / 2 - camera.x + camera.shake;
+            const offsetY = canvas.height / 2 - camera.y + camera.shake;
+            ctx.translate(offsetX, offsetY);
+
+            // 1. Draw Factory Floor & Grid
+            drawFloor();
+
+            // 2. Draw Interactive Items & Checkpoints
+            drawCheckpoints();
+            drawItems();
+
+            // 3. Draw Steam Hazards
+            drawHazards();
+
+            // 4. Draw Characters (Player & Monster) & Pseudo-3D Walls (Sorted Depth)
+            drawWorldEntities();
+
+            // 5. Draw Exit Gate
+            drawExitGate();
+
+            // 6. Apply Atmospheric Flashlight & Dark Fog Mask
+            drawLightingMask(offsetX, offsetY);
+
+            ctx.restore();
+        }
+
+        function drawFloor() {
+            for (let r = 0; r < CONFIG.MAP_ROWS; r++) {
+                for (let c = 0; c < CONFIG.MAP_COLS; c++) {
+                    const x = c * CONFIG.TILE_SIZE;
+                    const y = r * CONFIG.TILE_SIZE;
+                    const tile = MAP_GRID[r][c];
+
+                    if (tile === 0) {
+                        // Checkerboard metal factory floor
+                        ctx.fillStyle = (r + c) % 2 === 0 ? '#111318' : '#0d0f13';
+                        ctx.fillRect(x, y, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+
+                        ctx.strokeStyle = '#1a1f29';
+                        ctx.lineWidth = 1;
+                        ctx.strokeRect(x, y, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+                    }
+                }
+            }
+        }
+
+        function drawWorldEntities() {
+            // Pseudo 2.5D Extruded Wall Height
+            const WALL_HEIGHT = 20;
+
+            for (let r = 0; r < CONFIG.MAP_ROWS; r++) {
+                for (let c = 0; c < CONFIG.MAP_COLS; c++) {
+                    const x = c * CONFIG.TILE_SIZE;
+                    const y = r * CONFIG.TILE_SIZE;
+                    const tile = MAP_GRID[r][c];
+
+                    if (tile === 1) { // Solid Wall
+                        // Wall Top
+                        ctx.fillStyle = '#1e293b';
+                        ctx.fillRect(x, y - WALL_HEIGHT, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+
+                        // Wall Front Face (2.5D Extrusion)
+                        ctx.fillStyle = '#0f172a';
+                        ctx.fillRect(x, y + CONFIG.TILE_SIZE - WALL_HEIGHT, CONFIG.TILE_SIZE, WALL_HEIGHT);
+
+                        ctx.strokeStyle = '#334155';
+                        ctx.strokeRect(x, y - WALL_HEIGHT, CONFIG.TILE_SIZE, CONFIG.TILE_SIZE);
+                    } else if (tile === 2 || tile === 3) { // Locked Doors
+                        ctx.fillStyle = tile === 2 ? '#b45309' : '#1d4ed8';
+                        ctx.fillRect(x + 4, y + 16, CONFIG.TILE_SIZE - 8, 32);
+                        ctx.fillStyle = '#f59e0b';
+                        ctx.font = 'bold 11px sans-serif';
+                        ctx.fillText('LOCKED', x + 10, y + 36);
+                    }
+                }
+            }
+
+            // Draw Player Shadow & Avatar
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.beginPath();
+            ctx.ellipse(player.x, player.y + 10, 14, 8, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Player Icon Body
+            ctx.save();
+            ctx.translate(player.x, player.y);
+            ctx.rotate(player.angle);
+            ctx.fillStyle = '#f59e0b';
+            ctx.beginPath();
+            ctx.arc(0, 0, player.radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Flashlight Attachment
+            ctx.fillStyle = '#fef08a';
+            ctx.fillRect(6, -4, 10, 8);
+            ctx.restore();
+
+            // Draw Monster
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.beginPath();
+            ctx.ellipse(monster.x, monster.y + 12, 18, 10, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = monster.isChasing ? '#dc2626' : '#7f1d1d';
+            ctx.beginPath();
+            ctx.arc(monster.x, monster.y, monster.radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Glowing Eyes
+            ctx.fillStyle = '#fef08a';
+            ctx.beginPath();
+            ctx.arc(monster.x - 5, monster.y - 4, 3, 0, Math.PI * 2);
+            ctx.arc(monster.x + 5, monster.y - 4, 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawItems() {
+            items.forEach(item => {
+                if (!item.collected) {
+                    ctx.fillStyle = item.type.startsWith('key') ? '#f59e0b' : '#38bdf8';
+                    ctx.beginPath();
+                    ctx.arc(item.x, item.y, 8, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Pulse ring
+                    ctx.strokeStyle = item.type.startsWith('key') ? 'rgba(245, 158, 11, 0.4)' : 'rgba(56, 189, 248, 0.4)';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.arc(item.x, item.y, 12 + Math.sin(Date.now() * 0.005) * 3, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+            });
+        }
+
+        function drawCheckpoints() {
+            checkpoints.forEach(cp => {
+                ctx.fillStyle = cp.active ? '#10b981' : '#475569';
+                ctx.fillRect(cp.x - 12, cp.y - 12, 24, 24);
+
+                ctx.strokeStyle = cp.active ? '#34d399' : '#94a3b8';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(cp.x - 14, cp.y - 14, 28, 28);
+            });
+        }
+
+        function drawHazards() {
+            HAZARDS.forEach(h => {
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.25)';
+                ctx.beginPath();
+                ctx.arc(h.x, h.y, 24 + Math.sin(Date.now() * 0.01) * 4, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#ef4444';
+                ctx.font = '10px sans-serif';
+                ctx.fillText('STEAM HAZARD', h.x - 34, h.y - 30);
+            });
+        }
+
+        function drawExitGate() {
+            ctx.fillStyle = exitGate.unlocked ? '#10b981' : '#dc2626';
+            ctx.fillRect(exitGate.x - 20, exitGate.y - 20, 40, 40);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.fillText('EXIT GATE', exitGate.x - 24, exitGate.y + 4);
+        }
+
+        function drawLightingMask(offsetX, offsetY) {
+            // Create Dark Fog / Flashlight Lighting Cone
+            const lightCanvas = document.createElement('canvas');
+            lightCanvas.width = canvas.width;
+            lightCanvas.height = canvas.height;
+            const lCtx = lightCanvas.getContext('2d');
+
+            // Fill entire screen with dark ambient darkness
+            lCtx.fillStyle = 'rgba(5, 5, 8, 0.94)';
+            lCtx.fillRect(0, 0, lightCanvas.width, lightCanvas.height);
+
+            lCtx.globalCompositeOperation = 'destination-out';
+
+            // Flashlight Cone
+            const screenPX = player.x + offsetX;
+            const screenPY = player.y + offsetY;
+
+            const grad = lCtx.createRadialGradient(
+                screenPX, screenPY, 10,
+                screenPX, screenPY, CONFIG.LIGHT_RADIUS
+            );
+            grad.addColorStop(0, 'rgba(0,0,0,1)');
+            grad.addColorStop(0.8, 'rgba(0,0,0,0.8)');
+            grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+            lCtx.fillStyle = grad;
+            lCtx.beginPath();
+            lCtx.arc(screenPX, screenPY, CONFIG.LIGHT_RADIUS, 0, Math.PI * 2);
+            lCtx.fill();
+
+            // Draw final lighting layer over main canvas
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.drawImage(lightCanvas, 0, 0);
+            ctx.restore();
+        }
+
+        function updateHUD() {
+            // Stamina Bar
+            const staminaPercent = Math.round((player.stamina / CONFIG.STAMINA_MAX) * 100);
+            document.getElementById('stamina-percent').innerText = `${staminaPercent}%`;
+            document.getElementById('stamina-bar').style.width = `${staminaPercent}%`;
+
+            // Inventory Updates
+            const warehouseKeyEl = document.getElementById('inv-key-warehouse');
+            if (player.inventory.keyWarehouse) {
+                warehouseKeyEl.className = "w-12 h-12 rounded-lg border border-amber-500 bg-amber-950/80 flex flex-col items-center justify-center text-amber-400 relative group shadow-lg shadow-amber-500/20";
+            }
+
+            const machineKeyEl = document.getElementById('inv-key-machine');
+            if (player.inventory.keyMachine) {
+                machineKeyEl.className = "w-12 h-12 rounded-lg border border-amber-500 bg-amber-950/80 flex flex-col items-center justify-center text-amber-400 relative group shadow-lg shadow-amber-500/20";
+            }
+
+            const partsBoxEl = document.getElementById('inv-parts-box');
+            const partsCountText = document.getElementById('parts-count-text');
+            partsCountText.innerText = `${player.inventory.parts} / 4`;
+            if (player.inventory.parts > 0) {
+                partsBoxEl.className = "h-12 px-3 rounded-lg border border-sky-500 bg-sky-950/80 flex items-center gap-2 text-sky-400 transition-all shadow-lg shadow-sky-500/20";
+                partsCountText.className = "text-xs font-bold text-sky-300";
+            }
+
+            // Checkpoint Badge
+            document.getElementById('checkpoint-text').innerText = `체크포인트: ${lastCheckpoint.name}`;
+
+            // Interaction Prompt UI
+            const promptEl = document.getElementById('interaction-prompt');
+            if (activePrompt) {
+                promptEl.classList.remove('hidden');
+                document.getElementById('prompt-text').innerText = activePrompt.text;
+            } else {
+                promptEl.classList.add('hidden');
+            }
+        }
+
+        function updateObjective() {
+            const objEl = document.getElementById('objective-text');
+            if (!player.inventory.keyWarehouse && MAP_GRID[4][3] === 2) {
+                objEl.innerText = "1. 남서쪽 구역에서 [창고 열쇠]를 찾으세요.";
+            } else if (MAP_GRID[4][3] === 2) {
+                objEl.innerText = "2. [창고 열쇠]로 생산시설 출입문을 열고 진입하세요.";
+            } else if (!player.inventory.keyMachine) {
+                objEl.innerText = "3. 생산시설 구역 내부에서 [기계실 열쇠]와 발전기 부품을 탐색하세요.";
+            } else if (player.inventory.parts < 4) {
+                objEl.innerText = `4. 폐공장에 흩어진 발전기 부품을 모두 수집하세요 (${player.inventory.parts}/4개).`;
+            } else {
+                objEl.innerText = "5. 모든 부품을 확보했습니다! 동쪽 [탈출 게이트]로 이동하여 작동시키세요!";
+            }
+        }
+
+        function setGameState(newState) {
+            currentState = newState;
+
+            document.getElementById('modal-title').classList.add('hidden');
+            document.getElementById('modal-pause').classList.add('hidden');
+            document.getElementById('modal-clear').classList.add('hidden');
+
+            if (currentState === STATE.TITLE) {
+                document.getElementById('modal-title').classList.remove('hidden');
+            } else if (currentState === STATE.PAUSED) {
+                document.getElementById('modal-pause').classList.remove('hidden');
+            } else if (currentState === STATE.CLEAR) {
+                document.getElementById('modal-clear').classList.remove('hidden');
+            }
+        }
+
+        // Button Click Handlers
+        document.getElementById('btn-start').addEventListener('click', () => {
+            audio.init();
+            setGameState(STATE.PLAYING);
+        });
+
+        document.getElementById('btn-resume').addEventListener('click', () => {
+            setGameState(STATE.PLAYING);
+        });
+
+        document.getElementById('btn-restart').addEventListener('click', () => {
+            triggerFaint();
+            setGameState(STATE.PLAYING);
+        });
+
+        document.getElementById('btn-win-restart').addEventListener('click', () => {
+            window.location.reload();
+        });
+
+        let lastTime = performance.now();
+
+        function gameLoop(time) {
+            const dt = Math.min((time - lastTime) / 1000, 0.1);
+            lastTime = time;
+
+            if (currentState === STATE.PLAYING) {
+                updatePlayer(dt);
+                updateMonster(dt);
+                checkInteractions();
+                updateHUD();
+            }
+
+            render();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start Game Engine
+        updateObjective();
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
